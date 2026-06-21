@@ -8,12 +8,13 @@
  */
 
 import {
-  collection, query, where, orderBy, limit,
-  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, onSnapshot,
-  serverTimestamp, Timestamp
+  collection, query, where, orderBy, limit, startAfter,
+  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, deleteField, onSnapshot,
+  serverTimestamp, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js";
 
 // =====================
 // State
@@ -21,18 +22,95 @@ import { db, auth } from "./app.js";
 let currentUserProfile = null;
 let salonServices = [];
 let serviceCategories = [];
+// Retail products (salon-wide, with per-location + per-staff overrides) shown in the ticket picker.
+let salonProducts = [];
+let productCategories = [];
+let _productsUnsub = null;
+let _productCatsUnsub = null;
+let _productsSubSalonId = null;
 let currentTickets = [];
+/** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
+const TICKETS_PAGE_SIZE = 200;
+/** Page size for Summary: paginated fetch of CLOSED tickets. */
+const _ticketSummaryPageSize = 500;
+let _ticketsFirstPageTickets = [];
+let _ticketsExtraTickets = [];
+let _ticketsNextPageCursor = null;
+let _ticketsHasMoreOlder = false;
+let _ticketsLoadingMore = false;
 let ticketsUnsubscribe = null;
 let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
 let currentTicketsTab = 'ready';
 let editingTicketId = null;
-let ticketFormAsIsMode = false;
+/** When true, the ticket service/product picker shows the FULL catalog (used when a
+ * manager / front-desk receiver edits a ticket) instead of filtering by the current
+ * staff member's allowed services. Reset to false for the technician new-ticket flow. */
+let _ticketPickerShowAllCatalog = false;
 /** When set, opening this ticket (e.g. from list) must not show Ticket Details – we just closed it. */
 let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
 let _ticketsMembersAvatarCache = null;
 /** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
 let _ticketsMembersAvatarByName = null;
+
+function getActiveTicketsSalonId() {
+  return (typeof window !== 'undefined' && window.currentSalonId)
+    || currentUserProfile?.salonId
+    || null;
+}
+
+function resetTicketsRuntimeCache() {
+  currentTickets = [];
+  _ticketsFirstPageTickets = [];
+  _ticketsExtraTickets = [];
+  _ticketsNextPageCursor = null;
+  _ticketsHasMoreOlder = false;
+  _ticketsLoadingMore = false;
+  _ticketsListSnapshotReady = false;
+  _ticketsDataReady = false;
+  _frontDeskCache = null;
+}
+
+window.ffGetCurrentTickets = function() {
+  return Array.isArray(currentTickets) ? currentTickets.slice() : [];
+};
+
+// Live Desk (and other surfaces) open a ticket's details by id.
+window.ffOpenTicketModal = function(ticketId, appointmentData = null) {
+  return openTicketModal(ticketId, appointmentData);
+};
+
+// Currency formatter exposed so the Live Desk shows the same money format as tickets.
+window.ffTicketMoney = function(n, decimals) {
+  return ffTicketMoney(n, decimals);
+};
+
+window.ffLoadTicketsForAnalytics = async function() {
+  const salonId = getActiveTicketsSalonId();
+  if (!currentUserProfile) {
+    try { await loadCurrentUserProfile(); } catch (_) {}
+  }
+  const resolvedSalonId = getActiveTicketsSalonId() || salonId;
+  if (!resolvedSalonId) return [];
+  const qAnalytics = query(
+    collection(db, `salons/${resolvedSalonId}/tickets`),
+    orderBy('createdAt', 'desc'),
+    limit(500)
+  );
+  const snap = await getDocs(qAnalytics);
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return rows.filter((ticket) => {
+    try { return canSeeTicket(ticket); } catch (_) { return true; }
+  });
+};
+
+function notifyTicketsAnalyticsDataChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent('ff-tickets-data-changed', {
+      detail: { count: Array.isArray(currentTickets) ? currentTickets.length : 0 }
+    }));
+  } catch (_) {}
+}
 
 function normalizeTicketTechName(name) {
   if (!name || typeof name !== 'string') return '';
@@ -53,11 +131,45 @@ async function loadCurrentUserProfile() {
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
-      const data = userDoc.data();
-      currentUserProfile = { uid: user.uid, ...data };
-      if (!currentUserProfile.salonId && typeof window !== 'undefined' && window.currentSalonId) {
-        currentUserProfile.salonId = window.currentSalonId;
-        console.log('[Tickets] Using window.currentSalonId fallback:', window.currentSalonId);
+      const data = userDoc.data() || {};
+      // Multi-salon: prefer the salon picked from Choose Salon (or the single
+      // auto-selected membership) over users/{uid}.salonId. Previously this
+      // only fell back when salonId was missing, which still leaked legacy
+      // primary-salon tickets into the picked salon.
+      // staffId + role also need to follow the chosen membership so ticket
+      // permission checks (canViewTickets etc.) evaluate against the right
+      // salon's role rather than the legacy primary-salon role.
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      const resolvedSalonId = activeSalonId || data.salonId || null;
+      const resolvedStaffId = activeStaffId || data.staffId || null;
+      currentUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: resolvedSalonId,
+        staffId: resolvedStaffId,
+        role: activeRole || data.role || '',
+      };
+      // Multi-salon: pull the technician name from the staff doc in the chosen
+      // salon. Otherwise tickets created from test_salon_001 are stored with
+      // technicianName = legacy primary-salon name instead of the salon-scoped
+      // staff name, and the wrong technician is credited / the ticket is hidden
+      // from the actual servicer's "my tickets" view (which filters by name).
+      if (resolvedSalonId && resolvedStaffId) {
+        try {
+          const staffSnap = await getDoc(doc(db, `salons/${resolvedSalonId}/staff`, resolvedStaffId));
+          if (staffSnap.exists()) {
+            const st = staffSnap.data() || {};
+            const staffName = String(st.name || '').trim();
+            if (staffName) currentUserProfile.name = staffName;
+            currentUserProfile.permissions = { ...(currentUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) currentUserProfile.managerType = st.managerType;
+          }
+        } catch (mergeErr) {
+          console.warn('[Tickets] Failed to merge staff doc into profile', mergeErr);
+        }
       }
       return currentUserProfile;
     }
@@ -67,9 +179,25 @@ async function loadCurrentUserProfile() {
   return null;
 }
 
+/** If users/{uid} lacks staffId, copy from salons/{salonId}/members/{uid} so staff-store permission match works. */
+async function enrichTicketsProfileFromMemberDoc() {
+  if (!currentUserProfile?.uid) return;
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile.salonId;
+  if (!salonId) return;
+  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') return;
+  try {
+    const ms = await getDoc(doc(db, `salons/${salonId}/members`, currentUserProfile.uid));
+    if (!ms.exists()) return;
+    const sid = (ms.data() || {}).staffId;
+    if (sid != null && String(sid).trim() !== '') {
+      currentUserProfile.staffId = String(sid).trim();
+    }
+  } catch (_) {}
+}
+
 /** Load members with avatarUrl for ticket list avatars. */
 async function loadTicketsMembersForAvatars() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile?.salonId;
   if (!salonId) return;
   try {
     const snap = await getDocs(collection(db, `salons/${salonId}/members`));
@@ -135,22 +263,792 @@ function getTicketTechnicianAvatarUrl(t) {
 }
 
 // =====================
-// Service Catalog
+// Service Catalog (PER-LOCATION, real-time)
 // =====================
+// Each branch has its own catalog. Services and categories are stamped with
+// `locationId`. Documents without a `locationId` are LEGACY (pre-multi-
+// location) — they're hidden from the UI and auto-deleted once on the first
+// load after this version ships, because the user explicitly chose "fresh
+// start" when we redesigned the catalog. Auto-wipe is best-effort: a
+// permission error simply leaves the legacy docs in Firestore (still
+// hidden) so the UI never breaks.
+//
+// Two `onSnapshot` subscriptions keep `_rawServices` / `_rawCategories`
+// live. Whenever either changes, or the active branch changes, we re-apply
+// the location filter into `salonServices` / `serviceCategories` and
+// re-render the UI. This is why a technician sees new services the moment
+// an owner adds them — no refresh needed.
+let _ffCatalogLegacyWiped = false;
+let _rawServices = [];
+let _rawCategories = [];
+let _rawSharedServices = [];
+let _rawSharedCategories = [];
+let _rawServiceOverrides = {};
+let _catalogSource = 'unknown'; // 'shared' | 'location' | 'unknown'
+let _ffCatalogModalMode = 'location'; // 'location' | 'shared'
+let _servicesUnsub = null;
+let _serviceCatsUnsub = null;
+let _catalogSubSalonId = null;
+
+// Permission gates for the Services catalog. Default to allow when the helper
+// isn't available yet (e.g. very early load) so we never hard-block the owner.
+function ffCanViewServices() {
+  try {
+    if (typeof window.ffCurrentUserHasServicesViewPermission === 'function') {
+      return window.ffCurrentUserHasServicesViewPermission();
+    }
+  } catch (_) {}
+  return true;
+}
+function ffCanManageServices() {
+  try {
+    if (typeof window.ffCurrentUserHasServicesManagePermission === 'function') {
+      return window.ffCurrentUserHasServicesManagePermission();
+    }
+  } catch (_) {}
+  return true;
+}
+
+function getTicketsAccountId() {
+  const candidates = [
+    (typeof window !== 'undefined' ? window.currentSalonId : null),
+    currentUserProfile?.accountId,
+    currentUserProfile?.accountID,
+    currentUserProfile?.account_id,
+    currentUserProfile?.salonId,
+    (typeof window !== 'undefined' ? window.currentAccountId : null),
+    (typeof window !== 'undefined' ? window.accountId : null)
+  ];
+  for (const v of candidates) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function normalizeSharedCategoryName(category) {
+  const s = String(category || '').trim();
+  return s || 'Other';
+}
+
+function sharedCategoryId(category) {
+  return `shared:${normalizeSharedCategoryName(category).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'other'}`;
+}
+
+function serviceCatalogStableKey(name, category) {
+  return `${normalizeSharedCategoryName(category).toLowerCase()}::${String(name || '').trim().toLowerCase()}`;
+}
+
+function serviceCategoryDisplayId(categoryName) {
+  return sharedCategoryId(normalizeSharedCategoryName(categoryName));
+}
+
+function sharedServiceCatalogDocRef(accountId) {
+  return doc(db, `accounts/${accountId}/shared/serviceCatalog`);
+}
+
+function sharedServiceCatalogItemsRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/serviceCatalog/items`);
+}
+
+function sharedServiceCategoriesDocRef(accountId) {
+  return doc(db, `accounts/${accountId}/shared/serviceCategories`);
+}
+
+function sharedServiceCategoryItemsRef(accountId) {
+  return collection(db, `accounts/${accountId}/shared/serviceCategories/items`);
+}
+
+async function ensureSharedServiceCatalogDoc(accountId) {
+  if (!accountId) return;
+  await setDoc(sharedServiceCatalogDocRef(accountId), {}, { merge: true });
+}
+
+async function ensureSharedServiceCategoriesDoc(accountId) {
+  if (!accountId) return;
+  await setDoc(sharedServiceCategoriesDocRef(accountId), {}, { merge: true });
+}
+
+async function loadSharedServiceOverrides(accountId, locationId) {
+  _rawServiceOverrides = {};
+  if (!accountId || !locationId) return {};
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`));
+    snap.docs.forEach((d) => {
+      const data = d.data() || {};
+      const price = Number(data.price);
+      const override = {};
+      if (Number.isFinite(price)) override.price = price;
+      if (typeof data.enabled === 'boolean') override.enabled = data.enabled;
+      if (Object.keys(override).length) _rawServiceOverrides[d.id] = override;
+    });
+  } catch (e) {
+    console.warn('[SharedServices] overrides load failed', e);
+  }
+  return _rawServiceOverrides;
+}
+
+function applySharedServiceCatalog() {
+  const categoryMap = new Map();
+  _rawSharedCategories.forEach((c, idx) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const categoryId = sharedCategoryId(name);
+    if (!categoryMap.has(categoryId)) {
+      categoryMap.set(categoryId, {
+        id: categoryId,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : idx,
+        isSharedCategory: true
+      });
+    }
+  });
+  const sharedServices = _rawSharedServices
+    .filter((s) => s && s.active !== false)
+    .map((s, idx) => {
+      const categoryName = normalizeSharedCategoryName(s.category);
+      const categoryId = sharedCategoryId(categoryName);
+      if (!categoryMap.has(categoryId)) {
+        categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
+      }
+      const override = _rawServiceOverrides[s.id];
+      if (override && override.enabled === false) return null;
+      const defaultPrice = Number(s.defaultPrice) || 0;
+      const finalPrice = override && Number.isFinite(Number(override.price))
+        ? Number(override.price)
+        : defaultPrice;
+      if (override) console.log('[SharedServices] override applied', { serviceId: s.id, locationId: getActiveLocationIdForTickets(), price: finalPrice });
+      return {
+        id: s.id,
+        name: String(s.name || '').trim(),
+        defaultPrice: finalPrice,
+        sharedDefaultPrice: defaultPrice,
+        category: categoryName,
+        categoryId,
+        active: s.active !== false,
+        sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
+        isSharedService: true,
+        staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
+      };
+    })
+    .filter((s) => s && s.name)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+
+  const localCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  localCategories.forEach((c) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = serviceCategoryDisplayId(name);
+    if (!categoryMap.has(id)) {
+      categoryMap.set(id, {
+        ...c,
+        id,
+        sourceCategoryId: c?.id || id,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : categoryMap.size
+      });
+    }
+  });
+
+  const sharedKeys = new Set(sharedServices.map((s) => serviceCatalogStableKey(s.name, s.category)));
+  const localServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .map((s) => {
+      const cat = localCategories.find((c) => c.id === s.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
+      return {
+        ...s,
+        category: categoryName,
+        categoryId: serviceCategoryDisplayId(categoryName),
+        sourceCategoryId: s.categoryId,
+        isSharedService: false
+      };
+    })
+    .filter((s) => {
+      if (_rawSharedServices.length === 0) return true;
+      return !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other'));
+    })
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+
+  const mergedServices = [];
+  const seenServices = new Set();
+  [...sharedServices, ...localServices].forEach((svc) => {
+    const key = serviceCatalogStableKey(svc.name, svc.category || 'Other');
+    if (seenServices.has(key)) return;
+    seenServices.add(key);
+    mergedServices.push(svc);
+  });
+
+  salonServices = mergedServices;
+  serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  console.log('[SharedServices] merged catalog for picker', {
+    sharedServices: sharedServices.length,
+    localServices: localServices.length,
+    categories: serviceCategories.length
+  });
+}
+
+function getSharedServicesForCatalogManager() {
+  const categoryMap = new Map();
+  _rawSharedCategories.forEach((c, idx) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = sharedCategoryId(name);
+    categoryMap.set(id, {
+      id,
+      docId: c?.id || id,
+      name,
+      sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : idx,
+      isSharedCategory: true
+    });
+  });
+  const services = _rawSharedServices
+    .map((s, idx) => {
+      const categoryName = normalizeSharedCategoryName(s.category);
+      const categoryId = sharedCategoryId(categoryName);
+      if (!categoryMap.has(categoryId)) {
+        categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
+      }
+      const override = _rawServiceOverrides[s.id];
+      const defaultPrice = Number(s.defaultPrice) || 0;
+      const hasOverride = override && Number.isFinite(Number(override.price));
+      const locationEnabled = !(override && override.enabled === false);
+      return {
+        id: s.id,
+        name: String(s.name || '').trim(),
+        defaultPrice: hasOverride ? Number(override.price) : defaultPrice,
+        sharedDefaultPrice: defaultPrice,
+        category: categoryName,
+        categoryId,
+        active: s.active !== false,
+        locationEnabled,
+        sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
+        isSharedService: true,
+        hasOverride,
+        overridePrice: hasOverride ? Number(override.price) : null,
+        staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
+      };
+    })
+    .filter((s) => s.name)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const sharedKeys = new Set(services.map((s) => serviceCatalogStableKey(s.name, s.category)));
+  const localCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  localCategories.forEach((c) => {
+    const name = normalizeSharedCategoryName(c?.name);
+    const id = serviceCategoryDisplayId(name);
+    if (!categoryMap.has(id)) {
+      categoryMap.set(id, {
+        ...c,
+        id,
+        sourceCategoryId: c?.id || id,
+        name,
+        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : categoryMap.size
+      });
+    }
+  });
+  const localServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .map((s) => {
+      const cat = localCategories.find((c) => c.id === s.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
+      return {
+        ...s,
+        category: categoryName,
+        categoryId: serviceCategoryDisplayId(categoryName),
+        sourceCategoryId: s.categoryId,
+        isSharedService: false
+      };
+    })
+    .filter((s) => !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other')))
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const mergedServices = [];
+  const seenServices = new Set();
+  [...services, ...localServices].forEach((svc) => {
+    const key = serviceCatalogStableKey(svc.name, svc.category || 'Other');
+    if (seenServices.has(key)) return;
+    seenServices.add(key);
+    mergedServices.push(svc);
+  });
+  return {
+    services: mergedServices,
+    categories: Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+  };
+}
+
+function getLocationServicesForCatalogManager() {
+  return {
+    services: _rawServices
+      .filter(_ffServiceMatchesActiveLocation)
+      .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)),
+    categories: _rawCategories
+      .filter(_ffServiceMatchesActiveLocation)
+      .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+  };
+}
+
+async function loadSharedCatalogForManager() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return { services: [], categories: [] };
+  const [serviceSnap, categorySnap] = await Promise.all([
+    getDocs(sharedServiceCatalogItemsRef(accountId)),
+    getDocs(sharedServiceCategoryItemsRef(accountId)).catch(() => ({ docs: [] }))
+  ]);
+  _rawSharedServices = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
+  return getSharedServicesForCatalogManager();
+}
+
+async function loadLocationCatalogForManager() {
+  if (!currentUserProfile?.salonId) return { services: [], categories: [] };
+  await _ffWipeLegacyCatalogOnce();
+  const [svcSnap, catSnap] = await Promise.all([
+    getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+    getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+  ]);
+  _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  _applyCatalogFilter();
+  return getLocationServicesForCatalogManager();
+}
+
+async function saveSharedService(service) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
+  const accountId = getTicketsAccountId();
+  if (!accountId) throw new Error('No account');
+  const payload = {
+    name: String(service.name || '').trim(),
+    category: normalizeSharedCategoryName(service.category),
+    defaultPrice: Number(service.defaultPrice) || 0,
+    active: service.active !== false,
+    updatedAt: serverTimestamp()
+  };
+  if (Number.isFinite(Number(service.sortOrder))) payload.sortOrder = Number(service.sortOrder);
+  // "Charge Tax" — only write when explicitly provided (merge-safe).
+  if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
+  if (service.id) {
+    await ensureSharedServiceCatalogDoc(accountId);
+    await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
+    console.log('[SharedServicesUI] saved shared service', { serviceId: service.id });
+    return service.id;
+  }
+  await ensureSharedServiceCatalogDoc(accountId);
+  const ref = await addDoc(sharedServiceCatalogItemsRef(accountId), {
+    ...payload,
+    createdAt: serverTimestamp()
+  });
+  console.log('[SharedServicesUI] saved shared service', { serviceId: ref.id });
+  return ref.id;
+}
+
+async function saveSharedServiceCategory(cat) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
+  const accountId = getTicketsAccountId();
+  if (!accountId) throw new Error('No account');
+  const payload = {
+    name: normalizeSharedCategoryName(cat.name),
+    sortOrder: Number(cat.sortOrder) || 0,
+    updatedAt: serverTimestamp()
+  };
+  await ensureSharedServiceCategoriesDoc(accountId);
+  if (cat.id) {
+    await setDoc(doc(sharedServiceCategoryItemsRef(accountId), cat.id), payload, { merge: true });
+    return cat.id;
+  }
+  const categoryId = sharedCategoryId(payload.name);
+  await setDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId), {
+    ...payload,
+    createdAt: serverTimestamp()
+  });
+  return categoryId;
+}
+
+async function deleteSharedServiceCategory(categoryId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
+  const accountId = getTicketsAccountId();
+  if (!accountId || !categoryId) return;
+  await deleteDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId));
+}
+
+async function deleteSharedService(serviceId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
+  const accountId = getTicketsAccountId();
+  if (!accountId || !serviceId) return;
+  await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), serviceId));
+  console.log('[SharedServicesUI] deleted shared service', { serviceId });
+}
+
+async function saveSharedServiceOverride(serviceId, price) {
+  const accountId = getTicketsAccountId();
+  const locationId = getActiveLocationIdForTickets();
+  if (!accountId || !locationId || !serviceId) throw new Error('No location');
+  await setDoc(doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId), {
+    price: Number(price) || 0,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  console.log('[SharedServicesUI] saved override', { serviceId, locationId, price: Number(price) || 0 });
+}
+
+async function removeSharedServiceOverride(serviceId) {
+  const accountId = getTicketsAccountId();
+  const locationId = getActiveLocationIdForTickets();
+  if (!accountId || !locationId || !serviceId) return;
+  await deleteDoc(doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId));
+  console.log('[SharedServicesUI] removed override', { serviceId, locationId });
+}
+
+async function loadSharedServiceLocationOverridesForService(serviceId) {
+  const accountId = getTicketsAccountId();
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  const result = {};
+  if (!accountId || !serviceId || locations.length === 0) return result;
+  await Promise.all(locations.map(async (loc) => {
+    if (!loc || !loc.id) return;
+    try {
+      const snap = await getDoc(doc(db, `accounts/${accountId}/locations/${loc.id}/serviceOverrides`, serviceId));
+      if (!snap.exists()) return;
+      const data = snap.data() || {};
+      const price = Number(data.price);
+      const override = {};
+      if (Number.isFinite(price)) override.price = price;
+      if (typeof data.enabled === 'boolean') override.enabled = data.enabled;
+      if (Object.keys(override).length) result[loc.id] = override;
+    } catch (e) {
+      console.warn('[SharedServicesUI] location override load failed', loc.id, e);
+    }
+  }));
+  _ffServicesLocationOverridesByService[serviceId] = result;
+  return result;
+}
+
+async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
+  const accountId = getTicketsAccountId();
+  if (!accountId || !locationId || !serviceId) throw new Error('No location');
+  const existingByService = _ffServicesLocationOverridesByService[serviceId] || {};
+  const existing = existingByService[locationId] || {};
+  const next = { ...existing, ...(patch || {}) };
+  if (next.price == null || next.price === '') delete next.price;
+  if (next.enabled === true) delete next.enabled;
+  const ref = doc(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`, serviceId);
+  if (!Object.keys(next).length) {
+    await deleteDoc(ref);
+    delete existingByService[locationId];
+  } else {
+    const write = {
+      ...next,
+      updatedAt: serverTimestamp()
+    };
+    if ('price' in existing && !('price' in next)) write.price = deleteField();
+    if ('enabled' in existing && !('enabled' in next)) write.enabled = deleteField();
+    await setDoc(ref, write, { merge: true });
+    existingByService[locationId] = next;
+  }
+  _ffServicesLocationOverridesByService[serviceId] = existingByService;
+  const activeLocationId = getActiveLocationIdForTickets();
+  if (String(activeLocationId || '') === String(locationId || '')) {
+    if (!Object.keys(next).length) delete _rawServiceOverrides[serviceId];
+    else _rawServiceOverrides[serviceId] = { ...next };
+    applySharedServiceCatalog();
+  }
+}
+
+async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return { seeded: false, reason: 'no-account' };
+  if (_ffServicesSharedBackfillChecked) return { seeded: false, reason: 'already-checked' };
+  _ffServicesSharedBackfillChecked = true;
+  await loadLocationCatalogForManager();
+  const localServices = Array.isArray(_rawServices) ? _rawServices.filter((s) => s && String(s.name || '').trim()) : [];
+  if (localServices.length === 0) return { seeded: false, reason: 'no-local-services' };
+  const existingSharedKeys = new Set(
+    (_rawSharedServices || []).map((s) => serviceCatalogStableKey(s.name, s.category || 'Other'))
+  );
+  const existingCategoryNames = new Set(
+    (_rawSharedCategories || []).map((c) => normalizeSharedCategoryName(c?.name).toLowerCase())
+  );
+
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  const categoryById = new Map((_rawCategories || []).map((cat) => [cat.id, cat]));
+  const categorySeed = new Map();
+  localServices.forEach((svc) => {
+    const cat = categoryById.get(svc.categoryId);
+    const categoryName = normalizeSharedCategoryName(cat?.name || svc.category || 'Other');
+    if (existingCategoryNames.has(categoryName.toLowerCase())) return;
+    if (!categorySeed.has(categoryName)) {
+      categorySeed.set(categoryName, {
+        name: categoryName,
+        sortOrder: Number.isFinite(Number(cat?.sortOrder)) ? Number(cat.sortOrder) : categorySeed.size
+      });
+    }
+  });
+  await Promise.all(Array.from(categorySeed.values()).map((cat) => saveSharedServiceCategory(cat)));
+
+  const groups = new Map();
+  localServices
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
+    .forEach((svc) => {
+      const cat = categoryById.get(svc.categoryId);
+      const categoryName = normalizeSharedCategoryName(cat?.name || svc.category || 'Other');
+      const key = serviceCatalogStableKey(svc.name, categoryName);
+      if (existingSharedKeys.has(key)) return;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          name: String(svc.name || '').trim(),
+          category: categoryName,
+          defaultPrice: Number(svc.defaultPrice) || 0,
+          active: svc.active !== false,
+          sortOrder: Number.isFinite(Number(svc.sortOrder)) ? Number(svc.sortOrder) : groups.size,
+          localByLocation: new Map()
+        });
+      }
+      const group = groups.get(key);
+      const locId = typeof svc.locationId === 'string' && svc.locationId.trim() ? svc.locationId.trim() : getActiveLocationIdForTickets();
+      if (locId && !group.localByLocation.has(locId)) group.localByLocation.set(locId, svc);
+    });
+  if (groups.size === 0) return { seeded: false, reason: 'no-missing-local-services' };
+
+  for (const group of groups.values()) {
+    const serviceId = await saveSharedService(group);
+    if (Array.isArray(locations) && locations.length > 0) {
+      for (const loc of locations) {
+        if (!loc || !loc.id) continue;
+        const localSvc = group.localByLocation.get(loc.id);
+        if (!localSvc) {
+          await saveSharedServiceLocationOverride(serviceId, loc.id, { enabled: false, price: null });
+          continue;
+        }
+        const localPrice = Number(localSvc.defaultPrice) || 0;
+        if (localSvc.active === false || localPrice !== group.defaultPrice) {
+          await saveSharedServiceLocationOverride(serviceId, loc.id, {
+            enabled: localSvc.active !== false,
+            price: localPrice !== group.defaultPrice ? localPrice : null
+          });
+        }
+      }
+    }
+  }
+  await loadSharedCatalogForManager();
+  return { seeded: true, count: groups.size };
+}
+
+async function tryLoadSharedServiceCatalog() {
+  const accountId = getTicketsAccountId();
+  if (!accountId) return false;
+  try {
+    const [serviceSnap, categorySnap] = await Promise.all([
+      getDocs(sharedServiceCatalogItemsRef(accountId)),
+      getDocs(sharedServiceCategoryItemsRef(accountId)).catch(() => ({ docs: [] }))
+    ]);
+    const rows = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!rows.length) {
+      console.log('[SharedServices] fallback to location');
+      return false;
+    }
+    _catalogSource = 'shared';
+    _rawSharedServices = rows;
+    _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
+    applySharedServiceCatalog();
+    console.log('[SharedServices] loaded from shared');
+    return true;
+  } catch (e) {
+    console.warn('[SharedServices] shared load failed', e);
+    console.log('[SharedServices] fallback to location');
+    return false;
+  }
+}
+
+async function _ffWipeLegacyCatalogOnce() {
+  if (_ffCatalogLegacyWiped) return;
+  _ffCatalogLegacyWiped = true; // never retry within this session
+  if (!currentUserProfile?.salonId) return;
+  try {
+    const isOwnerOrAdmin = (() => {
+      try {
+        if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+      } catch (_) {}
+      const r = String(currentUserProfile?.role || '').toLowerCase();
+      return r === 'owner' || r === 'admin' || r === 'manager';
+    })();
+    if (!isOwnerOrAdmin) return;
+    const [svcSnap, catSnap] = await Promise.all([
+      getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+      getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`)),
+    ]);
+    const orphans = [];
+    svcSnap.docs.forEach((d) => {
+      const v = d.data() || {};
+      const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, d.id)));
+    });
+    catSnap.docs.forEach((d) => {
+      const v = d.data() || {};
+      const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, d.id)));
+    });
+    if (orphans.length) {
+      console.log(`[Tickets] Wiping ${orphans.length} legacy catalog docs (no locationId).`);
+      await Promise.allSettled(orphans);
+    }
+  } catch (e) {
+    console.warn('[Tickets] Legacy catalog wipe failed (non-fatal):', e);
+  }
+}
+
+function _ffServiceMatchesActiveLocation(s) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const raw = s && typeof s.locationId === 'string' ? s.locationId.trim() : '';
+  return raw === activeLoc;
+}
+
+/** Recompute `salonServices` + `serviceCategories` from raw caches using the
+ *  current active branch. Safe to call from any event (snapshot arrival,
+ *  location change, manual refresh). */
+function _applyCatalogFilter() {
+  if (_catalogSource === 'shared') {
+    applySharedServiceCatalog();
+    return;
+  }
+  salonServices = _rawServices
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  serviceCategories = _rawCategories
+    .filter(_ffServiceMatchesActiveLocation)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+}
+
+/** Single handler for both snapshot sources. Applies filter then refreshes
+ *  anything currently on screen that depends on the catalog. */
+function _onCatalogSnapshot() {
+  _applyCatalogFilter();
+  try {
+    const modal = document.getElementById('servicesModal');
+    if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+      renderServicesCatalogV2();
+    }
+  } catch (_) {}
+  try { setupTicketsUI(); } catch (_) {}
+}
+
+/** Live subscribe to services + serviceCategories for the current salon.
+ *  Idempotent; switching salon auto-rebinds. */
+function subscribeServiceCatalog() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  if (_catalogSubSalonId === salonId && (_servicesUnsub || _serviceCatsUnsub)) return;
+  // Different salon than what we were subscribed to — tear down first.
+  if (_servicesUnsub) { try { _servicesUnsub(); } catch (_) {} _servicesUnsub = null; }
+  if (_serviceCatsUnsub) { try { _serviceCatsUnsub(); } catch (_) {} _serviceCatsUnsub = null; }
+  _catalogSubSalonId = salonId;
+
+  // One-time legacy cleanup BEFORE we start listening — so the first snapshot
+  // doesn't include the orphans we're about to delete.
+  _ffWipeLegacyCatalogOnce().finally(() => {
+    try {
+      _servicesUnsub = onSnapshot(
+        collection(db, `salons/${salonId}/services`),
+        (snap) => { _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (err) => console.warn('[Tickets] services subscription error', err)
+      );
+    } catch (e) { console.warn('[Tickets] services subscription failed', e); }
+    try {
+      _serviceCatsUnsub = onSnapshot(
+        collection(db, `salons/${salonId}/serviceCategories`),
+        (snap) => { _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (err) => console.warn('[Tickets] categories subscription error', err)
+      );
+    } catch (e) { console.warn('[Tickets] categories subscription failed', e); }
+  });
+}
+
+/** Live subscribe to products + productCategories for the current salon so the
+ *  ticket picker can offer retail products. Products are salon-wide; per-location
+ *  availability/price and per-staff availability are resolved at render time.
+ *  Idempotent; switching salon auto-rebinds. */
+function subscribeProductsCatalog() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  if (_productsSubSalonId === salonId && (_productsUnsub || _productCatsUnsub)) return;
+  if (_productsUnsub) { try { _productsUnsub(); } catch (_) {} _productsUnsub = null; }
+  if (_productCatsUnsub) { try { _productCatsUnsub(); } catch (_) {} _productCatsUnsub = null; }
+  _productsSubSalonId = salonId;
+  try {
+    _productsUnsub = onSnapshot(
+      collection(db, `salons/${salonId}/products`),
+      (snap) => {
+        salonProducts = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        try { setupTicketsUI(); } catch (_) {}
+      },
+      (err) => console.warn('[Tickets] products subscription error', err)
+    );
+  } catch (e) { console.warn('[Tickets] products subscription failed', e); }
+  try {
+    _productCatsUnsub = onSnapshot(
+      collection(db, `salons/${salonId}/productCategories`),
+      (snap) => {
+        productCategories = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        try { setupTicketsUI(); } catch (_) {}
+      },
+      (err) => console.warn('[Tickets] product categories subscription error', err)
+    );
+  } catch (e) { console.warn('[Tickets] product categories subscription failed', e); }
+}
+
 async function loadServices() {
   if (!currentUserProfile?.salonId) return [];
+  if (_catalogSource !== 'location') {
+    const sharedLoaded = await tryLoadSharedServiceCatalog();
+    if (sharedLoaded) {
+      subscribeServiceCatalog();
+      try {
+        if (_rawServices.length === 0 || _rawCategories.length === 0) {
+          await _ffWipeLegacyCatalogOnce();
+          const [svcSnap, catSnap] = await Promise.all([
+            getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
+            getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+          ]);
+          _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          _applyCatalogFilter();
+        }
+      } catch (err) {
+        console.warn('[Tickets] location catalog merge load failed', err);
+      }
+      return salonServices;
+    }
+    _catalogSource = 'location';
+  }
+  // Make sure live subscriptions are running; they will refresh the UI the
+  // moment new data arrives.
+  subscribeServiceCatalog();
   try {
+    // First visit (before a snapshot has arrived) — do a one-shot getDocs
+    // so the caller has data to render immediately.
+    if (_rawServices.length === 0) {
+      await _ffWipeLegacyCatalogOnce();
     const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`));
-    salonServices = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    _applyCatalogFilter();
     return salonServices;
   } catch (err) {
     console.warn('[Tickets] Failed to load services', err);
-    salonServices = [];
-    return [];
+    return salonServices;
   }
 }
 
 async function saveService(service) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(service.name || '').trim(),
@@ -159,12 +1057,18 @@ async function saveService(service) {
     sortOrder: Number(service.sortOrder) || 0,
     updatedAt: serverTimestamp()
   };
+  // "Charge Tax" — only write when explicitly provided so reorder/other saves
+  // (which omit it) preserve the existing value.
+  if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   if (service.id) {
     await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
   } else {
+    // New doc — stamp the active branch so this service only appears there.
+    const activeLoc = getActiveLocationIdForTickets();
     const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/services`), {
       ...payload,
+      locationId: activeLoc || null,
       createdAt: serverTimestamp()
     });
     return ref.id;
@@ -172,27 +1076,41 @@ async function saveService(service) {
 }
 
 async function deleteService(serviceId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId || !serviceId) return;
   await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, serviceId));
 }
 
 // =====================
-// Service Categories (managed objects)
+// Service Categories (managed objects, PER-LOCATION)
 // =====================
 async function loadServiceCategories() {
   if (!currentUserProfile?.salonId) return [];
+  if (_catalogSource === 'unknown') {
+    await loadServices();
+    return serviceCategories;
+  }
+  if (_catalogSource === 'shared') {
+    applySharedServiceCatalog();
+    return serviceCategories;
+  }
+  subscribeServiceCatalog();
   try {
+    if (_rawCategories.length === 0) {
+      await _ffWipeLegacyCatalogOnce();
     const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`));
-    serviceCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    }
+    _applyCatalogFilter();
     return serviceCategories;
   } catch (err) {
     console.warn('[Tickets] Failed to load service categories', err);
-    serviceCategories = [];
-    return [];
+    return serviceCategories;
   }
 }
 
 async function saveServiceCategory(cat) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(cat.name || '').trim(),
@@ -203,8 +1121,10 @@ async function saveServiceCategory(cat) {
     await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, cat.id), payload);
     return cat.id;
   } else {
+    const activeLoc = getActiveLocationIdForTickets();
     const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`), {
       ...payload,
+      locationId: activeLoc || null,
       createdAt: serverTimestamp()
     });
     return ref.id;
@@ -212,13 +1132,145 @@ async function saveServiceCategory(cat) {
 }
 
 async function deleteServiceCategory(categoryId) {
+  if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!currentUserProfile?.salonId || !categoryId) return;
   const count = salonServices.filter(s => s.categoryId === categoryId).length;
   if (count > 0) throw new Error(`Cannot delete: ${count} service(s) use this category. Move them first.`);
   await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, categoryId));
 }
 
+function normalizeServiceProviderTypeText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').replace(/s$/, '');
+}
+
+function getStaffQueueProviderTypeIdsForTickets(staff) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetStaffQueueProviderTypeIds === 'function') {
+      return window.ffGetStaffQueueProviderTypeIds(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  const controlledRole = role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
+  const source = controlledRole ? staff?.queueJoinAsTechnicianTypes : staff?.technicianTypes;
+  return (Array.isArray(source) ? source : []).map((typeId) => String(typeId || '').trim()).filter(Boolean);
+}
+
+function staffUsesQueueJoinAsProviderTypes(staff) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffStaffRoleCanJoinQueueAsProviderType === 'function') {
+      return window.ffStaffRoleCanJoinQueueAsProviderType(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  return role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
+}
+
+function getServiceCategoryLabel(service) {
+  const categoryId = String(service?.categoryId || '').trim();
+  const cat = categoryId ? serviceCategories.find((c) => String(c.id || '').trim() === categoryId) : null;
+  return String(cat?.name || service?.category || '').trim();
+}
+
+function serviceMatchesProviderTypeIds(service, typeIds) {
+  const ids = Array.isArray(typeIds) ? typeIds.map((id) => String(id || '').trim()).filter(Boolean) : [];
+  if (!ids.length) return false;
+  const serviceTokens = [
+    normalizeServiceProviderTypeText(getServiceCategoryLabel(service)),
+    normalizeServiceProviderTypeText(service?.name)
+  ].filter(Boolean);
+  if (!serviceTokens.length) return true;
+  const cachedTypes = (typeof window !== 'undefined' && Array.isArray(window.__ff_technician_types_cache))
+    ? window.__ff_technician_types_cache
+    : [];
+  return ids.some((typeId) => {
+    const type = cachedTypes.find((t) => t && String(t.id || '').trim() === typeId);
+    const typeTokens = [
+      normalizeServiceProviderTypeText(typeId),
+      normalizeServiceProviderTypeText(type?.name)
+    ].filter(Boolean);
+    return typeTokens.some((typeToken) => serviceTokens.some((serviceToken) => (
+      typeToken === serviceToken || typeToken.indexOf(serviceToken) !== -1 || serviceToken.indexOf(typeToken) !== -1
+    )));
+  });
+}
+
+function controlledStaffCanProvideService(staff, service) {
+  if (!staffUsesQueueJoinAsProviderTypes(staff)) return true;
+  const permissions = staff?.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  if (ffServiceStaffPermissionTrue(permissions.tickets_create)) return true;
+  const joinOn = typeof window !== 'undefined' && typeof window.ffStaffHasQueueJoinPermission === 'function'
+    ? window.ffStaffHasQueueJoinPermission(staff)
+    : ffServiceStaffPermissionTrue(permissions.queue_join);
+  if (!joinOn) return false;
+  return serviceMatchesProviderTypeIds(service, getStaffQueueProviderTypeIdsForTickets(staff));
+}
+
 /** Group services by category for MangoMint-style picker. Uses managed categories; Other for uncategorized. */
+function isTicketPickerServiceAvailableForActiveLocation(service) {
+  if (!service || !String(service.name || '').trim()) return false;
+  if (service.active === false || service.locationEnabled === false) return false;
+  // A manager / front-desk receiver editing a ticket should see the FULL catalog,
+  // so skip the per-staff override + controlled-staff provider filtering.
+  if (!_ticketPickerShowAllCatalog) {
+    const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
+    if (staffOverride && staffOverride.enabled === false) return false;
+    try {
+      const currentStaff = typeof window !== 'undefined' && typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      if (currentStaff && !controlledStaffCanProvideService(currentStaff, service)) return false;
+    } catch (_) {}
+  }
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const serviceLoc = typeof service.locationId === 'string' ? service.locationId.trim() : '';
+  if (serviceLoc && serviceLoc !== activeLoc) return false;
+  return true;
+}
+
+function getServiceStaffOverrides(service) {
+  return service && service.staffOverrides && typeof service.staffOverrides === 'object'
+    ? service.staffOverrides
+    : {};
+}
+
+function getCurrentTicketStaffIdCandidates() {
+  const out = [];
+  const add = (v) => {
+    const s = v == null ? '' : String(v).trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+  try { add(window.__ff_authedStaffId); } catch (_) {}
+  add(currentUserProfile?.staffId);
+  add(currentUserProfile?.uid);
+  try {
+    const staff = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+      ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+      : null;
+    add(staff?.id);
+    add(staff?.staffId);
+    add(staff?.uid);
+    add(staff?.firebaseUid);
+  } catch (_) {}
+  return out;
+}
+
+function getServiceStaffOverrideForCurrentTicketUser(service) {
+  const overrides = getServiceStaffOverrides(service);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getTicketPriceForServiceAndCurrentStaff(service) {
+  const base = Number(service?.defaultPrice) || 0;
+  const override = getServiceStaffOverrideForCurrentTicketUser(service);
+  const price = override && Number.isFinite(Number(override.price)) ? Number(override.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
 function getServicesGroupedByCategory() {
   const grouped = {};
   if (serviceCategories.length > 0) {
@@ -227,19 +1279,232 @@ function getServicesGroupedByCategory() {
   } else {
     grouped['__other__'] = { label: 'Other', services: [] };
   }
-  salonServices.forEach((s) => {
+  salonServices.filter(isTicketPickerServiceAvailableForActiveLocation).forEach((s) => {
     const catId = s.categoryId || null;
     const key = (catId && grouped[catId]) ? catId : '__other__';
     grouped[key].services.push(s);
   });
   const ordered = {};
   if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => { ordered[c.id] = grouped[c.id] || { label: c.name, services: [] }; });
-    ordered['__other__'] = grouped['__other__'];
+    serviceCategories.forEach((c) => {
+      const bucket = grouped[c.id] || { label: c.name, services: [] };
+      if ((bucket.services || []).length > 0) ordered[c.id] = bucket;
+    });
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   } else {
-    ordered['__other__'] = grouped['__other__'];
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   }
   return ordered;
+}
+
+// =====================
+// Products in the ticket picker
+// A product appears only when (a) it is active, (b) it is enabled for the active
+// location, and (c) the current staff member is allowed to sell it (per-product
+// Staff "Available" override). Price is pulled from the product (per-location
+// override if present, otherwise retailPrice).
+// =====================
+function getProductStaffOverrides(product) {
+  return product && product.staffOverrides && typeof product.staffOverrides === 'object'
+    ? product.staffOverrides
+    : {};
+}
+
+function getProductStaffOverrideForCurrentTicketUser(product) {
+  const overrides = getProductStaffOverrides(product);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getProductLocationOverrideForActiveLocation(product) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return null;
+  const lo = product && product.locationOverrides && typeof product.locationOverrides === 'object'
+    ? product.locationOverrides
+    : {};
+  const o = lo[activeLoc];
+  return (o && typeof o === 'object') ? o : null;
+}
+
+function isTicketPickerProductAvailableForActiveLocation(product) {
+  if (!product || !String(product.name || '').trim()) return false;
+  if (product.active === false) return false;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  if (locOverride && locOverride.enabled === false) return false;
+  if (!_ticketPickerShowAllCatalog) {
+    const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
+    if (staffOverride && staffOverride.enabled === false) return false;
+  }
+  return true;
+}
+
+function getTicketPriceForProductAndActiveLocation(product) {
+  const base = Number(product?.retailPrice) || 0;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  const price = locOverride && Number.isFinite(Number(locOverride.price)) ? Number(locOverride.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
+function getProductsGroupedByCategory() {
+  const grouped = {};
+  if (productCategories.length > 0) {
+    productCategories.forEach((c) => { grouped[c.id] = { label: c.name, products: [] }; });
+  }
+  grouped['__other__'] = { label: 'Other', products: [] };
+  salonProducts.filter(isTicketPickerProductAvailableForActiveLocation).forEach((p) => {
+    const catId = p.categoryId || null;
+    const key = (catId && grouped[catId]) ? catId : '__other__';
+    grouped[key].products.push(p);
+  });
+  const ordered = {};
+  if (productCategories.length > 0) {
+    productCategories.forEach((c) => {
+      const bucket = grouped[c.id];
+      if (bucket && (bucket.products || []).length > 0) ordered[c.id] = bucket;
+    });
+  }
+  if ((grouped['__other__']?.products || []).length > 0) ordered['__other__'] = grouped['__other__'];
+  return ordered;
+}
+
+// Sales tax — Product Tax and Service Tax are configured in Settings → Business Format.
+//   • Product Tax applies when productTaxEnabled && productTaxRate>0, on taxable product lines.
+//   • Service Tax applies when serviceTaxEnabled && serviceTaxRate>0, AND the service's own
+//     Charge Tax flag (service.taxable===true) is set.
+function getSalonTaxRateForTickets() {
+  try {
+    if (typeof window.ffGetSalonTaxRate === 'function') {
+      const n = Number(window.ffGetSalonTaxRate());
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+  } catch (_) {}
+  return 0;
+}
+
+// Resolve Product/Service tax config from Settings. Each is { enabled, rate }.
+function getTicketTaxConfig() {
+  let product = { enabled: false, rate: 0 };
+  let service = { enabled: false, rate: 0 };
+  try {
+    if (typeof window.ffGetProductTaxSettings === 'function') {
+      const p = window.ffGetProductTaxSettings();
+      if (p && typeof p === 'object') product = { enabled: p.enabled === true, rate: Number(p.rate) || 0 };
+    }
+  } catch (_) {}
+  try {
+    if (typeof window.ffGetServiceTaxSettings === 'function') {
+      const s = window.ffGetServiceTaxSettings();
+      if (s && typeof s === 'object') service = { enabled: s.enabled === true, rate: Number(s.rate) || 0 };
+    }
+  } catch (_) {}
+  return { product, service };
+}
+
+// True when at least one tax type is active — drives the Summary "Sales Tax" column visibility.
+function ffAnyTicketTaxActive() {
+  const cfg = getTicketTaxConfig();
+  return (cfg.product.enabled && cfg.product.rate > 0) || (cfg.service.enabled && cfg.service.rate > 0);
+}
+
+function isTicketProductLine(line) {
+  return !!(line && line.lineType === 'product');
+}
+
+// Service lines are the default (legacy lines have no lineType).
+function isTicketServiceLine(line) {
+  return !!line && line.lineType !== 'product';
+}
+
+// Tax for one line → { amount, rate } (rate is the % applied, 0 when none).
+function computeLineSalesTax(line, taxConfig) {
+  const cfg = taxConfig || getTicketTaxConfig();
+  const price = Number(line && line.ticketPrice) || 0;
+  if (price <= 0) return { amount: 0, rate: 0 };
+  if (isTicketProductLine(line)) {
+    if (!cfg.product.enabled || !(cfg.product.rate > 0) || line.taxable !== true) return { amount: 0, rate: 0 };
+    return { amount: Math.round(price * cfg.product.rate) / 100, rate: cfg.product.rate };
+  }
+  // Service line — requires the service's own Charge Tax flag.
+  if (!cfg.service.enabled || !(cfg.service.rate > 0) || line.taxable !== true) return { amount: 0, rate: 0 };
+  return { amount: Math.round(price * cfg.service.rate) / 100, rate: cfg.service.rate };
+}
+
+// Back-compat wrapper (amount only). Second arg may be a taxConfig object.
+function computeLineSalesTaxAmount(line, taxConfig) {
+  return computeLineSalesTax(line, taxConfig).amount;
+}
+
+function computeTicketTotalsFromLines(lines) {
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  let subtotal = 0;
+  let productTax = 0;
+  let serviceTax = 0;
+  const ratesUsed = new Set();
+  arr.forEach((line) => {
+    const price = Number(line.ticketPrice) || 0;
+    subtotal += price;
+    const t = computeLineSalesTax(line, cfg);
+    if (isTicketProductLine(line)) productTax += t.amount;
+    else serviceTax += t.amount;
+    if (t.amount > 0 && t.rate > 0) ratesUsed.add(t.rate);
+  });
+  subtotal = Math.round(subtotal * 100) / 100;
+  productTax = Math.round(productTax * 100) / 100;
+  serviceTax = Math.round(serviceTax * 100) / 100;
+  const salesTax = Math.round((productTax + serviceTax) * 100) / 100;
+  // Show a single "(X%)" label only when one rate applied; otherwise hide it.
+  const taxRate = ratesUsed.size === 1 ? Array.from(ratesUsed)[0] : 0;
+  return {
+    subtotal,
+    salesTax,
+    productTax,
+    serviceTax,
+    total: Math.round((subtotal + salesTax) * 100) / 100,
+    taxRate
+  };
+}
+
+function getTicketSalesTaxAmount(ticket, lines) {
+  const stored = Number(ticket?.salesTax);
+  if (Number.isFinite(stored) && stored >= 0 && ticket != null && ticket.salesTax != null) {
+    return Math.round(stored * 100) / 100;
+  }
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  const sum = arr.reduce((acc, line) => acc + computeLineSalesTax(line, cfg).amount, 0);
+  return Math.round(sum * 100) / 100;
+}
+
+// Split a ticket's tax into product vs service → { productTax, serviceTax }.
+// Prefers stored per-type values; falls back to recomputing from lines.
+function getTicketTaxBreakdown(ticket, lines) {
+  const storedProduct = Number(ticket?.productTax);
+  const storedService = Number(ticket?.serviceTax);
+  const hasStoredProduct = ticket != null && ticket.productTax != null && Number.isFinite(storedProduct) && storedProduct >= 0;
+  const hasStoredService = ticket != null && ticket.serviceTax != null && Number.isFinite(storedService) && storedService >= 0;
+  if (hasStoredProduct || hasStoredService) {
+    return {
+      productTax: hasStoredProduct ? Math.round(storedProduct * 100) / 100 : 0,
+      serviceTax: hasStoredService ? Math.round(storedService * 100) / 100 : 0
+    };
+  }
+  const arr = Array.isArray(lines) ? lines : [];
+  const cfg = getTicketTaxConfig();
+  let productTax = 0;
+  let serviceTax = 0;
+  arr.forEach((line) => {
+    const t = computeLineSalesTax(line, cfg);
+    if (isTicketProductLine(line)) productTax += t.amount;
+    else serviceTax += t.amount;
+  });
+  return {
+    productTax: Math.round(productTax * 100) / 100,
+    serviceTax: Math.round(serviceTax * 100) / 100
+  };
 }
 
 // =====================
@@ -262,8 +1527,7 @@ async function loadFrontDeskRecipients() {
         const staffId = u.staffId || '';
         const memberEmail = (u.email || '').toLowerCase();
         const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-        const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-        const isFrontDesk = ['admin', 'owner', 'manager'].includes(role) || hasReceivesTickets;
+        const isFrontDesk = ['admin', 'owner', 'manager'].includes(role);
         if (!isFrontDesk) return null;
         return {
           uid: d.id,
@@ -302,20 +1566,16 @@ async function getAutoFrontDeskRecipients() {
       const staffId = u.staffId || '';
       const memberEmail = (u.email || '').toLowerCase();
       const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-      const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
       const isManagerOrAbove = ['owner', 'admin', 'manager'].includes(role);
-      const isRecipient = isManagerOrAbove || hasReceivesTickets;
+      const isRecipient = isManagerOrAbove;
       if (isRecipient) add(d.id, (u.name || '').trim());
     });
   } catch (_) {}
   return { uids, names };
 }
 
-/** Returns { isPrimaryAdmin, hasReceivesTickets } for current user.
- *  ONLY uses PIN Actor system — whoever entered their PIN right now.
- *  Never falls back to Firebase Auth owner role. */
+/** Returns { isPrimaryAdmin } for current user (PIN actor — who entered PIN). */
 function getTicketVisibility() {
-  // Use PIN Actor role exclusively
   const actorRole = window.__ff_actorRole
     || window.lastActorRole
     || (typeof getCurrentActorRole === 'function' ? getCurrentActorRole() : null)
@@ -323,18 +1583,194 @@ function getTicketVisibility() {
 
   const isPrimaryAdmin = actorRole === 'Admin' || actorRole === 'Manager';
 
-  let hasReceivesTickets = false;
+  return { isPrimaryAdmin };
+}
+
+/** Current signed-in user’s row in ff staff store (for permissions.tickets_*). */
+function _ticketsCurrentStaffRow() {
   try {
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
     const staffList = store?.staff || [];
-    const staff = staffList.find(s =>
-      (currentUserProfile?.staffId && s.id === currentUserProfile.staffId) ||
-      (currentUserProfile?.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
+    const uid = currentUserProfile?.uid ? String(currentUserProfile.uid).trim() : '';
+    const sid = currentUserProfile?.staffId != null ? String(currentUserProfile.staffId).trim() : '';
+    const email = currentUserProfile?.email ? String(currentUserProfile.email).toLowerCase().trim() : '';
+    return (
+      staffList.find((s) => {
+        if (sid && String(s.id || '').trim() === sid) return true;
+        if (uid && s.uid != null && String(s.uid).trim() === uid) return true;
+        if (email && s.email && String(s.email).toLowerCase().trim() === email) return true;
+        return false;
+      }) || null
     );
-    hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-  } catch (_) {}
+  } catch (_) {
+    return null;
+  }
+}
 
-  return { isPrimaryAdmin, hasReceivesTickets };
+function getTicketsStaffPermissions() {
+  const row = _ticketsCurrentStaffRow();
+  if (row?.permissions && typeof row.permissions === 'object') return row.permissions;
+  const p = currentUserProfile?.permissions;
+  if (p && typeof p === 'object') return p;
+  return {};
+}
+
+/** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions. */
+function canViewTicketsSummaryTab() {
+  if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (role === 'owner' || role === 'admin') return true;
+  return getTicketsStaffPermissions().tickets_summary === true;
+}
+
+/** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions (tickets_archived). */
+function canViewTicketsArchivedTab() {
+  if (!currentUserProfile) return false;
+  if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (role === 'owner' || role === 'admin') return true;
+  return getTicketsStaffPermissions().tickets_archived === true;
+}
+
+function canCurrentUserCloseTickets() {
+  if (!currentUserProfile) return false;
+  const role = (currentUserProfile.role || '').toLowerCase();
+  if (['owner', 'admin', 'manager'].includes(role)) return true;
+  try {
+    const staff = _ticketsCurrentStaffRow();
+    return !!(staff && (staff.isManager === true || staff.isAdmin === true));
+  } catch (_) {
+    return false;
+  }
+}
+
+function updateTicketsTabsVisibility() {
+  const archivedTab = document.getElementById('ticketsArchivedTab');
+  const summaryTab = document.getElementById('ticketsSummaryTab');
+  const showArchived = canViewTicketsArchivedTab();
+  const showSummary = canViewTicketsSummaryTab();
+  /* Let stylesheet control tab layout (flex on .tickets-tab). inline-block overrides mobile flex and can clip labels. */
+  if (archivedTab) archivedTab.style.display = showArchived ? '' : 'none';
+  if (summaryTab) {
+    // Always set label in JS so cached HTML (old "SUM" shortcut) still shows full "Summary".
+    summaryTab.textContent = 'Summary';
+    summaryTab.style.display = showSummary ? '' : 'none';
+  }
+}
+
+/** Show or hide the full-width filters strip below tabs (Summary / Closed date filters). */
+function ffTicketsSetTimePeriodFiltersVisible(want) {
+  const row = document.getElementById('ticketsFiltersRow');
+  const wrap = document.getElementById('ticketsTimePeriodWrap');
+  if (row) row.style.display = want ? 'flex' : 'none';
+  if (wrap) wrap.style.display = want ? 'flex' : 'none';
+}
+
+/** Staff row flags manager/admin even when Firestore profile role is still technician-like. */
+function isStaffRecordManagerOrAdmin() {
+  try {
+    const staff = _ticketsCurrentStaffRow();
+    return !!(staff && (staff.isManager === true || staff.isAdmin === true));
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Firestore salon profile: technician-like roles see only their own tickets in this module. */
+function isTicketsTechnicianRestrictedRole() {
+  const r = (currentUserProfile?.role || '').toLowerCase().trim();
+  return (
+    r === 'technician' ||
+    r === 'tech' ||
+    r === 'staff' ||
+    r === 'service_provider' ||
+    r === 'service provider'
+  );
+}
+
+/** Narrow screens: hide front-desk date/employee row for restricted roles (Closed/Archived). */
+function ffTicketsIsMobileViewport() {
+  try {
+    if (typeof window.matchMedia === 'function') {
+      return window.matchMedia('(max-width: 639px)').matches;
+    }
+  } catch (_) {}
+  return typeof window !== 'undefined' && Number(window.innerWidth || 0) <= 639;
+}
+
+function ffTicketsHideFrontDeskFiltersOnThisView() {
+  return (
+    ffTicketsIsMobileViewport() &&
+    isTicketsTechnicianRestrictedRole() &&
+    !isStaffRecordManagerOrAdmin() &&
+    (currentTicketsTab === 'closed' || currentTicketsTab === 'archived')
+  );
+}
+
+/** Matches ticket.technicianStaffId to staff doc id, falling back to auth uid (same as new tickets). */
+function getTicketsSelfEmployeeFilterId() {
+  if (!currentUserProfile) return 'all';
+  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') {
+    return String(currentUserProfile.staffId).trim();
+  }
+  return String(currentUserProfile.uid);
+}
+
+/** Only tickets assigned to this technician: technicianStaffId === staffId or auth uid; if missing id, exact name/email vs their staff row (no substring match). */
+function ticketBelongsToTicketsTechnician(ticket) {
+  if (!currentUserProfile || !ticket) return false;
+  const techRaw = ticket.technicianStaffId;
+  const techId =
+    techRaw != null && String(techRaw).trim() !== '' ? String(techRaw).trim() : '';
+  if (techId) {
+    const uid = String(currentUserProfile.uid || '').trim();
+    const sid =
+      currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== ''
+        ? String(currentUserProfile.staffId).trim()
+        : '';
+    if (sid && techId === sid) return true;
+    if (uid && techId === uid) return true;
+    return false;
+  }
+  const staff = _ticketsCurrentStaffRow();
+  if (!staff) return false;
+  const tn = normalizeTicketTechName(ticket.technicianName || '');
+  if (!tn) return false;
+  const n1 = normalizeTicketTechName(staff.name || '');
+  const n2 = normalizeTicketTechName(staff.email || '');
+  if (n1 && tn === n1) return true;
+  if (n2 && tn === n2) return true;
+  return false;
+}
+
+function updateTicketsEmployeeFilterVisibility() {
+  const sel = document.getElementById('ticketsEmployeeSelect');
+  if (!sel) return;
+  const show = !(isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin());
+  const disp = show ? '' : 'none';
+  sel.style.display = disp;
+  const label = sel.previousElementSibling;
+  const sep = label?.previousElementSibling;
+  if (label && label.classList.contains('tickets-time-period-label')) label.style.display = disp;
+  if (sep && sep.classList.contains('tickets-filters-sep')) sep.style.display = disp;
+}
+
+/** Current active branch. Tickets with a locationId that doesn't match are
+ *  hidden; legacy tickets without a locationId are shown in every branch so
+ *  older data doesn't disappear from the UI. */
+function getActiveLocationIdForTickets() {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v) return v;
+    }
+    if (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id) {
+      return window.__ff_active_location_id;
+    }
+  } catch (_) {}
+  return null;
 }
 
 /** Returns true if current user can see this ticket.
@@ -342,33 +1778,162 @@ function getTicketVisibility() {
  *  This ensures admin always sees all tickets regardless of PIN state. */
 function canSeeTicket(ticket) {
   if (!currentUserProfile) return false;
+  // Location scope gate:
+  //  • Stamped tickets must match the active branch (if any).
+  //  • Legacy tickets without a locationId are visible in single-branch
+  //    mode but hidden from multi-branch users (matches Inventory policy
+  //    so cross-branch revenue/bills don't leak into the wrong branch).
+  const activeLoc = getActiveLocationIdForTickets();
+  if (activeLoc && ticket) {
+    const ticketLoc = typeof ticket.locationId === 'string' ? ticket.locationId : '';
+    if (ticketLoc && ticketLoc !== activeLoc) {
+      return false;
+    }
+    if (!ticketLoc) {
+      let viewerIsMultiBranch = false;
+      try {
+        if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+          viewerIsMultiBranch = !!window.ffUserHasMultipleLocations();
+        }
+      } catch (_) {}
+      if (viewerIsMultiBranch) return false;
+    }
+  }
   // Firestore role: admin/owner/manager always see all tickets
   const profileRole = (currentUserProfile.role || '').toLowerCase();
   if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
-  // Technician: can see their own tickets
+  if (isStaffRecordManagerOrAdmin()) return true;
+  if (isTicketsTechnicianRestrictedRole()) {
+    return ticketBelongsToTicketsTechnician(ticket);
+  }
   if (ticket.createdByUid === currentUserProfile.uid) return true;
-  // Staff with receives-tickets permission
-  const { hasReceivesTickets } = getTicketVisibility();
-  if (hasReceivesTickets) return true;
   return false;
+}
+
+function ticketHasRealPostSendEdit(ticket) {
+  if (!ticket || ticket.editedAfterFinalize !== true) return false;
+  const history = Array.isArray(ticket.history) ? ticket.history : [];
+  return history.some((entry) => {
+    const action = String(entry?.action || '').toLowerCase();
+    return action === 'edited_after_send';
+  });
 }
 
 // =====================
 // Tickets CRUD
 // =====================
+function _rebuildCurrentTicketsMerged() {
+  const byId = new Map();
+  for (const t of _ticketsExtraTickets) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  for (const t of _ticketsFirstPageTickets) {
+    if (t && t.id) byId.set(t.id, t);
+  }
+  currentTickets = Array.from(byId.values()).sort((a, b) => {
+    const da = ticketSubmittedAtDate(a);
+    const db = ticketSubmittedAtDate(b);
+    const ma = da ? da.getTime() : 0;
+    const mb = db ? db.getTime() : 0;
+    return mb - ma;
+  });
+  notifyTicketsAnalyticsDataChanged();
+}
+
+/**
+ * Patch a ticket in the local pagination caches after a successful server write.
+ * The live snapshot only covers the newest TICKETS_PAGE_SIZE tickets; older rows
+ * loaded via "Load more" (_ticketsExtraTickets) are a static copy and never
+ * refresh, so without this an archived old ticket keeps its stale CLOSED status
+ * locally and "comes back" until a full reload.
+ */
+function ffTicketsPatchLocalTicket(ticketId, patch) {
+  if (!ticketId || !patch) return false;
+  // Skip FieldValue sentinels (e.g. serverTimestamp()) — they are not renderable values.
+  const safe = {};
+  Object.keys(patch).forEach((k) => {
+    const v = patch[k];
+    if (v && typeof v === 'object' && typeof v._methodName === 'string') return;
+    safe[k] = v;
+  });
+  let touched = false;
+  const apply = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].id === ticketId) {
+        arr[i] = { ...arr[i], ...safe };
+        touched = true;
+      }
+    }
+  };
+  apply(_ticketsExtraTickets);
+  apply(_ticketsFirstPageTickets);
+  return touched;
+}
+
+function updateTicketsLoadMoreUi() {
+  const wrap = document.getElementById('ticketsLoadMoreWrap');
+  const btn = document.getElementById('ticketsLoadMoreBtn');
+  if (!wrap || !btn) return;
+  const onListTab = currentTicketsTab !== 'summary';
+  const show = onListTab && _ticketsHasMoreOlder;
+  wrap.style.display = show ? 'block' : 'none';
+  btn.disabled = _ticketsLoadingMore;
+  btn.textContent = _ticketsLoadingMore ? 'Loading…' : 'Load more';
+}
+
+async function loadMoreTicketsOlder() {
+  if (_ticketsLoadingMore || !_ticketsHasMoreOlder || !_ticketsNextPageCursor) return;
+  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (!salonId) return;
+  _ticketsLoadingMore = true;
+  updateTicketsLoadMoreUi();
+  try {
+    const qMore = query(
+      collection(db, `salons/${salonId}/tickets`),
+      orderBy('createdAt', 'desc'),
+      startAfter(_ticketsNextPageCursor),
+      limit(TICKETS_PAGE_SIZE)
+    );
+    const batch = await getDocs(qMore);
+    const newRows = batch.docs.map((d) => ({ id: d.id, ...d.data() }));
+    _ticketsExtraTickets.push(...newRows);
+    if (batch.docs.length < TICKETS_PAGE_SIZE) {
+      _ticketsHasMoreOlder = false;
+      _ticketsNextPageCursor = null;
+    } else {
+      _ticketsHasMoreOlder = true;
+      _ticketsNextPageCursor = batch.docs[batch.docs.length - 1];
+    }
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    updateTicketsNavBadge();
+  } catch (e) {
+    console.error('[Tickets] load more failed', e);
+    showToast(e?.message || 'Could not load more tickets', 'error');
+  } finally {
+    _ticketsLoadingMore = false;
+    updateTicketsLoadMoreUi();
+  }
+}
+
 function subscribeTickets(options) {
   const resetLoading = !!(options && options.resetLoading);
-  const salonId = currentUserProfile?.salonId
-    || (typeof window !== 'undefined' && window.currentSalonId)
-    || null;
+  const salonId = getActiveTicketsSalonId();
   if (!salonId) {
     console.warn('[Tickets] No salonId. Retrying in 1s...');
     setTimeout(() => subscribeTickets(options), 1000);
+    renderTicketsList();
     return;
   }
   if (ticketsUnsubscribe) ticketsUnsubscribe();
   if (resetLoading) {
     _ticketsListSnapshotReady = false;
+    _ticketsFirstPageTickets = [];
+    _ticketsExtraTickets = [];
+    _ticketsNextPageCursor = null;
+    _ticketsHasMoreOlder = false;
+    _ticketsLoadingMore = false;
+    _rebuildCurrentTicketsMerged();
     const loadEl = document.getElementById('ticketsLoading');
     const listEl = document.getElementById('ticketsList');
     const emptyEl = document.getElementById('ticketsEmpty');
@@ -379,13 +1944,19 @@ function subscribeTickets(options) {
   const q = query(
     collection(db, `salons/${salonId}/tickets`),
     orderBy('createdAt', 'desc'),
-    limit(200)
+    limit(TICKETS_PAGE_SIZE)
   );
   ticketsUnsubscribe = onSnapshot(q, (snap) => {
-    currentTickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _ticketsFirstPageTickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (_ticketsExtraTickets.length === 0) {
+      _ticketsNextPageCursor =
+        snap.docs.length >= TICKETS_PAGE_SIZE ? snap.docs[snap.docs.length - 1] : null;
+      _ticketsHasMoreOlder = snap.docs.length === TICKETS_PAGE_SIZE;
+    }
+    _rebuildCurrentTicketsMerged();
     _ticketsListSnapshotReady = true;
     if (editingTicketId) {
-      const t = currentTickets.find(x => x.id === editingTicketId);
+      const t = currentTickets.find((x) => x.id === editingTicketId);
       const s = t ? (t.status || '').toUpperCase() : '';
       if (t && (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED')) {
         const ticketModal = document.getElementById('ticketModal');
@@ -404,45 +1975,54 @@ function subscribeTickets(options) {
   });
 }
 
-/** Red dot + number on TICKETS nav for manager/admin. Counts Ready tickets not yet opened (Firestore seenByFrontDeskAt OR opened this session). */
+/** Red dot + number on TICKETS nav. Counts visible READY tickets, even while user is outside Tickets. */
 function updateTicketsNavBadge() {
   const badge = document.getElementById('ticketsNavBadge');
   if (!badge) return;
-  // Badge only for admin/owner/manager by FIRESTORE role
-  const profileRole = (currentUserProfile?.role || '').toLowerCase();
-  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-  if (!isFirebaseAdmin) {
+  if (!currentUserProfile) {
     badge.textContent = '';
     badge.style.display = 'none';
     return;
   }
-  badge.style.display = '';
-  const readyUnread = (currentTickets || []).filter(t => {
-    if ((String(t.status || '').toUpperCase() !== 'READY_FOR_CHECKOUT') || !canSeeTicket(t)) return false;
-    if (_ticketsOpenedThisSession.has(t.id)) return false;
-    if (t.seenByFrontDeskAt) return false;
-    return true;
+  const readyVisible = (currentTickets || []).filter(t => {
+    return String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT' && canSeeTicket(t);
   });
-  badge.textContent = readyUnread.length > 0 ? String(readyUnread.length) : '';
+  badge.textContent = readyVisible.length > 0 ? String(readyVisible.length) : '';
+  badge.style.display = readyVisible.length > 0 ? '' : 'none';
+}
+
+function getTicketCustomerPriceApprovedFromForm() {
+  const wrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  const el = document.getElementById('ticketCustomerPriceApproved');
+  if (!el || !wrap || wrap.style.display === 'none') return false;
+  return !!el.checked;
 }
 
 async function createTicket(payload) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId) throw new Error('No salon - ensure your account has salonId');
   const status = payload.status === 'READY_FOR_CHECKOUT' ? 'READY_FOR_CHECKOUT' : 'OPEN';
+  const activeLocForNewTicket = getActiveLocationIdForTickets();
+  console.log('[Tickets] createTicket → activeLocationId:', activeLocForNewTicket || '(NONE — ticket will have no locationId)');
   const doc = {
     status,
     asIs: payload.asIs === true,
     asIsMessage: payload.asIs === true ? (payload.asIsMessage || 'Service matches system billing') : null,
+    customerApprovedPrice: payload.customerApprovedPrice === true,
     customerName: String(payload.customerName || '').trim(),
     appointmentId: payload.appointmentId || null,
     appointmentData: payload.appointmentData || null,
     technicianStaffId: currentUserProfile.staffId || currentUserProfile.uid,
     technicianName: currentUserProfile.name || currentUserProfile.email || 'Technician',
     performedLines: Array.isArray(payload.performedLines) ? payload.performedLines : [],
+    subtotal: Number(payload.subtotal) || Number(payload.total) || 0,
+    salesTax: Number(payload.salesTax) || 0,
+    productTax: Number(payload.productTax) || 0,
+    serviceTax: Number(payload.serviceTax) || 0,
     total: Number(payload.total) || 0,
     forUids: Array.isArray(payload.forUids) ? payload.forUids : [],
     forNames: Array.isArray(payload.forNames) ? payload.forNames : [],
+    ...(activeLocForNewTicket ? { locationId: activeLocForNewTicket } : {}),
     ...(status === 'READY_FOR_CHECKOUT' && { finalizedByUid: currentUserProfile.uid }),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -454,7 +2034,7 @@ async function createTicket(payload) {
 }
 
 async function updateTicket(ticketId, updates) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId || !ticketId) return;
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   let snap;
@@ -476,34 +2056,229 @@ async function updateTicket(ticketId, updates) {
   delete updates._details;
   delete updates.history;
   const isOnlyMarkingSeen = Object.keys(updates).length === 1 && updates.seenByFrontDeskAt !== undefined;
+  const isServiceUpgradeOnly =
+    (hist[hist.length - 1]?.action === 'service_upgrade_marked' ||
+      hist[hist.length - 1]?.action === 'service_upgrade_cleared') &&
+    Object.keys(updates).every((key) => key === 'serviceUpgrade');
+  const isReviewedToggleOnly =
+    (hist[hist.length - 1]?.action === 'reviewed_marked' ||
+      hist[hist.length - 1]?.action === 'reviewed_cleared') &&
+    Object.keys(updates).every((key) => ['reviewedByFrontDesk', 'reviewedByUid', 'reviewedByName', 'reviewedAt'].includes(key));
   const statusNow = (String(data.status || '')).toUpperCase();
-  if (!isOnlyMarkingSeen && statusNow === 'READY_FOR_CHECKOUT') {
+  if (!isOnlyMarkingSeen && !isServiceUpgradeOnly && !isReviewedToggleOnly && statusNow === 'READY_FOR_CHECKOUT') {
     updates.editedAfterFinalize = true;
     updates.editedAt = serverTimestamp();
+    // A real edit introduces new info, so any prior front-desk "Reviewed"
+    // mark is no longer valid — clear it so the ticket needs re-reviewing.
+    if (data.reviewedByFrontDesk === true) {
+      updates.reviewedByFrontDesk = false;
+      updates.reviewedByUid = null;
+      updates.reviewedByName = null;
+      updates.reviewedAt = null;
+    }
+  } else if (isServiceUpgradeOnly) {
+    updates.editedAfterFinalize = false;
+    updates.editedAt = null;
   }
   await updateDoc(ticketRef, {
     ...updates,
     history: hist,
     updatedAt: serverTimestamp()
   });
+  // Sync the local pagination cache: tickets loaded via "Load more" are not in
+  // the live snapshot window, so without this their stale copy keeps rendering.
+  if (ffTicketsPatchLocalTicket(ticketId, { ...updates, history: hist })) {
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+  }
 }
 
-async function finalizeTicket(ticketId, forUids, forNames) {
+async function finalizeTicket(ticketId, forUids, forNames, extra) {
   const updates = { status: 'READY_FOR_CHECKOUT', finalizedByUid: currentUserProfile.uid, _action: 'finalized' };
   if (Array.isArray(forUids) && forUids.length > 0) {
     updates.forUids = forUids;
     updates.forNames = Array.isArray(forNames) ? forNames : [];
   }
+  if (extra && typeof extra.customerName === 'string' && extra.customerName.trim()) {
+    updates.customerName = extra.customerName.trim();
+  }
   await updateTicket(ticketId, updates);
 }
 
-async function closeTicket(ticketId) {
+/** Append-only history for Tickets Summary (not read by UI yet). */
+async function appendTicketSummaryOnClose(salonId, ticketId) {
+  console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: enter', {
+    salonId: salonId || '(missing)',
+    ticketId: ticketId || '(missing)',
+    profileRole: currentUserProfile?.role ?? '(no profile)'
+  });
+  if (!salonId || !ticketId) {
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — missing salonId or ticketId');
+    return;
+  }
+  try {
+    const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
+    let snap;
+    try {
+      snap = await getDocFromServer(ticketRef);
+    } catch (e) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: getDocFromServer failed, fallback getDoc', e);
+      snap = await getDoc(ticketRef);
+    }
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: after ticket read', {
+      exists: snap.exists(),
+      status: snap.exists() ? String((snap.data() || {}).status || '') : '(n/a)'
+    });
+    if (!snap.exists()) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — ticket doc missing');
+      return;
+    }
+    const t = snap.data() || {};
+    if (String(t.status || '').toUpperCase() !== 'CLOSED') {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — status not CLOSED', {
+        status: t.status ?? '(empty)'
+      });
+      return;
+    }
+
+    const performedLines = Array.isArray(t.performedLines) ? t.performedLines : [];
+    const servicesCount = performedLines.length;
+    const rawTotal = Number(t.total);
+    const totalAmount = Number.isFinite(rawTotal) ? rawTotal : null;
+
+    const tsid = t.technicianStaffId;
+    const employeeId = tsid != null && String(tsid).trim() !== '' ? String(tsid).trim() : null;
+    const tn = t.technicianName;
+    const employeeName = tn != null && String(tn).trim() !== '' ? String(tn).trim() : null;
+
+    const dupQ = query(
+      collection(db, `salons/${salonId}/ticketSummaries`),
+      where('ticketId', '==', ticketId)
+    );
+    const dupSnap = await getDocs(dupQ);
+    // A summary that was reversed by a reopen should not block a fresh entry when
+    // the ticket is paid/closed again.
+    const hasActiveSummary = dupSnap.docs.some((d) => (d.data() || {}).reopenedReversed !== true);
+    if (hasActiveSummary) {
+      console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — active summary exists for ticketId');
+      return;
+    }
+
+    const now = new Date();
+    const closedDateKey = _fmtYmdLocal(now);
+
+    // Prefer the ticket's own locationId (set at creation) so summaries stay
+    // scoped even if the user switched branches between opening and closing.
+    // Fallback to the currently active branch if the ticket predates multi-branch.
+    const ticketLocationId =
+      typeof t.locationId === 'string' && t.locationId
+        ? t.locationId
+        : getActiveLocationIdForTickets();
+
+    const payload = {
+      ticketId,
+      salonId,
+      employeeId,
+      employeeName,
+      closedAt: serverTimestamp(),
+      closedDateKey,
+      ticketsCount: 1,
+      servicesCount,
+      totalAmount,
+      status: 'closed',
+      source: 'ticket_close',
+      ...(ticketLocationId ? { locationId: ticketLocationId } : {})
+    };
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: before addDoc ticketSummaries', {
+      path: `salons/${salonId}/ticketSummaries`,
+      closedDateKey,
+      payloadPreview: {
+        ticketId,
+        salonId,
+        employeeId,
+        employeeName,
+        servicesCount,
+        totalAmount
+      }
+    });
+    const ref = await addDoc(collection(db, `salons/${salonId}/ticketSummaries`), payload);
+    console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: addDoc OK', { newDocId: ref.id });
+  } catch (e) {
+    console.error('[Tickets Summary DEBUG] appendTicketSummaryOnClose: catch', {
+      message: e?.message,
+      code: e?.code,
+      stack: e?.stack,
+      profileRole: currentUserProfile?.role ?? '(no profile)',
+      salonId,
+      ticketId
+    });
+    console.warn('[Tickets] ticketSummaries write failed', e);
+  }
+}
+
+async function closeTicket(ticketId, preCloseFields = null) {
+  const salonId = getActiveTicketsSalonId();
   const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
+  console.log('[Tickets Summary DEBUG] closeTicket: before update + append', {
+    salonId: salonId || '(missing)',
+    ticketId: ticketId || '(missing)',
+    profileRole: currentUserProfile?.role ?? '(no profile)',
+    uid: currentUserProfile?.uid ?? '(no uid)'
+  });
+  const extra =
+    preCloseFields && typeof preCloseFields === 'object'
+      ? Object.fromEntries(
+          Object.entries(preCloseFields).filter(([, v]) => v !== undefined)
+        )
+      : {};
   await updateTicket(ticketId, {
+    ...extra,
     status: 'CLOSED',
     closedByUid: currentUserProfile.uid,
     closedByName,
     _action: 'closed'
+  });
+  await appendTicketSummaryOnClose(salonId, ticketId);
+}
+
+// Undo an accidental "Paid Ticket" (close). Returns the ticket to the
+// Ready-for-checkout state and removes the revenue summary entry created at
+// close so the ticket isn't counted twice in analytics.
+async function reopenTicket(ticketId) {
+  const salonId = getActiveTicketsSalonId();
+  if (salonId) {
+    // ticketSummaries delete is disallowed by rules; mark the close entry as
+    // reversed instead (best-effort; permitted for admin/owner). The dedup in
+    // appendTicketSummaryOnClose ignores reversed rows so a later re-close
+    // writes a fresh, correct summary.
+    try {
+      const sumQ = query(
+        collection(db, `salons/${salonId}/ticketSummaries`),
+        where('ticketId', '==', ticketId)
+      );
+      const sumSnap = await getDocs(sumQ);
+      await Promise.all(
+        sumSnap.docs.map((d) =>
+          updateDoc(d.ref, {
+            reopenedReversed: true,
+            reopenedAt: serverTimestamp(),
+            reopenedByUid: currentUserProfile?.uid ?? null,
+            reopenedByName: currentUserProfile?.name || currentUserProfile?.email || null
+          }).catch(() => {})
+        )
+      );
+    } catch (e) {
+      console.warn('[Tickets] reopenTicket: summary reversal failed', e);
+    }
+  }
+  await updateTicket(ticketId, {
+    status: 'READY_FOR_CHECKOUT',
+    closedByUid: deleteField(),
+    closedByName: deleteField(),
+    reopenedByUid: currentUserProfile?.uid || null,
+    reopenedByName: currentUserProfile?.name || currentUserProfile?.email || 'Manager',
+    reopenedAt: serverTimestamp(),
+    _action: 'reopened'
   });
 }
 
@@ -515,16 +2290,129 @@ async function archiveTicket(ticketId) {
   await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: currentUserProfile.uid, _action: 'archived' });
 }
 
-async function deleteTicketPermanently(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+async function setTicketServiceUpgrade(ticketId, enabled) {
+  await updateTicket(ticketId, {
+    serviceUpgrade: enabled === true,
+    _action: enabled ? 'service_upgrade_marked' : 'service_upgrade_cleared'
+  });
+}
+
+function getTicketUpgradePointsAccountId() {
+  return String(
+    (typeof window !== 'undefined' && window.currentSalonId)
+    || currentUserProfile?.salonId
+    || (typeof window !== 'undefined' && (window.currentAccountId || window.accountId))
+    || ''
+  ).trim();
+}
+
+function getTicketUpgradePointsLocationId(ticket) {
+  const fromTicket = String(ticket?.locationId || '').trim();
+  if (fromTicket) return fromTicket;
+  try {
+    const active = getActiveLocationIdForTickets();
+    if (active) return String(active).trim();
+  } catch (_) {}
+  return 'default';
+}
+
+async function getTicketUpgradePointsValue(accountId, locationId) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetPointsSettings === 'function') {
+      const settings = await window.ffGetPointsSettings(accountId, locationId);
+      const configured = Number(settings?.ticketUpgrade);
+      if (Number.isFinite(configured)) return configured;
+    }
+  } catch (_) {}
+  try {
+    const snap = await getDoc(doc(db, `accounts/${accountId}/settings/points`));
+    const configured = Number((snap.data() || {}).ticketUpgrade);
+    if (Number.isFinite(configured)) return configured;
+  } catch (_) {}
+  return 5;
+}
+
+async function awardTicketUpgradePoints(ticket) {
+  try {
+    if (!ticket || !ticket.id) {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'missing_ticket' });
+      return;
+    }
+    if (typeof window === 'undefined' || typeof window.ffCreatePointsEvent !== 'function') {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'points_engine_unavailable', ticketId: ticket.id });
+      return;
+    }
+    const accountId = getTicketUpgradePointsAccountId();
+    const locationId = getTicketUpgradePointsLocationId(ticket);
+    const staffId = String(ticket.technicianStaffId || '').trim();
+    const staffName = String(ticket.technicianName || staffId || '').trim();
+    if (!accountId || !locationId || !staffId) {
+      console.log('[Ticket Upgrade Points] skipped', { reason: 'missing_required_fields', ticketId: ticket.id, accountId, locationId, staffId });
+      return;
+    }
+    const points = await getTicketUpgradePointsValue(accountId, locationId);
+    const result = await window.ffCreatePointsEvent({
+      accountId,
+      staffId,
+      staffName,
+      locationId,
+      type: 'ticket_upgrade',
+      sourceModule: 'tickets',
+      sourceId: String(ticket.id),
+      points,
+      uniquePerSource: true
+    });
+    if (result?.created) {
+      console.log('[Ticket Upgrade Points] awarded', { ticketId: ticket.id, staffId, points });
+    } else {
+      console.log('[Ticket Upgrade Points] skipped', { ticketId: ticket.id, staffId, reason: result?.reason || (result?.duplicate ? 'duplicate' : 'not_created') });
+    }
+  } catch (err) {
+    console.warn('[Ticket Upgrade Points] error', err);
+  }
+}
+
+/** Does not remove ticketSummaries; marks matching rows when the live ticket is permanently deleted. */
+async function markTicketSummariesSourceDeleted(salonId, ticketId) {
   if (!salonId || !ticketId) return;
+  const uid = currentUserProfile?.uid ?? null;
+  const byName =
+    currentUserProfile?.name || currentUserProfile?.email || null;
+  try {
+    const q = query(
+      collection(db, `salons/${salonId}/ticketSummaries`),
+      where('ticketId', '==', ticketId)
+    );
+    const snap = await getDocs(q);
+    await Promise.all(
+      snap.docs.map((d) =>
+        updateDoc(d.ref, {
+          sourceTicketDeleted: true,
+          sourceTicketDeletedAt: serverTimestamp(),
+          sourceTicketDeletedByUid: uid,
+          sourceTicketDeletedByName: byName
+        })
+      )
+    );
+  } catch (e) {
+    console.warn('[Tickets] ticketSummaries source-deleted markers failed', e);
+  }
+}
+
+async function deleteTicketPermanently(ticketId) {
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId || !ticketId) return;
+  await markTicketSummariesSourceDeleted(salonId, ticketId);
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   await deleteDoc(ticketRef);
+  _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => t.id !== ticketId);
+  _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => t.id !== ticketId);
+  _rebuildCurrentTicketsMerged();
 }
 
 /** Mark ticket as seen/acknowledged by Front Desk (removes "Edited" indicator). Call when FD opens the ticket. */
 async function markTicketSeenByFrontDesk(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = getActiveTicketsSalonId();
   if (!salonId || !ticketId) return;
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   const snap = await getDoc(ticketRef);
@@ -535,77 +2423,990 @@ async function markTicketSeenByFrontDesk(ticketId) {
 // =====================
 // Helpers
 // =====================
+function ticketDateFromValue(value) {
+  if (!value) return null;
+  const d = value?.toDate ? value.toDate() : (value instanceof Date ? value : new Date(value));
+  return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+}
+
+function formatTicketDisplayDateTime(value) {
+  const d = ticketDateFromValue(value);
+  if (!d) return '';
+  const datePart = d.toLocaleDateString();
+  const timePart = typeof window !== 'undefined' && typeof window.ffFormatDisplayTime === 'function'
+    ? window.ffFormatDisplayTime(d, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
+}
+
 function formatDate(ts) {
-  if (!ts) return '';
-  const d = ts?.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return formatTicketDisplayDateTime(ts);
 }
 
-/** Align the gear icon precisely under the user avatar circle — works on any screen/DPI */
-function _alignGearToAvatar() {
-  const gear = document.getElementById('ticketsManageServicesBtn');
-  // Target the circle itself, not the full button (which includes the ▼ arrow)
-  const avatarCircle = document.querySelector('.user-avatar-circle') || document.getElementById('userAvatarBtn');
-  if (!gear || !avatarCircle || gear.style.display === 'none') return;
-  const circleRect = avatarCircle.getBoundingClientRect();
-  const tabsRow = gear.parentElement;
-  if (!tabsRow) return;
-  const tabsRect = tabsRow.getBoundingClientRect();
-  // Center gear under the circle center
-  const circleCenterX = circleRect.left + circleRect.width / 2;
-  const gearHalfWidth = 18; // 36px / 2
-  const rightFromRow = tabsRect.right - (circleCenterX + gearHalfWidth);
-  gear.style.marginRight = Math.max(4, Math.round(rightFromRow - 20)) + 'px';
+/** Submitted time for list + date filter (uses createdAt). */
+function ticketSubmittedAtDate(t) {
+  const ts = t?.createdAt;
+  if (!ts) return null;
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return isNaN(d.getTime()) ? null : d;
 }
 
-// Re-align on resize
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => {
-    const gear = document.getElementById('ticketsManageServicesBtn');
-    if (gear && gear.style.display !== 'none') _alignGearToAvatar();
+function passesTicketsDateFilter(t, fromStr, toStr) {
+  if (!fromStr && !toStr) return true;
+  const d = ticketSubmittedAtDate(t);
+  if (!d) return false;
+  const tMs = d.getTime();
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) {
+      const from = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+      if (tMs < from.getTime()) return false;
+    }
+  }
+  if (toStr) {
+    const p = toStr.split('-').map(Number);
+    if (p.length === 3) {
+      const toEnd = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
+      if (tMs > toEnd.getTime()) return false;
+    }
+  }
+  return true;
+}
+
+/** Firestore bounds for Summary queries (local calendar day, same as passesTicketsDateFilter). */
+function _summaryRangeToTimestampBounds(fromStr, toStr) {
+  if (!fromStr && !toStr) return { minTs: null, maxTs: null };
+  let minTs = null;
+  let maxTs = null;
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) {
+      const d = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0);
+      minTs = Timestamp.fromDate(d);
+    }
+  }
+  if (toStr) {
+    const p = toStr.split('-').map(Number);
+    if (p.length === 3) {
+      const d = new Date(p[0], p[1] - 1, p[2], 23, 59, 59, 999);
+      maxTs = Timestamp.fromDate(d);
+    }
+  }
+  return { minTs, maxTs };
+}
+
+/**
+ * Indexed path: status + createdAt (needs composite index on collection group "tickets").
+ */
+async function _fetchClosedTicketsForSummaryIndexed(salonId, fromStr, toStr) {
+  const colRef = collection(db, `salons/${salonId}/tickets`);
+  const { minTs, maxTs } = _summaryRangeToTimestampBounds(fromStr, toStr);
+  const out = [];
+  const PAGE = _ticketSummaryPageSize;
+  const constraints = [where('status', '==', 'CLOSED')];
+  if (minTs && maxTs) {
+    constraints.push(where('createdAt', '>=', minTs));
+    constraints.push(where('createdAt', '<=', maxTs));
+  } else if (minTs) {
+    constraints.push(where('createdAt', '>=', minTs));
+  } else if (maxTs) {
+    constraints.push(where('createdAt', '<=', maxTs));
+  }
+  constraints.push(orderBy('createdAt', 'desc'));
+  let lastDoc = null;
+  for (;;) {
+    const q = lastDoc
+      ? query(colRef, ...constraints, startAfter(lastDoc), limit(PAGE))
+      : query(colRef, ...constraints, limit(PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    snap.docs.forEach((d) => out.push({ id: d.id, ...d.data() }));
+    if (snap.size < PAGE) break;
+    lastDoc = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/** Scan by createdAt only (no status in query) — works without the CLOSED+createdAt composite index; stops once past fromStr. */
+async function _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr) {
+  const colRef = collection(db, `salons/${salonId}/tickets`);
+  const out = [];
+  const PAGE = _ticketSummaryPageSize;
+  let lastDoc = null;
+  let fromMs = null;
+  if (fromStr) {
+    const p = fromStr.split('-').map(Number);
+    if (p.length === 3) fromMs = new Date(p[0], p[1] - 1, p[2], 0, 0, 0, 0).getTime();
+  }
+  const maxPages = 250;
+  for (let page = 0; page < maxPages; page++) {
+    const q = lastDoc
+      ? query(colRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(PAGE))
+      : query(colRef, orderBy('createdAt', 'desc'), limit(PAGE));
+    const snap = await getDocs(q);
+    if (snap.empty) break;
+    let oldestInPageMs = Infinity;
+    for (const d of snap.docs) {
+      const data = d.data();
+      const row = { id: d.id, ...data };
+      const ts = data?.createdAt;
+      if (ts && typeof ts.toDate === 'function') {
+        const tms = ts.toDate().getTime();
+        if (!isNaN(tms) && tms < oldestInPageMs) oldestInPageMs = tms;
+      }
+      if (String(data.status || '').toUpperCase() !== 'CLOSED') continue;
+      if (!passesTicketsDateFilter(row, fromStr, toStr)) continue;
+      out.push(row);
+    }
+    if (snap.size < PAGE) break;
+    if (fromMs != null && Number.isFinite(oldestInPageMs) && oldestInPageMs < fromMs) break;
+    lastDoc = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/**
+ * Load all CLOSED tickets for Summary (not the paged list snapshot).
+ * Uses the same date semantics as the Closed tab: submitted time (createdAt).
+ */
+async function fetchClosedTicketsForSummary(salonId, fromStr, toStr) {
+  try {
+    return await _fetchClosedTicketsForSummaryIndexed(salonId, fromStr, toStr);
+  } catch (e) {
+    if (e?.code === 'failed-precondition') {
+      console.warn('[Tickets] Summary: using client-filter scan (Firestore index missing or still building)', e.message || e);
+      return await _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr);
+    }
+    throw e;
+  }
+}
+
+function _fmtYmdLocal(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/** Week starts Sunday (matches common US calendar UI). */
+function _ticketsStartOfWeekSunday(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - x.getDay());
+  return x;
+}
+
+function computeRangeForPreset(preset) {
+  const now = new Date();
+  const fmt = _fmtYmdLocal;
+  if (preset === 'all') return { from: '', to: '' };
+  if (preset === 'today') {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return { from: fmt(d), to: fmt(d) };
+  }
+  if (preset === 'yesterday') {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    return { from: fmt(d), to: fmt(d) };
+  }
+  if (preset === 'this_week') {
+    const start = _ticketsStartOfWeekSunday(now);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  if (preset === 'last_week') {
+    const thisStart = _ticketsStartOfWeekSunday(now);
+    const end = new Date(thisStart);
+    end.setDate(end.getDate() - 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  if (preset === 'last_two_weeks') {
+    const thisStart = _ticketsStartOfWeekSunday(now);
+    const end = new Date(thisStart);
+    end.setDate(end.getDate() - 1);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 13);
+    return { from: fmt(start), to: fmt(end) };
+  }
+  return { from: '', to: '' };
+}
+
+function _ticketsFmtMonthDay(d) {
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function _ticketsRangeLabelMd(fromStr, toStr) {
+  if (!fromStr || !toStr) return '';
+  const a = new Date(fromStr + 'T12:00:00');
+  const b = new Date(toStr + 'T12:00:00');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return '';
+  return `${_ticketsFmtMonthDay(a)} - ${_ticketsFmtMonthDay(b)}`;
+}
+
+function ticketMatchesEmployeeFilter(t, staffId) {
+  if (!staffId || staffId === 'all') return true;
+  if (t.technicianStaffId && String(t.technicianStaffId) === String(staffId)) return true;
+  const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+  const staff = store?.staff?.find(s => String(s.id) === String(staffId));
+  if (!staff) return false;
+  const tn = normalizeTicketTechName(t.technicianName || '');
+  const n1 = normalizeTicketTechName(staff.name || '');
+  const n2 = normalizeTicketTechName(staff.email || '');
+  if (tn && n1 && tn === n1) return true;
+  if (tn && n2 && tn === n2) return true;
+  if (tn && n1 && (tn.includes(n1) || n1.includes(tn))) return true;
+  return false;
+}
+
+function formatSummaryMoney(n) {
+  const x = n == null || n === '' ? NaN : Number(n);
+  const v = Number.isFinite(x) ? x : 0;
+  if (typeof window !== 'undefined' && typeof window.ffFormatCurrency === 'function') {
+    return window.ffFormatCurrency(v, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(v);
+  } catch (_) {
+    return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  }
+}
+
+/** Ticket money helper — respects salon currency, formats with given decimals. */
+function ffTicketMoney(n, decimals) {
+  const x = n == null || n === '' ? NaN : Number(n);
+  const v = Number.isFinite(x) ? x : 0;
+  const d = Number.isFinite(decimals) ? decimals : 2;
+  if (typeof window !== 'undefined' && typeof window.ffFormatCurrency === 'function') {
+    return window.ffFormatCurrency(v, { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  return '$' + v.toFixed(d);
+}
+
+/** Current salon currency symbol (fallback $). Used for inline prefixes/placeholders. */
+function ffTicketCurSym() {
+  if (typeof window !== 'undefined' && typeof window.ffGetCurrencySymbol === 'function') {
+    return window.ffGetCurrencySymbol();
+  }
+  return '$';
+}
+
+function formatSummaryInt(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x < 0) return '0';
+  return String(Math.round(x));
+}
+
+function getSummaryStaffList() {
+  try {
+    const store = typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function'
+      ? window.ffGetStaffStore()
+      : null;
+    return Array.isArray(store?.staff) ? store.staff : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function summaryStaffMatchesTicket(staff, ticket) {
+  if (!staff || !ticket) return false;
+  const staffIds = [
+    staff.id,
+    staff.staffId,
+    staff.uid,
+    staff.firebaseUid,
+    staff.firebaseAuthUid,
+    staff.authUid,
+    staff.userUid
+  ].map((v) => String(v || '').trim()).filter(Boolean);
+  const ticketStaffId = String(ticket.technicianStaffId || '').trim();
+  if (ticketStaffId && staffIds.indexOf(ticketStaffId) !== -1) return true;
+  const tn = normalizeTicketTechName(ticket.technicianName || '');
+  const names = [staff.name, staff.displayName, staff.fullName, staff.email]
+    .map((v) => normalizeTicketTechName(v || ''))
+    .filter(Boolean);
+  return !!tn && names.some((name) => name === tn);
+}
+
+function resolveSummaryStaffForTicket(ticket, staffList) {
+  const list = Array.isArray(staffList) ? staffList : [];
+  return list.find((staff) => summaryStaffMatchesTicket(staff, ticket)) || null;
+}
+
+function getSummaryStaffIdCandidates(staff, ticket) {
+  const out = [];
+  const add = (v) => {
+    const s = String(v || '').trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+  add(ticket?.technicianStaffId);
+  if (staff) {
+    add(staff.id);
+    add(staff.staffId);
+    add(staff.uid);
+    add(staff.firebaseUid);
+    add(staff.firebaseAuthUid);
+    add(staff.authUid);
+    add(staff.userUid);
+  }
+  return out;
+}
+
+function findSummaryServiceForLine(line) {
+  const serviceId = String(line?.serviceId || '').trim();
+  if (serviceId) {
+    const byId = salonServices.find((service) => String(service?.id || '').trim() === serviceId);
+    if (byId) return byId;
+  }
+  const lineName = normalizeTicketTechName(line?.serviceName || '');
+  if (!lineName) return null;
+  return salonServices.find((service) => normalizeTicketTechName(service?.name || '') === lineName) || null;
+}
+
+function findSummaryProductForLine(line) {
+  const productId = String(line?.productId || '').trim();
+  if (productId) {
+    const byId = salonProducts.find((product) => String(product?.id || '').trim() === productId);
+    if (byId) return byId;
+  }
+  const lineName = normalizeTicketTechName(line?.serviceName || '');
+  if (!lineName) return null;
+  return salonProducts.find((product) => normalizeTicketTechName(product?.name || '') === lineName) || null;
+}
+
+function getSummaryProductStaffOverride(product, staff, ticket) {
+  const overrides = getProductStaffOverrides(product);
+  const ids = getSummaryStaffIdCandidates(staff, ticket);
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getSummaryProductCommissionRule(product, staff, ticket) {
+  const override = getSummaryProductStaffOverride(product, staff, ticket);
+  if (override?.commission && Number.isFinite(Number(override.commission.value))) {
+    return {
+      type: override.commission.type === 'fixed' ? 'fixed' : 'percentage',
+      value: Number(override.commission.value)
+    };
+  }
+  const staffId = staff?.id || staff?.staffId || ticket?.technicianStaffId || '';
+  try {
+    if (typeof window.ffGetStaffProductCommission === 'function') {
+      const def = window.ffGetStaffProductCommission(staffId);
+      if (def && Number.isFinite(Number(def.value))) return def;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function getSummaryStaffOverride(service, staff, ticket) {
+  const overrides = getServiceStaffOverrides(service);
+  const ids = getSummaryStaffIdCandidates(staff, ticket);
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getSummaryCommissionRule(service, staff, ticket) {
+  const override = getSummaryStaffOverride(service, staff, ticket);
+  if (override?.commission && Number.isFinite(Number(override.commission.value))) {
+    return {
+      type: override.commission.type === 'fixed' ? 'fixed' : 'percentage',
+      value: Number(override.commission.value)
+    };
+  }
+  return getStaffDefaultServiceCommission(staff, staff?.id || staff?.staffId || '');
+}
+
+function getSummarySupplyDeductionRule(service, staff, ticket) {
+  const override = getSummaryStaffOverride(service, staff, ticket);
+  if (override?.supplyDeduction && override.supplyDeduction.enabled === false) return null;
+  if (override?.supplyDeduction?.enabled === true && Number.isFinite(Number(override.supplyDeduction.value))) {
+    return {
+      type: override.supplyDeduction.type === 'percentage' ? 'percentage' : 'fixed',
+      value: Number(override.supplyDeduction.value)
+    };
+  }
+  return getStaffDefaultSupplyDeduction(staff);
+}
+
+function computeSummaryDeductionAmount(servicePrice, deductionRule) {
+  const price = Number(servicePrice) || 0;
+  if (!deductionRule || !Number.isFinite(Number(deductionRule.value))) return 0;
+  const raw = deductionRule.type === 'percentage'
+    ? price * (Number(deductionRule.value) / 100)
+    : Number(deductionRule.value);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function computeSummaryCommissionAmount(commissionable, commissionRule) {
+  const base = Number(commissionable) || 0;
+  if (!commissionRule || !Number.isFinite(Number(commissionRule.value))) return 0;
+  const raw = commissionRule.type === 'fixed'
+    ? Number(commissionRule.value)
+    : base * (Number(commissionRule.value) / 100);
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+function getSummaryFilterDateRangeFromDom() {
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  if (periodSel && periodSel.value === 'all') {
+    return { fromStr: '', toStr: '' };
+  }
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  return {
+    fromStr: fromEl ? (fromEl.value || '').trim() : '',
+    toStr: toEl ? (toEl.value || '').trim() : ''
+  };
+}
+
+/** Mirrors canSeeTicket's location gate for summary rows.
+ *  Behavior:
+ *   • Single-branch mode / owners: legacy rows without a locationId stay
+ *     visible so older history isn't hidden.
+ *   • Multi-branch users: legacy rows without a locationId are HIDDEN.
+ *     Without this, a Brickell manager would see Key-Biscayne revenue mixed
+ *     into her "by employee" totals any time a ticket closed before the
+ *     multi-branch rollout stamped locationId. Matches the strict behavior
+ *     we adopted in Inventory. */
+function summaryDocMatchesLocation(d) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const hasLocationId = d && typeof d.locationId === 'string' && d.locationId;
+  if (hasLocationId) {
+    return d.locationId === activeLoc;
+  }
+  // Legacy row (no locationId). Keep visible only when the viewer has a
+  // single branch; hide from multi-branch users to avoid cross-branch leak.
+  let viewerIsMultiBranch = false;
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      viewerIsMultiBranch = !!window.ffUserHasMultipleLocations();
+    }
+  } catch (_) {}
+  return !viewerIsMultiBranch;
+}
+
+function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employeeId) {
+  const techSelfOnly =
+    isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+  const staffList = getSummaryStaffList();
+  const filtered = (ticketList || []).filter((t) => {
+    if (!canSeeTicket(t)) return false;
+    if (String(t.status || '').toUpperCase() !== 'CLOSED') return false;
+    if (!passesTicketsDateFilter(t, fromStr, toStr)) return false;
+    if (techSelfOnly) return ticketBelongsToTicketsTechnician(t);
+    return ticketMatchesEmployeeFilter(t, employeeId);
   });
+  const groups = new Map();
+  for (const t of filtered) {
+    const staff = resolveSummaryStaffForTicket(t, staffList);
+    const idPart =
+      t.technicianStaffId != null && String(t.technicianStaffId).trim() !== ''
+        ? String(t.technicianStaffId).trim()
+        : (staff?.id ? String(staff.id).trim() : '');
+    const nk = normalizeTicketTechName(t.technicianName || '');
+    const gkey = idPart ? `id:${idPart}` : `name:${nk || 'unknown'}`;
+    if (!groups.has(gkey)) {
+      groups.set(gkey, {
+        name: 'Unknown',
+        tickets: 0,
+        services: 0,
+        serviceSales: 0,
+        supplyDeductions: 0,
+        serviceCommission: 0,
+        productSales: 0,
+        productCommission: 0,
+        salesTax: 0,
+        productTax: 0,
+        serviceTax: 0,
+        totalEarned: 0
+      });
+    }
+    const g = groups.get(gkey);
+    const nm =
+      t.technicianName != null && String(t.technicianName).trim() !== ''
+        ? String(t.technicianName).trim()
+        : String(staff?.name || staff?.displayName || staff?.email || '').trim();
+    if (nm && g.name === 'Unknown') g.name = nm;
+    g.tickets += 1;
+    const lines = Array.isArray(t.performedLines) ? t.performedLines : [];
+    // Use the stored per-type tax when present (locks historical financials);
+    // otherwise recompute live from the CURRENT catalog Charge Tax flags.
+    const storedProductTax = (t && t.productTax != null && Number.isFinite(Number(t.productTax))) ? Number(t.productTax) : null;
+    const storedServiceTax = (t && t.serviceTax != null && Number.isFinite(Number(t.serviceTax))) ? Number(t.serviceTax) : null;
+    const hasStoredTax = storedProductTax != null || storedServiceTax != null;
+    const taxCfg = getTicketTaxConfig();
+    let liveProductTax = 0;
+    let liveServiceTax = 0;
+    for (const line of lines) {
+      if (isTicketProductLine(line)) {
+        const productPrice = Number(line?.ticketPrice) || 0;
+        const product = findSummaryProductForLine(line);
+        const commissionRule = getSummaryProductCommissionRule(product, staff, t);
+        const commissionAmount = computeSummaryCommissionAmount(productPrice, commissionRule);
+        g.productSales += productPrice;
+        g.productCommission += commissionAmount;
+        const productTaxable = product ? (product.taxable === true) : (line.taxable === true);
+        if (taxCfg.product.enabled && taxCfg.product.rate > 0 && productTaxable && productPrice > 0) {
+          liveProductTax += Math.round(productPrice * taxCfg.product.rate) / 100;
+        }
+        continue;
+      }
+      g.services += 1;
+      const servicePrice = Number(line?.ticketPrice) || 0;
+      const service = findSummaryServiceForLine(line);
+      const deductionRule = getSummarySupplyDeductionRule(service, staff, t);
+      const deductionAmount = computeSummaryDeductionAmount(servicePrice, deductionRule);
+      const commissionable = Math.max(0, servicePrice - deductionAmount);
+      const commissionRule = getSummaryCommissionRule(service, staff, t);
+      const commissionAmount = computeSummaryCommissionAmount(commissionable, commissionRule);
+      g.serviceSales += servicePrice;
+      g.supplyDeductions += deductionAmount;
+      g.serviceCommission += commissionAmount;
+      const serviceTaxable = service ? (service.taxable === true) : (line.taxable === true);
+      if (taxCfg.service.enabled && taxCfg.service.rate > 0 && serviceTaxable && servicePrice > 0) {
+        liveServiceTax += Math.round(servicePrice * taxCfg.service.rate) / 100;
+      }
+    }
+    const pTax = hasStoredTax ? (storedProductTax || 0) : Math.round(liveProductTax * 100) / 100;
+    const sTax = hasStoredTax ? (storedServiceTax || 0) : Math.round(liveServiceTax * 100) / 100;
+    g.productTax += pTax;
+    g.serviceTax += sTax;
+    g.salesTax += Math.round((pTax + sTax) * 100) / 100;
+  }
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  );
+  const totals = {
+    tickets: 0,
+    services: 0,
+    serviceSales: 0,
+    supplyDeductions: 0,
+    serviceCommission: 0,
+    productSales: 0,
+    productCommission: 0,
+    salesTax: 0,
+    productTax: 0,
+    serviceTax: 0,
+    totalEarned: 0
+  };
+  sorted.forEach((r) => {
+    r.totalEarned = r.serviceCommission + r.productCommission;
+    totals.tickets += r.tickets;
+    totals.services += r.services;
+    totals.serviceSales += r.serviceSales;
+    totals.supplyDeductions += r.supplyDeductions;
+    totals.serviceCommission += r.serviceCommission;
+    totals.productSales += r.productSales;
+    totals.productCommission += r.productCommission;
+    totals.salesTax += r.salesTax;
+    totals.productTax += r.productTax;
+    totals.serviceTax += r.serviceTax;
+    totals.totalEarned += r.totalEarned;
+  });
+  const summaryRows = sorted.map((r) => ({
+    name: !r.name || !String(r.name).trim() ? 'Unknown' : r.name.trim(),
+    tickets: r.tickets,
+    services: r.services,
+    serviceSales: r.serviceSales,
+    supplyDeductions: r.supplyDeductions,
+    serviceCommission: r.serviceCommission,
+    productSales: r.productSales,
+    productCommission: r.productCommission,
+    salesTax: r.salesTax,
+    productTax: r.productTax,
+    serviceTax: r.serviceTax,
+    totalEarned: r.totalEarned
+  }));
+  return { summaryRows, totals };
 }
 
-function showToast(msg, type = 'info') {
-  // Remove existing toast
-  const existing = document.getElementById('ff-tickets-toast');
-  if (existing) existing.remove();
+function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
+  return buildSummaryRowsFromClosedTicketList(currentTickets, fromStr, toStr, employeeId);
+}
 
-  const colors = { success: '#059669', error: '#dc2626', info: '#2563eb', warning: '#d97706' };
-  const icons  = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
-  const bg = colors[type] || colors.info;
-  const icon = icons[type] || icons.info;
+function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
+  // Mobile drill-down: tapping a summary row toggles its detail breakdown.
+  // Bound once at document level so it survives every repaint of the table.
+  if (typeof document !== 'undefined' && !document.__ffSummaryRowDelegated) {
+    document.__ffSummaryRowDelegated = true;
+    document.addEventListener('click', function (event) {
+      const row = event.target && event.target.closest
+        ? event.target.closest('#ticketsScreen .tickets-summary-table tr.tickets-summary-row')
+        : null;
+      if (!row) return;
+      // Only act as an accordion on mobile widths; desktop keeps the full table.
+      if (window.matchMedia && !window.matchMedia('(max-width: 640px)').matches) return;
+      row.classList.toggle('ff-summary-row-open');
+    });
+  }
+  // Each tax column shows only when its own toggle is active (enabled + rate > 0).
+  if (wrap && wrap.classList) {
+    const cfg = getTicketTaxConfig();
+    const productActive = cfg.product.enabled && cfg.product.rate > 0;
+    const serviceActive = cfg.service.enabled && cfg.service.rate > 0;
+    wrap.classList.toggle('ff-hide-product-tax-col', !productActive);
+    wrap.classList.toggle('ff-hide-service-tax-col', !serviceActive);
+  }
+  if (!summaryRows || summaryRows.length === 0) {
+    wrap.style.display = 'none';
+    if (emptyMsg) {
+      emptyMsg.style.display = 'block';
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+    return false;
+  }
+  tbody.innerHTML = summaryRows
+    .map(
+      (r) => `<tr class="tickets-summary-row">
+      <td class="ff-sum-name" data-label="Name">${escapeHtml(r.name)}</td>
+      <td class="tickets-summary-col-num" data-label="Tickets">${formatSummaryInt(r.tickets)}</td>
+      <td class="tickets-summary-col-num" data-label="Services">${formatSummaryInt(r.services)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Sales">${formatSummaryMoney(r.serviceSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Supply Deductions">${formatSummaryMoney(r.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Commission">${formatSummaryMoney(r.serviceCommission)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Sales">${formatSummaryMoney(r.productSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Commission">${formatSummaryMoney(r.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax" data-label="Product Tax">${formatSummaryMoney(r.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax" data-label="Service Tax">${formatSummaryMoney(r.serviceTax)}</td>
+      <td class="tickets-summary-col-num ff-sum-total" data-label="Total Earned">${formatSummaryMoney(r.totalEarned)}</td>
+    </tr>`
+    )
+    .join('');
+  tfoot.innerHTML = `<tr class="tickets-summary-total-row tickets-summary-row">
+      <td class="ff-sum-name" data-label="Name">Total</td>
+      <td class="tickets-summary-col-num" data-label="Tickets">${formatSummaryInt(totals?.tickets)}</td>
+      <td class="tickets-summary-col-num" data-label="Services">${formatSummaryInt(totals?.services)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Sales">${formatSummaryMoney(totals?.serviceSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Supply Deductions">${formatSummaryMoney(totals?.supplyDeductions)}</td>
+      <td class="tickets-summary-col-num" data-label="Service Commission">${formatSummaryMoney(totals?.serviceCommission)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Sales">${formatSummaryMoney(totals?.productSales)}</td>
+      <td class="tickets-summary-col-num" data-label="Product Commission">${formatSummaryMoney(totals?.productCommission)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-product-tax" data-label="Product Tax">${formatSummaryMoney(totals?.productTax)}</td>
+      <td class="tickets-summary-col-num tickets-summary-col-service-tax" data-label="Service Tax">${formatSummaryMoney(totals?.serviceTax)}</td>
+      <td class="tickets-summary-col-num ff-sum-total" data-label="Total Earned">${formatSummaryMoney(totals?.totalEarned)}</td>
+    </tr>`;
+  if (emptyMsg) {
+    emptyMsg.style.display = 'none';
+    emptyMsg.className = 'tickets-summary-state';
+  }
+  wrap.style.display = '';
+  return true;
+}
 
-  const toast = document.createElement('div');
-  toast.id = 'ff-tickets-toast';
-  toast.style.cssText = [
-    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-    `background:${bg}`, 'color:#fff', 'padding:12px 22px',
-    'border-radius:999px', 'font-size:14px', 'font-weight:600',
-    'z-index:999999', 'box-shadow:0 4px 20px rgba(0,0,0,0.25)',
-    'display:flex', 'align-items:center', 'gap:8px',
-    'white-space:nowrap', 'pointer-events:none',
-    'animation:ffToastIn .2s ease'
-  ].join(';');
-  toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`;
+let _ticketsSummaryFetchSeq = 0;
 
-  // Add animation
-  if (!document.getElementById('ff-toast-style')) {
-    const s = document.createElement('style');
-    s.id = 'ff-toast-style';
-    s.textContent = '@keyframes ffToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
-    document.head.appendChild(s);
+/**
+ * Summary tab: aggregate from all CLOSED tickets in Firestore (same date rules as Closed tab: createdAt).
+ * Rows in ticketSummaries are still written on close for optional analytics; the UI does not depend on them.
+ */
+async function loadAndRenderTicketsSummary() {
+  const seq = ++_ticketsSummaryFetchSeq;
+  if (currentTicketsTab === 'summary') {
+    syncTicketsTimePeriodSelectOptions();
+    ensureTicketsSummaryDefaultTimePeriod();
+  }
+  const panel = document.getElementById('ticketsSummaryPanel');
+  const wrap = panel?.querySelector('.tickets-summary-table-wrap');
+  const emptyMsg = document.getElementById('ticketsSummaryEmpty');
+  const tbody = document.getElementById('ticketsSummaryTableBody');
+  const tfoot = document.getElementById('ticketsSummaryTableFoot');
+  if (!panel || !wrap || !tbody || !tfoot) return;
+
+  wrap.style.display = 'none';
+  if (emptyMsg) {
+    emptyMsg.style.display = 'block';
+    emptyMsg.className = 'tickets-summary-state tickets-summary-state--loading';
+    emptyMsg.textContent = 'Loading summary...';
+  }
+  tbody.innerHTML = '';
+  tfoot.innerHTML = '';
+
+  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (!salonId) {
+    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (emptyMsg) {
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+    return;
   }
 
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transition = 'opacity .3s';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  const { fromStr, toStr } = getSummaryFilterDateRangeFromDom();
+  const empEl = document.getElementById('ticketsEmployeeSelect');
+  let employeeId = empEl ? (empEl.value || 'all') : 'all';
+  if (isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()) {
+    employeeId = getTicketsSelfEmployeeFilterId();
+  }
+
+  console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: start', {
+    salonId,
+    fromStr: fromStr || '(empty)',
+    toStr: toStr || '(empty)',
+    employeeId,
+    profileRole: currentUserProfile?.role ?? '(no profile)',
+    techRestricted: isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()
+  });
+
+  try {
+    if (!salonServices.length) {
+      try { await loadServices(); } catch (catalogErr) { console.warn('[Tickets] Summary catalog load failed', catalogErr); }
+    }
+    if (!salonProducts.length) {
+      try {
+        subscribeProductsCatalog();
+        const prodSnap = await getDocs(collection(db, `salons/${salonId}/products`));
+        salonProducts = prodSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+      } catch (catalogErr) {
+        console.warn('[Tickets] Summary products catalog load failed', catalogErr);
+      }
+    }
+    const closedTickets = await fetchClosedTicketsForSummary(salonId, fromStr, toStr);
+    if (seq !== _ticketsSummaryFetchSeq) return;
+
+    console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: fetched CLOSED ticket docs', closedTickets.length);
+
+    const fb = buildSummaryRowsFromClosedTicketList(closedTickets, fromStr, toStr, employeeId);
+
+    if (seq !== _ticketsSummaryFetchSeq) return;
+
+    paintTicketsSummaryTable(
+      wrap,
+      tbody,
+      tfoot,
+      emptyMsg,
+      fb.summaryRows,
+      fb.totals
+    );
+  } catch (e) {
+    console.error('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: catch', {
+      message: e?.message,
+      code: e?.code,
+      stack: e?.stack,
+      salonId,
+      profileRole: currentUserProfile?.role ?? '(no profile)'
+    });
+    console.warn('[Tickets] Summary load failed', e);
+    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (_ticketsListSnapshotReady) {
+      const fb = buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId);
+      if (
+        paintTicketsSummaryTable(
+          wrap,
+          tbody,
+          tfoot,
+          emptyMsg,
+          fb.summaryRows,
+          fb.totals
+        )
+      ) {
+        return;
+      }
+    }
+    wrap.style.display = 'none';
+    if (emptyMsg) {
+      emptyMsg.style.display = 'block';
+      emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
+      emptyMsg.textContent = 'No summary data found for the selected filters.';
+    }
+  }
+}
+
+function populateTicketsEmployeeSelect() {
+  const sel = document.getElementById('ticketsEmployeeSelect');
+  if (!sel) return;
+  const prev = sel.value;
+  const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+  const staffList = Array.isArray(store?.staff) ? [...store.staff] : [];
+  staffList.sort((a, b) => String(a.name || a.email || '').localeCompare(String(b.name || b.email || ''), undefined, { sensitivity: 'base' }));
+  sel.innerHTML = '';
+  const optAll = document.createElement('option');
+  optAll.value = 'all';
+  optAll.textContent = 'ALL EMPLOYEES';
+  sel.appendChild(optAll);
+  for (const s of staffList) {
+    if (!s || s.id == null || s.id === '') continue;
+    const o = document.createElement('option');
+    o.value = String(s.id);
+    o.textContent = (s.name || s.email || 'Staff').trim();
+    sel.appendChild(o);
+  }
+  const ok = [...sel.options].some(o => o.value === prev);
+  sel.value = ok ? prev : 'all';
+}
+
+function syncTicketsTimePeriodSelectOptions() {
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  if (!sel) return;
+  const setLabel = (val, text) => {
+    const o = sel.querySelector(`option[value="${val}"]`);
+    if (o) o.textContent = text;
+  };
+  const now = new Date();
+  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dY = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  setLabel('all', 'ALL DATES');
+  setLabel('today', `Today (${_ticketsFmtMonthDay(d0)})`);
+  setLabel('yesterday', `Yesterday (${_ticketsFmtMonthDay(dY)})`);
+  const tw = computeRangeForPreset('this_week');
+  setLabel('this_week', `This Week (${_ticketsRangeLabelMd(tw.from, tw.to)})`);
+  const lw = computeRangeForPreset('last_week');
+  setLabel('last_week', `Last Week (${_ticketsRangeLabelMd(lw.from, lw.to)})`);
+  const l2 = computeRangeForPreset('last_two_weeks');
+  setLabel('last_two_weeks', `Last Two Weeks (${_ticketsRangeLabelMd(l2.from, l2.to)})`);
+  setLabel('custom', 'Custom time period');
+}
+
+/** Summary tab: sync custom date row visibility; default to Today only when selection is missing (invalid). Respect ALL DATES — do not force it back to Today. */
+function ensureTicketsSummaryDefaultTimePeriod() {
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  if (!periodSel) return;
+  const v = String(periodSel.value || '').trim();
+  if (v === '') {
+    const todayOpt = periodSel.querySelector('option[value="today"]');
+    if (todayOpt) {
+      todayOpt.selected = true;
+      periodSel.value = 'today';
+    }
+    if (customWrap) customWrap.style.display = 'none';
+    const r = computeRangeForPreset('today');
+    if (fromEl) fromEl.value = r.from;
+    if (toEl) toEl.value = r.to;
+    return;
+  }
+  if (v === 'all') {
+    if (customWrap) customWrap.style.display = 'none';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+    return;
+  }
+  if (v === 'custom') {
+    if (customWrap) customWrap.style.display = 'inline-flex';
+    return;
+  }
+  if (customWrap) customWrap.style.display = 'none';
+}
+
+function applyTicketsTimePeriodFromSelect() {
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  if (!sel || !fromEl || !toEl) return;
+  const v = sel.value;
+  if (v === 'custom') {
+    if (customWrap) customWrap.style.display = 'inline-flex';
+    if (!fromEl.value && !toEl.value) {
+      const d = computeRangeForPreset('last_week');
+      fromEl.value = d.from;
+      toEl.value = d.to;
+    }
+    renderTicketsList();
+    return;
+  }
+  if (customWrap) customWrap.style.display = 'none';
+  const r = computeRangeForPreset(v);
+  fromEl.value = r.from;
+  toEl.value = r.to;
+  renderTicketsList();
+}
+
+let _ticketsDateFiltersWired = false;
+function setupTicketsDateFilters() {
+  if (_ticketsDateFiltersWired) return;
+  _ticketsDateFiltersWired = true;
+  const sel = document.getElementById('ticketsTimePeriodSelect');
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  const onDatesChange = () => renderTicketsList();
+  if (sel) sel.addEventListener('change', () => applyTicketsTimePeriodFromSelect());
+  if (fromEl) {
+    fromEl.addEventListener('change', onDatesChange);
+    fromEl.addEventListener('input', onDatesChange);
+  }
+  if (toEl) {
+    toEl.addEventListener('change', onDatesChange);
+    toEl.addEventListener('input', onDatesChange);
+  }
+  const empSel = document.getElementById('ticketsEmployeeSelect');
+  if (empSel) empSel.addEventListener('change', onDatesChange);
+}
+
+/**
+ * Legacy no-op: the gear used to live on the right toolbar and had to be
+ * re-aligned under the user avatar. It now sits inline right after the
+ * "Summary" tab, so no explicit alignment is needed anymore. Function
+ * kept to satisfy existing call sites.
+ */
+function _alignGearToAvatar() { /* no-op — see note above */ }
+
+function showToast(msg, type = 'info') {
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    const v =
+      type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    window.ffToast.show(String(msg), { variant: v, durationMs: type === 'error' ? 6000 : 4000 });
+    return;
+  }
+  console.warn('[Tickets]', msg, type);
 }
 
 /** Custom confirm for tickets: always use in-app modal, never browser confirm. */
+/** Styled text-input prompt that matches the app theme (purple buttons).
+ *  Resolves to the trimmed string, or null if cancelled. */
+function ticketPrompt(message, title = 'Enter value', defaultValue = '') {
+  if (typeof window.ffPrompt === 'function') return window.ffPrompt(message, title, defaultValue);
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('ff-prompt-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'ff-prompt-overlay';
+      overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
+      card.innerHTML = '<h3 id="ff-prompt-title" style="margin:0 0 10px;font-size:17px;font-weight:700;color:#111;"></h3><p id="ff-prompt-msg" style="margin:0 0 14px;font-size:13px;color:#6b7280;line-height:1.5;"></p><input id="ff-prompt-input" type="text" style="width:100%;box-sizing:border-box;padding:11px 13px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:18px;outline:none;"><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-prompt-cancel" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-prompt-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save</button></div>';
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      const inputEl = card.querySelector('#ff-prompt-input');
+      const closeWith = (v) => {
+        overlay.style.display = 'none';
+        if (window._ffPromptResolve) { window._ffPromptResolve(v); window._ffPromptResolve = null; }
+      };
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWith(null); });
+      card.querySelector('#ff-prompt-cancel').addEventListener('click', () => closeWith(null));
+      card.querySelector('#ff-prompt-ok').addEventListener('click', () => {
+        const v = (inputEl.value || '').trim();
+        closeWith(v || null);
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); card.querySelector('#ff-prompt-ok').click(); }
+        if (e.key === 'Escape') { e.preventDefault(); closeWith(null); }
+      });
+    }
+    window._ffPromptResolve = resolve;
+    const titleEl = overlay.querySelector('#ff-prompt-title');
+    const msgEl = overlay.querySelector('#ff-prompt-msg');
+    const inputEl = overlay.querySelector('#ff-prompt-input');
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    if (inputEl) { inputEl.value = defaultValue || ''; inputEl.placeholder = title; }
+    overlay.style.display = 'flex';
+    setTimeout(() => { try { inputEl.focus(); inputEl.select(); } catch (_) {} }, 30);
+  });
+}
+
 function ticketConfirm(message, title = 'Confirm') {
   if (typeof window.ffConfirm === 'function') return window.ffConfirm(message, title);
   return new Promise((resolve) => {
@@ -616,7 +3417,7 @@ function ticketConfirm(message, title = 'Confirm') {
       overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
       const card = document.createElement('div');
       card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
-      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">OK</button></div>';
+      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">OK</button></div>';
       overlay.appendChild(card);
       document.body.appendChild(overlay);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.style.display = 'none'; if (window._ffConfirmResolve) { window._ffConfirmResolve(false); window._ffConfirmResolve = null; } } });
@@ -646,6 +3447,50 @@ function computeDiff(appointmentData, performedLines) {
   return { removed, added, changed };
 }
 
+// Diff between two sets of performed lines (used to show what the front desk
+// changed on a ticket vs the technician's original submission).
+function ffNormalizeLineForCompare(l) {
+  return {
+    name: String((l && l.serviceName) || '').trim(),
+    price: Number(l && l.ticketPrice) || 0,
+    note: String((l && l.note) || '').trim()
+  };
+}
+function computeLinesDiff(originalLines, currentLines) {
+  const orig = (Array.isArray(originalLines) ? originalLines : []).map(ffNormalizeLineForCompare);
+  const curr = (Array.isArray(currentLines) ? currentLines : []).map(ffNormalizeLineForCompare);
+  const removed = orig.filter(o => !curr.some(c => c.name === o.name));
+  const added = curr.filter(c => !orig.some(o => o.name === c.name));
+  const changed = [];
+  orig.forEach(o => {
+    const c = curr.find(x => x.name === o.name);
+    if (c && (c.price !== o.price || c.note !== o.note)) {
+      changed.push({ name: o.name, from: o.price, to: c.price });
+    }
+  });
+  return { removed, added, changed };
+}
+function ffTicketLinesChanged(beforeLines, afterLines) {
+  const d = computeLinesDiff(beforeLines, afterLines);
+  return !!(d.removed.length || d.added.length || d.changed.length);
+}
+// Renders the "Edited by front desk" change summary (vs the technician's original).
+function ffRenderFrontDeskChangesHtml(t) {
+  if (!t || t.frontDeskEdited !== true || !Array.isArray(t.frontDeskOriginalLines)) return '';
+  const d = computeLinesDiff(t.frontDeskOriginalLines, t.performedLines || []);
+  if (!d.removed.length && !d.added.length && !d.changed.length) return '';
+  const who = escapeHtml(t.frontDeskEditedByName || 'Front desk');
+  const when = ffFormatReviewedAt(t.frontDeskEditedAt);
+  const parts = [];
+  d.removed.forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)} (${ffTicketMoney(r.price || 0)})</div>`));
+  d.added.forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+  d.changed.forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} — ${ffTicketMoney(c.from || 0)} → ${ffTicketMoney(c.to || 0)}</div>`));
+  return `<div style="margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;">
+    <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px;">Edited by front desk${who ? ' · ' + who : ''}${when ? ' · ' + when : ''} <span style="font-weight:500;color:#b45309;">(vs technician)</span></div>
+    ${parts.join('')}
+  </div>`;
+}
+
 // =====================
 // UI: List
 // =====================
@@ -654,9 +3499,9 @@ function formatLineForList(l) {
   const base = Number(l.catalogPrice) || 0;
   const adj = Number(l.ticketPrice) || 0;
   if (l.isOverride && base !== adj) {
-    return `${name} <span style="font-size:11px;color:#d97706;" title="Price adjusted">(base $${base.toFixed(0)} → $${adj.toFixed(0)})</span>`;
+    return `${name} <span style="font-size:11px;color:#d97706;" title="Price adjusted">(base ${ffTicketMoney(base, 0)} → ${ffTicketMoney(adj, 0)})</span>`;
   }
-  return `${name} $${adj.toFixed(0)}`;
+  return `${name} ${ffTicketMoney(adj, 0)}`;
 }
 
 function getInitial(name) {
@@ -666,27 +3511,392 @@ function getInitial(name) {
   return (parts[0][0] || '?').toUpperCase();
 }
 
-/** After first real list paint, remove boot cover (profile + toolbar + snapshot ready). */
-function endTicketsBootCover() {
-  const screen = document.getElementById('ticketsScreen');
-  if (!screen || !screen.classList.contains('ff-tickets-boot')) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      screen.classList.remove('ff-tickets-boot');
-    });
-  });
+// =====================
+// Bulk select — archive (Closed tab) / permanent delete (Archived tab)
+// =====================
+let ticketsSelectionMode = false;
+let ticketsSelectionTab = null; // tab the selection was started on ('closed' | 'archived')
+const ticketsSelected = new Set();
+let ticketsClosedShownIds = [];
+
+/** Bulk archive/delete is restricted to owner/admin — same gate as the single-ticket actions. */
+function ffTicketsCanBulkArchive() {
+  return !!(currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase()));
 }
 
+/** Tabs where bulk selection is available: Closed (archive) and Archived (permanent delete). */
+function ffTicketsBulkTabHere() {
+  if (!ffTicketsCanBulkArchive()) return false;
+  return currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+}
+
+function ffTicketsExitSelectionMode() {
+  ticketsSelectionMode = false;
+  ticketsSelectionTab = null;
+  ticketsSelected.clear();
+}
+
+function ffTicketsToggleSelect(id, cardEl) {
+  if (ticketsSelected.has(id)) ticketsSelected.delete(id);
+  else ticketsSelected.add(id);
+  if (cardEl) {
+    const on = ticketsSelected.has(id);
+    cardEl.classList.toggle('ticket-selected', on);
+    const cb = cardEl.querySelector('.ticket-select-cb');
+    if (cb) cb.textContent = on ? '\u2713' : '';
+  }
+  ffTicketsUpdateBulkBar();
+}
+
+function ffTicketsUpdateBulkBar() {
+  const bar = document.getElementById('ticketsBulkBar');
+  if (!bar) return;
+  const onBulkTab = ffTicketsBulkTabHere();
+  bar.style.display = onBulkTab ? 'flex' : 'none';
+  // Mobile CSS pins the bar to the bottom of the screen while selecting.
+  const screenEl = document.getElementById('ticketsScreen');
+  if (screenEl) screenEl.classList.toggle('ff-tickets-selecting', onBulkTab && ticketsSelectionMode);
+  if (!onBulkTab) return;
+  const onArchived = currentTicketsTab === 'archived';
+  const toggleBtn = document.getElementById('ticketsSelectToggleBtn');
+  const selectAllBtn = document.getElementById('ticketsSelectAllBtn');
+  const info = document.getElementById('ticketsBulkInfo');
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  const cancelBtn = document.getElementById('ticketsBulkCancelBtn');
+  const n = ticketsSelected.size;
+  const total = ticketsClosedShownIds.length;
+  if (toggleBtn) toggleBtn.style.display = ticketsSelectionMode ? 'none' : '';
+  if (selectAllBtn) {
+    selectAllBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    const allSelected = total > 0 && n >= total;
+    selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
+  }
+  if (info) {
+    info.style.display = ticketsSelectionMode ? '' : 'none';
+    info.textContent = n > 0 ? `${n} selected` : 'Tap tickets to select';
+  }
+  if (archiveBtn) {
+    archiveBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    archiveBtn.disabled = n === 0;
+    archiveBtn.style.opacity = n === 0 ? '0.5' : '1';
+    archiveBtn.style.background = onArchived ? '#ef4444' : '#7c3aed';
+    archiveBtn.textContent = onArchived
+      ? (n > 0 ? `Delete selected (${n})` : 'Delete selected')
+      : (n > 0 ? `Archive selected (${n})` : 'Archive selected');
+  }
+  if (cancelBtn) cancelBtn.style.display = ticketsSelectionMode ? '' : 'none';
+}
+
+function ffTicketsBulkInit() {
+  const toggleBtn = document.getElementById('ticketsSelectToggleBtn');
+  const selectAllBtn = document.getElementById('ticketsSelectAllBtn');
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  const cancelBtn = document.getElementById('ticketsBulkCancelBtn');
+  if (toggleBtn && !toggleBtn._ffWired) {
+    toggleBtn._ffWired = true;
+    toggleBtn.onclick = () => {
+      ticketsSelectionMode = true;
+      ticketsSelectionTab = currentTicketsTab;
+      ticketsSelected.clear();
+      renderTicketsList();
+    };
+  }
+  if (selectAllBtn && !selectAllBtn._ffWired) {
+    selectAllBtn._ffWired = true;
+    selectAllBtn.onclick = () => {
+      const allSelected = ticketsClosedShownIds.length > 0 && ticketsSelected.size >= ticketsClosedShownIds.length;
+      ticketsSelected.clear();
+      if (!allSelected) ticketsClosedShownIds.forEach((id) => ticketsSelected.add(id));
+      renderTicketsList();
+    };
+  }
+  if (cancelBtn && !cancelBtn._ffWired) {
+    cancelBtn._ffWired = true;
+    cancelBtn.onclick = () => { ffTicketsExitSelectionMode(); renderTicketsList(); };
+  }
+  if (archiveBtn && !archiveBtn._ffWired) {
+    archiveBtn._ffWired = true;
+    archiveBtn.onclick = () => {
+      if (currentTicketsTab === 'archived') void ffTicketsDeleteSelected();
+      else void ffTicketsArchiveSelected();
+    };
+  }
+}
+
+/** Archive every selected CLOSED/VOID ticket in chunked Firestore batches (handles hundreds at once). */
+async function ffTicketsArchiveSelected() {
+  if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
+  const ids = Array.from(ticketsSelected);
+  if (ids.length === 0) return;
+  const ok = await ticketConfirm(`Move ${ids.length} ticket${ids.length > 1 ? 's' : ''} to Archived?`, 'Archive tickets');
+  if (!ok) return;
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId) { showToast('No salon selected', 'error'); return; }
+  const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
+  if (archiveBtn) { archiveBtn.disabled = true; archiveBtn.textContent = 'Archiving\u2026'; }
+  try {
+    let done = 0;
+    const CHUNK = 400; // Firestore batch limit is 500; stay safely below.
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const batch = writeBatch(db);
+      const batchPatches = [];
+      slice.forEach((id) => {
+        const t = currentTickets.find((x) => x.id === id);
+        // Defensive: only ever archive CLOSED/VOID tickets.
+        if (!t || !(t.status === 'CLOSED' || t.status === 'VOID')) return;
+        const ref = doc(db, `salons/${salonId}/tickets`, id);
+        const existingHist = Array.isArray(t.history) ? t.history : [];
+        const hist = [...existingHist, {
+          at: Timestamp.now(),
+          by: currentUserProfile.uid,
+          byName: currentUserProfile.name || '',
+          action: 'archived',
+          details: 'bulk'
+        }];
+        const fields = {
+          status: 'ARCHIVED',
+          archivedByUid: currentUserProfile.uid,
+          history: hist
+        };
+        batch.update(ref, { ...fields, updatedAt: serverTimestamp() });
+        batchPatches.push({ id, fields });
+      });
+      if (batchPatches.length > 0) {
+        await batch.commit();
+        done += batchPatches.length;
+        // Keep the local pagination cache in sync — tickets loaded via "Load more"
+        // are not covered by the live snapshot and would otherwise reappear as CLOSED.
+        batchPatches.forEach((p) => ffTicketsPatchLocalTicket(p.id, p.fields));
+      }
+    }
+    _rebuildCurrentTicketsMerged();
+    ffTicketsExitSelectionMode();
+    showToast(`${done} ticket${done !== 1 ? 's' : ''} archived`, 'success');
+    renderTicketsList();
+  } catch (e) {
+    console.warn('[Tickets] bulk archive failed', e);
+    showToast(e?.message || 'Failed to archive', 'error');
+    // Earlier batches may have committed — reflect them locally.
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    if (archiveBtn) archiveBtn.disabled = false;
+    ffTicketsUpdateBulkBar();
+  }
+}
+
+/**
+ * Permanently delete every selected ARCHIVED ticket in chunked Firestore batches
+ * (handles hundreds at once). Mirrors deleteTicketPermanently: matching
+ * ticketSummaries rows are marked source-deleted before the tickets are removed.
+ */
+async function ffTicketsDeleteSelected() {
+  if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
+  const ids = Array.from(ticketsSelected);
+  if (ids.length === 0) return;
+  const ok = await ticketConfirm(
+    `Permanently delete ${ids.length} ticket${ids.length > 1 ? 's' : ''}? This cannot be undone.`,
+    'Delete tickets'
+  );
+  if (!ok) return;
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId) { showToast('No salon selected', 'error'); return; }
+  const actionBtn = document.getElementById('ticketsBulkArchiveBtn');
+  if (actionBtn) { actionBtn.disabled = true; actionBtn.textContent = 'Deleting\u2026'; }
+  // Defensive: only ever bulk-delete ARCHIVED tickets.
+  const delIds = ids.filter((id) => {
+    const t = currentTickets.find((x) => x.id === id);
+    return !!t && t.status === 'ARCHIVED';
+  });
+  try {
+    // 1) Mark matching Summary rows as source-deleted (same as single permanent delete).
+    //    Failure here must not block the delete itself — same tolerance as the single flow.
+    try {
+      const uid = currentUserProfile?.uid ?? null;
+      const byName = currentUserProfile?.name || currentUserProfile?.email || null;
+      const IN_CHUNK = 10; // conservative 'in' filter size
+      for (let i = 0; i < delIds.length; i += IN_CHUNK) {
+        const slice = delIds.slice(i, i + IN_CHUNK);
+        const snap = await getDocs(query(
+          collection(db, `salons/${salonId}/ticketSummaries`),
+          where('ticketId', 'in', slice)
+        ));
+        for (let j = 0; j < snap.docs.length; j += 400) {
+          const markBatch = writeBatch(db);
+          snap.docs.slice(j, j + 400).forEach((d) => {
+            markBatch.update(d.ref, {
+              sourceTicketDeleted: true,
+              sourceTicketDeletedAt: serverTimestamp(),
+              sourceTicketDeletedByUid: uid,
+              sourceTicketDeletedByName: byName
+            });
+          });
+          await markBatch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('[Tickets] bulk delete: ticketSummaries markers failed', e);
+    }
+
+    // 2) Delete the tickets themselves in chunked batches.
+    let done = 0;
+    const CHUNK = 400; // Firestore batch limit is 500; stay safely below.
+    for (let i = 0; i < delIds.length; i += CHUNK) {
+      const slice = delIds.slice(i, i + CHUNK);
+      const batch = writeBatch(db);
+      slice.forEach((id) => batch.delete(doc(db, `salons/${salonId}/tickets`, id)));
+      await batch.commit();
+      done += slice.length;
+      // Remove from the local pagination caches — "Load more" rows are not in the
+      // live snapshot and would otherwise keep rendering until a full reload.
+      const gone = new Set(slice);
+      _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => !gone.has(t.id));
+      _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => !gone.has(t.id));
+      if (actionBtn) actionBtn.textContent = `Deleting\u2026 (${done}/${delIds.length})`;
+    }
+    _rebuildCurrentTicketsMerged();
+    ffTicketsExitSelectionMode();
+    showToast(`${done} ticket${done !== 1 ? 's' : ''} deleted`, 'success');
+    renderTicketsList();
+  } catch (e) {
+    console.warn('[Tickets] bulk delete failed', e);
+    showToast(e?.message || 'Failed to delete', 'error');
+    // Earlier batches may have committed — reflect them locally.
+    _rebuildCurrentTicketsMerged();
+    renderTicketsList();
+    if (actionBtn) actionBtn.disabled = false;
+    ffTicketsUpdateBulkBar();
+  }
+}
+
+// Build a single ticket card with the EXACT same look as the Tickets list cards.
+// Used by the Tickets list and by the Live Desk so both look identical.
+function ffBuildTicketCardHTML(t) {
+  const statusKey = (s) => {
+    s = String(s || '').toUpperCase();
+    if (s === 'READY_FOR_CHECKOUT') return 'ready';
+    if (s === 'CLOSED') return 'closed';
+    if (s === 'VOID') return 'void';
+    if (s === 'ARCHIVED') return 'archived';
+    return 'open';
+  };
+  const submittedAt = formatDate(t.createdAt);
+  const allLines = t.performedLines || [];
+  const lines = allLines.slice(0, 4);
+  const more = allLines.length > 4 ? allLines.length - 4 : 0;
+  const techName = escapeHtml(t.technicianName || '\u2014');
+  const customerName = (t.customerName || '').trim();
+  const initial = getInitial(t.technicianName);
+  const sk = statusKey(t.status);
+  const statusLabel = { ready: 'READY', closed: 'CLOSED', open: 'OPEN', void: 'VOID', archived: 'ARCHIVED' }[sk] || sk.toUpperCase();
+  const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
+  const isReady = sk === 'ready';
+  const showEdited = isAdminOrManager && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
+  const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
+  const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
+    ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
+    : '';
+  const serviceUpgradeBadgeHtml = (t.serviceUpgrade === true)
+    ? '<span class="ticket-customer-approved-badge" title="Service upgrade marked" style="background:#7c3aed;">Upgrade</span>'
+    : '';
+  const reviewedWhenStr = ffFormatReviewedAt(t.reviewedAt);
+  const reviewedBadgeHtml = (t.reviewedByFrontDesk === true)
+    ? `<span class="ticket-customer-approved-badge" title="Reviewed by front desk${t.reviewedByName ? ' \u00b7 ' + escapeHtml(t.reviewedByName) : ''}${reviewedWhenStr ? ' \u00b7 ' + escapeHtml(reviewedWhenStr) : ''}" style="background:#2563eb;">Reviewed</span>`
+    : '';
+  const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
+  const initialEsc = escapeHtml(initial);
+  const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
+  const imgTag = technicianAvatarUrl
+    ? `<img class="ticket-card-avatar-img" src="${String(technicianAvatarUrl).replace(/"/g, '&quot;')}" alt="" loading="lazy" decoding="async" onload="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','1');" onerror="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','error');" />`
+    : '';
+  const avatarHtml = `<div class="ticket-card-avatar-wrap" data-avatar-loaded="${avatarLoadedAttr}"><span class="ticket-card-avatar-fallback">${initialEsc}</span>${imgTag}</div>`;
+  const linesHtml = lines.map(l => `<div style="font-size:13px;color:#374151;padding:2px 0;">${formatLineForList(l)}</div>`).join('');
+  const moreHtml = more > 0 ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;">+ ${more} more\u2026</div>` : '';
+  const asIsHtml = t.asIs && t.asIsMessage
+    ? `<div style="font-size:12px;color:#059669;background:#d1fae5;padding:6px 8px;border-radius:6px;margin-top:6px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>`
+    : '';
+  const closedByHtml = (sk === 'closed' && t.closedByName)
+    ? `<div style="font-size:11px;color:#059669;margin-top:2px;">\u2713 Closed by ${escapeHtml(t.closedByName)}</div>`
+    : '';
+  return `
+    <div class="ticket-card" data-ticket-id="${t.id}">
+      <div class="ticket-card-header-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:44px;">
+        ${avatarHtml}
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${techName}</div>
+          ${customerName ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">\uD83D\uDC64 ${escapeHtml(customerName)}</div>` : ''}
+          <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${submittedAt}</div>
+          ${closedByHtml}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+          <span class="ticket-status-badge ${sk}">${statusLabel}</span>
+          ${serviceUpgradeBadgeHtml}
+          ${customerApprovedBadgeHtml}
+          ${reviewedBadgeHtml}
+          ${editedBadgeHtml}
+        </div>
+      </div>
+      <div style="border-top:1px dashed #e5e7eb;padding-top:10px;">
+        ${linesHtml || '<div style="font-size:12px;color:#9ca3af;">No services</div>'}
+        ${moreHtml}
+      </div>
+      ${asIsHtml}
+    </div>
+  `;
+}
+window.ffRenderTicketCardHTML = function (t) {
+  try { return t ? ffBuildTicketCardHTML(t) : ''; } catch (_) { return ''; }
+};
+
 function renderTicketsList() {
+  // Keep the Live Desk tickets card in sync in real time (it reads from ffGetCurrentTickets).
+  if (typeof window.ffLiveRefreshTicketsCard === 'function') {
+    try { window.ffLiveRefreshTicketsCard(); } catch (_eLive) {}
+  }
   const listEl = document.getElementById('ticketsList');
   const loadingEl = document.getElementById('ticketsLoading');
   const emptyEl = document.getElementById('ticketsEmpty');
+  const summaryPanel = document.getElementById('ticketsSummaryPanel');
   if (!listEl) return;
+
+  updateTicketsTabsVisibility();
+  if (currentTicketsTab === 'summary' && !canViewTicketsSummaryTab()) {
+    currentTicketsTab = 'ready';
+    document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
+    const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
+    if (rb) rb.classList.add('active');
+  } else if (currentTicketsTab === 'archived' && !canViewTicketsArchivedTab()) {
+    currentTicketsTab = 'ready';
+    document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
+    const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
+    if (rb) rb.classList.add('active');
+  }
+
+  if (ticketsSelectionMode && currentTicketsTab !== ticketsSelectionTab) ffTicketsExitSelectionMode();
+  ffTicketsUpdateBulkBar();
+
+  if (currentTicketsTab === 'summary') {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (summaryPanel) summaryPanel.style.display = 'block';
+    listEl.innerHTML = '';
+    listEl.classList.remove('tickets-list--closed', 'tickets-list--archived');
+    ffTicketsSetTimePeriodFiltersVisible(true);
+    syncTicketsTimePeriodSelectOptions();
+    ensureTicketsSummaryDefaultTimePeriod();
+    populateTicketsEmployeeSelect();
+    updateTicketsEmployeeFilterVisibility();
+    void loadAndRenderTicketsSummary();
+    updateTicketsLoadMoreUi();
+    return;
+  }
+  if (summaryPanel) summaryPanel.style.display = 'none';
 
   if (!_ticketsListSnapshotReady) {
     if (loadingEl) loadingEl.style.display = 'block';
     if (emptyEl) emptyEl.style.display = 'none';
     listEl.innerHTML = '';
+    updateTicketsLoadMoreUi();
     return;
   }
 
@@ -698,17 +3908,69 @@ function renderTicketsList() {
     : currentTickets.filter(t => t.status === statusFilter);
   toShow = toShow.filter(t => canSeeTicket(t));
 
-  if (loadingEl) loadingEl.style.display = 'none';
-  if (emptyEl) emptyEl.style.display = toShow.length === 0 ? 'block' : 'none';
+  const showDateFilters = currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+  const hideDeskFiltersHere = showDateFilters && ffTicketsHideFrontDeskFiltersOnThisView();
+  const filtersOn = showDateFilters && !hideDeskFiltersHere;
+  ffTicketsSetTimePeriodFiltersVisible(filtersOn);
+  if (showDateFilters && !hideDeskFiltersHere) syncTicketsTimePeriodSelectOptions();
+  const periodSel = document.getElementById('ticketsTimePeriodSelect');
+  const customWrap = document.getElementById('ticketsTimePeriodCustomWrap');
+  if (showDateFilters && !hideDeskFiltersHere && periodSel && customWrap) {
+    customWrap.style.display = periodSel.value === 'custom' ? 'inline-flex' : 'none';
+  }
 
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    archivedTab.style.display = (role === 'owner' || role === 'admin') ? 'inline-block' : 'none';
+  const fromEl = document.getElementById('ticketsFilterDateFrom');
+  const toEl = document.getElementById('ticketsFilterDateTo');
+  const fromStr = showDateFilters && fromEl ? (fromEl.value || '').trim() : '';
+  const toStr = showDateFilters && toEl ? (toEl.value || '').trim() : '';
+  const hasDateFilter = showDateFilters && !hideDeskFiltersHere && (fromStr || toStr);
+  const countAfterStatus = toShow.length;
+  if (hasDateFilter) {
+    toShow = toShow.filter(t => passesTicketsDateFilter(t, fromStr, toStr));
+  }
+  if (showDateFilters && !hideDeskFiltersHere) populateTicketsEmployeeSelect();
+  updateTicketsEmployeeFilterVisibility();
+  const empEl = document.getElementById('ticketsEmployeeSelect');
+  let employeeId = showDateFilters && empEl ? (empEl.value || 'all') : 'all';
+  if (showDateFilters && isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()) {
+    employeeId = getTicketsSelfEmployeeFilterId();
+  }
+  const hasEmployeeFilter = showDateFilters && employeeId !== 'all';
+  if (hasEmployeeFilter) {
+    const techSelfOnly =
+      isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin();
+    toShow = toShow.filter((t) =>
+      techSelfOnly ? ticketBelongsToTicketsTechnician(t) : ticketMatchesEmployeeFilter(t, employeeId)
+    );
+  }
+
+  if (loadingEl) loadingEl.style.display = 'none';
+  if (emptyEl) {
+    emptyEl.style.display = toShow.length === 0 ? 'block' : 'none';
+    if (toShow.length === 0) {
+      if (countAfterStatus > 0 && (hasDateFilter || hasEmployeeFilter)) {
+        emptyEl.textContent = 'No tickets match this filter.';
+      } else {
+        emptyEl.textContent = 'No tickets here yet.';
+      }
+    }
   }
 
   listEl.classList.toggle('tickets-list--closed', currentTicketsTab === 'closed');
   listEl.classList.toggle('tickets-list--archived', currentTicketsTab === 'archived');
+
+  // Track which tickets are currently shown (for "Select all"), and drop
+  // any selected ids that are no longer visible (e.g. archived/deleted elsewhere).
+  if (ffTicketsBulkTabHere()) {
+    ticketsClosedShownIds = toShow.map((t) => t.id);
+    if (ticketsSelected.size) {
+      const shown = new Set(ticketsClosedShownIds);
+      Array.from(ticketsSelected).forEach((id) => { if (!shown.has(id)) ticketsSelected.delete(id); });
+    }
+  } else {
+    ticketsClosedShownIds = [];
+  }
+  const inBulkSelect = ticketsSelectionMode && ffTicketsBulkTabHere();
 
   // Helper: status css key
   const statusKey = (s) => {
@@ -731,7 +3993,7 @@ function renderTicketsList() {
     const sk = statusKey(t.status);
     const statusLabel = { ready:'READY', closed:'CLOSED', open:'OPEN', void:'VOID', archived:'ARCHIVED' }[sk] || sk.toUpperCase();
     const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner;
+    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner && !inBulkSelect;
     const isCreator = currentUserProfile && (
       t.createdByUid === currentUserProfile.uid ||
       t.technicianStaffId === currentUserProfile.staffId ||
@@ -746,16 +4008,28 @@ function renderTicketsList() {
     const editBtnHtml = canEdit
       ? `<button type="button" class="ticket-edit-btn" data-ticket-id="${t.id}" title="Edit ticket" style="padding:6px;background:none;border:none;cursor:pointer;flex-shrink:0;color:#9ca3af;line-height:0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
       : '';
-    const { hasReceivesTickets } = getTicketVisibility();
     const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
-    const canSeeEditedFlag = isAdminOrManager || hasReceivesTickets;
+    const canSeeEditedFlag = isAdminOrManager;
     const isReady = sk === 'ready';
-    const showEdited = canSeeEditedFlag && isReady && !!t.editedAfterFinalize;
+    const showEdited = canSeeEditedFlag && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
     const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
+    const customerApprovedBadgeHtml = (t.customerApprovedPrice === true)
+      ? '<span class="ticket-customer-approved-badge" title="Customer approved the price">Approved</span>'
+      : '';
+    const serviceUpgradeBadgeHtml = (t.serviceUpgrade === true)
+      ? '<span class="ticket-customer-approved-badge" title="Service upgrade marked" style="background:#7c3aed;">Upgrade</span>'
+      : '';
+    const reviewedWhenStr = ffFormatReviewedAt(t.reviewedAt);
+    const reviewedBadgeHtml = (t.reviewedByFrontDesk === true)
+      ? `<span class="ticket-customer-approved-badge" title="Reviewed by front desk${t.reviewedByName ? ' \u00b7 ' + escapeHtml(t.reviewedByName) : ''}${reviewedWhenStr ? ' \u00b7 ' + escapeHtml(reviewedWhenStr) : ''}" style="background:#2563eb;">Reviewed</span>`
+      : '';
     const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
-    const avatarHtml = technicianAvatarUrl
-      ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="${String(technicianAvatarUrl).replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
-      : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#9d68b9,#ff9580);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initial}</div>`;
+    const initialEsc = escapeHtml(initial);
+    const avatarLoadedAttr = technicianAvatarUrl ? '0' : '1';
+    const imgTag = technicianAvatarUrl
+      ? `<img class="ticket-card-avatar-img" src="${String(technicianAvatarUrl).replace(/"/g, '&quot;')}" alt="" loading="lazy" decoding="async" onload="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','1');" onerror="var w=this.closest('.ticket-card-avatar-wrap');if(w)w.setAttribute('data-avatar-loaded','error');" />`
+      : '';
+    const avatarHtml = `<div class="ticket-card-avatar-wrap" data-avatar-loaded="${avatarLoadedAttr}"><span class="ticket-card-avatar-fallback">${initialEsc}</span>${imgTag}</div>`;
 
     // Service lines — bullet style matching screenshot
     const linesHtml = lines.map(l => `<div style="font-size:13px;color:#374151;padding:2px 0;">${formatLineForList(l)}</div>`).join('');
@@ -771,10 +4045,15 @@ function renderTicketsList() {
       ? `<div style="font-size:11px;color:#059669;margin-top:2px;">✓ Closed by ${escapeHtml(t.closedByName)}</div>`
       : '';
 
+    const isSel = inBulkSelect && ticketsSelected.has(t.id);
+    const selCbHtml = inBulkSelect ? `<div class="ticket-select-cb">${isSel ? '\u2713' : ''}</div>` : '';
+    const cardClass = `ticket-card${inBulkSelect ? ' ticket-selectable' : ''}${isSel ? ' ticket-selected' : ''}`;
+
     return `
-    <div class="ticket-card" data-ticket-id="${t.id}">
-      <!-- Header row -->
-      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+    <div class="${cardClass}" data-ticket-id="${t.id}">
+      <!-- Header row: fixed min-height + center alignment avoids row jump when avatar/text resolves -->
+      <div class="ticket-card-header-row" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;min-height:44px;">
+        ${selCbHtml}
         ${editBtnHtml}
         ${avatarHtml}
         <div style="flex:1;min-width:0;">
@@ -785,6 +4064,9 @@ function renderTicketsList() {
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <span class="ticket-status-badge ${sk}">${statusLabel}</span>
+          ${serviceUpgradeBadgeHtml}
+          ${customerApprovedBadgeHtml}
+          ${reviewedBadgeHtml}
           ${editedBadgeHtml}
         </div>
       </div>
@@ -796,12 +4078,25 @@ function renderTicketsList() {
       ${asIsHtml}
       ${deleteBtnHtml}
     </div>
-  `}).join('');
+  `  }).join('');
+
+  listEl.querySelectorAll('.ticket-card-avatar-wrap img.ticket-card-avatar-img').forEach((img) => {
+    try {
+      if (img.complete && img.naturalHeight > 0) {
+        img.closest('.ticket-card-avatar-wrap')?.setAttribute('data-avatar-loaded', '1');
+      }
+    } catch (e) {}
+  });
 
   listEl.querySelectorAll('.ticket-card').forEach(card => {
     const ticketId = card.getAttribute('data-ticket-id');
     card.onclick = (e) => {
       if (e.target.closest('.ticket-delete-btn')) return;
+      if (ticketsSelectionMode && ffTicketsBulkTabHere()) {
+        e.preventDefault();
+        ffTicketsToggleSelect(ticketId, card);
+        return;
+      }
       openTicketModal(ticketId);
     };
   });
@@ -820,7 +4115,8 @@ function renderTicketsList() {
     };
   });
 
-  endTicketsBootCover();
+  updateTicketsLoadMoreUi();
+  ffTicketsUpdateBulkBar();
 }
 
 function statusBg(s) {
@@ -848,9 +4144,12 @@ function escapeHtml(s) {
 // UI: Tabs
 // =====================
 function setTicketsTab(tab) {
-  currentTicketsTab = tab;
+  let t = tab;
+  if (t === 'summary' && !canViewTicketsSummaryTab()) t = 'ready';
+  if (t === 'archived' && !canViewTicketsArchivedTab()) t = 'ready';
+  currentTicketsTab = t;
   document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
-  const btn = document.querySelector(`.tickets-tab[data-tab="${tab}"]`);
+  const btn = document.querySelector(`.tickets-tab[data-tab="${t}"]`);
   if (btn) btn.classList.add('active');
   renderTicketsList();
 }
@@ -868,6 +4167,10 @@ function openTicketModal(ticketId, appointmentData = null) {
   if (editingTicketId) {
     const t = currentTickets.find(x => x.id === editingTicketId);
     if (!t) return;
+    if (!canSeeTicket(t)) {
+      showToast('You cannot view this ticket.', 'error');
+      return;
+    }
     const s = (t.status || '').toUpperCase();
     if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
       if (_justClosedTicketId === editingTicketId) {
@@ -879,15 +4182,21 @@ function openTicketModal(ticketId, appointmentData = null) {
     }
 
     // Admin/manager/owner viewing a READY ticket → simplified view with Close Ticket only
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrManager = ['owner', 'admin', 'manager'].includes(profileRole);
-    if (isAdminOrManager && s === 'READY_FOR_CHECKOUT') {
+    if (canCurrentUserCloseTickets() && s === 'READY_FOR_CHECKOUT') {
       if (!t.seenByFrontDeskAt) {
         _ticketsOpenedThisSession.add(t.id);
         t.seenByFrontDeskAt = true;
         updateTicketsNavBadge();
         markTicketSeenByFrontDesk(t.id).catch(() => {});
       }
+      openAdminTicketView(t);
+      return;
+    }
+
+    // Admin/manager/owner viewing an OPEN ticket → manager (read-only) view, NOT the
+    // technician edit form. They can review / upgrade / close, but not edit prices
+    // like a technician. Technicians (cannot close) still get the edit form below.
+    if (canCurrentUserCloseTickets() && s === 'OPEN') {
       openAdminTicketView(t);
       return;
     }
@@ -912,7 +4221,7 @@ function openTicketModal(ticketId, appointmentData = null) {
       if (none) none.style.display = 'none';
       if (content) {
         const booked = appointmentData.services;
-        content.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
+        content.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — ${ffTicketMoney(s.price || 0)}</div>`).join('');
         content.style.display = 'none';
       }
     }
@@ -922,6 +4231,56 @@ function openTicketModal(ticketId, appointmentData = null) {
 
 /** Admin/manager view: read-only ticket with ONLY Close Ticket button.
  *  Uses existing modal elements — does NOT replace innerHTML. */
+function ffFormatReviewedAt(v) {
+  try {
+    if (!v) return '';
+    let d = null;
+    if (v instanceof Date) d = v;
+    else if (typeof v.toDate === 'function') d = v.toDate();
+    else if (v.seconds) d = new Date(v.seconds * 1000);
+    if (!d || isNaN(d.getTime())) return '';
+    return formatTicketDisplayDateTime(d);
+  } catch (_) { return ''; }
+}
+
+async function toggleTicketReviewed(ticketId) {
+  const t = (currentTickets || []).find(x => x.id === ticketId);
+  if (!t) return;
+  if (!canCurrentUserCloseTickets()) { showToast('Not allowed', 'error'); return; }
+  const makeReviewed = !(t.reviewedByFrontDesk === true);
+  try {
+    if (makeReviewed) {
+      await updateTicket(ticketId, {
+        reviewedByFrontDesk: true,
+        reviewedByUid: (currentUserProfile && currentUserProfile.uid) || null,
+        reviewedByName: (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '',
+        reviewedAt: serverTimestamp(),
+        _action: 'reviewed_marked'
+      });
+      t.reviewedByFrontDesk = true;
+      t.reviewedByName = (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '';
+      t.reviewedAt = new Date();
+    } else {
+      await updateTicket(ticketId, {
+        reviewedByFrontDesk: false,
+        reviewedByUid: null,
+        reviewedByName: null,
+        reviewedAt: null,
+        _action: 'reviewed_cleared'
+      });
+      t.reviewedByFrontDesk = false;
+      t.reviewedByName = null;
+      t.reviewedAt = null;
+    }
+    showToast(makeReviewed ? 'Marked as reviewed' : 'Review cleared', 'success');
+    const modal = document.getElementById('ticketModal');
+    if (modal && modal.dataset.adminView === '1') openAdminTicketView(t);
+    if (typeof renderTicketsList === 'function') renderTicketsList();
+  } catch (e) {
+    showToast((e && e.message) || 'Failed to update', 'error');
+  }
+}
+
 function openAdminTicketView(t) {
   const modal = document.getElementById('ticketModal');
   const title = document.getElementById('ticketModalTitle');
@@ -941,9 +4300,10 @@ function openAdminTicketView(t) {
       const adjusted = base > 0 && price !== base;
       return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:14px;">
         <span style="color:#374151;">${escapeHtml(l.serviceName || '')}</span>
-        <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">$${price.toFixed(2)}${adjusted ? ` <small style="color:#9ca3af;">(base $${base.toFixed(2)})</small>` : ''}</span>
+        <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">${ffTicketMoney(price)}${adjusted ? ` <small style="color:#9ca3af;">(base ${ffTicketMoney(base)})</small>` : ''}</span>
       </div>`;
     }).join('') || '<div style="color:#9ca3af;font-size:14px;padding:8px 0;">No services</div>';
+    cont.innerHTML += ffRenderFrontDeskChangesHtml(t);
   }
 
   // Hide lines data and service picker
@@ -952,6 +4312,7 @@ function openAdminTicketView(t) {
 
   const picker = document.getElementById('ticketServicePickerContainer');
   if (picker) picker.style.display = 'none';
+  ffTicketServiceSearchSetVisible(false);
 
   // Customer name (read-only)
   const custToggle = document.getElementById('ticketCustomerToggle');
@@ -965,29 +4326,43 @@ function openAdminTicketView(t) {
     if (custWrap) custWrap.style.display = 'none';
   }
 
-  // AS IS message
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText  = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
   // Show total
   const totalBlock = document.getElementById('ticketTotalBlock');
   const totalAmt   = document.getElementById('ticketTotalAmount');
   if (totalBlock) totalBlock.style.display = lines.length > 0 ? 'block' : 'none';
-  if (totalAmt)   totalAmt.textContent = '$' + total.toFixed(2);
+  if (totalAmt)   totalAmt.textContent = ffTicketMoney(total);
+
+  const priceApprovedWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceApprovedWrap) priceApprovedWrap.style.display = 'none';
+
+  const adminAprBlock = document.getElementById('ticketAdminPriceApprovalBlock');
+  if (adminAprBlock) {
+    if (t.customerApprovedPrice === true) {
+      adminAprBlock.innerHTML = '<strong>Customer approved the price</strong> ✓';
+      adminAprBlock.style.display = 'block';
+      adminAprBlock.style.padding = '12px 14px';
+      adminAprBlock.style.borderRadius = '8px';
+      adminAprBlock.style.fontSize = '14px';
+      adminAprBlock.style.color = '#5b21b6';
+      adminAprBlock.style.background = '#f5f3ff';
+      adminAprBlock.style.border = '1px solid #e9d5ff';
+    } else {
+      adminAprBlock.innerHTML = 'Technician did <strong>not</strong> confirm that the customer approved the final price.';
+      adminAprBlock.style.display = 'block';
+      adminAprBlock.style.padding = '12px 14px';
+      adminAprBlock.style.borderRadius = '8px';
+      adminAprBlock.style.fontSize = '14px';
+      adminAprBlock.style.color = '#92400e';
+      adminAprBlock.style.background = '#fffbeb';
+      adminAprBlock.style.border = '1px solid #fde68a';
+    }
+  }
+
+  setupTicketServiceUpgradeControl(t, canCurrentUserCloseTickets());
 
   // Hide all action buttons except Close
   ['ticketSendNewBtn','ticketSaveBtn','ticketFinalizeBtn','ticketArchiveBtn',
-   'ticketDeleteBtn','ticketAsIsBtn'].forEach(id => {
+   'ticketDeleteBtn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -1001,7 +4376,82 @@ function openAdminTicketView(t) {
     closeBtn.style.fontSize = '16px';
     closeBtn.style.fontWeight = '700';
     closeBtn.style.borderRadius = '10px';
+    closeBtn.style.background = '#7c3aed';
+    closeBtn.style.color = '#fff';
     closeBtn.onclick = () => doCloseTicket(t.id);
+  }
+
+  // Edit Services button — lets whoever received the ticket modify the services
+  // (add / remove / change price). Only for staff allowed to close tickets.
+  let editBtn = document.getElementById('ticketEditServicesBtn');
+  if (!editBtn && closeBtn && closeBtn.parentNode) {
+    editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.id = 'ticketEditServicesBtn';
+    closeBtn.parentNode.insertBefore(editBtn, closeBtn);
+  }
+  if (editBtn) {
+    if (canCurrentUserCloseTickets()) {
+      editBtn.style.display = 'inline-block';
+      editBtn.style.width = '100%';
+      editBtn.style.padding = '12px';
+      editBtn.style.fontSize = '15px';
+      editBtn.style.fontWeight = '700';
+      editBtn.style.borderRadius = '10px';
+      editBtn.style.marginBottom = '8px';
+      editBtn.style.background = '#fff';
+      editBtn.style.color = '#6d28d9';
+      editBtn.style.border = '1px solid #c4b5fd';
+      editBtn.style.cursor = 'pointer';
+      editBtn.textContent = 'Edit Services';
+      editBtn.onclick = () => {
+        delete modal.dataset.adminView;
+        editingTicketId = t.id;
+        // Reset the admin-view button styling so the edit form looks normal.
+        if (closeBtn) {
+          closeBtn.style.width = '';
+          closeBtn.style.padding = '';
+          closeBtn.style.fontSize = '';
+          closeBtn.style.fontWeight = '';
+          closeBtn.style.borderRadius = '';
+        }
+        const titleEl = document.getElementById('ticketModalTitle');
+        if (titleEl) titleEl.textContent = 'Edit Ticket';
+        populateTicketForm(t);
+      };
+    } else {
+      editBtn.style.display = 'none';
+    }
+  }
+
+  // Reviewed toggle button (front desk / managers / owners only)
+  const reviewedBtn = document.getElementById('ticketReviewedBtn');
+  if (reviewedBtn) {
+    if (canCurrentUserCloseTickets()) {
+      const isReviewed = t.reviewedByFrontDesk === true;
+      reviewedBtn.style.display = 'inline-block';
+      reviewedBtn.style.width = '100%';
+      reviewedBtn.style.padding = '12px';
+      reviewedBtn.style.fontSize = '15px';
+      reviewedBtn.style.fontWeight = '700';
+      reviewedBtn.style.borderRadius = '10px';
+      reviewedBtn.style.marginBottom = '8px';
+      if (isReviewed) {
+        const whenStr = ffFormatReviewedAt(t.reviewedAt);
+        reviewedBtn.textContent = 'Reviewed \u2713' + (t.reviewedByName ? ' \u00b7 ' + t.reviewedByName : '') + (whenStr ? ' \u00b7 ' + whenStr : '');
+        reviewedBtn.style.background = '#dbeafe';
+        reviewedBtn.style.color = '#1e40af';
+        reviewedBtn.style.border = '1px solid #93c5fd';
+      } else {
+        reviewedBtn.textContent = 'Mark as Reviewed';
+        reviewedBtn.style.background = '#2563eb';
+        reviewedBtn.style.color = '#fff';
+        reviewedBtn.style.border = 'none';
+      }
+      reviewedBtn.onclick = () => toggleTicketReviewed(t.id);
+    } else {
+      reviewedBtn.style.display = 'none';
+    }
   }
 
   // Hide as-booked block
@@ -1038,6 +4488,12 @@ function closeTicketModal() {
         closeBtn.style.fontWeight = '';
         closeBtn.style.borderRadius = '';
       }
+      // Hide reviewed button
+      const reviewedBtn = document.getElementById('ticketReviewedBtn');
+      if (reviewedBtn) {
+        reviewedBtn.style.display = 'none';
+        reviewedBtn.style.marginBottom = '';
+      }
     }
   }
   editingTicketId = null;
@@ -1045,6 +4501,10 @@ function closeTicketModal() {
 }
 
 function openTicketDetailsModal(t) {
+  if (!t || !canSeeTicket(t)) {
+    if (t) showToast('You cannot view this ticket.', 'error');
+    return;
+  }
   const modal = document.getElementById('ticketDetailsModal');
   const contentEl = document.getElementById('ticketDetailsContent');
   const actionsEl = document.getElementById('ticketDetailsActions');
@@ -1062,45 +4522,72 @@ function openTicketDetailsModal(t) {
     const tickPrice = Number(l.ticketPrice) || 0;
     const basePrice = Number(l.catalogPrice) || 0;
     const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-    const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
+    const priceText = hasOverride ? `base ${ffTicketMoney(basePrice)} → ${ffTicketMoney(tickPrice)}` : ffTicketMoney(tickPrice);
     const notePart = l.note ? ` <span style="color:#6b7280;font-size:12px;">— ${escapeHtml(l.note)}</span>` : '';
     return `<div style="padding:10px;background:#f9fafb;border-radius:8px;margin-bottom:8px;font-size:14px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
   }).join('');
+  const sumFromLines = lines.reduce((s, l) => s + (Number(l.ticketPrice) || 0), 0);
+  const storedTotal = Number(t.total);
+  const ticketTotalAmount =
+    lines.length > 0 ? sumFromLines : Number.isFinite(storedTotal) ? storedTotal : sumFromLines;
+  const showTicketTotal = lines.length > 0 || Number.isFinite(storedTotal);
+  const totalHtml = showTicketTotal
+    ? `<div style="margin-top:12px;padding:12px 14px;background:#f3f4f6;border-radius:8px;display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:600;color:#111827;border:1px solid #e5e7eb;">
+        <span>Total</span>
+        <span>${ffTicketMoney(ticketTotalAmount)}</span>
+      </div>`
+    : '';
   let diffHtml = '';
   if (hasDiff) {
     const parts = [];
     (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-    (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-    (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
+    (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+    (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → ${ffTicketMoney(c.to || 0)}</div>`));
     diffHtml = `<div style="margin-top:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Changes vs booked</h3><div style="background:#f9fafb;border-radius:8px;padding:12px;">${parts.join('')}</div></div>`;
   }
   const asIsHtml = (t.asIs && t.asIsMessage) ? `<div style="margin-top:16px;font-size:13px;color:#059669;background:#d1fae5;padding:10px 12px;border-radius:8px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>` : '';
+  const serviceUpgradeHtml = t.serviceUpgrade === true
+    ? `<div style="margin-top:16px;font-size:13px;color:#5b21b6;background:#f3e8ff;border:1px solid #e9d5ff;padding:10px 12px;border-radius:8px;font-weight:700;">Service Upgrade marked</div>`
+    : '';
   contentEl.innerHTML = `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:16px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
-        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted time</div><div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div></div>
+        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted time</div><div style="font-weight:500;">${formatTicketDisplayDateTime(createdDate)}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Submitted by</div><div style="font-weight:500;">${escapeHtml(t.technicianName || '—')}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Status</div><div style="font-weight:500;">${escapeHtml(statusLabel)}</div></div>
         <div><div style="color:#6b7280;margin-bottom:4px;">Customer</div><div style="font-weight:500;">${escapeHtml(t.customerName || '—')}</div></div>
       </div>
     </div>
-    <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}</div>
+    <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}${totalHtml}</div>
+    ${ffRenderFrontDeskChangesHtml(t)}
     ${diffHtml}
     ${asIsHtml}
+    ${serviceUpgradeHtml}
   `;
   const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
+  const canReopenTicket = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
   let actionsHtml = '';
+  if (t.status === 'CLOSED' && canReopenTicket) {
+    actionsHtml += `<button type="button" id="ticketDetailsReopenBtn" style="padding:8px 16px;border:1px solid #c4b5fd;border-radius:6px;background:#f5f3ff;color:#6d28d9;cursor:pointer;font-size:14px;font-weight:600;">Reopen Ticket</button>`;
+  }
   if ((t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner) {
     actionsHtml += `<button type="button" id="ticketDetailsArchiveBtn" style="padding:8px 16px;border:1px solid #9ca3af;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>`;
   }
   if (t.status === 'ARCHIVED' && isAdminOrOwner) {
     actionsHtml += `<button type="button" id="ticketDetailsDeleteBtn" style="padding:8px 16px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>`;
   }
-  actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#111;color:#fff;cursor:pointer;font-size:14px;">Close</button>`;
+  actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Close</button>`;
   actionsEl.innerHTML = actionsHtml;
+  const reopenBtn = document.getElementById('ticketDetailsReopenBtn');
   const archiveBtn = document.getElementById('ticketDetailsArchiveBtn');
   const deleteBtn = document.getElementById('ticketDetailsDeleteBtn');
   const closeBtn = document.getElementById('ticketDetailsCloseBtn');
+  if (reopenBtn) reopenBtn.onclick = async () => {
+    const ok = await ticketConfirm('Reopen this ticket? It will return to Ready for checkout (no longer marked as Paid).', 'Reopen ticket');
+    if (!ok) return;
+    try { await reopenTicket(t.id); showToast('Ticket reopened', 'success'); closeTicketDetailsModal(); }
+    catch (e) { showToast(e?.message || 'Failed', 'error'); }
+  };
   if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (closeBtn) closeBtn.onclick = () => closeTicketDetailsModal();
@@ -1117,7 +4604,51 @@ function closeTicketDetailsModal() {
   }
 }
 
+/** Salon setting: when true, staff must enter a customer name before sending. */
+function ffTicketRequiresCustomerName() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetRequireCustomerNameOnTicket === 'function') {
+      return window.ffGetRequireCustomerNameOnTicket() === true;
+    }
+    return !!(window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true);
+  } catch (_) { return false; }
+}
+
+/**
+ * When the salon requires a customer name, reveal the customer field, lock the
+ * Optional toggle (so it can't be collapsed) and mark it required. Returns
+ * whether the requirement is active.
+ */
+function ffApplyTicketCustomerRequiredUI() {
+  const required = ffTicketRequiresCustomerName();
+  const wrap = document.getElementById('ticketCustomerWrap');
+  const toggle = document.getElementById('ticketCustomerToggle');
+  const input = document.getElementById('ticketCustomerName');
+  if (required) {
+    if (wrap) wrap.style.display = 'block';
+    if (toggle) {
+      toggle.textContent = 'Customer / Client (required)';
+      toggle.style.pointerEvents = 'none';
+      toggle.style.cursor = 'default';
+      toggle.style.color = '#374151';
+    }
+    if (input) input.placeholder = 'Customer / Client name (required)';
+  } else {
+    if (toggle) {
+      toggle.style.pointerEvents = '';
+      toggle.style.cursor = '';
+      toggle.style.color = '';
+    }
+    if (input) input.placeholder = 'Customer / Client name';
+  }
+  return required;
+}
+
 function resetTicketForm() {
+  // New-ticket flow (technicians) keeps the staff-filtered catalog.
+  _ticketPickerShowAllCatalog = false;
+  // Rebuild the picker so it reflects the (filtered) catalog for this flow.
+  try { if (typeof setupTicketsUI === 'function') setupTicketsUI(); } catch (_) {}
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('ticketCustomerName', el => { el.value = ''; });
   set('ticketCustomerWrap', el => { el.style.display = 'none'; });
@@ -1126,14 +4657,11 @@ function resetTicketForm() {
   set('ticketLinesData', el => { el.value = '[]'; });
   set('ticketAsBookedBlock', el => { el.style.display = 'none'; });
   set('ticketAsBookedNone', el => { el.style.display = 'block'; });
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
+  set('ticketCustomerPriceApproved', el => { el.checked = false; });
+  set('ticketAdminPriceApprovalBlock', el => { el.style.display = 'none'; el.innerHTML = ''; });
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
   const closeBtn = document.getElementById('ticketCloseBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
   const saveBtn = document.getElementById('ticketSaveBtn');
   const archiveBtn = document.getElementById('ticketArchiveBtn');
   const deleteBtn = document.getElementById('ticketDeleteBtn');
@@ -1146,22 +4674,45 @@ function resetTicketForm() {
     sendNewBtn.style.display = 'inline-block';
     sendNewBtn.onclick = () => doSendNewTicket();
   }
-  if (asIsBtn) asIsBtn.style.display = 'none';
+  const upgradeWrap = document.getElementById('ticketServiceUpgradeWrap');
+  const upgradeBtn = document.getElementById('ticketServiceUpgradeBtn');
+  if (upgradeWrap) upgradeWrap.style.display = 'none';
+  if (upgradeBtn) upgradeBtn.onclick = null;
+  paintTicketServiceUpgradeButton(false);
   // Collapse all service category sections when opening a new ticket
   const picker = document.getElementById('ticketServicePickerContainer');
   if (picker) {
     picker.querySelectorAll('.ticket-category-body').forEach((body) => { body.style.display = 'none'; });
     picker.querySelectorAll('.ticket-cat-arrow').forEach((arrow) => { arrow.textContent = '▶'; });
   }
+  // Search field always mirrors the picker: cleared on every open, visible
+  // exactly when the picker is visible.
+  ffTicketServiceSearchClear();
+  ffTicketServiceSearchSetVisible(!(picker && picker.style.display === 'none'));
+  updateTicketDiff();
   setupTicketFormToggles();
+  ffApplyTicketCustomerRequiredUI();
 }
 
 function populateTicketForm(t) {
+  if (!canSeeTicket(t)) {
+    showToast('You cannot view this ticket.', 'error');
+    return;
+  }
   const s = (t.status || '').toUpperCase();
   if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
     closeTicketModal();
     openTicketDetailsModal(t);
     return;
+  }
+  const sendNewBtnEarly = document.getElementById('ticketSendNewBtn');
+  if (sendNewBtnEarly) sendNewBtnEarly.style.display = 'none';
+  const priceWrapEarly = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceWrapEarly) priceWrapEarly.style.display = 'none';
+  const adminAprEarly = document.getElementById('ticketAdminPriceApprovalBlock');
+  if (adminAprEarly) {
+    adminAprEarly.style.display = 'none';
+    adminAprEarly.innerHTML = '';
   }
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
   set('ticketCustomerName', el => { el.value = t.customerName || ''; });
@@ -1173,34 +4724,45 @@ function populateTicketForm(t) {
   set('ticketAsBookedBlock', el => { el.style.display = hasAppointment ? 'block' : 'none'; });
   set('ticketAsBookedNone', el => { el.style.display = hasAppointment ? 'none' : 'block'; });
   set('ticketAsBookedContent', el => {
-    el.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
+    el.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — ${ffTicketMoney(s.price || 0)}</div>`).join('');
     el.style.display = 'none';
   });
   set('ticketAsBookedToggle', el => { el.textContent = 'Show As Booked'; });
   const lines = t.performedLines || [];
   set('ticketLinesData', el => { el.value = JSON.stringify(lines); });
   const isReadOnly = ['CLOSED', 'VOID', 'ARCHIVED'].includes((t.status || '').toUpperCase());
+  // Managers / front-desk receivers editing a ticket see the FULL service + product
+  // catalog (not just their own assigned services). Technicians keep the filtered view.
+  _ticketPickerShowAllCatalog = (typeof canCurrentUserCloseTickets === 'function')
+    ? !!canCurrentUserCloseTickets()
+    : false;
   renderPerformedLines(lines, isReadOnly);
   const servicePickerContainer = document.getElementById('ticketServicePickerContainer');
   const customerToggle = document.getElementById('ticketCustomerToggle');
   const customerInput = document.getElementById('ticketCustomerName');
   if (servicePickerContainer) servicePickerContainer.style.display = isReadOnly ? 'none' : 'block';
+  ffTicketServiceSearchSetVisible(!isReadOnly);
+  if (!isReadOnly) ffTicketServiceSearchClear();
+  // When a manager / front-desk user opens a ticket for editing they may not
+  // have visited the "new ticket" flow yet, so the service catalog (salonServices)
+  // can be empty even though products are streaming in. Ensure the catalog is
+  // loaded and re-render the picker so they see all services + products.
+  if (!isReadOnly) {
+    (async () => {
+      try {
+        if (!Array.isArray(salonServices) || salonServices.length === 0) {
+          try { await loadServiceCategories(); } catch (_) {}
+          try { await loadServices(); } catch (_) {}
+        }
+        if (typeof setupTicketsUI === 'function') await setupTicketsUI();
+      } catch (err) {
+        console.warn('[Tickets] ensure catalog for edit failed', err);
+      }
+    })();
+  }
   if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
   if (customerInput) customerInput.readOnly = isReadOnly;
   updateTicketTotal(lines);
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
   const isCreator = currentUserProfile && (
     t.createdByUid === currentUserProfile.uid ||
     t.technicianStaffId === currentUserProfile.staffId ||
@@ -1214,36 +4776,23 @@ function populateTicketForm(t) {
   const canViewTicket = canSeeTicket(t);
   const canSaveEdits = (isCreator || canViewTicket) && (t.status === 'OPEN' || t.status === 'READY_FOR_CHECKOUT');
   const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-  // Only manager/admin/owner can close ticket; technicians must not see Close button (use role + staff isManager/isAdmin)
-  let canCloseTicket = false;
-  if (currentUserProfile) {
-    const role = (currentUserProfile.role || '').toLowerCase();
-    if (['owner', 'admin', 'manager'].includes(role)) canCloseTicket = true;
-    if (!canCloseTicket) {
-      try {
-        const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-        const staffList = store?.staff || [];
-        const staff = staffList.find(s =>
-          (currentUserProfile.staffId && s.id === currentUserProfile.staffId) ||
-          (currentUserProfile.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
-        );
-        if (staff && (staff.isManager === true || staff.isAdmin === true)) canCloseTicket = true;
-      } catch (_) {}
-    }
-  }
+  // Only manager/admin/owner can close ticket; technicians must not see Close button.
+  const canCloseTicket = canCurrentUserCloseTickets();
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
   const closeBtn = document.getElementById('ticketCloseBtn');
   const archiveBtn = document.getElementById('ticketArchiveBtn');
   const deleteBtn = document.getElementById('ticketDeleteBtn');
   const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
   const saveBtn = document.getElementById('ticketSaveBtn');
+  const reviewedBtnEdit = document.getElementById('ticketReviewedBtn');
+  if (reviewedBtnEdit) reviewedBtnEdit.style.display = 'none';
+  const editServicesBtnEdit = document.getElementById('ticketEditServicesBtn');
+  if (editServicesBtnEdit) editServicesBtnEdit.style.display = 'none';
   if (finalizeBtn) finalizeBtn.style.display = (t.status === 'OPEN') ? 'inline-block' : 'none';
   if (closeBtn) closeBtn.style.display = (t.status === 'READY_FOR_CHECKOUT' && canCloseTicket) ? 'inline-block' : 'none';
   if (archiveBtn) archiveBtn.style.display = (t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner ? 'inline-block' : 'none';
   if (deleteBtn) deleteBtn.style.display = t.status === 'ARCHIVED' && isAdminOrOwner ? 'inline-block' : 'none';
   if (sendNewBtn) sendNewBtn.style.display = 'none';
-  if (asIsBtn) asIsBtn.style.display = 'none';
   if (saveBtn) {
     saveBtn.style.display = canSaveEdits ? 'inline-block' : 'none';
     saveBtn.textContent = t.status === 'READY_FOR_CHECKOUT' ? 'Save changes' : 'Save';
@@ -1252,7 +4801,40 @@ function populateTicketForm(t) {
   if (closeBtn) closeBtn.onclick = () => doCloseTicket(t.id);
   if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
   if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
+  setupTicketServiceUpgradeControl(t, canCloseTicket);
   setupTicketFormToggles();
+  if (!isReadOnly) ffApplyTicketCustomerRequiredUI();
+}
+
+/** Push current price/note inputs into #ticketLinesData so Close/Save sees latest edits (e.g. before blur). */
+function syncTicketFormLinesFromDom() {
+  const linesEl = document.getElementById('ticketLinesData');
+  if (!linesEl) return;
+  let lines;
+  try {
+    lines = JSON.parse(linesEl.value || '[]');
+  } catch (_) {
+    return;
+  }
+  if (!Array.isArray(lines) || lines.length === 0) return;
+  const cont = document.getElementById('ticketPerformedList');
+  if (!cont) return;
+  const priceInputs = cont.querySelectorAll('.ticket-price-input');
+  const noteInputs = cont.querySelectorAll('.ticket-note-input');
+  if (priceInputs.length === 0 && noteInputs.length === 0) return;
+  priceInputs.forEach((inp) => {
+    const idx = parseInt(inp.getAttribute('data-idx'), 10);
+    if (!Number.isFinite(idx) || !lines[idx]) return;
+    const num = parseFloat(inp.value) || 0;
+    lines[idx].ticketPrice = num;
+    lines[idx].isOverride = num !== (Number(lines[idx].catalogPrice) || 0);
+  });
+  noteInputs.forEach((inp) => {
+    const idx = parseInt(inp.getAttribute('data-idx'), 10);
+    if (!Number.isFinite(idx) || !lines[idx]) return;
+    lines[idx].note = (inp.value || '').trim() || null;
+  });
+  linesEl.value = JSON.stringify(lines);
 }
 
 function renderPerformedLines(lines, readOnly = false) {
@@ -1263,9 +4845,10 @@ function renderPerformedLines(lines, readOnly = false) {
       const tickPrice = Number(l.ticketPrice) || 0;
       const basePrice = Number(l.catalogPrice) || 0;
       const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-      const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
+      const priceText = hasOverride ? `base ${ffTicketMoney(basePrice)} → ${ffTicketMoney(tickPrice)}` : ffTicketMoney(tickPrice);
       const notePart = l.note ? ` <span style="color:#6b7280;font-size:11px;">— ${escapeHtml(l.note)}</span>` : '';
-      return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
+      const prodTag = l.lineType === 'product' ? ' <span style="font-size:9px;color:#7c3aed;background:#ede9fe;padding:1px 5px;border-radius:4px;vertical-align:middle;">Product</span>' : '';
+      return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)}${prodTag} — ${priceText}${notePart}</div>`;
     }).join('');
     return;
   }
@@ -1276,10 +4859,10 @@ function renderPerformedLines(lines, readOnly = false) {
     const isOverride = tickPrice !== catPrice;
     return `
     <div class="ticket-line" data-idx="${i}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;background:#f9fafb;border-radius:6px;margin-bottom:4px;">
-      <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}</span>
-      <span style="font-size:10px;color:#9ca3af;">base $${catPrice.toFixed(2)}</span>
+      <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}${l.lineType === 'product' ? ' <span style="font-size:9px;color:#7c3aed;background:#ede9fe;padding:1px 5px;border-radius:4px;vertical-align:middle;">Product</span>' : ''}</span>
+      <span style="font-size:10px;color:#9ca3af;">base ${ffTicketMoney(catPrice)}</span>
       <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
-        <span style="color:#6b7280;">$</span>
+        <span style="color:#6b7280;">${ffTicketCurSym()}</span>
         <input type="number" min="0" step="0.01" value="${tickPrice.toFixed(2)}" class="ticket-price-input" data-idx="${i}" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
         ${isOverride ? '<span style="font-size:10px;color:#d97706;background:#fef3c7;padding:2px 6px;border-radius:4px;">Adjusted</span>' : ''}
       </label>
@@ -1335,23 +4918,45 @@ function renderDiff(diff, total, hasLines) {
   if (!cont) return;
   const parts = [];
   (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-  (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-  (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
+  (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+  (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → ${ffTicketMoney(c.to || 0)}</div>`));
   if (hasLines && typeof total === 'number') {
-    parts.push(`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#166534;">Total: $${total.toFixed(2)}</div>`);
+    parts.push(`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#166534;">Total: ${ffTicketMoney(total)}</div>`);
   }
   cont.innerHTML = parts.length ? parts.join('') : '<div style="color:#9ca3af;font-size:13px;">No changes</div>';
 }
 
 function addServiceToTicket(service) {
   const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-  const price = Number(service.defaultPrice) || 0;
+  const price = getTicketPriceForServiceAndCurrentStaff(service);
+  const catalogPrice = Number(service.defaultPrice) || price;
   lines.push({
     serviceId: service.id,
     serviceName: service.name,
-    catalogPrice: price,
+    catalogPrice,
     ticketPrice: price,
-    isOverride: false,
+    isOverride: price !== catalogPrice,
+    taxable: service.taxable === true,
+    note: null
+  });
+  document.getElementById('ticketLinesData').value = JSON.stringify(lines);
+  renderPerformedLines(lines);
+  updateTicketDiff();
+  updateTicketTotal(lines);
+}
+
+function addProductToTicket(product) {
+  const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
+  const price = getTicketPriceForProductAndActiveLocation(product);
+  const catalogPrice = Number(product.retailPrice) || price;
+  lines.push({
+    lineType: 'product',
+    productId: product.id,
+    serviceName: product.name,
+    catalogPrice,
+    ticketPrice: price,
+    isOverride: price !== catalogPrice,
+    taxable: product.taxable === true,
     note: null
   });
   document.getElementById('ticketLinesData').value = JSON.stringify(lines);
@@ -1389,11 +4994,77 @@ function updateTicketDiff() {
 function updateTicketTotal(lines) {
   const el = Array.isArray(lines) ? null : document.getElementById('ticketLinesData');
   const arr = Array.isArray(lines) ? lines : (el ? JSON.parse(el.value || '[]') : []);
-  const total = arr.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const { subtotal, salesTax, total, taxRate } = computeTicketTotalsFromLines(arr);
   const block = document.getElementById('ticketTotalBlock');
   const amountEl = document.getElementById('ticketTotalAmount');
+  const subRow = document.getElementById('ticketSubtotalRow');
+  const subEl = document.getElementById('ticketSubtotalAmount');
+  const taxRow = document.getElementById('ticketSalesTaxRow');
+  const taxEl = document.getElementById('ticketSalesTaxAmount');
   if (block) block.style.display = arr.length > 0 ? 'block' : 'none';
-  if (amountEl) amountEl.textContent = '$' + total.toFixed(2);
+  const showTax = salesTax > 0;
+  if (subRow) subRow.style.display = showTax ? 'block' : 'none';
+  if (taxRow) taxRow.style.display = showTax ? 'block' : 'none';
+  if (subEl) subEl.textContent = ffTicketMoney(subtotal);
+  if (taxEl) {
+    const pctLabel = taxRate > 0 ? ` (${taxRate}%)` : '';
+    taxEl.textContent = ffTicketMoney(salesTax) + pctLabel;
+  }
+  if (amountEl) amountEl.textContent = ffTicketMoney(total);
+  const sendNewBtn = document.getElementById('ticketSendNewBtn');
+  const priceWrap = document.getElementById('ticketCustomerPriceApprovedWrap');
+  if (priceWrap && sendNewBtn) {
+    const isNewTicketFlow = sendNewBtn.style.display !== 'none';
+    const showApproval = isNewTicketFlow && arr.length > 0;
+    priceWrap.style.display = showApproval ? 'block' : 'none';
+    if (!showApproval) {
+      const cb = document.getElementById('ticketCustomerPriceApproved');
+      if (cb) cb.checked = false;
+    }
+  }
+}
+
+function paintTicketServiceUpgradeButton(enabled) {
+  const btn = document.getElementById('ticketServiceUpgradeBtn');
+  const val = document.getElementById('ticketServiceUpgradeValue');
+  if (val) val.value = enabled ? 'true' : 'false';
+  if (!btn) return;
+  btn.textContent = enabled ? 'Service Upgrade ✓' : 'Upgrade Service';
+  btn.style.background = enabled ? '#f3e8ff' : '#fff';
+  btn.style.borderColor = enabled ? '#7c3aed' : '#e9d5ff';
+  btn.style.color = enabled ? '#5b21b6' : '#7c3aed';
+}
+
+function setupTicketServiceUpgradeControl(ticket, canUse) {
+  const wrap = document.getElementById('ticketServiceUpgradeWrap');
+  const btn = document.getElementById('ticketServiceUpgradeBtn');
+  if (!wrap || !btn) return;
+  const show = !!(canUse && ticket && String(ticket.status || '').toUpperCase() === 'READY_FOR_CHECKOUT');
+  wrap.style.display = show ? 'block' : 'none';
+  paintTicketServiceUpgradeButton(ticket && ticket.serviceUpgrade === true);
+  btn.onclick = null;
+  if (!show) return;
+  btn.onclick = async () => {
+    const next = !(document.getElementById('ticketServiceUpgradeValue')?.value === 'true');
+    btn.disabled = true;
+    try {
+      paintTicketServiceUpgradeButton(next);
+      await setTicketServiceUpgrade(ticket.id, next);
+      ticket.serviceUpgrade = next;
+      ticket.editedAfterFinalize = false;
+      ticket.editedAt = null;
+      renderTicketsList();
+      if (next) {
+        void awardTicketUpgradePoints(ticket);
+      }
+      showToast(next ? 'Service upgrade marked' : 'Service upgrade removed', 'success');
+    } catch (e) {
+      paintTicketServiceUpgradeButton(!next);
+      showToast(e?.message || 'Could not update service upgrade', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 async function saveTicket() {
@@ -1402,31 +5073,62 @@ async function saveTicket() {
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const totals = computeTicketTotalsFromLines(lines);
 
   try {
     if (editingTicketId) {
+      // If someone who received the ticket (front desk / manager) changes the
+      // services, preserve the technician's original lines once and tag the edit
+      // so we can show what changed and by whom.
+      const fdUpdate = {};
+      try {
+        const existingT = (currentTickets || []).find(x => x.id === editingTicketId);
+        const isCloser = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
+        if (isCloser && existingT) {
+          const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
+          if (ffTicketLinesChanged(beforeLines, lines)) {
+            if (!Array.isArray(existingT.frontDeskOriginalLines)) {
+              fdUpdate.frontDeskOriginalLines = beforeLines;
+            }
+            fdUpdate.frontDeskEdited = true;
+            fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+            fdUpdate.frontDeskEditedByName =
+              (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+            fdUpdate.frontDeskEditedAt = serverTimestamp();
+          }
+        }
+      } catch (_) {}
       await updateTicket(editingTicketId, {
         customerName,
         performedLines: lines,
-        total,
+        subtotal: totals.subtotal,
+        salesTax: totals.salesTax,
+        productTax: totals.productTax,
+        serviceTax: totals.serviceTax,
+        total: totals.total,
         forUids,
-        forNames
+        forNames,
+        ...fdUpdate,
+        _action: 'edited_after_send'
       });
       const t = currentTickets.find(x => x.id === editingTicketId);
       if (t && (String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT') && !t.seenByFrontDeskAt) {
         _ticketsOpenedThisSession.add(editingTicketId);
         t.seenByFrontDeskAt = true;
         updateTicketsNavBadge();
-        const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
-        if (isPrimaryAdmin || hasReceivesTickets) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
+        const { isPrimaryAdmin } = getTicketVisibility();
+        if (isPrimaryAdmin) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
       }
       showToast('Ticket updated', 'success');
     } else {
       await createTicket({
         customerName,
         performedLines: lines,
-        total,
+        subtotal: totals.subtotal,
+        salesTax: totals.salesTax,
+        productTax: totals.productTax,
+        serviceTax: totals.serviceTax,
+        total: totals.total,
         forUids,
         forNames
       });
@@ -1438,81 +5140,36 @@ async function saveTicket() {
   }
 }
 
-/** Called from modal AS IS button. Uses stored appointment if opened with one, else null. */
-async function doSendAsIsFromModal() {
-  if (!currentUserProfile?.salonId) {
-    showToast('Please wait – user profile loading…', 'error');
-    return;
-  }
-  const appointmentData = window._ticketModalAppointmentData || null;
-  const customerEl = document.getElementById('ticketCustomerName');
-  const customerName = customerEl ? customerEl.value.trim() : '';
-  const ok = await doSendAsIsTicket(appointmentData, customerName);
-  if (ok) closeTicketModal();
-}
-
-/** Quick AS IS: no manual entry. With appointment: copy As Booked to Performed. Without: empty performed. */
-async function doSendAsIsTicket(appointmentData = null, customerName = '') {
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  let performedLines = [];
-  let appointmentId = null;
-  const cust = (customerName || appointmentData?.customerName || '').trim();
-  if (appointmentData && Array.isArray(appointmentData.services) && appointmentData.services.length > 0) {
-    appointmentId = appointmentData.id || null;
-    performedLines = (appointmentData.services || []).map(s => ({
-      serviceId: s.id || null,
-      serviceName: s.name || s.serviceName,
-      catalogPrice: Number(s.price) || 0,
-      ticketPrice: Number(s.price) || 0,
-      isOverride: false,
-      note: null
-    }));
-  }
-  const total = performedLines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  try {
-    await createTicket({
-      customerName: cust,
-      performedLines,
-      total,
-      forUids,
-      forNames,
-      status: 'READY_FOR_CHECKOUT',
-      asIs: true,
-      appointmentId,
-      appointmentData: appointmentData || null
-    });
-    showToast('AS IS ticket sent to Front Desk', 'success');
-    return true;
-  } catch (err) {
-    showToast(err?.message || 'Failed', 'error');
-    return false;
-  }
-}
-
 async function doSendNewTicket() {
   const customerNameEl = document.getElementById('ticketCustomerName');
   const customerName = customerNameEl ? customerNameEl.value.trim() : '';
-  if (ticketFormAsIsMode) {
-    const ok = await doSendAsIsFromModal();
-    if (ok) closeTicketModal();
+  if (ffTicketRequiresCustomerName() && !customerName) {
+    ffApplyTicketCustomerRequiredUI();
+    showToast('Customer name is required to send this ticket.', 'error');
+    if (customerNameEl) customerNameEl.focus();
     return;
   }
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
   if (lines.length === 0) {
-    showToast('Add at least one service or select "Services stay exactly as booked"', 'error');
+    showToast('Add at least one service or product to send a ticket.', 'error');
     return;
   }
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
+  const total = computeTicketTotalsFromLines(lines);
   try {
     await createTicket({
       customerName,
       performedLines: lines,
-      total,
+      subtotal: total.subtotal,
+      salesTax: total.salesTax,
+      productTax: total.productTax,
+      serviceTax: total.serviceTax,
+      total: total.total,
       forUids,
       forNames,
-      status: 'READY_FOR_CHECKOUT'
+      status: 'READY_FOR_CHECKOUT',
+      customerApprovedPrice: getTicketCustomerPriceApprovedFromForm()
     });
     showToast('Ticket sent to Front Desk', 'success');
     closeTicketModal();
@@ -1522,11 +5179,19 @@ async function doSendNewTicket() {
 }
 
 async function doFinalizeTicket(ticketId) {
+  const customerNameEl = document.getElementById('ticketCustomerName');
+  const customerName = customerNameEl ? customerNameEl.value.trim() : '';
+  if (ffTicketRequiresCustomerName() && !customerName) {
+    ffApplyTicketCustomerRequiredUI();
+    showToast('Customer name is required to send this ticket.', 'error');
+    if (customerNameEl) customerNameEl.focus();
+    return;
+  }
   const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const ok = await ticketConfirm('Send this ticket to Front Desk?', 'Send to Front Desk');
   if (!ok) return;
   try {
-    await finalizeTicket(ticketId, forUids, forNames);
+    await finalizeTicket(ticketId, forUids, forNames, { customerName });
     showToast('Ticket sent to Front Desk', 'success');
     closeTicketModal();
   } catch (err) {
@@ -1535,14 +5200,49 @@ async function doFinalizeTicket(ticketId) {
 }
 
 async function doCloseTicket(ticketId) {
-  const ok = await ticketConfirm('Mark this ticket as Closed? (Checkout done)', 'Close ticket');
+  const ok = await ticketConfirm('Mark this ticket as Paid? (Checkout done)', 'Paid ticket');
   if (!ok) return;
   _justClosedTicketId = ticketId;
-  closeTicketModal();
-  editingTicketId = null;
   try {
-    await closeTicket(ticketId);
-    showToast('Ticket closed', 'success');
+    syncTicketFormLinesFromDom();
+    const customerNameEl = document.getElementById('ticketCustomerName');
+    const customerName = customerNameEl ? customerNameEl.value.trim() : '';
+    const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
+    const linesEl = document.getElementById('ticketLinesData');
+    const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
+    const totals = computeTicketTotalsFromLines(lines);
+    // Capture front-desk edits made right before paying (vs technician original).
+    const fdUpdate = {};
+    try {
+      const existingT = (currentTickets || []).find(x => x.id === ticketId);
+      if (existingT) {
+        const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
+        if (ffTicketLinesChanged(beforeLines, lines)) {
+          if (!Array.isArray(existingT.frontDeskOriginalLines)) {
+            fdUpdate.frontDeskOriginalLines = beforeLines;
+          }
+          fdUpdate.frontDeskEdited = true;
+          fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+          fdUpdate.frontDeskEditedByName =
+            (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+          fdUpdate.frontDeskEditedAt = serverTimestamp();
+        }
+      }
+    } catch (_) {}
+    await closeTicket(ticketId, {
+      customerName,
+      performedLines: lines,
+      subtotal: totals.subtotal,
+      salesTax: totals.salesTax,
+      productTax: totals.productTax,
+      serviceTax: totals.serviceTax,
+      total: totals.total,
+      forUids,
+      forNames,
+      ...fdUpdate
+    });
+    showToast('Ticket marked as paid', 'success');
+    closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed', 'error');
     _justClosedTicketId = null;
@@ -1553,225 +5253,1968 @@ async function doCloseTicket(ticketId) {
 // =====================
 // UI: Service Catalog Modal
 // =====================
-let editingServiceId = null;
+// =====================
+// Service Catalog V2 — unified collapsible UI (per-location)
+// =====================
+// One screen. Each category is a header with ▸/▾ toggle; expanding reveals
+// its services (name + price) and a "+ Add service" link. A top "+ Add
+// Category" button and a small shared "Add/Edit" mini modal do all CRUD.
+// Legacy two-tab view + subcategory concept are removed.
 
-async function openServicesModal() {
+/** Which categories are open (in-memory; reset when the modal closes). */
+const _ffOpenCats = new Set();
+/** True after the first render of the modal in the current opening. Used to
+ *  auto-expand the first category so the user sees services immediately. */
+let _ffCatalogRenderedOnce = false;
+let _ffCatalogRenderRootId = 'servicesModal';
+let _ffSelectedServiceId = null;
+let _ffSelectedCategoryId = null;
+let _ffServicesInlineEditServiceId = null;
+let _ffServicesDetailTab = 'details';
+let _ffServicesLocationOverridesByService = {};
+let _ffServicesLocationOverridesLoading = {};
+let _ffServicesSharedBackfillChecked = false;
+
+function _ffCatalogRenderRoot() {
+  return document.getElementById(_ffCatalogRenderRootId || 'servicesModal') || document;
+}
+
+function _ffCatalogEl(id) {
+  const root = _ffCatalogRenderRoot();
+  return (root && root.querySelector ? root.querySelector('#' + id) : null) || document.getElementById(id);
+}
+
+function _ffEnsureCatalogEditorPortal() {
+  const editor = document.getElementById('servicesCatalogEditorModal');
+  if (editor && editor.parentElement && editor.parentElement.id === 'servicesModalInner') {
+    document.body.appendChild(editor);
+  }
+}
+
+function _ffIsServicesScreenRoot() {
+  return _ffCatalogRenderRootId === 'servicesScreen';
+}
+
+// ===== Services screen mobile drill-down (list -> service menu -> section) =====
+// Mirrors the proven Staff Members modal pattern. On phones (<=640px) the
+// two-pane desktop layout is shown one level at a time, driven by classes on
+// the #servicesScreen root. No effect on desktop.
+function _ffServicesScreenIsMobile() {
+  try {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+  } catch (_) {
+    return false;
+  }
+}
+
+function _ffServicesMobileShowList() {
+  const el = document.getElementById('servicesScreen');
+  if (!el) return;
+  el.classList.remove('ff-services-mobile-detail');
+  el.classList.remove('ff-services-mobile-tab');
+}
+
+// mode: 'detail' (service selected -> show the Details/Locations/Staff menu)
+//       'tab'    (a section was chosen -> show that section's content)
+function _ffServicesMobileShowDetail(mode) {
+  if (!_ffServicesScreenIsMobile()) return;
+  const el = document.getElementById('servicesScreen');
+  if (!el) return;
+  el.classList.remove('ff-services-mobile-detail');
+  el.classList.remove('ff-services-mobile-tab');
+  el.classList.add(mode === 'tab' ? 'ff-services-mobile-tab' : 'ff-services-mobile-detail');
+  try {
+    const content = el.querySelector('.staff-content-area');
+    if (content) content.scrollTop = 0;
+  } catch (_) {}
+}
+
+// Back button: section -> menu, menu -> list. Delegated once.
+if (typeof document !== 'undefined' && !document.__ffServicesMobileBackDelegated) {
+  document.__ffServicesMobileBackDelegated = true;
+  document.addEventListener('click', function (event) {
+    const target = event.target && event.target.closest
+      ? event.target.closest('#servicesScreen .ff-services-mobile-back')
+      : null;
+    if (!target) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = document.getElementById('servicesScreen');
+    if (el && el.classList.contains('ff-services-mobile-tab')) {
+      el.classList.remove('ff-services-mobile-tab');
+      el.classList.add('ff-services-mobile-detail');
+      try {
+        const content = el.querySelector('.staff-content-area');
+        if (content) content.scrollTop = 0;
+      } catch (_) {}
+      return;
+    }
+    _ffServicesMobileShowList();
+  }, true);
+}
+
+async function openServicesModal(opts = {}) {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
-  editingServiceId = null;
-  await loadServiceCategories();
-  showServicesCatalogPanel();
-  const nameEl = document.getElementById('serviceFormName');
-  const priceEl = document.getElementById('serviceFormPrice');
-  if (nameEl) nameEl.value = '';
-  if (priceEl) priceEl.value = '';
-  populateServiceCategoryDropdown(null);
-  renderServicesList();
-  modal.style.display = 'flex';
-  const catTab = document.getElementById('servicesCategoriesTab');
-  const svcTab = document.getElementById('servicesCatalogTab');
-  if (svcTab) svcTab.onclick = showServicesCatalogPanel;
-  if (catTab) catTab.onclick = () => { showCategoriesPanel(); };
-}
-
-function showServicesCatalogPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) { panel.style.display = 'block'; panel.style.flex = '1'; }
-  if (catPanel) catPanel.style.display = 'none';
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid #111'; tabBtn.style.fontWeight = '600'; tabBtn.style.color = '#111'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid transparent'; catTabBtn.style.fontWeight = '500'; catTabBtn.style.color = '#6b7280'; }
-}
-
-function showCategoriesPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) panel.style.display = 'none';
-  if (catPanel) { catPanel.style.display = 'block'; catPanel.style.flex = '1'; }
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid transparent'; tabBtn.style.fontWeight = '500'; tabBtn.style.color = '#6b7280'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid #111'; catTabBtn.style.fontWeight = '600'; catTabBtn.style.color = '#111'; }
-  renderCategoriesList();
-}
-
-function populateServiceCategoryDropdown(selectedId) {
-  const sel = document.getElementById('serviceFormCategory');
-  if (!sel) return;
-  const ADD_NEW = '__add_new__';
-  let opts = '<option value="">Other</option>';
-  serviceCategories.forEach((c) => { opts += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
-  opts += `<option value="${ADD_NEW}">+ Add new category</option>`;
-  sel.innerHTML = opts;
-  sel.value = selectedId || '';
-  sel.onchange = () => {
-    if (sel.value === ADD_NEW) {
-      const name = prompt('Category name:');
-      if (name && name.trim()) {
-        saveServiceCategory({ name: name.trim(), sortOrder: serviceCategories.length }).then(async (id) => {
-          await loadServiceCategories();
-          populateServiceCategoryDropdown(id);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category added', 'success');
-        }).catch((e) => showToast(e?.message || 'Failed', 'error'));
-      }
-      sel.value = '';
-    }
-  };
-}
-
-async function addServiceCategory() {
-  const inp = document.getElementById('newCategoryName');
-  const name = inp?.value?.trim();
-  if (!name) { showToast('Enter category name', 'error'); return; }
-  try {
-    await saveServiceCategory({ name, sortOrder: serviceCategories.length });
-    await loadServiceCategories();
-    if (inp) inp.value = '';
-    renderCategoriesList();
-    populateServiceCategoryDropdown(null);
-    setupTicketsUI();
-    showToast('Category added', 'success');
-  } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-}
-
-function renderCategoriesList() {
-  const list = document.getElementById('categoriesList');
-  if (!list) return;
-  if (serviceCategories.length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No categories. Add one above.</div>';
+  _ffEnsureCatalogEditorPortal();
+  _ffCatalogRenderRootId = 'servicesModal';
+  _ffCatalogModalMode = opts && opts.mode === 'shared' ? 'shared' : 'location';
+  _ffOpenCats.clear();
+  _ffCatalogRenderedOnce = false;
+  if (_ffCatalogModalMode === 'shared') {
+    await loadSharedCatalogForManager();
   } else {
-    list.innerHTML = serviceCategories.map((c) => {
-      const count = salonServices.filter(s => s.categoryId === c.id).length;
-      const pencilSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid #eee;"><div><strong style="font-size:13px !important;">${escapeHtml(c.name)}</strong><span style="color:#9ca3af;font-size:13px;margin-left:8px;">${count} service(s)</span></div><div style="display:flex;gap:8px;"><button type="button" class="cat-edit-btn" data-id="${c.id}" title="Edit" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="cat-delete-btn" data-id="${c.id}" title="Delete" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-    }).join('');
-    list.querySelectorAll('.cat-edit-btn').forEach((btn) => {
-      btn.onclick = () => {
-        const c = serviceCategories.find(x => x.id === btn.getAttribute('data-id'));
-        if (!c) return;
-        const name = prompt('Category name:', c.name);
-        if (name != null && name.trim()) {
-          saveServiceCategory({ id: c.id, name: name.trim(), sortOrder: c.sortOrder }).then(async () => {
-            await loadServiceCategories();
-            renderCategoriesList();
-            populateServiceCategoryDropdown(null);
-            renderServicesList();
-            setupTicketsUI();
-            showToast('Updated', 'success');
-          }).catch((e) => showToast(e?.message || 'Failed', 'error'));
-        }
-      };
-    });
-    list.querySelectorAll('.cat-delete-btn').forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute('data-id');
-        try {
-          await deleteServiceCategory(id);
-          await loadServiceCategories();
-          renderCategoriesList();
-          populateServiceCategoryDropdown(null);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category deleted', 'success');
-        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-      };
-    });
+    await loadLocationCatalogForManager();
   }
+  renderServicesCatalogV2();
+  modal.style.display = 'flex';
 }
 
 function closeServicesModal() {
   const modal = document.getElementById('servicesModal');
   if (modal) modal.style.display = 'none';
+  _ffCatalogEditorClose();
 }
 
-function renderServicesList() {
-  const list = document.getElementById('servicesList');
+/** Render the unified catalog. Keeps currently-open categories open. */
+function renderServicesCatalogV2() {
+  const list = _ffCatalogEl('servicesCatalogV2List');
   if (!list) return;
-  const grouped = getServicesGroupedByCategory();
-  if (Object.keys(grouped).length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No services yet. Add one below.</div>';
-  } else {
-    let html = '';
-    Object.entries(grouped).forEach(([key, data], idx) => {
-      const label = escapeHtml(data.label || 'Other');
-      const services = data.services || [];
-      html += `<div class="services-category-section" data-cat-idx="${idx}" style="margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">`;
-      html += `<div class="services-category-header" style="display:flex;align-items:center;gap:4px;padding:3px 6px;font-size:10px !important;font-weight:600;color:#374151;background:#f9fafb;">${label}</div>`;
-      html += '<div style="padding:2px 6px 4px;display:flex;flex-direction:column;gap:2px;">';
-      const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      services.forEach((s) => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;"><div><strong style="font-size:11px !important;font-weight:600;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:8px !important;margin-left:5px;">$${(s.defaultPrice || 0).toFixed(2)}</span></div><div style="display:flex;gap:9px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-      });
-      html += '</div></div>';
-    });
-    list.innerHTML = html;
+  const sourceBadge = _ffCatalogEl('servicesCatalogSourceBadge');
+  const sourceHelp = _ffCatalogEl('servicesCatalogSourceHelp');
+  const addSharedBtn = _ffCatalogEl('servicesCatalogAddSharedBtn');
+  const addCategoryBtn = _ffCatalogEl('servicesCatalogAddCategoryBtn');
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog
+    ? getSharedServicesForCatalogManager()
+    : getLocationServicesForCatalogManager();
+  const catalogServices = catalogData.services || [];
+  const catalogCategories = catalogData.categories || [];
+
+  if (sourceBadge) {
+    sourceBadge.textContent = isSharedCatalog ? 'Service Catalog' : 'Location Service Catalog';
+    sourceBadge.style.background = isSharedCatalog ? '#ede9fe' : '#eef2ff';
+    sourceBadge.style.color = isSharedCatalog ? '#5b21b6' : '#3730a3';
   }
-  list.querySelectorAll('.services-edit-btn').forEach(btn => {
-    btn.onclick = () => {
-      const s = salonServices.find(x => x.id === btn.getAttribute('data-id'));
-      if (s) {
-        editingServiceId = s.id;
-        const nameEl = document.getElementById('serviceFormName');
-        const catEl = document.getElementById('serviceFormCategory');
-        const priceEl = document.getElementById('serviceFormPrice');
-        if (nameEl) nameEl.value = s.name || '';
-        populateServiceCategoryDropdown(s.categoryId || '');
-        if (priceEl) priceEl.value = (s.defaultPrice || 0).toString();
+  if (sourceHelp) {
+    sourceHelp.textContent = isSharedCatalog
+      ? 'Services can be managed with availability and pricing by location.'
+      : 'Categories and services are saved for the active location only.';
+  }
+  const canManageServices = ffCanManageServices();
+  if (addSharedBtn) {
+    addSharedBtn.style.display = 'none';
+    addSharedBtn.textContent = '+ Add Service';
+  }
+  if (addCategoryBtn) {
+    addCategoryBtn.style.display = canManageServices ? 'inline-block' : 'none';
+    addCategoryBtn.textContent = '+ Add Category';
+  }
+
+  if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && catalogCategories.length > 0) {
+    if (_ffIsServicesScreenRoot()) {
+      catalogCategories.forEach((cat) => _ffOpenCats.add(cat.id));
+    } else {
+      _ffOpenCats.add(catalogCategories[0].id);
+    }
+  }
+  _ffCatalogRenderedOnce = true;
+
+  // Group services under each category. Services with no categoryId (or a
+  // category id that no longer exists) land in a virtual "Other" bucket,
+  // shown only when it actually has services.
+  const grouped = new Map();
+  catalogCategories.forEach((c) => grouped.set(c.id, { id: c.id, name: c.name, services: [], isSharedCategory: !!c.isSharedCategory }));
+  const orphans = [];
+  catalogServices.forEach((s) => {
+    const bucket = s.categoryId && grouped.has(s.categoryId) ? grouped.get(s.categoryId) : null;
+    if (bucket) bucket.services.push(s);
+    else orphans.push(s);
+  });
+  if (orphans.length) grouped.set('__other__', { id: '__other__', name: 'Other', services: orphans });
+
+  if (_ffIsServicesScreenRoot()) {
+    renderServicesScreenCatalogList(list, grouped, isSharedCatalog);
+    renderServicesScreenDetail(catalogServices, catalogCategories);
+    return;
+  }
+
+  if (grouped.size === 0) {
+    const emptyTitle = 'No categories yet';
+    const emptyBody = isSharedCatalog
+      ? 'Start by adding a category, then add services under it.'
+      : 'Start by adding a category (e.g. <em>Manicure</em>, <em>Pedicure</em>, <em>Massage</em>), then add services under it with their prices.';
+    list.innerHTML = `
+      <div style="padding:36px 20px;color:#6b7280;text-align:center;font-size:14px;line-height:1.5;">
+        <div style="font-size:15px;color:#111;font-weight:600;margin-bottom:6px;">${emptyTitle}</div>
+        <div>${emptyBody}</div>
+      </div>`;
+    return;
+  }
+
+  const dotsSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="#9ca3af" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>';
+
+  let html = '';
+  for (const cat of grouped.values()) {
+    const isOpen = _ffOpenCats.has(cat.id);
+    const arrow = isOpen ? '▾' : '▸';
+    const count = cat.services.length;
+    const isOther = cat.id === '__other__';
+    html += `<div class="ffcat-row" data-cat-id="${escapeHtml(cat.id)}" style="margin-bottom:6px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;">`;
+    // The HEADER itself is draggable for categories (so services inside
+    // don't accidentally pick up the category drag). Services have their
+    // own draggable row below.
+    const canEditCategory = !isOther;
+    const canDragCategory = canEditCategory && !isSharedCatalog;
+    const headDraggable = canDragCategory ? `draggable="true" data-drag-kind="category" data-cat-id="${escapeHtml(cat.id)}"` : '';
+    html += `<div class="ffcat-head" ${headDraggable} role="button" tabindex="0" title="${canDragCategory ? 'Drag to reorder' : ''}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:${canDragCategory ? 'grab' : 'pointer'};background:#f9fafb;user-select:none;">`;
+    html += `<span class="ffcat-arrow" style="font-size:12px;color:#6b7280;width:10px;display:inline-block;">${arrow}</span>`;
+    html += `<span style="font-weight:600;color:#111;font-size:13px;flex:1;line-height:1.25;">${escapeHtml(cat.name)}</span>`;
+    html += `<span style="color:#9ca3af;font-size:11px;">${count}</span>`;
+    if (canEditCategory) {
+      html += `<button type="button" class="ffcat-menu-btn" data-cat-id="${escapeHtml(cat.id)}" title="Category actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
+    }
+    html += `</div>`;
+    html += `<div class="ffcat-body" style="display:${isOpen ? 'block' : 'none'};padding:2px 6px 6px;">`;
+    if (cat.services.length === 0) {
+      html += `<div style="padding:6px 10px;color:#9ca3af;font-size:12px;">No services yet.</div>`;
+    } else {
+      cat.services.forEach((s) => {
+        // Services that landed in the virtual "Other" bucket have no real
+        // parent category — drag them only to re-home into a real one.
+        const canDragService = !isSharedCatalog;
+        const serviceDragAttrs = canDragService ? `draggable="true" data-drag-kind="service"` : '';
+        const serviceOpacity = s.active === false ? 'opacity:0.62;' : '';
+        const priceBadge = isSharedCatalog && s.hasOverride
+          ? `<span style="padding:2px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:10px;font-weight:700;white-space:nowrap;">Override: ${ffTicketMoney(s.overridePrice || 0)}</span>`
+          : (isSharedCatalog ? `<span style="padding:2px 6px;border-radius:999px;background:#f3f4f6;color:#4b5563;font-size:10px;font-weight:700;white-space:nowrap;">Default</span>` : '');
+        const inactiveBadge = isSharedCatalog && s.active === false
+          ? `<span style="padding:2px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-size:10px;font-weight:700;white-space:nowrap;">Inactive</span>`
+          : '';
+        html += `<div class="ffsvc-row" ${serviceDragAttrs} data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="${canDragService ? 'Drag to reorder / move' : ''}" style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 18px;border-bottom:1px solid #f3f4f6;cursor:${canDragService ? 'grab' : 'default'};${serviceOpacity}">`;
+        html += `<span style="font-weight:500;color:#111;font-size:12px;flex:1;line-height:1.25;">${escapeHtml(s.name)}</span>`;
+        html += priceBadge;
+        html += inactiveBadge;
+        html += `<span style="color:#374151;font-size:12px;font-variant-numeric:tabular-nums;">${ffTicketMoney(s.defaultPrice || 0)}</span>`;
+        html += `<button type="button" class="ffsvc-menu-btn" data-svc-id="${escapeHtml(s.id)}" title="Service actions" style="border:none;background:none;padding:2px 4px;cursor:pointer;line-height:0;border-radius:4px;">${dotsSvg}</button>`;
+        html += `</div>`;
+      });
+    }
+    if (!isOther) {
+      const addMode = isSharedCatalog ? 'shared' : 'location';
+      const addLabel = isSharedCatalog ? '+ Add Service' : '+ Add service';
+      html += `<div style="padding:4px 6px;"><button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:4px 6px;cursor:pointer;text-align:left;">${addLabel}</button></div>`;
+    }
+    html += `</div></div>`;
+  }
+  list.innerHTML = html;
+  if (!ffCanManageServices()) {
+    list.querySelectorAll('.ffcat-addsvc-btn, .ffcat-menu-btn, .ffsvc-menu-btn').forEach((el) => { el.style.display = 'none'; });
+    list.querySelectorAll('[data-drag-kind], .ff-services-drag-handle, .ff-catalog-drag-handle').forEach((el) => { el.style.display = 'none'; el.removeAttribute('draggable'); });
+  }
+  _ffWireCatalogDragDrop(list);
+
+  // Wire: expand/collapse on header click (but not when clicking the menu).
+  list.querySelectorAll('.ffcat-head').forEach((head) => {
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('.ffcat-menu-btn')) return;
+      const row = head.closest('.ffcat-row');
+      const catId = row?.getAttribute('data-cat-id');
+      if (!catId) return;
+      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      renderServicesCatalogV2();
+    });
+  });
+  // Wire: category action menu
+  list.querySelectorAll('.ffcat-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffShowCategoryMenu(btn, catId);
+    });
+  });
+  // Wire: add service inside a category
+  list.querySelectorAll('.ffcat-addsvc-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffOpenCats.add(catId);
+      if (btn.getAttribute('data-add-mode') === 'shared') {
+        const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+      } else {
+        _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+      }
+    });
+  });
+  // Wire: service action menu
+  list.querySelectorAll('.ffsvc-menu-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const svcId = btn.getAttribute('data-svc-id');
+      _ffShowServiceMenu(btn, svcId);
+    });
+  });
+}
+
+function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
+  if (!grouped || grouped.size === 0) {
+    list.innerHTML = '<div style="padding:0 20px 20px;color:#6b7280;font-size:12px;line-height:1.5;">No categories yet. Use + Add Category above.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const cat of grouped.values()) {
+    const isOther = cat.id === '__other__';
+    const canEditCategory = !isOther;
+    const isOpen = _ffOpenCats.has(cat.id);
+    const arrow = isOpen ? '▾' : '▸';
+    const isCategorySelected = String(cat.id) === String(_ffSelectedCategoryId || '');
+    html += `<div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">`;
+    html += `<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px 0;">`;
+    html += `<button type="button" class="ff-services-cat-toggle" data-cat-id="${escapeHtml(cat.id)}" aria-expanded="${isOpen ? 'true' : 'false'}" style="border:none;background:none;color:#6b7280;cursor:pointer;font-size:14px;line-height:1;padding:2px;width:16px;flex-shrink:0;">${arrow}</button>`;
+    html += `<button type="button" class="ff-services-category-title${isCategorySelected ? ' is-selected' : ''}" data-cat-id="${escapeHtml(cat.id)}" ${canEditCategory ? '' : 'disabled'} style="margin:0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;flex:1;text-align:left;border:none;background:${isCategorySelected ? '#ede9fe' : 'transparent'};border-radius:6px;padding:4px 6px;cursor:${canEditCategory ? 'pointer' : 'default'};">${escapeHtml(cat.name)}</button>`;
+    html += `</div>`;
+    html += `<div class="ff-services-cat-services" data-cat-id="${escapeHtml(cat.id)}" style="display:${isOpen ? 'flex' : 'none'};flex-direction:column;gap:4px;">`;
+    if (cat.services.length === 0) {
+      html += `<div style="padding:6px 8px;color:#9ca3af;font-size:12px;">No services yet.</div>`;
+    } else {
+      cat.services.forEach((s) => {
+        const isSelected = String(s.id) === String(_ffSelectedServiceId || '');
+        const serviceOpacity = s.active === false ? 'opacity:0.62;' : '';
+        html += `<div class="staff-sidebar-item ff-services-sidebar-service${isSelected ? ' is-selected' : ''}" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 8px;border:none;border-radius:6px;background:${isSelected ? '#ede9fe' : 'transparent'};cursor:pointer;text-align:left;${serviceOpacity}">`;
+        html += `<span class="ff-services-drag-handle" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder" style="color:#9ca3af;font-size:12px;line-height:1;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>`;
+        html += `<span style="font-size:12px;color:#111827;line-height:1.25;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name || '')}</span>`;
+        html += `</div>`;
+      });
+    }
+    if (!isOther) {
+      const addMode = isSharedCatalog ? 'shared' : 'location';
+      const addLabel = '+ Add Service';
+      html += `<button type="button" class="ffcat-addsvc-btn" data-cat-id="${escapeHtml(cat.id)}" data-add-mode="${addMode}" style="width:100%;background:none;border:none;color:#7c3aed;font-weight:600;font-size:12px;padding:6px 8px;cursor:pointer;text-align:left;border-radius:6px;">${addLabel}</button>`;
+    }
+    html += `</div></div>`;
+  }
+
+  list.innerHTML = html;
+  if (!ffCanManageServices()) {
+    list.querySelectorAll('.ffcat-addsvc-btn, .ffcat-menu-btn, .ffsvc-menu-btn').forEach((el) => { el.style.display = 'none'; });
+    list.querySelectorAll('[data-drag-kind], .ff-services-drag-handle, .ff-catalog-drag-handle').forEach((el) => { el.style.display = 'none'; el.removeAttribute('draggable'); });
+  }
+
+  list.querySelectorAll('.ff-services-cat-toggle').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      if (!catId) return;
+      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      renderServicesCatalogV2();
+    });
+  });
+  list.querySelectorAll('.ff-services-category-title').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      if (!catId) return;
+      _ffSelectedCategoryId = catId;
+      _ffSelectedServiceId = null;
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+      // Mobile: open the category detail full-screen.
+      _ffServicesMobileShowDetail('detail');
+    });
+  });
+  list.querySelectorAll('.ffcat-addsvc-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const catId = btn.getAttribute('data-cat-id');
+      _ffOpenCats.add(catId);
+      if (btn.getAttribute('data-add-mode') === 'shared') {
+        const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+      } else {
+        _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
+      }
+    });
+  });
+  list.querySelectorAll('.ff-services-sidebar-service').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      if (e.target.closest('.ffsvc-menu-btn')) return;
+      _ffSelectedServiceId = btn.getAttribute('data-svc-id');
+      _ffSelectedCategoryId = null;
+      if (String(_ffServicesInlineEditServiceId || '') !== String(_ffSelectedServiceId || '')) {
+        _ffServicesInlineEditServiceId = null;
+      }
+      renderServicesCatalogV2();
+      // Mobile: open the service menu (Details/Locations/Staff) full-screen.
+      _ffServicesMobileShowDetail('detail');
+    });
+  });
+  _ffWireServicesScreenDragDrop(list);
+}
+
+function _ffWireServicesScreenDragDrop(listEl) {
+  listEl.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('.ff-services-drag-handle[data-drag-kind="service"]');
+    if (!handle) return;
+    const row = handle.closest('.ff-services-sidebar-service');
+    _ffDragSrc = {
+      kind: 'service',
+      catId: handle.getAttribute('data-cat-id') || null,
+      svcId: handle.getAttribute('data-svc-id') || null,
+    };
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || '');
+    } catch (_) {}
+    if (row) row.style.opacity = '0.4';
+  });
+
+  listEl.addEventListener('dragend', (e) => {
+    const row = e.target.closest('.ff-services-sidebar-service');
+    if (row) row.style.opacity = '';
+    _ffClearDragHover();
+    _ffDragSrc = null;
+  });
+
+  listEl.addEventListener('dragover', (e) => {
+    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    const targetSvc = e.target.closest('.ff-services-sidebar-service');
+    if (
+      !targetSvc ||
+      targetSvc.getAttribute('data-svc-id') === _ffDragSrc.svcId ||
+      targetSvc.getAttribute('data-cat-id') !== _ffDragSrc.catId
+    ) {
+      if (_ffDragHoverEl) _ffClearDragHover();
+      return;
+    }
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    if (targetSvc !== _ffDragHoverEl) {
+      _ffClearDragHover();
+      _ffDragHoverEl = targetSvc;
+    }
+    const rect = targetSvc.getBoundingClientRect();
+    const placeAfter = e.clientY > rect.top + rect.height / 2;
+    targetSvc.dataset.dropPosition = placeAfter ? 'after' : 'before';
+    targetSvc.style.boxShadow = placeAfter
+      ? 'inset 0 -2px 0 0 #7c3aed'
+      : 'inset 0 2px 0 0 #7c3aed';
+  });
+
+  listEl.addEventListener('drop', async (e) => {
+    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    const targetSvc = e.target.closest('.ff-services-sidebar-service');
+    const src = _ffDragSrc;
+    _ffClearDragHover();
+    _ffDragSrc = null;
+    if (
+      !targetSvc ||
+      targetSvc.getAttribute('data-svc-id') === src.svcId ||
+      targetSvc.getAttribute('data-cat-id') !== src.catId
+    ) {
+      return;
+    }
+    e.preventDefault();
+    try {
+      await _ffReorderServiceWithinCategory(
+        src.svcId,
+        targetSvc.getAttribute('data-svc-id'),
+        src.catId,
+        targetSvc.dataset.dropPosition === 'after'
+      );
+      await loadServices();
+      renderServicesCatalogV2();
+    } catch (err) {
+      console.error('[Services] Reorder failed', err);
+      showToast(err?.message || 'Reorder failed', 'error');
+    }
+  });
+}
+
+async function _ffReorderServiceWithinCategory(srcId, targetSvcId, categoryId, placeAfter) {
+  if (!categoryId || categoryId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src || src.categoryId !== categoryId) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === categoryId && s.id !== srcId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const targetIdx = siblings.findIndex(s => s.id === targetSvcId);
+  if (targetIdx < 0) return;
+  siblings.splice(targetIdx + (placeAfter ? 1 : 0), 0, src);
+  await Promise.all(siblings.map((s, idx) => saveService({
+    id: s.id,
+    name: s.name,
+    categoryId,
+    defaultPrice: s.defaultPrice || 0,
+    sortOrder: idx,
+  })));
+}
+
+function renderServicesScreenDetail(catalogServices, catalogCategories) {
+  const root = document.getElementById('servicesScreen');
+  if (!root) return;
+  const placeholder = root.querySelector('#servicesDetailPlaceholder');
+  const container = root.querySelector('#servicesDetailContainer');
+  const header = root.querySelector('#servicesDetailHeader');
+  const nav = root.querySelector('#servicesDetailNav');
+  const content = root.querySelector('#servicesDetailTabContent');
+  if (!placeholder || !container || !header || !nav || !content) return;
+
+  const services = Array.isArray(catalogServices) ? catalogServices : [];
+  const categories = Array.isArray(catalogCategories) ? catalogCategories : [];
+  let selectedService = services.find((s) => String(s.id) === String(_ffSelectedServiceId || ''));
+  if (!selectedService && _ffSelectedServiceId) _ffSelectedServiceId = null;
+  let selectedCategory = categories.find((c) => String(c.id) === String(_ffSelectedCategoryId || ''));
+  if (!selectedCategory && _ffSelectedCategoryId) _ffSelectedCategoryId = null;
+  if (!selectedService && !selectedCategory) {
+    placeholder.style.display = 'flex';
+    container.style.display = 'none';
+    return;
+  }
+
+  placeholder.style.display = 'none';
+  container.style.display = 'block';
+
+  if (selectedCategory && !selectedService) {
+    const categoryMode = _ffCatalogModalMode === 'shared' ? 'shared-category-edit' : 'category-edit';
+    nav.innerHTML = `
+      <button type="button" class="staff-nav-item is-active" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
+    `;
+    header.innerHTML = `
+      <div style="padding:8px 0 4px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+        <div style="min-width:0;">
+          <div style="font-size:22px;font-weight:800;color:#111827;line-height:1.2;">${escapeHtml(selectedCategory.name || 'Category')}</div>
+        </div>
+        <button type="button" id="servicesCategoryActionsBtn" title="Category actions" style="width:32px;height:32px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;font-weight:800;line-height:1;flex-shrink:0;">...</button>
+      </div>
+    `;
+    content.innerHTML = `
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+          <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+          <button type="button" id="servicesCategoryEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
+        </div>
+        <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+          <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+            <div style="font-size:12px;color:#6b7280;">Category name</div>
+            <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selectedCategory.name || '')}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    const categoryActionsBtn = root.querySelector('#servicesCategoryActionsBtn');
+    if (categoryActionsBtn) {
+      categoryActionsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffShowServicesCategoryDetailMenu(categoryActionsBtn, String(selectedCategory.id));
+      });
+    }
+    const categoryEditBtn = root.querySelector('#servicesCategoryEditBtn');
+    if (categoryEditBtn) {
+      categoryEditBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffCatalogEditorOpen({ mode: categoryMode, categoryId: selectedCategory.id });
+      });
+    }
+    return;
+  }
+
+  const selected = selectedService;
+  const rawDuration = selected.durationMinutes ?? selected.duration ?? selected.defaultDuration ?? selected.minutes;
+  const durationText = rawDuration == null || rawDuration === ''
+    ? ''
+    : (Number.isFinite(Number(rawDuration)) ? `${Number(rawDuration)} min` : String(rawDuration));
+  const isInlineEditingService = String(_ffServicesInlineEditServiceId || '') === String(selected.id || '');
+  const activeServiceTab = _ffServicesDetailTab || 'details';
+  const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
+  const categoryOptions = categories
+    .filter((cat) => cat.id !== '__other__')
+    .map((cat) => `<option value="${escapeHtml(cat.name || cat.id)}" ${String(cat.id) === String(selected.categoryId || '') ? 'selected' : ''}>${escapeHtml(cat.name || '')}</option>`)
+    .join('');
+  nav.innerHTML = `
+    <button type="button" class="staff-nav-item${activeServiceTab === 'details' ? ' is-active' : ''}" data-services-tab="details" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
+    <button type="button" class="staff-nav-item${activeServiceTab === 'locations' ? ' is-active' : ''}" data-services-tab="locations" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Locations</button>
+    <button type="button" class="staff-nav-item${activeServiceTab === 'staff' ? ' is-active' : ''}" data-services-tab="staff" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Staff</button>
+  `;
+  header.innerHTML = `
+    <div style="padding:8px 0 4px;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;">
+      <div style="min-width:0;">
+        <div style="font-size:22px;font-weight:800;color:#111827;line-height:1.2;">${escapeHtml(selected.name || 'Service')}</div>
+        <div style="margin-top:6px;font-size:14px;color:#6b7280;font-weight:600;">${ffTicketMoney(basePrice)}</div>
+      </div>
+      <button type="button" id="servicesDetailActionsBtn" title="Service actions" style="width:32px;height:32px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;font-weight:800;line-height:1;flex-shrink:0;">...</button>
+    </div>
+  `;
+  if (activeServiceTab === 'locations') {
+    content.innerHTML = renderServicesLocationsTabHtml(selected);
+    wireServicesLocationsTab(root, selected);
+  } else if (activeServiceTab === 'staff') {
+    content.innerHTML = renderServicesStaffTabHtml(selected);
+    wireServicesStaffTab(root, selected);
+  } else {
+    content.innerHTML = isInlineEditingService ? `
+    <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button type="button" id="servicesInlineEditCancelBtn" style="padding:7px 12px;background:#fff;color:#374151;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Cancel</button>
+          <button type="button" id="servicesInlineEditSaveBtn" style="padding:7px 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Save</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Service Name</span>
+          <input id="servicesInlineEditName" type="text" value="${escapeHtml(selected.name || '')}" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Category</span>
+          <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+            <option value="">No category</option>
+            ${categoryOptions}
+          </select>
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Price</span>
+          <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Charge Tax</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="ff-toggle-switch"><input id="servicesInlineEditTaxable" type="checkbox" ${selected.taxable === true ? 'checked' : ''}><span class="ff-toggle-slider"></span></span>
+            <span style="font-size:11px;color:#9ca3af;line-height:1.35;">Apply Service Tax to this service (only when Service Tax is enabled in Settings).</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  ` : `
+    <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;">Details</div>
+        <button type="button" id="servicesDetailEditBtn" style="padding:7px 12px;background:#fff;color:#7c3aed;border:1px solid #e9d5ff;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Edit</button>
+      </div>
+      <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Service name</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selected.name || '')}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${ffTicketMoney(basePrice)}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Charge Tax</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${selected.taxable === true ? 'On' : 'Off'}</div>
+        </div>
+        ${durationText ? `
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Duration</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+  }
+  root.querySelectorAll('#servicesDetailNav [data-services-tab]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffServicesDetailTab = btn.getAttribute('data-services-tab') || 'details';
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+      // Mobile: drill into the chosen section (Details/Locations/Staff).
+      _ffServicesMobileShowDetail('tab');
+    });
+  });
+  const canManageServicesDetail = ffCanManageServices();
+  const actionsBtn = root.querySelector('#servicesDetailActionsBtn');
+  if (actionsBtn) {
+    if (!canManageServicesDetail) {
+      actionsBtn.style.display = 'none';
+    } else {
+      actionsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffShowServiceMenu(actionsBtn, String(selected.id));
+      });
+    }
+  }
+  const editBtn = root.querySelector('#servicesDetailEditBtn');
+  if (editBtn) {
+    if (!canManageServicesDetail) {
+      editBtn.style.display = 'none';
+    } else {
+      editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ffServicesInlineEditServiceId = selected.id;
+        renderServicesCatalogV2();
+      });
+    }
+  }
+  const cancelBtn = root.querySelector('#servicesInlineEditCancelBtn');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      _ffServicesInlineEditServiceId = null;
+      renderServicesCatalogV2();
+    });
+  }
+  const saveBtn = root.querySelector('#servicesInlineEditSaveBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const nameInput = root.querySelector('#servicesInlineEditName');
+      const categoryInput = root.querySelector('#servicesInlineEditCategory');
+      const priceInput = root.querySelector('#servicesInlineEditPrice');
+      const name = String(nameInput?.value || '').trim();
+      if (!name) {
+        if (nameInput) nameInput.focus();
+        showToast('Service name is required', 'error');
+        return;
+      }
+      const categoryId = categoryInput?.value || null;
+      const defaultPrice = parseFloat(priceInput?.value) || 0;
+      const taxableInput = root.querySelector('#servicesInlineEditTaxable');
+      const taxable = !!(taxableInput && taxableInput.checked);
+      saveBtn.disabled = true;
+      saveBtn.style.opacity = '0.7';
+      try {
+        if (selected.isSharedService || _ffCatalogModalMode === 'shared') {
+          await saveSharedService({
+            id: selected.id,
+            name,
+            category: categoryId || selected.category || '',
+            defaultPrice,
+            active: selected.active !== false,
+          sortOrder: selected.sortOrder,
+            taxable,
+          });
+          await loadSharedCatalogForManager();
+        } else {
+          await saveService({
+            id: selected.id,
+            name,
+            categoryId,
+            defaultPrice,
+          sortOrder: Number.isFinite(Number(selected.sortOrder)) ? Number(selected.sortOrder) : 0,
+            taxable,
+          });
+          await Promise.all([loadServiceCategories(), loadServices()]);
+        }
+        selected.name = name;
+        selected.categoryId = categoryId;
+        selected.defaultPrice = defaultPrice;
+        selected.taxable = taxable;
+        _ffServicesInlineEditServiceId = null;
+        if (categoryId) _ffOpenCats.add(categoryId);
+        renderServicesCatalogV2();
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast('Updated', 'success');
+      } catch (err) {
+        showToast(err?.message || 'Failed', 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = '1';
+      }
+    });
+  }
+}
+
+function renderServicesLocationsTabHtml(service) {
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  if (!service || !service.id) return '';
+  if (_ffCatalogModalMode !== 'shared' && !service.isSharedService) {
+    return `
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">This service is still using the older location catalog. Open Services after the catalog migration completes to manage locations here.</p>
+      </div>
+    `;
+  }
+  if (!Array.isArray(locations) || locations.length === 0) {
+    return `
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No active locations found.</p>
+      </div>
+    `;
+  }
+  if (!_ffServicesLocationOverridesByService[service.id] && !_ffServicesLocationOverridesLoading[service.id]) {
+    _ffServicesLocationOverridesLoading[service.id] = true;
+    loadSharedServiceLocationOverridesForService(service.id)
+      .catch((e) => console.warn('[Services] failed loading location overrides', e))
+      .finally(() => {
+        _ffServicesLocationOverridesLoading[service.id] = false;
+        if (_ffSelectedServiceId === service.id && _ffServicesDetailTab === 'locations') renderServicesCatalogV2();
+      });
+  }
+  const overrides = _ffServicesLocationOverridesByService[service.id] || {};
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const loading = _ffServicesLocationOverridesLoading[service.id] === true;
+  const cards = locations.map((loc) => {
+    const override = overrides[loc.id] || {};
+    const enabled = override.enabled !== false;
+    const hasPriceOverride = Number.isFinite(Number(override.price));
+    const shownPrice = hasPriceOverride ? Number(override.price) : basePrice;
+    return `
+      <div class="ff-services-location-card" data-location-id="${escapeHtml(loc.id)}" style="padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(loc.name || loc.label || 'Location')}</div>
+            <div style="margin-top:2px;font-size:11px;color:#6b7280;">${enabled ? 'Available at this location' : 'Not available at this location'}</div>
+          </div>
+          <label class="staff-permission-toggle" style="flex:0 0 auto;">
+            <input type="checkbox" class="ff-services-location-enabled" ${enabled ? 'checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <input type="number" min="0" step="0.01" class="ff-services-location-price" value="${escapeHtml(String(shownPrice))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="ff-services-location-save" style="padding:7px 12px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Save</button>
+            ${hasPriceOverride ? `<button type="button" class="ff-services-location-reset" style="padding:7px 12px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Reset to default</button>` : ''}
+            <span style="font-size:11px;color:${hasPriceOverride ? '#7c3aed' : '#9ca3af'};">${hasPriceOverride ? 'Override' : `Default ${ffTicketMoney(basePrice)}`}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:3px;">Locations</div>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage availability and location-specific pricing for this service.</p>
+        ${loading ? '<div style="margin-top:8px;font-size:12px;color:#9ca3af;">Loading location overrides...</div>' : ''}
+      </div>
+      ${cards}
+    </div>
+  `;
+}
+
+function wireServicesLocationsTab(root, service) {
+  if (!root || !service || !service.id) return;
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  root.querySelectorAll('.ff-services-location-card').forEach((card) => {
+    const locationId = card.getAttribute('data-location-id');
+    const enabledInput = card.querySelector('.ff-services-location-enabled');
+    const priceInput = card.querySelector('.ff-services-location-price');
+    const saveBtn = card.querySelector('.ff-services-location-save');
+    const resetBtn = card.querySelector('.ff-services-location-reset');
+    const saveLocation = async (priceMode) => {
+      if (!locationId) return;
+      const enabled = enabledInput ? enabledInput.checked : true;
+      const rawPrice = parseFloat(priceInput?.value);
+      const patch = { enabled };
+      if (priceMode === 'reset') {
+        patch.price = null;
+        if (priceInput) priceInput.value = String(basePrice);
+      } else if (Number.isFinite(rawPrice) && rawPrice !== basePrice) {
+        patch.price = rawPrice;
+      } else {
+        patch.price = null;
+      }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
+      try {
+        await saveSharedServiceLocationOverride(service.id, locationId, patch);
+        const catalogData = _ffCatalogModalMode === 'shared'
+          ? getSharedServicesForCatalogManager()
+          : getLocationServicesForCatalogManager();
+        renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast(priceMode === 'reset' ? 'Price reset to default' : 'Location updated', 'success');
+      } catch (e) {
+        showToast(e?.message || 'Failed', 'error');
+      } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
       }
     };
+    if (enabledInput) {
+      enabledInput.addEventListener('change', () => { saveLocation('save'); });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveLocation('save');
+      });
+    }
+    if (resetBtn) {
+      resetBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveLocation('reset');
+      });
+    }
   });
-  list.querySelectorAll('.services-delete-btn').forEach(btn => {
-    btn.onclick = async () => {
-      const ok = await ticketConfirm('Delete this service?', 'Delete service');
-      if (!ok) return;
-      const id = btn.getAttribute('data-id');
+}
+
+function ffServiceStaffPermissionTrue(value) {
+  return value === true || value === 'true' || value === 1 || value === '1' || value === 'yes' || value === 'on';
+}
+
+function isServiceProviderStaffForServices(staff, service) {
+  if (!staff || typeof staff !== 'object' || staff.isArchived === true || staff.archived === true) return false;
+  if (service && !controlledStaffCanProvideService(staff, service)) return false;
+  const role = String(staff.role || staff.type || '').toLowerCase().trim();
+  const permissions = staff.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  const hasTicketsPermission =
+    ffServiceStaffPermissionTrue(permissions.tickets_view) ||
+    ffServiceStaffPermissionTrue(permissions.tickets_use) ||
+    ffServiceStaffPermissionTrue(permissions.tickets_create);
+  const hasProviderRole = [
+    'technician',
+    'tech',
+    'service_provider',
+    'service provider',
+    'provider',
+    'staff'
+  ].indexOf(role) !== -1;
+  const hasProviderTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0;
+  return hasProviderRole || hasProviderTypes || hasTicketsPermission;
+}
+
+function canStaffSendNewTicket(staff) {
+  if (!staff || typeof staff !== 'object' || staff.isArchived === true || staff.archived === true) return false;
+  const permissions = staff.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  // The "Can send new ticket" toggle is authoritative in BOTH directions once an
+  // owner has set it explicitly: ON always shows the + New button, OFF always
+  // hides it (even for service providers). This matches what owners expect when
+  // they flip the switch on a staff member.
+  if (Object.prototype.hasOwnProperty.call(permissions, 'tickets_create')) {
+    return ffServiceStaffPermissionTrue(permissions.tickets_create);
+  }
+  // Legacy staff whose toggle was never set: service providers keep the button
+  // by role / provider types so existing technicians are unaffected.
+  const role = String(staff.role || staff.type || '').toLowerCase().trim();
+  if (['owner', 'admin', 'manager', 'front_desk', 'front desk', 'assistant_manager'].includes(role)) return false;
+  const hasProviderRole = [
+    'technician',
+    'tech',
+    'service_provider',
+    'service provider',
+    'provider',
+    'staff'
+  ].indexOf(role) !== -1;
+  const hasProviderTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0;
+  return hasProviderRole || hasProviderTypes;
+}
+
+function getServicesEligibleStaffRows(service) {
+  try {
+    const store = typeof window !== 'undefined' && typeof window.ffGetStaffStore === 'function'
+      ? window.ffGetStaffStore()
+      : null;
+    const staff = Array.isArray(store?.staff) ? store.staff : [];
+    return staff
+      .filter((row) => isServiceProviderStaffForServices(row, service))
+      .sort((a, b) => String(a.name || a.displayName || '').localeCompare(String(b.name || b.displayName || '')));
+  } catch (_) {
+    return [];
+  }
+}
+
+function getServiceStaffId(staff) {
+  return String(staff?.id || staff?.staffId || staff?.uid || staff?.firebaseUid || '').trim();
+}
+
+function getServiceStaffName(staff) {
+  return String(staff?.name || staff?.displayName || staff?.fullName || staff?.email || 'Staff').trim();
+}
+
+function getStaffDefaultServiceCommission(staff, staffId) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetStaffServiceCommissionPct === 'function') {
+      const pct = Number(window.ffGetStaffServiceCommissionPct(staffId));
+      if (Number.isFinite(pct) && pct > 0) return { type: 'percentage', value: pct };
+    }
+  } catch (_) {}
+  const rules = staff && staff.earningsRules && typeof staff.earningsRules === 'object' ? staff.earningsRules : {};
+  const serviceCommission = rules.serviceCommission && typeof rules.serviceCommission === 'object' ? rules.serviceCommission : {};
+  const pct = Number(serviceCommission.basicPercent);
+  if (serviceCommission.enabled === true && Number.isFinite(pct) && pct > 0) {
+    return { type: 'percentage', value: pct };
+  }
+  return null;
+}
+
+function formatServiceStaffDefaultCommission(defaultCommission) {
+  if (!defaultCommission || !Number.isFinite(Number(defaultCommission.value))) return 'Default';
+  const value = Number(defaultCommission.value);
+  return defaultCommission.type === 'fixed'
+    ? `Default ${ffTicketMoney(value)}`
+    : `Default ${value}%`;
+}
+
+function getStaffDefaultSupplyDeduction(staff) {
+  const rules = staff && staff.earningsRules && typeof staff.earningsRules === 'object' ? staff.earningsRules : {};
+  const serviceCommission = rules.serviceCommission && typeof rules.serviceCommission === 'object' ? rules.serviceCommission : {};
+  const supply = serviceCommission.supplyDeduction && typeof serviceCommission.supplyDeduction === 'object'
+    ? serviceCommission.supplyDeduction
+    : {};
+  const value = Number(supply.value);
+  if (supply.enabled === true && Number.isFinite(value) && value > 0) {
+    return {
+      type: supply.type === 'percentage' ? 'percentage' : 'fixed',
+      value
+    };
+  }
+  return null;
+}
+
+function formatServiceStaffSupplyDeductionLabel(deduction) {
+  if (!deduction || !Number.isFinite(Number(deduction.value))) return 'Default OFF';
+  const value = Number(deduction.value);
+  return deduction.type === 'percentage' ? `Default ${value}%` : `Default ${ffTicketMoney(value)}`;
+}
+
+function renderServicesStaffTabHtml(service) {
+  const staffRows = getServicesEligibleStaffRows(service);
+  if (!service || !service.id) return '';
+  if (!staffRows.length) {
+    return `
+      <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.5;">No eligible service providers found.</p>
+      </div>
+    `;
+  }
+  const overrides = getServiceStaffOverrides(service);
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const cards = staffRows.map((staff) => {
+    const staffId = getServiceStaffId(staff);
+    if (!staffId) return '';
+    const override = overrides[staffId] && typeof overrides[staffId] === 'object' ? overrides[staffId] : {};
+    const enabled = override.enabled !== false;
+    const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
+    const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
+    const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
+    const hasCommissionOverride = Number.isFinite(Number(commission.value));
+    const commissionType = hasCommissionOverride
+      ? (commission.type === 'fixed' ? 'fixed' : 'percentage')
+      : (defaultCommission?.type === 'fixed' ? 'fixed' : 'percentage');
+    const commissionValue = hasCommissionOverride ? String(Number(commission.value)) : '';
+    const commissionDefaultLabel = formatServiceStaffDefaultCommission(defaultCommission);
+    const defaultSupplyDeduction = getStaffDefaultSupplyDeduction(staff);
+    const supplyDeduction = override.supplyDeduction && typeof override.supplyDeduction === 'object' ? override.supplyDeduction : {};
+    const hasSupplyDeductionOverride = Object.prototype.hasOwnProperty.call(override, 'supplyDeduction');
+    const hasSupplyDeductionValueOverride = supplyDeduction.enabled === true && Number.isFinite(Number(supplyDeduction.value));
+    const effectiveSupplyDeduction = hasSupplyDeductionOverride
+      ? (hasSupplyDeductionValueOverride ? supplyDeduction : null)
+      : defaultSupplyDeduction;
+    const supplyDeductionEnabled = !!effectiveSupplyDeduction;
+    const supplyDeductionType = effectiveSupplyDeduction?.type === 'percentage' ? 'percentage' : 'fixed';
+    const supplyDeductionValue = hasSupplyDeductionValueOverride ? String(Number(supplyDeduction.value)) : '';
+    const supplyDeductionDefaultLabel = formatServiceStaffSupplyDeductionLabel(defaultSupplyDeduction);
+    const supplyDeductionStatusLabel = hasSupplyDeductionOverride
+      ? (hasSupplyDeductionValueOverride ? 'Override' : 'Override OFF')
+      : supplyDeductionDefaultLabel;
+    return `
+      <div class="ff-services-staff-card" data-staff-id="${escapeHtml(staffId)}" style="padding:10px 12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.25;">${escapeHtml(getServiceStaffName(staff))}</div>
+            <div style="margin-top:2px;font-size:11px;color:#6b7280;">${enabled ? 'Available for this service' : 'Not available for this service'}</div>
+          </div>
+          <label class="staff-permission-toggle" style="flex:0 0 auto;">
+            <input type="checkbox" class="ff-services-staff-enabled" ${enabled ? 'checked' : ''}>
+            <span class="staff-permission-toggle-slider"></span>
+          </label>
+        </div>
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;margin-bottom:8px;">
+          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+          <span style="font-size:11px;color:#9ca3af;">Default ${ffTicketMoney(basePrice)}</span>
+        </div>
+        <div style="margin-bottom:8px;padding:8px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:#374151;">Supply Deduction</div>
+              <div style="font-size:11px;color:#9ca3af;margin-top:2px;">Deduct supplies before commission. No payroll calculation is applied yet.</div>
+            </div>
+            <label class="staff-permission-toggle" style="flex:0 0 auto;">
+              <input type="checkbox" class="ff-services-staff-supply-enabled" ${supplyDeductionEnabled ? 'checked' : ''}>
+              <span class="staff-permission-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="ff-services-staff-supply-fields" style="display:${supplyDeductionEnabled ? 'grid' : 'none'};grid-template-columns:100px minmax(110px,170px) minmax(110px,170px) auto;gap:8px;align-items:center;">
+            <div style="font-size:12px;color:#6b7280;">Deduction</div>
+            <select class="ff-services-staff-supply-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+              <option value="fixed" ${supplyDeductionType === 'fixed' ? 'selected' : ''}>Fixed Amount ($)</option>
+              <option value="percentage" ${supplyDeductionType === 'percentage' ? 'selected' : ''}>Percentage (%)</option>
+            </select>
+            <input type="number" min="0" step="0.01" class="ff-services-staff-supply-value" value="${escapeHtml(supplyDeductionValue)}" placeholder="${hasSupplyDeductionValueOverride ? '' : escapeHtml(supplyDeductionDefaultLabel)}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            <span style="font-size:11px;color:${hasSupplyDeductionOverride ? '#7c3aed' : '#9ca3af'};">${escapeHtml(supplyDeductionStatusLabel)}</span>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) minmax(70px,100px) auto;gap:8px;align-items:center;">
+          <div style="font-size:12px;color:#6b7280;">Commission</div>
+          <input type="number" min="0" step="0.01" class="ff-services-staff-commission-value" value="${escapeHtml(commissionValue)}" placeholder="${escapeHtml(commissionDefaultLabel)}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+          <select class="ff-services-staff-commission-type" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+            <option value="percentage" ${commissionType === 'percentage' ? 'selected' : ''}>%</option>
+            <option value="fixed" ${commissionType === 'fixed' ? 'selected' : ''}>$</option>
+          </select>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="ff-services-staff-save" style="width:auto;min-width:0;justify-self:start;padding:5px 10px;background:#7c3aed;color:#fff;border:1px solid #7c3aed;border-radius:999px;cursor:pointer;font-size:11px;font-weight:700;line-height:1.2;">Save</button>
+            <span style="font-size:11px;color:${hasCommissionOverride ? '#7c3aed' : '#9ca3af'};">${hasCommissionOverride ? 'Override' : escapeHtml(commissionDefaultLabel)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
+        <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:3px;">Staff</div>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage staff availability, staff-specific price, and commission for this service.</p>
+      </div>
+      ${cards}
+    </div>
+  `;
+}
+
+async function saveServiceStaffOverride(service, staffId, patch) {
+  if (!service || !service.id || !staffId) throw new Error('Missing service or staff');
+  const current = getServiceStaffOverrides(service);
+  const existing = current[staffId] && typeof current[staffId] === 'object' ? current[staffId] : {};
+  const next = { ...existing, ...(patch || {}) };
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  if (next.enabled === true) delete next.enabled;
+  if (next.price == null || next.price === '' || Number(next.price) === basePrice) delete next.price;
+  if (!next.commission || !Number.isFinite(Number(next.commission.value))) delete next.commission;
+  if (
+    !next.supplyDeduction ||
+    (next.supplyDeduction.enabled !== true && next.supplyDeduction.enabled !== false)
+  ) {
+    delete next.supplyDeduction;
+  } else if (next.supplyDeduction.enabled === false) {
+    next.supplyDeduction = { enabled: false };
+  } else if (!Number.isFinite(Number(next.supplyDeduction.value))) {
+    delete next.supplyDeduction;
+  } else {
+    next.supplyDeduction = {
+      enabled: true,
+      type: next.supplyDeduction.type === 'percentage' ? 'percentage' : 'fixed',
+      value: Number(next.supplyDeduction.value)
+    };
+  }
+  const nextOverrides = { ...current };
+  if (Object.keys(next).length) nextOverrides[staffId] = next;
+  else delete nextOverrides[staffId];
+
+  // IMPORTANT: updateDoc (not setDoc+merge). "Enabled" is represented by the
+  // ABSENCE of `enabled:false` in the per-staff map, and setDoc with
+  // { merge:true } merges nested maps recursively — it never deletes the stale
+  // `enabled:false` key on the server. Result: disabling stuck, re-enabling
+  // silently didn't persist (toggle reverted on reload, and the staff member's
+  // ticket picker stayed empty). updateDoc REPLACES the whole staffOverrides
+  // field with exactly what we computed.
+  if (service.isSharedService || _ffCatalogModalMode === 'shared') {
+    const accountId = getTicketsAccountId();
+    if (!accountId) throw new Error('No account');
+    await updateDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), {
+      staffOverrides: nextOverrides,
+      updatedAt: serverTimestamp()
+    });
+    const raw = _rawSharedServices.find((s) => String(s.id) === String(service.id));
+    if (raw) raw.staffOverrides = nextOverrides;
+  } else {
+    if (!currentUserProfile?.salonId) throw new Error('No salon');
+    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), {
+      staffOverrides: nextOverrides,
+      updatedAt: serverTimestamp()
+    });
+    const raw = _rawServices.find((s) => String(s.id) === String(service.id));
+    if (raw) raw.staffOverrides = nextOverrides;
+  }
+  service.staffOverrides = nextOverrides;
+  const live = salonServices.find((s) => String(s.id) === String(service.id));
+  if (live) live.staffOverrides = nextOverrides;
+}
+
+async function ffStaffServicesLoadForStaffMember() {
+  await loadServices();
+  _applyCatalogFilter();
+  return {
+    services: salonServices.slice(),
+    categories: serviceCategories.slice()
+  };
+}
+
+async function ffStaffServicesSaveOverrideForStaffMember(serviceId, staffId, patch) {
+  await loadServices();
+  const service = salonServices.find((s) => String(s.id) === String(serviceId));
+  if (!service) throw new Error('Service not found');
+  await saveServiceStaffOverride(service, staffId, patch);
+  return service;
+}
+
+function ffStaffServicesGetOverrideForStaffMember(service, staffId) {
+  const overrides = getServiceStaffOverrides(service);
+  return overrides && overrides[staffId] && typeof overrides[staffId] === 'object'
+    ? overrides[staffId]
+    : {};
+}
+
+function ffStaffServicesDefaultsForStaffMember(staff, service) {
+  return {
+    price: Number(service?.sharedDefaultPrice ?? service?.defaultPrice) || 0,
+    commission: getStaffDefaultServiceCommission(staff, getServiceStaffId(staff)),
+    supplyDeduction: getStaffDefaultSupplyDeduction(staff)
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.ffStaffServicesLoadForStaffMember = ffStaffServicesLoadForStaffMember;
+  window.ffStaffServicesSaveOverrideForStaffMember = ffStaffServicesSaveOverrideForStaffMember;
+  window.ffStaffServicesGetOverrideForStaffMember = ffStaffServicesGetOverrideForStaffMember;
+  window.ffStaffServicesDefaultsForStaffMember = ffStaffServicesDefaultsForStaffMember;
+  window.ffStaffServicesMoney = ffTicketMoney;
+  window.ffStaffServicesEscapeHtml = escapeHtml;
+}
+
+function wireServicesStaffTab(root, service) {
+  if (!root || !service || !service.id) return;
+  const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  root.querySelectorAll('.ff-services-staff-card').forEach((card) => {
+    const staffId = card.getAttribute('data-staff-id');
+    const enabledInput = card.querySelector('.ff-services-staff-enabled');
+    const priceInput = card.querySelector('.ff-services-staff-price');
+    const commissionValueInput = card.querySelector('.ff-services-staff-commission-value');
+    const commissionTypeInput = card.querySelector('.ff-services-staff-commission-type');
+    const supplyEnabledInput = card.querySelector('.ff-services-staff-supply-enabled');
+    const supplyFields = card.querySelector('.ff-services-staff-supply-fields');
+    const supplyTypeInput = card.querySelector('.ff-services-staff-supply-type');
+    const supplyValueInput = card.querySelector('.ff-services-staff-supply-value');
+    const saveBtn = card.querySelector('.ff-services-staff-save');
+    const staff = getServicesEligibleStaffRows(service).find((row) => getServiceStaffId(row) === staffId);
+    const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
+    const defaultSupplyDeduction = getStaffDefaultSupplyDeduction(staff);
+    const saveStaff = async () => {
+      if (!staffId) return;
+      const enabled = enabledInput ? enabledInput.checked : true;
+      const rawPrice = parseFloat(priceInput?.value);
+      const commissionValue = parseFloat(commissionValueInput?.value);
+      const supplyEnabled = supplyEnabledInput ? supplyEnabledInput.checked : false;
+      const supplyValue = parseFloat(supplyValueInput?.value);
+      const patch = {
+        enabled,
+        price: Number.isFinite(rawPrice) ? rawPrice : basePrice
+      };
+      if (Number.isFinite(commissionValue)) {
+        const commissionType = commissionTypeInput?.value === 'fixed' ? 'fixed' : 'percentage';
+        patch.commission = {
+          type: commissionType,
+          value: commissionValue
+        };
+        if (
+          defaultCommission &&
+          defaultCommission.type === commissionType &&
+          Number(defaultCommission.value) === commissionValue
+        ) {
+          patch.commission = null;
+        }
+      } else {
+        patch.commission = null;
+      }
+      if (supplyEnabled && Number.isFinite(supplyValue)) {
+        const supplyType = supplyTypeInput?.value === 'percentage' ? 'percentage' : 'fixed';
+        patch.supplyDeduction = {
+          enabled: true,
+          type: supplyType,
+          value: supplyValue
+        };
+        if (
+          defaultSupplyDeduction &&
+          defaultSupplyDeduction.type === supplyType &&
+          Number(defaultSupplyDeduction.value) === supplyValue
+        ) {
+          patch.supplyDeduction = null;
+        }
+      } else {
+        patch.supplyDeduction = defaultSupplyDeduction ? { enabled: false } : null;
+      }
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
       try {
-        await deleteService(id);
-        await loadServices();
-        renderServicesList();
-        showToast('Service deleted', 'success');
+        await saveServiceStaffOverride(service, staffId, patch);
+        const catalogData = _ffCatalogModalMode === 'shared'
+          ? getSharedServicesForCatalogManager()
+          : getLocationServicesForCatalogManager();
+        renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast('Staff settings updated', 'success');
+      } catch (e) {
+        showToast(e?.message || 'Failed', 'error');
+      } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+      }
+    };
+    if (supplyEnabledInput) {
+      supplyEnabledInput.addEventListener('change', () => {
+        if (supplyFields) supplyFields.style.display = supplyEnabledInput.checked ? 'grid' : 'none';
+      });
+    }
+    if (supplyTypeInput && supplyValueInput) {
+      supplyTypeInput.addEventListener('change', () => {
+        supplyValueInput.placeholder = supplyTypeInput.value === 'percentage' ? '15' : '30';
+      });
+    }
+    if (enabledInput) enabledInput.addEventListener('change', saveStaff);
+    if (saveBtn) {
+      saveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveStaff();
+      });
+    }
+  });
+}
+
+function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
+  _ffCloseAllPopovers();
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
+  const cat = catalogData.categories.find((c) => String(c.id) === String(catId));
+  if (!cat) return;
+  const pop = _ffBuildPopover(anchorBtn, [
+    { label: 'Delete Category', danger: true, onClick: async () => {
+      const count = (catalogData.services || []).filter((s) => String(s.categoryId) === String(catId)).length;
+      if (count > 0) {
+        showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
+        return;
+      }
+      const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
+      if (!ok) return;
+      try {
+        if (isSharedCatalog) {
+          await deleteSharedServiceCategory(cat.docId || catId);
+          await loadSharedCatalogForManager();
+        } else {
+          await deleteServiceCategory(catId);
+          await Promise.all([loadServiceCategories(), loadServices()]);
+        }
+        _ffSelectedCategoryId = null;
+        _ffOpenCats.delete(catId);
+        renderServicesCatalogV2();
+        showToast('Category deleted', 'success');
       } catch (e) {
         showToast(e?.message || 'Failed', 'error');
       }
+    }},
+  ]);
+  document.body.appendChild(pop);
+}
+
+/** Small popover menu for a category row. */
+function _ffShowCategoryMenu(anchorBtn, catId) {
+  _ffCloseAllPopovers();
+  if (!ffCanManageServices()) return;
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
+  const cat = catalogData.categories.find((c) => c.id === catId);
+  if (!cat) return;
+  if (isSharedCatalog) {
+    const pop = _ffBuildPopover(anchorBtn, [
+      { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'shared-category-edit', categoryId: catId }) },
+      { label: 'Delete category', danger: true, onClick: async () => {
+        const count = catalogData.services.filter((s) => s.categoryId === catId).length;
+        if (count > 0) {
+          showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
+          return;
+        }
+        const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
+        if (!ok) return;
+        try {
+          await deleteSharedServiceCategory(cat.docId || catId);
+          await loadSharedCatalogForManager();
+          _ffOpenCats.delete(catId);
+          renderServicesCatalogV2();
+          showToast('Category deleted', 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+      }},
+    ]);
+    document.body.appendChild(pop);
+    return;
+  }
+  const pop = _ffBuildPopover(anchorBtn, [
+    { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'category-edit', categoryId: catId }) },
+    { label: 'Delete category', danger: true, onClick: async () => {
+      const ok = await ticketConfirm(`Delete "${cat.name}"? Services inside must be moved first.`, 'Delete category');
+      if (!ok) return;
+      try {
+        await deleteServiceCategory(catId);
+        await Promise.all([loadServiceCategories(), loadServices()]);
+        _ffOpenCats.delete(catId);
+        renderServicesCatalogV2();
+    setupTicketsUI();
+        showToast('Category deleted', 'success');
+  } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+    }},
+  ]);
+  document.body.appendChild(pop);
+}
+
+/** Small popover menu for a service row. */
+function _ffShowServiceMenu(anchorBtn, svcId) {
+  _ffCloseAllPopovers();
+  if (!ffCanManageServices()) return;
+  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const svc = isSharedCatalog
+    ? getSharedServicesForCatalogManager().services.find((s) => s.id === svcId)
+    : salonServices.find((s) => s.id === svcId);
+  if (!svc) return;
+  const items = [
+    { label: 'Edit service', onClick: () => {
+      if (_ffIsServicesScreenRoot()) {
+        _ffSelectedServiceId = svcId;
+        _ffSelectedCategoryId = null;
+        _ffServicesInlineEditServiceId = svcId;
+        renderServicesCatalogV2();
+      } else {
+        _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-service-edit' : 'service-edit', serviceId: svcId });
+      }
+    } },
+  ];
+  if (isSharedCatalog) {
+    items.push({ label: 'Delete service', danger: true, onClick: async () => {
+      const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
+      if (!ok) return;
+      try {
+        await deleteSharedService(svcId);
+        if (_ffSelectedServiceId === svcId) _ffSelectedServiceId = null;
+        await loadSharedCatalogForManager();
+        renderServicesCatalogV2();
+        setupTicketsUI();
+        showToast('Service deleted', 'success');
+      } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+    }});
+    const pop = _ffBuildPopover(anchorBtn, items);
+    document.body.appendChild(pop);
+    return;
+  }
+  // Offer a "Move to…" shortcut for keyboards / touch devices where HTML5
+  // drag-and-drop isn't available. Only appears when there's somewhere
+  // meaningful to move to (another real category).
+  const otherCats = serviceCategories.filter((c) => c.id !== svc.categoryId);
+  if (otherCats.length > 0) {
+    items.push({ label: 'Move to category…', onClick: () => _ffShowMoveServicePicker(anchorBtn, svcId) });
+  }
+  items.push({ label: 'Delete service', danger: true, onClick: async () => {
+    const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
+    if (!ok) return;
+    try {
+      await deleteService(svcId);
+      await loadServices();
+      renderServicesCatalogV2();
+          setupTicketsUI();
+      showToast('Service deleted', 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+  }});
+  const pop = _ffBuildPopover(anchorBtn, items);
+  document.body.appendChild(pop);
+}
+
+/** Secondary popover: list of categories to move the service into. */
+function _ffShowMoveServicePicker(anchorBtn, svcId) {
+  _ffCloseAllPopovers();
+  const svc = salonServices.find((s) => s.id === svcId);
+  if (!svc) return;
+  const items = serviceCategories
+    .filter((c) => c.id !== svc.categoryId)
+    .map((c) => ({
+      label: c.name,
+      onClick: async () => {
+        try {
+          await _ffMoveServiceToCategoryEnd(svcId, c.id);
+          showToast(`Moved to "${c.name}"`, 'success');
+        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+      },
+    }));
+  if (items.length === 0) return;
+  const pop = _ffBuildPopover(anchorBtn, items);
+  document.body.appendChild(pop);
+}
+
+function _ffCloseAllPopovers() {
+  document.querySelectorAll('.ffcat-popover').forEach((el) => el.remove());
+}
+
+/** Creates a small floating popover anchored near `anchorBtn`. */
+function _ffBuildPopover(anchorBtn, items) {
+  const pop = document.createElement('div');
+  pop.className = 'ffcat-popover';
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${Math.max(8, rect.right - 160)}px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,0.12);padding:4px;min-width:160px;z-index:2147483500;`;
+  items.forEach(({ label, danger, onClick }) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.style.cssText = `display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:13px;color:${danger ? '#ef4444' : '#111'};border-radius:6px;`;
+    b.addEventListener('mouseenter', () => { b.style.background = danger ? '#fef2f2' : '#f3f4f6'; });
+    b.addEventListener('mouseleave', () => { b.style.background = 'none'; });
+    b.addEventListener('click', () => { _ffCloseAllPopovers(); onClick?.(); });
+    pop.appendChild(b);
+  });
+  // Auto-close on outside click (pop may be removed earlier — ignore stale listeners so nested menus work)
+  setTimeout(() => {
+    const off = (e) => {
+      if (!pop.isConnected) {
+        document.removeEventListener('mousedown', off, true);
+        return;
+      }
+      if (!pop.contains(e.target)) {
+        _ffCloseAllPopovers();
+        document.removeEventListener('mousedown', off, true);
+      }
     };
+    document.addEventListener('mousedown', off, true);
+  }, 0);
+  return pop;
+}
+
+// ---------- Drag-and-drop reordering ----------
+// Categories are reordered by dragging their header onto another header.
+// Services are reordered within a category by dragging one row onto another,
+// or moved across categories by dropping on another category's services or
+// directly on a category header (which appends the service to the end of
+// that category). Firestore writes update `sortOrder` for every sibling
+// affected; the onSnapshot subscription re-renders the UI.
+
+/** @type {{kind:'category'|'service', catId:string|null, svcId:string|null}|null} */
+let _ffDragSrc = null;
+let _ffDragHoverEl = null;
+
+function _ffClearDragHover() {
+  if (_ffDragHoverEl) {
+    _ffDragHoverEl.style.boxShadow = '';
+    _ffDragHoverEl.style.background = _ffDragHoverEl._ffPrevBg || '';
+    _ffDragHoverEl._ffPrevBg = undefined;
+    _ffDragHoverEl = null;
+  }
+}
+
+function _ffWireCatalogDragDrop(listEl) {
+  // The list is re-rendered on every snapshot, so wire once per render by
+  // attaching to the fresh listEl. No need for idempotence.
+  listEl.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('[data-drag-kind]');
+    if (!row) return;
+    _ffDragSrc = {
+      kind: row.getAttribute('data-drag-kind'),
+      catId: row.getAttribute('data-cat-id') || null,
+      svcId: row.getAttribute('data-svc-id') || null,
+    };
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      // Firefox needs data set for dragstart to actually begin.
+      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || _ffDragSrc.catId || '');
+    } catch (_) {}
+    row.style.opacity = '0.4';
+  });
+
+  listEl.addEventListener('dragend', (e) => {
+    const row = e.target.closest('[data-drag-kind]');
+    if (row) row.style.opacity = '';
+    _ffClearDragHover();
+    _ffDragSrc = null;
+  });
+
+  listEl.addEventListener('dragover', (e) => {
+    if (!_ffDragSrc) return;
+    let hl = null;
+    if (_ffDragSrc.kind === 'category') {
+      const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+      if (targetHead && targetHead.getAttribute('data-cat-id') !== _ffDragSrc.catId) {
+        hl = targetHead;
+      }
+    } else if (_ffDragSrc.kind === 'service') {
+      const targetSvc = e.target.closest('.ffsvc-row');
+      const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== _ffDragSrc.svcId) {
+        hl = targetSvc;
+      } else if (targetHead) {
+        hl = targetHead;
+      }
+    }
+    if (hl) {
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+      if (hl !== _ffDragHoverEl) {
+        _ffClearDragHover();
+        _ffDragHoverEl = hl;
+        if (hl.classList.contains('ffcat-head')) {
+          hl._ffPrevBg = hl.style.background;
+          hl.style.background = '#ede9fe';
+        } else {
+          // inset box-shadow avoids the layout jitter a real border would cause.
+          hl.style.boxShadow = 'inset 0 2px 0 0 #7c3aed';
+        }
+      }
+    } else if (_ffDragHoverEl) {
+      _ffClearDragHover();
+    }
+  });
+
+  listEl.addEventListener('drop', async (e) => {
+    if (!_ffDragSrc) return;
+    e.preventDefault();
+    const src = _ffDragSrc;
+    _ffClearDragHover();
+    _ffDragSrc = null;
+    try {
+      if (src.kind === 'category') {
+        const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+        const dstId = targetHead?.getAttribute('data-cat-id');
+        if (dstId && dstId !== src.catId) {
+          await _ffReorderCategoriesBefore(src.catId, dstId);
+        }
+      } else if (src.kind === 'service') {
+        const targetSvc = e.target.closest('.ffsvc-row');
+        const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
+        if (targetSvc && targetSvc.getAttribute('data-svc-id') !== src.svcId) {
+          const beforeSvcId = targetSvc.getAttribute('data-svc-id');
+          const targetCatId = targetSvc.getAttribute('data-cat-id');
+          await _ffReorderServiceBefore(src.svcId, beforeSvcId, targetCatId);
+        } else if (targetHead) {
+          const targetCatId = targetHead.getAttribute('data-cat-id');
+          await _ffMoveServiceToCategoryEnd(src.svcId, targetCatId);
+        }
+      }
+    } catch (err) {
+      console.error('[Tickets] Reorder failed', err);
+      showToast(err?.message || 'Reorder failed', 'error');
+    }
   });
 }
 
-async function saveServiceFromForm() {
-  const name = document.getElementById('serviceFormName').value.trim();
-  if (!name) { showToast('Enter service name', 'error'); return; }
-  const catSel = document.getElementById('serviceFormCategory');
-  const categoryId = (catSel?.value || '').trim() || null;
-  const defaultPrice = parseFloat(document.getElementById('serviceFormPrice').value) || 0;
-  const isEdit = !!editingServiceId;
+/** Move `srcId` so it lands immediately before `beforeId` in the category
+ *  order, then persist a fresh sortOrder (0,1,2,…) to every category. */
+async function _ffReorderCategoriesBefore(srcId, beforeId) {
+  const arr = [...serviceCategories];
+  const srcIdx = arr.findIndex(c => c.id === srcId);
+  if (srcIdx < 0) return;
+  const [moved] = arr.splice(srcIdx, 1);
+  const dstIdx = arr.findIndex(c => c.id === beforeId);
+  arr.splice(dstIdx >= 0 ? dstIdx : arr.length, 0, moved);
+  await Promise.all(arr.map((c, idx) => saveServiceCategory({ id: c.id, name: c.name, sortOrder: idx })));
+}
+
+/** Service reorder: insert `srcId` before `beforeSvcId` inside `targetCatId`
+ *  (same or different category from source). Rewrites sortOrder for every
+ *  service in the target bucket. If `targetCatId` is the virtual "Other"
+ *  bucket, bail out — it isn't a real category. */
+async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId) {
+  if (!targetCatId || targetCatId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === targetCatId && s.id !== srcId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const beforeIdx = siblings.findIndex(s => s.id === beforeSvcId);
+  siblings.splice(beforeIdx >= 0 ? beforeIdx : siblings.length, 0, src);
+  await Promise.all(siblings.map((s, idx) => saveService({
+    id: s.id,
+    name: s.name,
+    categoryId: targetCatId,
+    defaultPrice: s.defaultPrice || 0,
+    sortOrder: idx,
+  })));
+}
+
+/** Drop on a category header = move the service to the END of that category. */
+async function _ffMoveServiceToCategoryEnd(srcId, targetCatId) {
+  if (!targetCatId || targetCatId === '__other__') return;
+  const src = salonServices.find(s => s.id === srcId);
+  if (!src) return;
+  if (src.categoryId === targetCatId) return;
+  const siblings = salonServices
+    .filter(s => s.categoryId === targetCatId)
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const lastOrder = siblings.length > 0 ? (siblings[siblings.length - 1].sortOrder ?? siblings.length - 1) : -1;
+  await saveService({
+    id: src.id,
+    name: src.name,
+    categoryId: targetCatId,
+    defaultPrice: src.defaultPrice || 0,
+    sortOrder: lastOrder + 1,
+  });
+  _ffOpenCats.add(targetCatId);
+}
+
+// ---------- Shared mini editor modal (Add/Edit category or service) ----------
+
+/** Shape: { mode: 'category-add'|'category-edit'|'service-add'|'service-edit', categoryId?, serviceId? } */
+function _ffCatalogEditorOpen(opts) {
+  const mod = document.getElementById('servicesCatalogEditorModal');
+  if (!mod) return;
+  const title = document.getElementById('servicesCatalogEditorTitle');
+  const wrapCat = document.getElementById('servicesCatalogEditorCatWrap');
+  const wrapPrice = document.getElementById('servicesCatalogEditorPriceWrap');
+  const nameInp = document.getElementById('servicesCatalogEditorName');
+  const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
+  const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const activeWrap = document.getElementById('servicesCatalogEditorActiveWrap');
+  const activeInp = document.getElementById('servicesCatalogEditorActive');
+  const overrideWrap = document.getElementById('servicesCatalogOverrideWrap');
+  const overrideDefault = document.getElementById('servicesCatalogOverrideDefault');
+  const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
+  const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
+  const saveBtn = document.getElementById('servicesCatalogEditorSave');
+  if (!title || !nameInp || !saveBtn) return;
+
+  // Reset visibility + fields
+  wrapCat.style.display = 'none';
+  wrapPrice.style.display = 'none';
+  nameInp.value = '';
+  nameInp.placeholder = '';
+  priceInp.value = '';
+  catSel.innerHTML = '';
+  if (catSel) catSel.style.display = 'block';
+  if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
+  if (activeWrap) activeWrap.style.display = 'none';
+  if (activeInp) activeInp.checked = true;
+  if (overrideWrap) overrideWrap.style.display = 'none';
+  if (overrideDefault) overrideDefault.checked = true;
+  if (overrideCustom) overrideCustom.checked = false;
+  if (overridePriceInp) { overridePriceInp.style.display = 'none'; overridePriceInp.value = ''; }
+  saveBtn.disabled = false;
+  saveBtn.style.opacity = '1';
+
+  const ctx = { ...opts };
+
+  if (opts.mode === 'category-add' || opts.mode === 'shared-category-add') {
+    title.textContent = 'New category';
+    nameInp.placeholder = 'Category name (e.g. Manicure)';
+  } else if (opts.mode === 'category-edit' || opts.mode === 'shared-category-edit') {
+    const c = opts.mode === 'shared-category-edit'
+      ? getSharedServicesForCatalogManager().categories.find((x) => x.id === opts.categoryId)
+      : serviceCategories.find((x) => x.id === opts.categoryId);
+    if (!c) return;
+    title.textContent = 'Rename category';
+    nameInp.placeholder = 'Category name';
+    nameInp.value = c.name || '';
+    ctx.existing = c;
+  } else if (opts.mode === 'service-add' || opts.mode === 'service-edit' || opts.mode === 'shared-service-add' || opts.mode === 'shared-service-edit') {
+    const isSharedServiceMode = opts.mode === 'shared-service-add' || opts.mode === 'shared-service-edit';
+    title.textContent = opts.mode === 'service-add' || opts.mode === 'shared-service-add' ? 'New service' : 'Edit service';
+    nameInp.placeholder = 'Service name (e.g. Gel Full Set)';
+    wrapCat.style.display = 'block';
+    wrapPrice.style.display = 'block';
+    priceInp.placeholder = isSharedServiceMode ? `Default price (${ffTicketCurSym()})` : `Default price (${ffTicketCurSym()})`;
+    if (isSharedServiceMode) {
+      if (catSel) catSel.style.display = 'none';
+      if (catTextInp) {
+        catTextInp.style.display = 'block';
+        catTextInp.placeholder = 'Category (e.g. Manicure)';
+        catTextInp.value = opts.categoryName || '';
+      }
+      if (activeWrap) activeWrap.style.display = 'flex';
+      if (overrideWrap && opts.mode === 'shared-service-edit') overrideWrap.style.display = 'block';
+      const syncOverrideInput = () => {
+        if (!overridePriceInp) return;
+        overridePriceInp.style.display = overrideCustom?.checked ? 'block' : 'none';
+      };
+      if (overrideDefault) overrideDefault.onchange = syncOverrideInput;
+      if (overrideCustom) overrideCustom.onchange = syncOverrideInput;
+    } else {
+      // Populate category dropdown for the existing location fallback catalog.
+      let optsHtml = '';
+      serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
+      catSel.innerHTML = optsHtml;
+    }
+    if (opts.mode === 'service-edit' || opts.mode === 'shared-service-edit') {
+      const s = isSharedServiceMode
+        ? getSharedServicesForCatalogManager().services.find((x) => x.id === opts.serviceId)
+        : salonServices.find((x) => x.id === opts.serviceId);
+      if (!s) return;
+      if (isSharedServiceMode) console.log('[SharedServicesUI] editing shared service', { serviceId: s.id });
+      nameInp.value = s.name || '';
+      priceInp.value = isSharedServiceMode
+        ? (s.sharedDefaultPrice != null ? String(s.sharedDefaultPrice) : '')
+        : (s.defaultPrice != null ? String(s.defaultPrice) : '');
+      if (isSharedServiceMode) {
+        if (catTextInp) catTextInp.value = s.category || '';
+        if (activeInp) activeInp.checked = s.active !== false;
+        if (s.hasOverride) {
+          if (overrideCustom) overrideCustom.checked = true;
+          if (overrideDefault) overrideDefault.checked = false;
+          if (overridePriceInp) {
+            overridePriceInp.value = String(s.overridePrice ?? '');
+            overridePriceInp.style.display = 'block';
+          }
+        }
+      } else if (s.categoryId && serviceCategories.some((c) => c.id === s.categoryId)) {
+        catSel.value = s.categoryId;
+      }
+      ctx.existing = s;
+    } else if (!isSharedServiceMode) {
+      if (opts.categoryId && serviceCategories.some((c) => c.id === opts.categoryId)) {
+        catSel.value = opts.categoryId;
+      }
+    }
+  }
+
+  saveBtn.onclick = () => _ffCatalogEditorSubmit(ctx);
+  nameInp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); _ffCatalogEditorSubmit(ctx); } };
+  mod.style.display = 'flex';
+  setTimeout(() => { try { nameInp.focus(); nameInp.select(); } catch (_) {} }, 50);
+}
+
+function _ffCatalogEditorClose() {
+  const mod = document.getElementById('servicesCatalogEditorModal');
+  if (mod) mod.style.display = 'none';
+}
+
+async function _ffCatalogEditorSubmit(ctx) {
+  const nameInp = document.getElementById('servicesCatalogEditorName');
+  const catSel = document.getElementById('servicesCatalogEditorCategory');
+  const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
+  const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const activeInp = document.getElementById('servicesCatalogEditorActive');
+  const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
+  const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
+  const saveBtn = document.getElementById('servicesCatalogEditorSave');
+  const name = String(nameInp?.value || '').trim();
+  const flashErr = (el) => {
+    try {
+      const prev = el.style.borderColor;
+      el.style.borderColor = '#ef4444';
+      el.focus();
+      setTimeout(() => { el.style.borderColor = prev || '#e5e7eb'; }, 1400);
+    } catch (_) {}
+  };
+  if (!name) { flashErr(nameInp); return; }
+
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   try {
-    await saveService(editingServiceId ? { id: editingServiceId, name, categoryId, defaultPrice } : { name, categoryId, defaultPrice });
-    await loadServices();
-    renderServicesList();
-    const nameEl = document.getElementById('serviceFormName');
-    const catEl = document.getElementById('serviceFormCategory');
-    const priceEl = document.getElementById('serviceFormPrice');
-    if (nameEl) nameEl.value = '';
-    populateServiceCategoryDropdown(null);
-    if (priceEl) priceEl.value = '';
-    editingServiceId = null;
-    showToast(isEdit ? 'Updated' : 'Service added', 'success');
-    setupTicketsUI(); // refresh dropdown in ticket form
+    if (ctx.mode === 'category-add') {
+      await saveServiceCategory({ name, sortOrder: serviceCategories.length });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      showToast('Category added', 'success');
+    } else if (ctx.mode === 'category-edit') {
+      const c = ctx.existing;
+      await saveServiceCategory({ id: c.id, name, sortOrder: c.sortOrder });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      showToast('Updated', 'success');
+    } else if (ctx.mode === 'shared-category-add') {
+      const data = getSharedServicesForCatalogManager();
+      const categoryId = await saveSharedServiceCategory({ name, sortOrder: data.categories.length });
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(categoryId);
+      showToast('Category added', 'success');
+    } else if (ctx.mode === 'shared-category-edit') {
+      const c = ctx.existing;
+      const oldName = normalizeSharedCategoryName(c.name);
+      const newName = normalizeSharedCategoryName(name);
+      await saveSharedServiceCategory({ id: c.docId || c.id, name: newName, sortOrder: c.sortOrder });
+      if (oldName !== newName) {
+        const affected = _rawSharedServices.filter((s) => normalizeSharedCategoryName(s.category) === oldName);
+        await Promise.all(affected.map((s) => saveSharedService({
+          id: s.id,
+          name: s.name,
+          category: newName,
+          defaultPrice: s.defaultPrice,
+          active: s.active !== false,
+          sortOrder: s.sortOrder
+        })));
+      }
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(sharedCategoryId(newName));
+      showToast('Category updated', 'success');
+    } else if (ctx.mode === 'service-add') {
+      const categoryId = catSel?.value || null;
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      await saveService({ name, categoryId, defaultPrice });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      if (categoryId) _ffOpenCats.add(categoryId);
+      showToast('Service added', 'success');
+    } else if (ctx.mode === 'service-edit') {
+      const s = ctx.existing;
+      const categoryId = catSel?.value || null;
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder });
+      await Promise.all([loadServiceCategories(), loadServices()]);
+      if (categoryId) _ffOpenCats.add(categoryId);
+      showToast('Updated', 'success');
+    } else if (ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit') {
+      const s = ctx.existing || {};
+      const category = normalizeSharedCategoryName(catTextInp?.value || s.category || '');
+      const defaultPrice = parseFloat(priceInp?.value) || 0;
+      const overridePrice = parseFloat(overridePriceInp?.value);
+      if (ctx.mode === 'shared-service-edit' && overrideCustom?.checked && !Number.isFinite(overridePrice)) {
+        flashErr(overridePriceInp);
+        return;
+      }
+      const serviceId = await saveSharedService({
+        id: s.id,
+        name,
+        category,
+        defaultPrice,
+        active: activeInp ? activeInp.checked : true,
+        sortOrder: s.sortOrder
+      });
+      if (ctx.mode === 'shared-service-edit') {
+        if (overrideCustom?.checked) {
+          await saveSharedServiceOverride(serviceId, overridePrice);
+        } else {
+          await removeSharedServiceOverride(serviceId);
+        }
+      }
+      await loadSharedCatalogForManager();
+      _ffOpenCats.add(sharedCategoryId(category));
+      showToast(ctx.mode === 'shared-service-add' ? 'Service added' : 'Service updated', 'success');
+    }
+    _ffCatalogEditorClose();
+    renderServicesCatalogV2();
+    setupTicketsUI();
   } catch (e) {
     showToast(e?.message || 'Failed', 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
   }
+}
+
+/** Entry from header "+ Add Category" button. */
+function addServiceCategoryV2() {
+  if (!ffCanManageServices()) { if (typeof showToast === 'function') showToast('You do not have permission to manage services.', 'error'); return; }
+  _ffCatalogEditorOpen({ mode: _ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
+}
+
+/** Entry from header "+ Add Service" button. */
+function addSharedServiceV2() {
+  if (!ffCanManageServices()) { if (typeof showToast === 'function') showToast('You do not have permission to manage services.', 'error'); return; }
+  _ffCatalogEditorOpen({ mode: 'shared-service-add' });
 }
 
 // =====================
 // Navigation
 // =====================
 export function goToTickets() {
+  const _ticketsLoadState =
+    typeof window.ffStaffPermissionLoadState === 'function' ? window.ffStaffPermissionLoadState() : 'ready';
+  const _ticketsTrustPerm =
+    _ticketsLoadState === 'staff_loading' || _ticketsLoadState === 'staff_unresolved';
+  const _ticketsPermOk =
+    _ticketsTrustPerm ||
+    (typeof window.ffCurrentUserHasTicketsViewPermission === 'function' &&
+      window.ffCurrentUserHasTicketsViewPermission());
+  if (!_ticketsPermOk) {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    return;
+  }
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
@@ -1786,41 +7229,40 @@ export function goToTickets() {
   const mediaScreen = document.getElementById('mediaScreen');
   const trainingScreen = document.getElementById('trainingScreen');
   const scheduleScreen = document.getElementById('scheduleScreen');
+  const timeClockScreenTk = document.getElementById('timeClockScreen');
   const ticketsScreen = document.getElementById('ticketsScreen');
+  const servicesScreen = document.getElementById('servicesScreen');
 
   const manageQueueScreen = document.getElementById('manageQueueScreen');
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, manageQueueScreen].forEach(el => {
+  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, timeClockScreenTk, servicesScreen, manageQueueScreen].forEach(el => {
     if (el) el.style.display = 'none';
   });
   if (wrap) wrap.style.display = 'none';
 
-  const headerEl = document.querySelector('.header');
-  if (headerEl) {
-    document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
-  }
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') {
+      window.ffSyncShellHeaderInset();
+    } else {
+      const headerEl = document.querySelector('.header');
+      if (headerEl) {
+        document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
+      }
+    }
+  } catch (e) {}
 
   if (ticketsScreen) {
     ticketsScreen.style.display = 'flex';
-    ticketsScreen.classList.add('ff-tickets-boot');
+    ticketsScreen.style.setProperty('pointer-events', 'auto', 'important');
   }
 
-  // When any other nav button is clicked:
-  // 1. Hide tickets screen
-  // 2. Unsubscribe from tickets if NOT admin (badge not needed)
+  // When any other nav button is clicked, hide the screen but keep subscription alive
+  // so the red Tickets badge updates even while the user is in Queue/Tasks/Chat.
   const NAV_IDS = ['queueBtn','tasksBtn','chatBtn','inboxBtn','logBtn','appsBtn'];
   NAV_IDS.forEach(id => {
     const btn = document.getElementById(id);
     if (btn && !btn._ffTicketsHideHandler) {
       btn._ffTicketsHideHandler = () => {
         if (ticketsScreen) ticketsScreen.style.display = 'none';
-        // For non-admins: unsubscribe so the nav badge doesn't update
-        const { isPrimaryAdmin } = getTicketVisibility();
-        if (!isPrimaryAdmin && typeof ticketsUnsubscribe === 'function') {
-          ticketsUnsubscribe();
-          ticketsUnsubscribe = null;
-          currentTickets = [];
-        }
-        // Always enforce badge state
         updateTicketsNavBadge();
       };
       btn.addEventListener('click', btn._ffTicketsHideHandler, { capture: true });
@@ -1829,78 +7271,299 @@ export function goToTickets() {
 
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   const ticketsBtn = document.getElementById('ticketsBtn');
-  if (ticketsBtn) ticketsBtn.classList.add('active');
+  if (ticketsBtn && _ticketsPermOk) {
+    ticketsBtn.classList.add('active');
+  }
+  if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+  updateNewTicketButtonVisibility();
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+  } catch (e) {}
 
   if (_ticketsDataReady && currentUserProfile) {
-    // Data already cached — skip Firestore fetches, just re-subscribe and render
-    ticketsScreen.classList.remove('ff-tickets-boot');
-    setupTicketsUI().then(() => {
-      subscribeTickets({ resetLoading: true });
-      renderTicketsList();
-      updateTicketsNavBadge();
-    });
+    enrichTicketsProfileFromMemberDoc()
+      .then(() => {
+        subscribeTickets({ resetLoading: true });
+        renderTicketsList();
+        updateTicketsNavBadge();
+        return setupTicketsUI();
+      })
+      .then(() => loadTicketsMembersForAvatars())
+      .then(() => {
+        renderTicketsList();
+        updateTicketsNavBadge();
+      })
+      .catch((err) => {
+        console.error('[Tickets] setupTicketsUI failed', err);
+      });
   } else {
-    loadCurrentUserProfile().then(async () => {
-      await loadServiceCategories();
-      await loadServices();
-      await setupTicketsUI();
-      _ticketsDataReady = true;
-      subscribeTickets({ resetLoading: true });
-      loadTicketsMembersForAvatars().then(() => renderTicketsList());
-      updateTicketsNavBadge();
-    });
+    loadCurrentUserProfile()
+      .then(async () => {
+        await enrichTicketsProfileFromMemberDoc();
+        subscribeTickets({ resetLoading: true });
+        renderTicketsList();
+        updateTicketsNavBadge();
+        await loadServiceCategories();
+        await loadServices();
+        await setupTicketsUI();
+        _ticketsDataReady = true;
+        await loadTicketsMembersForAvatars();
+        renderTicketsList();
+        updateTicketsNavBadge();
+      })
+      .catch((err) => {
+        console.error('[Tickets] goToTickets init failed', err);
+      });
   }
 }
 
-const AS_IS_OPTION_VALUE = '__as_is__';
-const AS_IS_OPTION_LABEL = 'Services stay exactly as booked — no changes';
+export async function goToServices() {
+  if (!ffCanViewServices()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to view Services.', 'error');
+    return;
+  }
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
+  }
+  if (typeof window.closeStaffMembersModal === 'function') {
+    try { window.closeStaffMembersModal(); } catch (e) {}
+  }
 
-function doAsIsSelect() {
-  ticketFormAsIsMode = true;
-  document.getElementById('ticketLinesData').value = '[]';
-  document.getElementById('ticketPerformedList').innerHTML = '';
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock && asIsMsgText) {
-    asIsMsgText.textContent = 'Service matches system billing';
-    asIsMsgBlock.style.display = 'block';
-    if (asIsClearBtn) {
-      asIsClearBtn.style.display = 'inline-block';
-      asIsClearBtn.onclick = () => {
-        ticketFormAsIsMode = false;
-        asIsMsgBlock.style.display = 'none';
-        asIsClearBtn.style.display = 'none';
-      };
+  const servicesScreen = document.getElementById('servicesScreen');
+  if (!servicesScreen) return;
+
+  [
+    'owner-view',
+    'ticketsScreen',
+    'tasksScreen',
+    'chatScreen',
+    'inboxScreen',
+    'mediaScreen',
+    'inventoryScreen',
+    'trainingScreen',
+    'scheduleScreen',
+    'timeClockScreen',
+    'pointsAppScreen',
+    'userProfileScreen',
+    'myProfileScreen',
+    'manageQueueScreen',
+    'dashboardScreen',
+    'queueAnalyticsScreen',
+    'ticketsAnalyticsScreen',
+    'timeAnalyticsScreen',
+    'tasksAnalyticsScreen',
+    'historyScreen'
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.display = 'none';
+      el.style.pointerEvents = 'none';
     }
+  });
+  const joinBar = document.querySelector('.joinBar');
+  const wrap = document.querySelector('.wrap');
+  const queueControls = document.getElementById('queueControls');
+  [joinBar, wrap, queueControls].forEach((el) => {
+    if (el) el.style.display = 'none';
+  });
+
+  document.querySelectorAll('.btn-pill').forEach((b) => b.classList.remove('active'));
+  servicesScreen.style.display = 'block';
+  servicesScreen.style.pointerEvents = 'auto';
+  _ffEnsureCatalogEditorPortal();
+  _ffCatalogRenderRootId = 'servicesScreen';
+  _ffCatalogModalMode = 'shared';
+  _ffOpenCats.clear();
+  _ffCatalogRenderedOnce = false;
+  // Mobile: always open at the top level (the services list).
+  _ffSelectedServiceId = null;
+  _ffSelectedCategoryId = null;
+  _ffServicesMobileShowList();
+
+  try {
+    if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
+  } catch (e) {}
+
+  try {
+    await loadCurrentUserProfile();
+    await enrichTicketsProfileFromMemberDoc();
+    let sharedCatalog = await loadSharedCatalogForManager();
+    const backfillResult = await seedSharedServiceCatalogFromLocationCatalogIfEmpty();
+    if (backfillResult && backfillResult.seeded) {
+      sharedCatalog = await loadSharedCatalogForManager();
+      _ffCatalogModalMode = 'shared';
+    }
+    if (!sharedCatalog || ((sharedCatalog.services || []).length === 0 && (sharedCatalog.categories || []).length === 0)) {
+      _ffCatalogModalMode = 'location';
+      await loadLocationCatalogForManager();
+    }
+    renderServicesCatalogV2();
+  } catch (err) {
+    console.error('[Services] Failed opening Services screen', err);
+    if (typeof showToast === 'function') showToast('Service Catalog is still loading. Try again in a moment.', 'error');
   }
 }
+
+try {
+  window.__ffGoToTicketsReal = goToTickets;
+} catch (e) {}
 
 function doServiceSelect(svc) {
-  ticketFormAsIsMode = false;
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
   if (svc) addServiceToTicket(svc);
+}
+
+// =====================
+// Ticket service search (UI-only filter over the already-loaded catalog)
+// =====================
+// Filters the SAME salonServices / serviceCategories arrays the picker renders
+// from — no separate list, no duplication. Selecting a result goes through the
+// exact same doServiceSelect(svc) path as the normal category list, so pricing,
+// location overrides, taxes, fees and supply deductions are untouched.
+
+function ffTicketServiceSearchClear() {
+  const input = document.getElementById('ticketServiceSearchInput');
+  if (input) input.value = '';
+  ffRenderTicketServiceSearch();
+}
+
+function ffTicketServiceSearchSetVisible(show) {
+  const wrap = document.getElementById('ticketServiceSearchWrap');
+  if (wrap) wrap.style.display = show ? 'block' : 'none';
+}
+
+function ffRenderTicketServiceSearch() {
+  const catalog = document.getElementById('ticketServiceCatalogList');
+  const results = document.getElementById('ticketServiceSearchResults');
+  if (!catalog || !results) return;
+
+  const input = document.getElementById('ticketServiceSearchInput');
+  const query = input ? String(input.value || '').trim() : '';
+
+  // Empty query → restore the normal categories view exactly as-is.
+  if (!query) {
+    results.style.display = 'none';
+    results.innerHTML = '';
+    catalog.style.display = '';
+    return;
+  }
+
+  // Multi-word partial match, case-insensitive, against service name + category
+  // name ("gel mani" matches "Gel Manicure").
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const catNameById = new Map(serviceCategories.map((c) => [c.id, c.name]));
+  const matches = salonServices
+    .filter(isTicketPickerServiceAvailableForActiveLocation)
+    .filter((s) => {
+      const catLabel = catNameById.get(s.categoryId) || s.category || 'Other';
+      const hay = `${String(s.name || '')} ${String(catLabel)}`.toLowerCase();
+      return tokens.every((t) => hay.includes(t));
+    });
+
+  catalog.style.display = 'none';
+  results.style.display = 'block';
+
+  if (!matches.length) {
+    results.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services found</div>';
+    return;
+  }
+
+  results.innerHTML = matches.map((s) => {
+    const catLabel = catNameById.get(s.categoryId) || s.category || 'Other';
+    return `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(s.defaultPrice || 0)}</span><span style="display:block;font-size:10px;color:#9ca3af;">${escapeHtml(catLabel)}</span></button>`;
+  }).join('');
+
+  results.querySelectorAll('.ticket-service-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.getAttribute('data-id');
+      const svc = salonServices.find((x) => x.id === id);
+      doServiceSelect(svc);
+    };
+  });
+}
+
+function ffTicketServiceSearchWire() {
+  const input = document.getElementById('ticketServiceSearchInput');
+  if (!input || input._ffSearchWired) return;
+  input._ffSearchWired = true;
+  input.addEventListener('input', ffRenderTicketServiceSearch);
+}
+
+function updateNewTicketButtonVisibility() {
+  const newTicketBtn = document.getElementById('ticketsNewBtn');
+  if (!newTicketBtn) return;
+  if (!currentUserProfile) {
+    newTicketBtn.style.display = 'none';
+    return;
+  }
+  const staff = _ticketsCurrentStaffRow();
+  if (staff) {
+    newTicketBtn.style.display = canStaffSendNewTicket(staff) ? 'inline-flex' : 'none';
+    return;
+  }
+  // Fallback only when the salon staff row is not hydrated yet.
+  const profileRole = (currentUserProfile?.role || '').toLowerCase();
+  newTicketBtn.style.display = ['owner', 'admin', 'manager'].includes(profileRole) ? 'none' : 'inline-flex';
+}
+
+function ensureTicketsBackgroundSubscription(attempt = 0) {
+  if (!currentUserProfile) return;
+  if (getActiveTicketsSalonId()) {
+    subscribeTickets();
+    return;
+  }
+  const loadState =
+    typeof window.ffStaffPermissionLoadState === 'function' ? window.ffStaffPermissionLoadState() : 'ready';
+  if (loadState === 'staff_loading' && attempt < 10) {
+    setTimeout(() => ensureTicketsBackgroundSubscription(attempt + 1), 1000);
+  }
 }
 
 async function setupTicketsUI() {
   const container = document.getElementById('ticketServicePickerContainer');
   if (!container) return;
+  try { subscribeProductsCatalog(); } catch (_) {}
   const grouped = getServicesGroupedByCategory();
-  let html = `<div style="padding:6px 8px;background:#f0fdf4;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#166534;cursor:pointer;" onclick="window.ffDoAsIsSelect && window.ffDoAsIsSelect()">✓ ${AS_IS_OPTION_LABEL}</div>`;
+  const groupedProducts = getProductsGroupedByCategory();
+  const hasServices = Object.keys(grouped).length > 0;
+  const hasProducts = Object.keys(groupedProducts).length > 0;
+  let html = '';
+  if (!hasServices && !hasProducts) {
+    container.innerHTML = '<div style="padding:10px 8px;color:#6b7280;font-size:12px;">No services or products available for this location.</div>';
+    ffTicketServiceSearchSetVisible(false);
+    return;
+  }
+  // Mirror the picker: if a catalog snapshot rebuilds the list while the modal
+  // shows a read-only ticket (picker hidden), keep the search hidden too.
+  ffTicketServiceSearchSetVisible(container.style.display !== 'none');
   Object.entries(grouped).forEach(([key, data], idx) => {
     const label = escapeHtml(data.label || 'Other');
     html += `<div class="ticket-category-section" data-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
     html += `<div class="ticket-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;user-select:none;font-size:11px;font-weight:600;color:#374151;background:#f9fafb;"><span class="ticket-cat-arrow" style="font-size:9px;color:#6b7280;">▶</span><span>${label}</span></div>`;
     html += `<div class="ticket-category-body" style="display:none;padding:4px 8px 8px 16px;background:#fff;">`;
     (data.services || []).forEach((s) => {
-      html += `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">$${(s.defaultPrice || 0).toFixed(2)}</span></button>`;
+      html += `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(s.defaultPrice || 0)}</span></button>`;
     });
     html += '</div></div>';
   });
-  container.innerHTML = html;
+  if (hasProducts) {
+    html += `<div style="padding:6px 8px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#9ca3af;background:#f3f4f6;border-bottom:1px solid #e5e7eb;">Products</div>`;
+    Object.entries(groupedProducts).forEach(([key, data], idx) => {
+      const label = escapeHtml(data.label || 'Other');
+      html += `<div class="ticket-category-section" data-prod-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
+      html += `<div class="ticket-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;user-select:none;font-size:11px;font-weight:600;color:#374151;background:#f9fafb;"><span class="ticket-cat-arrow" style="font-size:9px;color:#6b7280;">▶</span><span>${label}</span></div>`;
+      html += `<div class="ticket-category-body" style="display:none;padding:4px 8px 8px 16px;background:#fff;">`;
+      (data.products || []).forEach((p) => {
+        html += `<button type="button" class="ticket-product-btn" data-id="${p.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(p.name)} <span style="color:#6b7280;font-size:11px;">${ffTicketMoney(getTicketPriceForProductAndActiveLocation(p))}</span></button>`;
+      });
+      html += '</div></div>';
+    });
+  }
+  // Wrap the normal categories view so the search can toggle it without
+  // touching its content; results render into a sibling div inside the same
+  // scrollable container.
+  container.innerHTML = `<div id="ticketServiceCatalogList">${html}</div><div id="ticketServiceSearchResults" style="display:none;padding:4px 8px;background:#fff;"></div>`;
+  ffTicketServiceSearchWire();
+  ffRenderTicketServiceSearch();
   container.querySelectorAll('.ticket-service-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
@@ -1908,7 +7571,13 @@ async function setupTicketsUI() {
       doServiceSelect(svc);
     };
   });
-  window.ffDoAsIsSelect = doAsIsSelect;
+  container.querySelectorAll('.ticket-product-btn').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.getAttribute('data-id');
+      const prod = salonProducts.find((x) => x.id === id);
+      if (prod) addProductToTicket(prod);
+    };
+  });
   container.querySelectorAll('.ticket-category-header').forEach((header) => {
     header.onclick = () => {
       const section = header.closest('.ticket-category-section');
@@ -1922,65 +7591,124 @@ async function setupTicketsUI() {
   });
   const manageServicesBtn = document.getElementById('ticketsManageServicesBtn');
   if (manageServicesBtn) {
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const canManage = ['admin', 'owner', 'manager'].includes(profileRole);
-    manageServicesBtn.style.display = canManage ? 'flex' : 'none';
-    manageServicesBtn.onclick = openServicesModal;
-    if (canManage) {
-      // Align gear precisely under user avatar on any screen/DPI
-      requestAnimationFrame(() => _alignGearToAvatar());
-    }
+    // Services are now managed from the dedicated Services module (Apps → Services).
+    // Hide the legacy gear shortcut on the Tickets screen to avoid two entry points.
+    manageServicesBtn.style.display = 'none';
+    manageServicesBtn.onclick = null;
   }
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrOwner = currentUserProfile && (role === 'owner' || role === 'admin');
-    archivedTab.style.display = isAdminOrOwner ? 'inline-block' : 'none';
-  }
-  const newTicketBtn = document.getElementById('ticketsNewBtn');
-  if (newTicketBtn) {
-    // Hide for admin/manager/owner based on FIRESTORE profile role
-    // (not PIN actor — the logged-in Firebase user determines this)
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-    newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-block';
-  }
+  updateTicketsTabsVisibility();
+  updateNewTicketButtonVisibility();
 }
 
 // =====================
 // Init
 // =====================
 export function initTickets() {
+  setupTicketsDateFilters();
   document.querySelectorAll('.tickets-tab').forEach(btn => {
     btn.onclick = () => setTicketsTab(btn.getAttribute('data-tab'));
   });
+  ffTicketsBulkInit();
   const newBtn = document.getElementById('ticketsNewBtn');
   if (newBtn) newBtn.onclick = () => openTicketModal();
   window.goToTickets = goToTickets;
-  window.doSendAsIsTicket = doSendAsIsTicket;
-  window.doSendAsIsFromModal = doSendAsIsFromModal;
+  window.goToServices = goToServices;
   window.closeTicketModal = closeTicketModal;
   window.closeTicketDetailsModal = closeTicketDetailsModal;
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
-  window.saveServiceFromForm = saveServiceFromForm;
-  window.addServiceCategory = addServiceCategory;
+  window.openServicesModal = openServicesModal;
+  window.renderServicesCatalogV2 = renderServicesCatalogV2;
+  window.addServiceCategoryV2 = addServiceCategoryV2;
+  window.addSharedServiceV2 = addSharedServiceV2;
+  window.ffCloseCatalogEditor = _ffCatalogEditorClose;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
+  window.ffRefreshTicketsTabVisibility = () => {
+    updateTicketsTabsVisibility();
+    ensureTicketsBackgroundSubscription();
+    const ts = document.getElementById('ticketsScreen');
+    if (ts && ts.style.display !== 'none' && ts.style.display !== '') {
+      renderTicketsList();
+    }
+  };
 
-  // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)
-  // This shows the badge in real-time even when not on the Tickets screen
+  const loadMoreBtn = document.getElementById('ticketsLoadMoreBtn');
+  if (loadMoreBtn && !loadMoreBtn._ffTicketsLoadMoreWired) {
+    loadMoreBtn._ffTicketsLoadMoreWired = true;
+    loadMoreBtn.onclick = () => void loadMoreTicketsOlder();
+  }
+
+  // Re-render Tickets list, summary and badge whenever the active branch
+  // switches. The underlying Firestore subscription stays the same (we
+  // don't want to rebuild/refetch), only the client-side visibility gate
+  // (canSeeTicket + summaryDocMatchesLocation) changes.
+  if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
+    window.__ffTicketsLocationListenerBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      if (ticketsUnsubscribe) { try { ticketsUnsubscribe(); } catch (_) {} ticketsUnsubscribe = null; }
+      resetTicketsRuntimeCache();
+      if (typeof subscribeTickets === 'function') subscribeTickets({ resetLoading: true });
+      try { renderTicketsList(); } catch (_) {}
+      try { updateTicketsNavBadge(); } catch (_) {}
+      try {
+        if (currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
+          loadAndRenderTicketsSummary();
+        }
+      } catch (_) {}
+      // Service Catalog is per-branch. The raw caches already hold every
+      // doc for the salon — re-apply the filter against the new active
+      // branch (no Firestore roundtrip), then refresh anything on screen.
+      try {
+        const refreshCatalogForLocation = async () => {
+          if (_catalogSource === 'shared') {
+            await loadSharedServiceOverrides(getTicketsAccountId(), getActiveLocationIdForTickets());
+          }
+          _applyCatalogFilter();
+          setupTicketsUI();
+          if (_ffCatalogModalMode === 'shared') {
+            await loadSharedCatalogForManager();
+          }
+          const modal = document.getElementById('servicesModal');
+          const servicesScreen = document.getElementById('servicesScreen');
+          if ((modal && modal.style.display !== 'none' && modal.style.display !== '') ||
+              (servicesScreen && servicesScreen.style.display !== 'none' && servicesScreen.style.display !== '')) {
+            _ffOpenCats.clear();
+            _ffCatalogRenderedOnce = false;
+            renderServicesCatalogV2();
+          }
+        };
+        refreshCatalogForLocation().catch((e) => console.warn('[SharedServices] location refresh failed', e));
+      } catch (_) {}
+    });
+  }
+
+  // Staff permissions hydrate asynchronously: the staff store can finish loading
+  // (or change) AFTER the Tickets screen is already visible. Without this, the
+  // + New button stays stuck on the role-only fallback and ignores the
+  // "Can send new ticket" toggle. Re-evaluate it (and tab visibility) on every
+  // staff-store update so the permission-driven state is always correct.
+  if (typeof document !== 'undefined' && !window.__ffTicketsStaffListenerBound) {
+    window.__ffTicketsStaffListenerBound = true;
+    document.addEventListener('ff-staff-cloud-updated', function () {
+      try { updateNewTicketButtonVisibility(); } catch (_) {}
+      try { updateTicketsTabsVisibility(); } catch (_) {}
+    });
+  }
+
+  // Background subscription for badge: start as soon as the user can access Tickets,
+  // so new READY tickets show on the nav even before opening the Tickets module.
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
     setTimeout(() => {
       loadCurrentUserProfile().then(() => {
-        const profileRole = (currentUserProfile?.role || '').toLowerCase();
-        const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-        if (isFirebaseAdmin) {
-          subscribeTickets(); // real-time badge for admin/manager
-        }
+        ensureTicketsBackgroundSubscription();
       }).catch(() => {});
     }, 1000);
   });
+
+  try {
+    updateTicketsTabsVisibility();
+  } catch (_) {}
 
   console.log('[Tickets] Initialized');
 }

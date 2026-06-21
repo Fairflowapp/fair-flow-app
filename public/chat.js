@@ -1,7 +1,8 @@
 /**
  * Chat Module — Structured Messages System
  * WhatsApp-style Thread List → Conversation View
- * Messages sent via Admin-defined templates only (no free text).
+ * Messages are normally sent via admin-defined templates/flows; staff with
+ * permissions.chat_free_text (or owner/admin session) may type freely.
  *
  * Firestore:
  *   salons/{salonId}/chatTemplates/{templateId}
@@ -18,41 +19,588 @@ import {
   onSnapshot, serverTimestamp, arrayUnion
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js";
+import {
+  addFlowOptionAt,
+  addFlowOptionByStepId,
+  addFlowStep,
+  addFlowStepAndLinkAt,
+  addFlowStepAndLinkByStepId,
+  collectFlowStepsFromDom,
+  ensureFlowDraft,
+  removeFlowOptionAt,
+  removeFlowOptionByStepId,
+  removeFlowStepAt,
+  removeFlowStepById,
+  unlinkFlowOption
+} from "./flow-builder.js";
+
+// Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
+// window level in capture phase to beat any other handler that might
+// stopPropagation. Idempotent.
+if (typeof document !== 'undefined' && !window.__ff_chatSendBtnDelegated) {
+  window.__ff_chatSendBtnDelegated = true;
+  window.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest && ev.target.closest('#chatSendBtn');
+    if (!btn) return;
+    if (typeof window.openSendMessageModal === 'function') {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] delegated openSendMessageModal threw', e); }
+    }
+  }, true);
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let chatUserProfile    = null;
 let chatTemplates      = [];
-let chatFlows          = [];     // { id, title, allowedSenders, startStepId, steps: [{id,prompt,order,options:[{id,label,nextStepId,finish}]}] }
+let chatFlows          = [];     // { id, title, category, allowedSenders, startStepId, steps: [...] }
 let chatSalonUsers     = [];
+/** Set true after first `loadChatSalonUsers` completes (success or empty). Used to show "Loading..." until members exist. */
+let _chatMembersLoaded = false;
+const CHAT_NAME_LOADING = 'Loading...';
 let chatConvsUnsub     = null;
 let _chatInitialized   = false;  // cache flag — skip re-fetching on repeat visits
+let _chatUsersLoadKey = '';
+let _chatTemplatesLoadKey = '';
+let _chatFlowsLoadKey = '';
+let _chatUsersLoadPromise = null;
+let _chatTemplatesLoadPromise = null;
+let _chatFlowsLoadPromise = null;
+let _chatSendModalOpening = false;
 let chatMsgsUnsub      = null;
 let chatBadgeUnsub     = null;
 let chatToastUnsub     = null;
+/** Perf: Chat screen open → first thread list paint (see [ChatBadgePerf] logs). */
+let _chatBadgePerfOpenMs = 0;
+let _chatBadgePerfRenderLogged = false;
+let _chatConvFirstSnapLogged = false;
+
+function _chatOrderValue(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _chatSortByOrder(items = []) {
+  return [...items].sort((a, b) =>
+    _chatOrderValue(a?.order, 0) - _chatOrderValue(b?.order, 0)
+  );
+}
+
+function _chatCategoryValue(value) {
+  return String(value || '').trim().slice(0, 40);
+}
+
+function _chatCategoryLabel(value) {
+  return _chatCategoryValue(value) || 'Uncategorized';
+}
+
+function _chatKnownCategories() {
+  const names = new Map();
+  [...chatTemplates, ...chatFlows].forEach(item => {
+    const category = _chatCategoryValue(item?.category);
+    if (!category) return;
+    names.set(category.toLowerCase(), category);
+  });
+  return [...names.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function _chatRefreshCategorySuggestions() {
+  const list = document.getElementById('chatCategorySuggestions');
+  if (!list) return;
+  list.innerHTML = _chatKnownCategories()
+    .map(category => `<option value="${escHtml(category)}"></option>`)
+    .join('');
+}
+
+function _chatGroupByCategory(items = []) {
+  const groups = new Map();
+  items.forEach(item => {
+    const label = _chatCategoryLabel(item?.category);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(item);
+  });
+  return [...groups.entries()].sort(([a], [b]) => {
+    if (a === 'Uncategorized') return 1;
+    if (b === 'Uncategorized') return -1;
+    return a.localeCompare(b);
+  });
+}
+
+window._chatToggleSendCategory = function(categoryIdx) {
+  const section = document.querySelector(`[data-chat-send-category="${String(categoryIdx)}"]`);
+  if (!section) return;
+  const items = section.querySelector('.chat-category-section-items');
+  const arrow = section.querySelector('.chat-send-category-arrow');
+  const isOpen = items && items.style.display !== 'none';
+  if (items) items.style.display = isOpen ? 'none' : 'flex';
+  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+};
+let _chatNavBadgeFirstSnapLogged = false;
+let _chatNavBadgeRenderDoneLogged = false;
 let chatEditingTmplId  = null;
 let chatEditingFlowId  = null;
 let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
 let chatReplyContext   = null;   // { uid, name, conversationId }
 let allConversations   = [];     // kept in sync by onSnapshot
+// Live Desk reads the most recent conversations for its Chat card.
+// Returns the FULL conversation objects so the Live card can render the exact
+// same thread card as the Chat module (avatars, name, time, preview, unread).
+if (typeof window !== 'undefined') {
+  window.ffGetRecentConversations = function (limitN) {
+    var n = Number(limitN) > 0 ? Number(limitN) : 8;
+    var arr = Array.isArray(allConversations) ? allConversations.slice() : [];
+    arr.sort(function (a, b) {
+      var am = (a && (a.lastMessageAtMs || (a.lastMessageAt && a.lastMessageAt.toMillis && a.lastMessageAt.toMillis()))) || 0;
+      var bm = (b && (b.lastMessageAtMs || (b.lastMessageAt && b.lastMessageAt.toMillis && b.lastMessageAt.toMillis()))) || 0;
+      return bm - am;
+    });
+    return arr.slice(0, n);
+  };
+  // Build a single chat thread card with the EXACT same look as the Chat module.
+  window.ffRenderChatThreadCardHTML = function (conv) {
+    try { return conv ? ffBuildChatThreadCardHTML(conv, { forLive: true }) : ''; }
+    catch (_) { return ''; }
+  };
+  // Open a conversation from the Live Desk: switch to the Chat screen and open the thread.
+  window.ffOpenChatConversation = async function (convId) {
+    if (!convId) return;
+    try { if (typeof goToChat === 'function') await goToChat(); } catch (_) {}
+    try { if (typeof window._openThread === 'function') window._openThread(convId); } catch (_) {}
+  };
+}
+
+// Shared thread-card builder used by both the Chat module list and the Live Desk
+// so the two always look identical.
+function ffBuildChatThreadCardHTML(conv, opts) {
+  opts = opts || {};
+  const forLive = !!opts.forLive;
+  const uid = (opts.uid != null && opts.uid !== '') ? opts.uid : (chatUserProfile?.uid || '');
+  const convId = conv.id;
+  const otherUid = _otherUidFromParticipants(conv.participants, uid);
+  const otherName = _nameForUid(otherUid) || 'Unknown';
+  const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
+  const myInitial = (_trimStr(chatUserProfile?.displayName) || _trimStr(chatUserProfile?.name) || '?').charAt(0).toUpperCase();
+  const otherInitial = otherName.charAt(0).toUpperCase();
+  const myAvatarUrl = _avatarUrlForUid(uid);
+  const otherAvatarUrl = _avatarUrlForUid(otherUid);
+  const myAvatarHtml = myAvatarUrl
+    ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+    : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
+  const otherAvatarHtml = otherAvatarUrl
+    ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+    : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
+  const selected = (!forLive && typeof currentConvId !== 'undefined' && currentConvId === convId) ? 'is-selected' : '';
+  const onclickAttr = forLive ? '' : ` onclick="window._openThread('${escHtml(convId)}', this)"`;
+  return `
+      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
+           data-conv-id="${escHtml(convId)}"
+           data-other-uid="${escHtml(otherUid)}"
+           data-other-name="${escHtml(otherName)}"${onclickAttr}>
+        <div class="ctc-avatars">
+          ${myAvatarHtml}
+          ${otherAvatarHtml}
+        </div>
+        <div class="ctc-body">
+          <div class="ctc-top">
+            <span class="ctc-name">${escHtml(otherName)}</span>
+            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
+          </div>
+          <div class="ctc-preview">
+            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
+            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
+          </div>
+        </div>
+        ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
+      </div>
+    `;
+}
+let lastNonEmptyConversations = [];
+let lastRenderedConversations = [];
+let lastRenderedThreadListHtml = '';
+let cachedConversationsById = {};
+let currentThreadFallback = null;
+let chatMessagesLoading = false;
 let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
 let currentConvId      = null;   // currently open thread
-let chatSendMode       = 'template';
+let chatSendMode       = 'template'; // 'template' | 'flow' (free text uses textarea, not this flag)
 let chatSelectedFlow   = null;
 let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, label }]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
 const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
-const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
-const buildConvId = (a, b) => [a, b].sort().join('__');
 
+/**
+ * Match users/{uid}.role to chat template/flow allowedSenders (checkbox values are
+ * technician | manager | admin). Owners are excluded unless we map owner↔admin.
+ */
+function _chatNormalizeUserRoleForSenders(role) {
+  const r = (role || '').toLowerCase();
+  if (r === 'staff') return 'technician';
+  return r;
+}
+
+function _chatExpandedRolesForAllowedToken(token) {
+  const t = String(token || '').toLowerCase().trim();
+  const set = new Set([t]);
+  if (t === 'owner') set.add('admin');
+  if (t === 'admin') set.add('owner');
+  if (t === 'manager') {
+    set.add('front_desk');
+    set.add('assistant_manager');
+  }
+  if (t === 'front_desk' || t === 'assistant_manager') set.add('manager');
+  return set;
+}
+
+function _chatUserMatchesAllowedSenders(userRole, allowedSenders) {
+  if (!Array.isArray(allowedSenders) || allowedSenders.length === 0) return true;
+  const ur = _chatNormalizeUserRoleForSenders(userRole);
+  return allowedSenders.some(tok => _chatExpandedRolesForAllowedToken(tok).has(ur));
+}
+const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const escapeAttr = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+/** Plain text with https URLs → safe HTML with clickable links (expiry reminders, etc.). */
+function linkifyMessageHtml(raw) {
+  const s = String(raw ?? '');
+  const parts = s.split(/(https?:\/\/[^\s]+)/g);
+  return parts.map(p => {
+    if (/^https?:\/\//.test(p)) {
+      const href = escapeAttr(p);
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;word-break:break-all;">${escHtml(p)}</a>`;
+    }
+    return escHtml(p);
+  }).join('');
+}
+const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
+
+// ─── Location helpers (per-location chat isolation) ────────────────────────────
+/**
+ * Resolve the currently active location id from the header switcher.
+ * Returns the trimmed location id string, or "" when nothing is active
+ * (single-location salon, or locations not loaded yet).
+ */
+function _readActiveLocationId() {
+  if (typeof window === 'undefined') return '';
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  const raw = typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+  return raw || '';
+}
+
+/** Normalized key used to scope conversations: "default" when no active location. */
+const CHAT_DEFAULT_LOC_KEY = 'default';
+function _activeLocKey() {
+  const raw = _readActiveLocationId();
+  return raw ? raw : CHAT_DEFAULT_LOC_KEY;
+}
+
+/**
+ * Branch key for filtering conversations, badge, and toasts.
+ * When Queue shows "not linked to a staff profile" (staff_unresolved), the
+ * location switcher may still hold a stale `ff_active_location_id` — then
+ * scoping chat to that id hides all legacy/default-branch DMs.
+ */
+function _chatEffectiveLocKey() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffCurrentUserSalonOwnerPermissionBypass === 'function' && w.ffCurrentUserSalonOwnerPermissionBypass()) {
+      return _activeLocKey();
+    }
+    if (typeof w.ffStaffPermissionLoadState === 'function' && w.ffStaffPermissionLoadState() === 'staff_unresolved') {
+      return CHAT_DEFAULT_LOC_KEY;
+    }
+  } catch (_) {}
+  return _activeLocKey();
+}
+/**
+ * Derive the location from a conversation document ID.
+ *
+ * `buildConvId` encodes location into the ID itself:
+ *   - default location → `{uidA}__{uidB}`
+ *   - other location  → `loc_{locKey}__{uidA}__{uidB}`
+ *
+ * The ID is set at document creation and never mutates, so it is the
+ * authoritative signal for which location the conversation belongs to.
+ */
+function _convLocKeyFromId(id) {
+  const s = String(id || '');
+  if (s.startsWith('loc_')) {
+    const sep = s.indexOf('__', 4);
+    if (sep > 4) return s.substring(4, sep);
+  }
+  return CHAT_DEFAULT_LOC_KEY;
+}
+/**
+ * Resolve the location a conversation doc belongs to.
+ *
+ * Prefers the ID prefix for newer location-scoped conversations. Legacy
+ * conversation IDs have no prefix, so if Firestore has a locationId field,
+ * use that instead of treating them as permanently "default".
+ */
+function _convLocKey(conv) {
+  if (!conv || typeof conv !== 'object') return CHAT_DEFAULT_LOC_KEY;
+  const v = typeof conv.locationId === 'string' ? conv.locationId.trim() : '';
+  if (conv.id && String(conv.id).startsWith('loc_')) return _convLocKeyFromId(conv.id);
+  if (v) return v;
+  if (conv.id) return _convLocKeyFromId(conv.id);
+  return v ? v : CHAT_DEFAULT_LOC_KEY;
+}
+/** True when a conversation doc belongs to the given location key. */
+function _convMatchesLocation(conv, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  const convKey = _convLocKey(conv);
+  if (convKey === k) return true;
+  // Legacy / salon-default DMs (branch "default") stay visible at any location the
+  // user is allowed to work in — not only primary. Otherwise after staff + location
+  // hydrate (~1s after load) the nav badge recomputes with a concrete location id
+  // and incorrectly drops to 0 while the thread list still shows unread.
+  if (convKey === CHAT_DEFAULT_LOC_KEY && k !== CHAT_DEFAULT_LOC_KEY) {
+    try {
+      const w = typeof window !== 'undefined' ? window : {};
+      if (typeof w.ffGetUserAllowedLocations === 'function') {
+        const locs = w.ffGetUserAllowedLocations();
+        if (Array.isArray(locs) && locs.some((loc) => loc && String(loc.id || '').trim() === k)) {
+          return true;
+        }
+      }
+      if (typeof w.ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        const row = w.ffResolveCurrentStaffRowFromFfStaffV1();
+        if (row && typeof w.ffEnsureStaffLocationFields === 'function') {
+          const f = w.ffEnsureStaffLocationFields(row);
+          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+          if (primary && primary === k) return true;
+          const allowed = Array.isArray(f.allowedLocationIds) ? f.allowedLocationIds : [];
+          if (allowed.some((id) => String(id || '').trim() === k)) return true;
+        }
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+/**
+ * True when a salon-scoped item (chat template, flow, …) belongs to the
+ * active location. Items without a `locationId` field are treated as
+ * belonging to the "default" (primary) location so legacy data stays
+ * visible where it originally lived.
+ */
+function _itemMatchesLocation(item, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  if (!item || typeof item !== 'object') return k === CHAT_DEFAULT_LOC_KEY;
+  const v = typeof item.locationId === 'string' ? item.locationId.trim() : '';
+  return (v || CHAT_DEFAULT_LOC_KEY) === k;
+}
+
+function getChatAccountId() {
+  const candidates = [
+    chatUserProfile?.accountId,
+    chatUserProfile?.accountID,
+    chatUserProfile?.account_id,
+    chatUserProfile?.salonId,
+    (typeof window !== 'undefined' ? window.currentAccountId : null),
+    (typeof window !== 'undefined' ? window.accountId : null),
+    (typeof window !== 'undefined' ? window.currentSalonId : null)
+  ];
+  for (const v of candidates) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+async function loadSharedChatTemplates() {
+  const accountId = getChatAccountId();
+  if (!accountId) return [];
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatTemplates/items`));
+    return snap.docs
+      .map(d => ({ id: `shared:${d.id}`, sharedTemplateId: d.id, isSharedTemplate: true, ...d.data() }))
+      .filter(t => t.active !== false)
+      .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  } catch (e) {
+    console.warn('[SharedChat] load templates failed', e);
+    return [];
+  }
+}
+
+async function loadSharedChatFlows() {
+  const accountId = getChatAccountId();
+  if (!accountId) return [];
+  try {
+    const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatFlows/items`));
+    return snap.docs
+      .map(d => ({ id: `shared:${d.id}`, sharedFlowId: d.id, isSharedFlow: true, ...d.data() }))
+      .filter(f => f.active !== false && (f.status || 'active') !== 'archived')
+      .map(f => ({
+        ...f,
+        steps: Array.isArray(f.steps)
+          ? _chatSortByOrder(f.steps.map(s => ({
+              ...s,
+              options: Array.isArray(s.options) ? _chatSortByOrder(s.options) : []
+            })))
+          : []
+      }))
+      .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  } catch (e) {
+    console.warn('[SharedChat] load flows failed', e);
+    return [];
+  }
+}
+
+/**
+ * True when the given member/user row is allowed to work in the active location.
+ *
+ * Mirrors the staff list filter in index.html (search "STRICT client-side
+ * location filter"):
+ *   - No active location → allow everyone (initial load, single-location salons).
+ *   - Owner / Admin / Manager → always visible everywhere ("leadership must be
+ *     reachable in every branch").
+ *   - Everyone else → must have `allowedLocationIds` that includes the active
+ *     location id. Empty / missing means not assigned anywhere → hidden.
+ *
+ * Resolves the staff record for the member via `window.ffGetStaffStore()` and
+ * falls back to the member row's own fields if no staff match exists (covers
+ * the owner row which may not be in the staff store).
+ */
+function _userAllowedInActiveLocation(u) {
+  if (!u) return false;
+  const activeLoc = _readActiveLocationId();
+  if (!activeLoc) return true;
+  const roleLc = String(u.role || '').toLowerCase().trim();
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') return true;
+
+  // Cross-reference the staff store for primaryLocationId / allowedLocationIds.
+  let staffRow = null;
+  try {
+    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+    const staff = store && Array.isArray(store.staff) ? store.staff : [];
+    staffRow = staff.find(
+      s =>
+        s &&
+        (String(s.uid || '').trim() === u.uid ||
+          String(s.firebaseUid || '').trim() === u.uid)
+    ) || null;
+  } catch (_) {}
+
+  if (staffRow) {
+    if (staffRow.isAdmin === true || staffRow.isManager === true) return true;
+    const sRole = String(staffRow.role || '').toLowerCase().trim();
+    if (sRole === 'owner' || sRole === 'admin' || sRole === 'manager') return true;
+    if (Array.isArray(staffRow.allowedLocationIds) && staffRow.allowedLocationIds.length) {
+      return staffRow.allowedLocationIds.indexOf(activeLoc) !== -1;
+    }
+    if (typeof staffRow.primaryLocationId === 'string' && staffRow.primaryLocationId.trim()) {
+      return staffRow.primaryLocationId.trim() === activeLoc;
+    }
+    return false;
+  }
+
+  // Fallback: member row itself.
+  if (Array.isArray(u.allowedLocationIds) && u.allowedLocationIds.length) {
+    return u.allowedLocationIds.indexOf(activeLoc) !== -1;
+  }
+  if (typeof u.primaryLocationId === 'string' && u.primaryLocationId.trim()) {
+    return u.primaryLocationId.trim() === activeLoc;
+  }
+  // No staff row AND no location hints on the member — treat as unscoped and
+  // allow (prevents hiding the salon owner who may not be in the staff store).
+  return true;
+}
+
+/**
+ * Build the deterministic conversation id for a 1:1 chat between two users,
+ * scoped to a location. The "default" branch keeps the legacy `a__b` format
+ * so existing conversations (created before multi-location rollout) remain
+ * visible to users viewing the primary/default branch; all non-default
+ * locations use a prefixed id so the same pair gets a fresh thread per branch.
+ */
+const buildConvId = (a, b, locKey) => {
+  const pair = [a, b].sort().join('__');
+  const lk = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  return lk === CHAT_DEFAULT_LOC_KEY ? pair : `loc_${lk}__${pair}`;
+};
+
+function _trimStr(v) {
+  if (v == null) return '';
+  const s = String(v).trim();
+  return s;
+}
+
+/** displayName → name on a salon/members row (or similar). */
+function _memberDisplayNameFromRow(u) {
+  if (!u || typeof u !== 'object') return '';
+  const dn = _trimStr(u.displayName);
+  if (dn) return dn;
+  return _trimStr(u.name);
+}
+
+/** Staff store row: displayName / name for a Firebase uid. */
+function _staffDisplayNameForUid(uid) {
+  if (!uid) return '';
+  try {
+    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+    const staff = store && Array.isArray(store.staff) ? store.staff : [];
+    const row = staff.find(
+      s =>
+        s &&
+        (String(s.uid || '').trim() === uid ||
+          String(s.firebaseUid || '').trim() === uid)
+    );
+    if (!row) return '';
+    return _trimStr(row.displayName) || _trimStr(row.name);
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Human-readable label for UI (never raw uid). While salon members are still loading, show CHAT_NAME_LOADING for others.
+ * Order: displayName → name → staff (ff_staff_v1) → email (members row only).
+ */
 function _nameForUid(uid) {
   if (!uid) return '';
-  if (uid === chatUserProfile?.uid) return chatUserProfile?.name || chatUserProfile?.displayName || '';
+  if (uid === chatUserProfile?.uid) {
+    const p = chatUserProfile;
+    const dn = _trimStr(p?.displayName);
+    if (dn) return dn;
+    const nm = _trimStr(p?.name);
+    if (nm) return nm;
+    return _trimStr(p?.email);
+  }
   const u = chatSalonUsers.find(x => x.uid === uid);
-  return (u && (u.name || u.email || u.uid)) || uid;
+  if (u) {
+    const nm = _memberDisplayNameFromRow(u);
+    if (nm) return nm;
+    const staffNm = _staffDisplayNameForUid(uid);
+    if (staffNm) return staffNm;
+    const em = _trimStr(u.email);
+    if (em) return em;
+  } else if (!_chatMembersLoaded) {
+    return CHAT_NAME_LOADING;
+  }
+  const staffOnly = _staffDisplayNameForUid(uid);
+  if (staffOnly) return staffOnly;
+  return 'Unknown';
+}
+
+/** For persisted message fields: never use uid; avoid "Loading..." when possible. */
+function _nameForUidForSend(uid) {
+  const n = _nameForUid(uid);
+  if (n && n !== CHAT_NAME_LOADING) return n;
+  const staffNm = _staffDisplayNameForUid(uid);
+  if (staffNm) return staffNm;
+  const u = chatSalonUsers.find(x => x.uid === uid);
+  if (u) {
+    const em = _trimStr(u.email);
+    if (em) return em;
+  }
+  return 'Someone';
 }
 function _avatarUrlForUid(uid) {
   if (!uid) return null;
@@ -68,6 +616,25 @@ function _otherUidFromParticipants(parts, myUid) {
   return parts.find(u => u && u !== myUid) || '';
 }
 
+function _cacheConversations(list) {
+  if (!Array.isArray(list)) return;
+  list.forEach(c => {
+    if (c && c.id) cachedConversationsById[c.id] = c;
+  });
+}
+
+function _conversationById(convId) {
+  const id = String(convId || '');
+  if (!id) return null;
+  return (
+    (Array.isArray(allConversations) && allConversations.find(c => c && c.id === id)) ||
+    (Array.isArray(lastRenderedConversations) && lastRenderedConversations.find(c => c && c.id === id)) ||
+    (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.find(c => c && c.id === id)) ||
+    cachedConversationsById[id] ||
+    null
+  );
+}
+
 function timeAgo(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -80,32 +647,127 @@ function timeAgo(ts) {
 function fmtTime(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+  if (Number.isNaN(d.getTime())) return '';
+  if (typeof window !== 'undefined' && typeof window.ffFormatDisplayTime === 'function') {
+    return window.ffFormatDisplayTime(d, { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ─── Header (gear) visibility by role ─────────────────────────────────────────
-// Uses chatUserProfile.role (Firestore). Fallback: ff_is_admin_cached from app.js (set on login).
+/** Local calendar day key for grouping (YYYY-MM-DD). */
+function _chatDayKey(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** WhatsApp-style separator: TODAY / YESTERDAY / weekday or date. */
+function _chatDaySeparatorLabel(ts) {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const startD = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startToday - startD) / 86400000);
+  if (diffDays === 0) return 'TODAY';
+  if (diffDays === 1) return 'YESTERDAY';
+  const yNow = today.getFullYear();
+  if (d.getFullYear() !== yNow) {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+// ─── Header (gear): ffCurrentUserHasChatManagePermission (staff chat_manage + admin session) ───
 function renderChatHeaderForRole(role) {
   const gear = document.getElementById('chatSettingsGearBtn');
   if (!gear) return;
-  const showGear = isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
+  const showGear =
+    typeof window.ffCurrentUserHasChatManagePermission === 'function'
+      ? window.ffCurrentUserHasChatManagePermission()
+      : isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
   gear.style.display = showGear ? 'flex' : 'none';
 }
 
+function _chatManageAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatManagePermission === 'function' &&
+    window.ffCurrentUserHasChatManagePermission()
+  );
+}
+
+function _chatFreeTextAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatFreeTextPermission === 'function' &&
+    window.ffCurrentUserHasChatFreeTextPermission()
+  );
+}
+
+function _getChatFreeTextTrimmed() {
+  if (!_chatFreeTextAllowed()) return '';
+  const el = document.getElementById('chatSendFreeTextInput');
+  return el ? String(el.value || '').trim() : '';
+}
+
 // ─── Navigation ───────────────────────────────────────────────────────────────
+/**
+ * Attach a direct click listener to the New Message button. Idempotent — the
+ * flag on the element prevents double-binding. We also re-run this every time
+ * the chat screen opens so we recover if a parent re-render swaps the node.
+ */
+function _bindChatSendBtn() {
+  const btn = document.getElementById('chatSendBtn');
+  if (!btn) return;
+  if (btn.__ffSendBtnBound) return;
+  btn.__ffSendBtnBound = true;
+  btn.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (typeof window.openSendMessageModal === 'function') {
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] direct openSendMessageModal threw', e); }
+    } else {
+      setTimeout(() => {
+        if (typeof window.openSendMessageModal === 'function') {
+          try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] retry openSendMessageModal threw', e); }
+        }
+      }, 50);
+    }
+  });
+}
+
+// Bind ASAP — the button is already in the DOM when chat.js executes because
+// it's declared statically in index.html.
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bindChatSendBtn, { once: true });
+  } else {
+    _bindChatSendBtn();
+  }
+}
+
 async function goToChat() {
+  console.log('[ChatBadgePerf] screen-open', performance.now(), Date.now());
+  _bindChatSendBtn();
+  _chatBadgePerfOpenMs = performance.now();
+  _chatBadgePerfRenderLogged = false;
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
-  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'ticketsScreen'].forEach((id) => {
+  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'timeClockScreen', 'ticketsScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  ['.joinBar', '.wrap'].forEach((sel) => {
+  ['#joinBar', '.joinbar', '.wrap', '#queueControls'].forEach((sel) => {
     const el = document.querySelector(sel);
     if (el) el.style.display = 'none';
   });
-  ['queueControls', 'userProfileScreen', 'manageQueueScreen'].forEach((id) => {
+  ['userProfileScreen', 'manageQueueScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -129,6 +791,8 @@ async function initChatScreen() {
   if (_chatInitialized && chatUserProfile) {
     renderChatHeaderForRole(chatUserProfile.role);
     if (!chatConvsUnsub) subscribeToConversationList();
+    _bindChatConvFreeTextComposer();
+    _syncChatConvFreeTextComposer();
     return;
   }
   await loadChatUserProfile();
@@ -137,10 +801,17 @@ async function initChatScreen() {
     renderChatHeaderForRole(null);
     return;
   }
-  await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
   renderChatHeaderForRole(chatUserProfile.role);
   subscribeToConversationList();
+  _bindChatConvFreeTextComposer();
+  _syncChatConvFreeTextComposer();
   _chatInitialized = true;
+  Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()])
+    .then(() => {
+      if (allConversations.length) renderThreadList();
+      _syncChatConvFreeTextComposer();
+    })
+    .catch((err) => console.warn('[Chat] background preload failed', err));
 }
 
 // ─── Profile / Users / Templates ──────────────────────────────────────────────
@@ -154,7 +825,49 @@ async function loadChatUserProfile() {
   try {
     const snap = await getDoc(doc(db, 'users', user.uid));
     if (snap.exists()) {
-      chatUserProfile = { uid: user.uid, ...snap.data() };
+      const data = snap.data() || {};
+      // Multi-salon: prefer the salon the user picked from Choose Salon (or the
+      // single auto-selected membership) over the legacy users/{uid}.salonId.
+      // Without this override, a user who picked test_salon_001 from Choose
+      // Salon would still see conversations / templates / flows from their
+      // legacy primary salon (data.salonId), since every chat query below
+      // composes paths from chatUserProfile.salonId.
+      // staffId and role also need to be overridden — chat header rendering
+      // and "allowed senders" gating use chatUserProfile.role, which differs
+      // between salons (e.g. owner here, technician there).
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      const resolvedSalonId = activeSalonId || data.salonId || null;
+      const resolvedStaffId = activeStaffId || data.staffId || null;
+      chatUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: resolvedSalonId,
+        staffId: resolvedStaffId,
+        role: activeRole || data.role || '',
+      };
+      // Multi-salon: pull the display name from the staff doc in the chosen
+      // salon. Otherwise messages sent from test_salon_001 are stored with
+      // chatUserProfile.name = the legacy primary-salon user name (e.g.
+      // "Test Multi") instead of the salon-scoped staff name (e.g. "TEST TECH"),
+      // and recipients see the wrong sender label.
+      if (resolvedSalonId && resolvedStaffId) {
+        try {
+          const staffSnap = await getDoc(doc(db, `salons/${resolvedSalonId}/staff`, resolvedStaffId));
+          if (staffSnap.exists()) {
+            const st = staffSnap.data() || {};
+            const staffName = String(st.name || '').trim();
+            if (staffName) chatUserProfile.name = staffName;
+            // Also merge permissions so per-salon access controls work in chat.
+            chatUserProfile.permissions = { ...(chatUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) chatUserProfile.managerType = st.managerType;
+          }
+        } catch (mergeErr) {
+          console.warn('[Chat] Failed to merge staff doc into profile', mergeErr);
+        }
+      }
     } else {
       console.error('[Chat] loadChatUserProfile failed — Firestore doc users/' + user.uid + ' not found. Gear hidden.');
       chatUserProfile = null;
@@ -165,46 +878,126 @@ async function loadChatUserProfile() {
   }
 }
 
-async function loadChatSalonUsers() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
-    chatSalonUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
-                              .filter(u => u.uid !== chatUserProfile.uid);
-  } catch(e) { chatSalonUsers = []; }
-}
-
-async function loadChatTemplates() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-      orderBy('order','asc')
-    ));
-    chatTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch(e) { chatTemplates = []; }
-}
-
-async function loadChatFlows() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
-    const flows = [];
-    for (const fd of flowsSnap.docs) {
-      const flowData = { id: fd.id, ...fd.data() };
-      const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
-      flowData.steps = [];
-      for (const sd of stepsSnap.docs) {
-        const stepData = { id: sd.id, ...sd.data() };
-        const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
-        stepData.options = optsSnap.docs.map(od => ({ id: od.id, ...od.data() }));
-        flowData.steps.push(stepData);
-      }
-      flowData.steps.sort((a,b) => (a.order||0) - (b.order||0));
-      if ((flowData.status || 'active') !== 'archived') flows.push(flowData);
+async function loadChatSalonUsers(options = {}) {
+  if (!chatUserProfile?.salonId) {
+    chatSalonUsers = [];
+    _chatMembersLoaded = true;
+    return;
+  }
+  const key = `${chatUserProfile.salonId}::${chatUserProfile.uid || ''}`;
+  if (!options.force && _chatMembersLoaded && _chatUsersLoadKey === key) return;
+  if (!options.force && _chatUsersLoadPromise && _chatUsersLoadKey === key) return _chatUsersLoadPromise;
+  _chatUsersLoadKey = key;
+  _chatMembersLoaded = false;
+  _chatUsersLoadPromise = (async () => {
+    try {
+      const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
+      chatSalonUsers = snap.docs
+        .map(d => ({ ...d.data(), uid: d.id }))
+        .filter(u => u.uid !== chatUserProfile.uid);
+    } catch (e) {
+      chatSalonUsers = [];
+    } finally {
+      _chatMembersLoaded = true;
+      _chatUsersLoadPromise = null;
     }
-    chatFlows = flows;
-  } catch(e) { chatFlows = []; }
+  })();
+  return _chatUsersLoadPromise;
+}
+
+async function loadChatTemplates(options = {}) {
+  if (!chatUserProfile?.salonId) return;
+  const locKey = _chatEffectiveLocKey();
+  const key = `${chatUserProfile.salonId}::${locKey}`;
+  if (!options.force && _chatTemplatesLoadKey === key && chatTemplates.length) return;
+  if (!options.force && _chatTemplatesLoadPromise && _chatTemplatesLoadKey === key) return _chatTemplatesLoadPromise;
+  _chatTemplatesLoadKey = key;
+  _chatTemplatesLoadPromise = (async () => {
+    const sharedTemplates = await loadSharedChatTemplates();
+    try {
+      const snap = await getDocs(query(
+        collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
+        orderBy('order','asc')
+      ));
+      const localTemplates = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(t => _itemMatchesLocation(t, locKey));
+      chatTemplates = [...sharedTemplates, ...localTemplates];
+    } catch (e) {
+      console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
+      try {
+        const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
+        const localTemplates = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(t => _itemMatchesLocation(t, locKey))
+          .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+        chatTemplates = [...sharedTemplates, ...localTemplates];
+      } catch (e2) {
+        console.error('[Chat] loadChatTemplates error', e2);
+        chatTemplates = sharedTemplates;
+      }
+    } finally {
+      _chatTemplatesLoadPromise = null;
+    }
+  })();
+  return _chatTemplatesLoadPromise;
+}
+
+async function loadChatFlows(options = {}) {
+  if (!chatUserProfile?.salonId) return;
+  const locKey = _chatEffectiveLocKey();
+  const key = `${chatUserProfile.salonId}::${locKey}`;
+  if (!options.force && _chatFlowsLoadKey === key && chatFlows.length) return;
+  if (!options.force && _chatFlowsLoadPromise && _chatFlowsLoadKey === key) return _chatFlowsLoadPromise;
+  _chatFlowsLoadKey = key;
+  _chatFlowsLoadPromise = (async () => {
+    const sharedFlows = await loadSharedChatFlows();
+    try {
+      const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
+      const flows = (await Promise.all(flowsSnap.docs.map(async (fd) => {
+        const flowData = { id: fd.id, ...fd.data() };
+        if (!_itemMatchesLocation(flowData, locKey)) return null;
+        try {
+          const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
+          flowData.steps = await Promise.all(stepsSnap.docs.map(async (sd) => {
+            const stepData = { id: sd.id, ...sd.data() };
+            try {
+              const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
+              stepData.options = _chatSortByOrder(optsSnap.docs.map(od => ({ id: od.id, ...od.data() })));
+            } catch (optErr) {
+              console.warn('[Chat] flow option load failed', {
+                salonId: chatUserProfile.salonId,
+                flowId: fd.id,
+                stepId: sd.id,
+                code: optErr?.code,
+                message: optErr?.message
+              });
+              stepData.options = [];
+            }
+            return stepData;
+          }));
+        } catch (stepErr) {
+          console.warn('[Chat] flow step load failed; showing flow shell', {
+            salonId: chatUserProfile.salonId,
+            flowId: fd.id,
+            title: flowData.title,
+            code: stepErr?.code,
+            message: stepErr?.message
+          });
+          flowData.steps = [];
+        }
+        flowData.steps = _chatSortByOrder(flowData.steps);
+        return (flowData.status || 'active') !== 'archived' ? flowData : null;
+      }))).filter(Boolean);
+      chatFlows = [...sharedFlows, ...flows];
+    } catch(e) {
+      console.error('[Chat] loadChatFlows top-level failed', e?.code, e?.message, e);
+      chatFlows = sharedFlows;
+    } finally {
+      _chatFlowsLoadPromise = null;
+    }
+  })();
+  return _chatFlowsLoadPromise;
 }
 
 // ─── Conversation List Subscription (PRIVATE) ──────────────────────────────────
@@ -215,13 +1008,49 @@ function subscribeToConversationList() {
 
   const uid  = chatUserProfile.uid;
 
+  console.log('[ChatBadgePerf] subscribe-start', performance.now(), Date.now(), 'loc=', _chatEffectiveLocKey());
+  _chatConvFirstSnapLogged = false;
+
   chatConvsUnsub = onSnapshot(
     query(
       collection(db, `salons/${chatUserProfile.salonId}/conversations`),
       where('participants', 'array-contains', uid)
     ),
     snap => {
-      allConversations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (!_chatConvFirstSnapLogged) {
+        _chatConvFirstSnapLogged = true;
+        console.log('[ChatBadgePerf] first-snapshot', performance.now(), Date.now());
+      }
+      const locKey = _chatEffectiveLocKey();
+      const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const nextConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
+      if (nextConversations.length > 0) {
+        allConversations = nextConversations;
+        lastNonEmptyConversations = nextConversations;
+      } else if (allDocs.length > 0) {
+        // If location metadata is stale/missing, do not show an empty chat list.
+        allConversations = allDocs;
+        lastNonEmptyConversations = allDocs;
+      } else if (lastNonEmptyConversations.length > 0) {
+        const staleForLoc = lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey));
+        allConversations = staleForLoc.length > 0 ? staleForLoc : [];
+      } else {
+        allConversations = nextConversations;
+      }
+      _cacheConversations(allDocs);
+      _cacheConversations(allConversations);
+      console.log(
+        '[Chat] threads snapshot: locKey=', locKey,
+        'totalDocs=', allDocs.length,
+        'matchLocation=', nextConversations.length,
+        'rendered=', allConversations.length,
+        'sample=', allDocs.slice(0, 8).map(d => ({
+          id: d.id,
+          locationId: d.locationId || '(none)',
+          resolvedLoc: _convLocKey(d),
+          matches: _convMatchesLocation(d, locKey)
+        }))
+      );
       // Sort client-side (avoid composite index requirements)
       allConversations.sort((a, b) => {
         const aMs = a.lastMessageAt?.toMillis?.()
@@ -240,6 +1069,11 @@ function subscribeToConversationList() {
       });
 
       renderThreadList();
+      _applyChatNavBadgeFromConversationSnap(snap, uid);
+      if (!_chatBadgePerfRenderLogged && _chatBadgePerfOpenMs) {
+        _chatBadgePerfRenderLogged = true;
+        console.log('[ChatBadgePerf] render-done', performance.now(), Date.now());
+      }
       if (currentConvId) renderConversation(currentConvId);
       else _renderEmptyConversation();
     },
@@ -249,6 +1083,10 @@ function subscribeToConversationList() {
 
 // ─── Thread List ───────────────────────────────────────────────────────────────
 function renderThreadList() {
+  // Keep the Live Desk chat card in sync in real time (it reads from ffGetRecentConversations).
+  if (typeof window.ffLiveRefreshChatCard === 'function') {
+    try { window.ffLiveRefreshChatCard(); } catch (_eLive) {}
+  }
   const loading = document.getElementById('chatFeedLoading');
   const empty   = document.getElementById('chatFeedEmpty');
   const list    = document.getElementById('chatFeedList');
@@ -256,74 +1094,134 @@ function renderThreadList() {
   if (loading) loading.style.display = 'none';
 
   const uid = chatUserProfile?.uid || '';
+  const locKey = _chatEffectiveLocKey();
+  const lastNonEmptyForLoc = Array.isArray(lastNonEmptyConversations)
+    ? lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey))
+    : [];
+  const lastRenderedForLoc = Array.isArray(lastRenderedConversations)
+    ? lastRenderedConversations.filter(c => _convMatchesLocation(c, locKey))
+    : [];
+  const conversationsToRender = (Array.isArray(allConversations) && allConversations.length > 0)
+    ? allConversations
+    : lastNonEmptyForLoc.length > 0
+      ? lastNonEmptyForLoc
+      : lastRenderedForLoc.length > 0
+        ? lastRenderedForLoc
+        : (Array.isArray(lastNonEmptyConversations) && lastNonEmptyConversations.length > 0)
+          ? lastNonEmptyConversations
+          : (Array.isArray(lastRenderedConversations) && lastRenderedConversations.length > 0)
+            ? lastRenderedConversations
+            : [];
 
-  if (!Array.isArray(allConversations) || allConversations.length === 0) {
-    if (empty) empty.style.display = 'block';
-    list.innerHTML = '';
+  if (conversationsToRender.length === 0) {
+    if (lastRenderedThreadListHtml) {
+      if (empty) empty.style.display = 'none';
+      list.innerHTML = lastRenderedThreadListHtml;
+    } else {
+      if (empty) empty.style.display = 'block';
+      list.innerHTML = '';
+    }
     return;
   }
   if (empty) empty.style.display = 'none';
+  lastRenderedConversations = conversationsToRender.slice();
+  _cacheConversations(conversationsToRender);
 
-  list.innerHTML = allConversations.map(conv => {
-    const convId = conv.id;
-    const otherUid = _otherUidFromParticipants(conv.participants, uid);
-    const otherName = _nameForUid(otherUid) || 'Unknown';
-    const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
-    const myInitial  = (chatUserProfile?.name || '?').charAt(0).toUpperCase();
-    const otherInitial = otherName.charAt(0).toUpperCase();
-    const myAvatarUrl = _avatarUrlForUid(uid);
-    const otherAvatarUrl = _avatarUrlForUid(otherUid);
-    const myAvatarHtml = myAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
-    const otherAvatarHtml = otherAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
+  const nextHtml = conversationsToRender.map(conv => ffBuildChatThreadCardHTML(conv, { uid })).join('');
+  lastRenderedThreadListHtml = nextHtml;
+  list.innerHTML = nextHtml;
+}
 
-    const selected = (currentConvId === convId) ? 'is-selected' : '';
-    return `
-      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
-           onclick="window._openThread('${escHtml(convId)}')">
-        <div class="ctc-avatars">
-          ${myAvatarHtml}
-          ${otherAvatarHtml}
-        </div>
-        <div class="ctc-body">
-          <div class="ctc-top">
-            <span class="ctc-name">${escHtml(otherName)}</span>
-            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
-          </div>
-          <div class="ctc-preview">
-            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
-            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
-          </div>
-        </div>
-        ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
-      </div>
-    `;
-  }).join('');
+function _rememberConversationForList(conv) {
+  if (!conv || !conv.id) return;
+  const mergeInto = (list) => {
+    if (!Array.isArray(list)) return [conv];
+    const idx = list.findIndex(c => c && c.id === conv.id);
+    if (idx >= 0) {
+      const next = list.slice();
+      next[idx] = { ...next[idx], ...conv };
+      return next;
+    }
+    return [conv, ...list];
+  };
+  allConversations = mergeInto(allConversations);
+  lastNonEmptyConversations = mergeInto(lastNonEmptyConversations);
+  lastRenderedConversations = mergeInto(lastRenderedConversations);
+}
+
+function _cacheVisibleThreadListHtml() {
+  try {
+    const list = document.getElementById('chatFeedList');
+    const html = list && typeof list.innerHTML === 'string' ? list.innerHTML.trim() : '';
+    if (html) lastRenderedThreadListHtml = list.innerHTML;
+  } catch (_) {}
+}
+
+function _restoreVisibleThreadListHtml() {
+  try {
+    const list = document.getElementById('chatFeedList');
+    if (!list || !lastRenderedThreadListHtml) return false;
+    const empty = document.getElementById('chatFeedEmpty');
+    if (empty) empty.style.display = 'none';
+    list.innerHTML = lastRenderedThreadListHtml;
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
-window._openThread = async function(convId) {
+window._openThread = async function(convId, sourceEl) {
+  _cacheVisibleThreadListHtml();
+  if (Array.isArray(allConversations) && allConversations.length > 0) {
+    lastNonEmptyConversations = allConversations.slice();
+    lastRenderedConversations = allConversations.slice();
+  }
+  const sourceOtherUid = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-uid') : '';
+  const sourceOtherNameAttr = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-name') : '';
+  const sourceOtherNameText = sourceEl && sourceEl.querySelector ? (sourceEl.querySelector('.ctc-name')?.textContent || '') : '';
+  const sourceOtherName = sourceOtherNameAttr && sourceOtherNameAttr !== CHAT_NAME_LOADING && sourceOtherNameAttr !== 'Unknown'
+    ? sourceOtherNameAttr
+    : sourceOtherNameText;
+  const cachedConv = _conversationById(convId);
+  currentThreadFallback = {
+    convId,
+    otherUid: sourceOtherUid || _otherUidFromParticipants(cachedConv?.participants, chatUserProfile?.uid || ''),
+    otherName: sourceOtherName || '',
+  };
   currentConvId = convId;
-  // Mobile: open conversation view (hide list)
-  document.getElementById('chatScreen')?.classList.add('chat-mobile-open');
+  // On narrow mobile screens, show the conversation view with a back button.
+  // Desktop/tablet keeps the left conversation list visible.
+  const shouldUseMobileChatView = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 860px)').matches;
+  document.getElementById('chatScreen')?.classList.toggle('chat-mobile-open', shouldUseMobileChatView);
   // Update header title
   _setConversationHeader(convId);
+  renderThreadList();
+  currentMessages = [];
+  chatMessagesLoading = true;
   _subscribeToMessages(convId);
   renderConversation(convId);
-  await markThreadRead(convId);
-  renderThreadList();
+  markThreadRead(convId)
+    .catch(() => {})
+    .finally(() => {
+      if (currentConvId === convId) renderThreadList();
+    });
 };
 
 window.closeConversation = function() {
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
   currentMessages = [];
   currentConvId = null;
+  currentThreadFallback = null;
+  chatMessagesLoading = false;
   document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
+  _restoreVisibleThreadListHtml();
   renderThreadList();
+  _restoreVisibleThreadListHtml();
   _renderEmptyConversation();
+  _syncChatConvFreeTextComposer();
 };
 
 // ─── Conversation View (bubbles) ───────────────────────────────────────────────
@@ -340,16 +1238,44 @@ function renderConversation(convId) {
     return;
   }
 
+  const conv = _conversationById(convId);
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (currentThreadFallback?.convId === convId ? currentThreadFallback.otherUid : '');
+  const replyBtn = document.getElementById('chatConvReplyBtn');
+  if (replyBtn) {
+    replyBtn.setAttribute('data-other-uid', otherUid);
+    replyBtn.setAttribute('data-other-name', _nameForUidForSend(otherUid));
+    replyBtn.setAttribute('data-conv-id', convId);
+  }
+
   if (msgs.length === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
+    container.innerHTML = chatMessagesLoading
+      ? '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading messages...</div>'
+      : '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
+    _syncChatConvFreeTextComposer();
     return;
   }
 
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
   const otherAvatarUrl = _avatarUrlForUid(otherUid);
 
-  container.innerHTML = msgs.map(ev => {
+  let lastDayKey = '';
+  const segments = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const ev = msgs[i];
+    const dk = _chatDayKey(ev.sentAt);
+    if (dk && dk !== lastDayKey) {
+      lastDayKey = dk;
+      segments.push({ kind: 'day', ts: ev.sentAt });
+    }
+    segments.push({ kind: 'msg', ev });
+  }
+
+  container.innerHTML = segments.map(seg => {
+    if (seg.kind === 'day') {
+      const lab = _chatDaySeparatorLabel(seg.ts);
+      if (!lab) return '';
+      return `<div class="cb-day-sep" role="separator" aria-label="${escHtml(lab)}"><span>${escHtml(lab)}</span></div>`;
+    }
+    const ev = seg.ev;
     const mine = ev.senderUid === uid;
     const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
     const otherAvatarHtml = !mine && otherAvatarUrl
@@ -362,7 +1288,7 @@ function renderConversation(convId) {
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
             <div class="cb-title">${escHtml(ev.title||'')}</div>
-            ${ev.message ? `<div class="cb-body">${escHtml(ev.message)}</div>` : ''}
+            ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>
         </div>
@@ -373,14 +1299,7 @@ function renderConversation(convId) {
   // Scroll to bottom
   setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
 
-  // Store other participant for reply (conv, otherUid already declared above)
-  const otherName = _nameForUid(otherUid);
-  const replyBtn  = document.getElementById('chatConvReplyBtn');
-  if (replyBtn) {
-    replyBtn.setAttribute('data-other-uid',  otherUid);
-    replyBtn.setAttribute('data-other-name', otherName);
-    replyBtn.setAttribute('data-conv-id',    convId);
-  }
+  _syncChatConvFreeTextComposer();
 }
 
 function _setConversationHeader(convId) {
@@ -391,9 +1310,10 @@ function _setConversationHeader(convId) {
     return;
   }
   const uid  = chatUserProfile?.uid || '';
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  title.textContent = _nameForUid(otherUid) || 'Conversation';
+  const conv = _conversationById(convId);
+  const fallbackName = currentThreadFallback?.convId === convId ? currentThreadFallback.otherName : '';
+  const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (currentThreadFallback?.convId === convId ? currentThreadFallback.otherUid : '');
+  title.textContent = _nameForUid(otherUid) || fallbackName || 'Conversation';
 }
 
 function _renderEmptyConversation() {
@@ -406,79 +1326,250 @@ function _renderEmptyConversation() {
       <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
     </div>
   `;
+  _syncChatConvFreeTextComposer();
 }
+
+/** Show inline free-text row only with permission and an open 1:1 thread. */
+function _syncChatConvFreeTextComposer() {
+  const bar = document.getElementById('chatConvFreeTextBar');
+  if (!bar) return;
+  const allowed = _chatFreeTextAllowed();
+  const open = !!currentConvId;
+  bar.style.display = allowed && open ? 'flex' : 'none';
+  if (!allowed || !open) {
+    const ta = document.getElementById('chatConvFreeTextInput');
+    if (ta) ta.value = '';
+  }
+}
+
+function _bindChatConvFreeTextComposer() {
+  const ta = document.getElementById('chatConvFreeTextInput');
+  if (!ta || ta.__ffChatConvFreeBound) return;
+  ta.__ffChatConvFreeBound = true;
+  ta.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      if (typeof window.sendChatConvFreeText === 'function') window.sendChatConvFreeText();
+    }
+  });
+}
+
+/**
+ * Send one free-text chat message (title + message only). Used by inline composer and modal.
+ * @param {string|null} conversationIdOverride - when set (reply), use this conv id instead of deriving from uids.
+ */
+async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOverride, bodyTrimmed) {
+  if (!chatUserProfile?.salonId || !recipientUid) throw new Error('missing_context');
+  const trimmed = String(bodyTrimmed || '').trim();
+  if (!trimmed) throw new Error('empty_message');
+  const maxFree = 8000;
+  if (trimmed.length > maxFree) throw new Error('message_too_long');
+
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const title = (lines[0] || 'Message').slice(0, 120);
+  const message = trimmed;
+
+  const salonId = chatUserProfile.salonId;
+  const senderUid = chatUserProfile.uid;
+  const senderName =
+    _trimStr(chatUserProfile.displayName) ||
+    _trimStr(chatUserProfile.name) ||
+    (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+    '';
+  const senderRole = chatUserProfile.role || '';
+  const rUid = recipientUid;
+  const rName = recipientName || _nameForUidForSend(rUid);
+  const locKey = _chatEffectiveLocKey();
+  const convId = conversationIdOverride || buildConvId(senderUid, rUid, locKey);
+
+  const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+  await setDoc(
+    convRef,
+    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+    { merge: true }
+  );
+
+  const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+  const batch = writeBatch(db);
+  const msgData = {
+    senderUid,
+    senderName,
+    senderRole,
+    recipientUid: rUid,
+    recipientName: rName,
+    sentAt: serverTimestamp(),
+    readBy: [senderUid],
+    title,
+    message
+  };
+  batch.set(msgRef, msgData);
+  batch.set(
+    convRef,
+    {
+      lastMessageAt: serverTimestamp(),
+      lastMessageAtMs: Date.now(),
+      lastTitle: title,
+      lastMessage: message,
+      lastSenderUid: senderUid,
+      lastSenderName: senderName,
+      lastSenderRole: senderRole,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+      unreadFor: { [rUid]: increment(1) }
+    },
+    { merge: true }
+  );
+  await batch.commit();
+  return convId;
+}
+
+window.sendChatConvFreeText = async function() {
+  if (!_chatFreeTextAllowed() || !chatUserProfile) return;
+  const ta = document.getElementById('chatConvFreeTextInput');
+  const body = String(ta?.value || '').trim();
+  if (!body) {
+    alert('Please type a message.');
+    return;
+  }
+  if (!currentConvId) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const replyBtn = document.getElementById('chatConvReplyBtn');
+  const otherUid = replyBtn?.getAttribute('data-other-uid') || '';
+  if (!otherUid) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
+  const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+  }
+  try {
+    await _sendFreeTextDirect(otherUid, otherName, currentConvId, body);
+    if (ta) ta.value = '';
+    renderConversation(currentConvId);
+  } catch (e) {
+    if (e && e.message === 'message_too_long') {
+      alert('Message is too long (max 8000 characters).');
+    } else {
+      console.error('[Chat] inline free-text send', e);
+      alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+    }
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  }
+};
 
 // ─── Reply from inside thread ──────────────────────────────────────────────────
 window.openThreadReply = async function() {
-  const btn      = document.getElementById('chatConvReplyBtn');
-  const otherUid = btn?.getAttribute('data-other-uid')  || '';
-  const otherName= btn?.getAttribute('data-other-name') || '';
-  const convId   = btn?.getAttribute('data-conv-id')    || currentConvId;
-
-  chatReplyContext = { uid: otherUid, name: otherName, conversationId: convId };
-  await _openChatModal({ title: `↩ Reply to ${otherName || otherUid}`, showSendTo: false });
+  if (_chatSendModalOpening) return;
+  const btn = document.getElementById('chatConvReplyBtn');
+  let otherUid = btn?.getAttribute('data-other-uid') || '';
+  const convId = btn?.getAttribute('data-conv-id') || currentConvId;
+  if (!otherUid && convId && chatUserProfile?.uid) {
+    const conv = _conversationById(convId);
+    otherUid = _otherUidFromParticipants(conv?.participants, chatUserProfile.uid) || '';
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.ffOriginalText = btn.dataset.ffOriginalText || btn.textContent || 'Reply';
+    btn.textContent = 'Loading...';
+  }
+  _chatSendModalOpening = true;
+  try {
+    if (!chatUserProfile) {
+      await loadChatUserProfile();
+    }
+    if (!otherUid && convId && chatUserProfile?.uid) {
+      const conv = _conversationById(convId);
+      otherUid = _otherUidFromParticipants(conv?.participants, chatUserProfile.uid) || '';
+    }
+    if (!otherUid || !chatUserProfile) {
+      console.warn('[Chat] openThreadReply: missing profile or recipient after load', { otherUid, convId });
+      return;
+    }
+    const resolvedOtherName = btn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
+    chatReplyContext = { uid: otherUid, name: resolvedOtherName, conversationId: convId };
+    await _openChatModal({
+      title: `↩ Reply to ${_nameForUid(otherUid) || 'Someone'}`,
+      showSendTo: false
+    });
+  } finally {
+    _chatSendModalOpening = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.ffOriginalText || 'Reply';
+    }
+  }
 };
 
 // ─── Mark Thread Read ──────────────────────────────────────────────────────────
 async function markThreadRead(convId) {
-  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) return;
-  const uid = chatUserProfile.uid;
+  if (!chatUserProfile?.salonId || !chatUserProfile?.uid || !convId) return;
+  const conv = cachedConversationsById[convId] || allConversations.find(c => c.id === convId) || null;
+  if (conv && Array.isArray(conv.participants) && !conv.participants.includes(chatUserProfile.uid)) return;
+  const currentUnread = _unreadCountForUid(conv || {}, chatUserProfile.uid);
+  if (currentUnread <= 0) return;
   try {
-    // Reset unread counter on conversation doc
-    await updateDoc(
-      doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId),
-      { [`unreadFor.${uid}`]: 0 }
-    );
-  } catch(e) {}
-
-  // Best-effort: mark recent messages as read (last 60)
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt', 'desc'),
-      limit(60)
-    ));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => {
-      const data = d.data() || {};
-      const rb = Array.isArray(data.readBy) ? data.readBy : [];
-      if (!rb.includes(uid)) {
-        batch.update(d.ref, { readBy: arrayUnion(uid) });
-      }
+    await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId), {
+      [`unreadFor.${chatUserProfile.uid}`]: 0
     });
-    await batch.commit();
-  } catch(e) {}
+    if (conv) {
+      conv.unreadFor = { ...(conv.unreadFor || {}), [chatUserProfile.uid]: 0 };
+      _paintChatNavBadge(_computeChatNavUnreadFromSnapDocs(allConversations.map(c => ({ data: () => c })), chatUserProfile.uid));
+    }
+  } catch (err) {
+    console.warn('[Chat] markThreadRead failed', err);
+  }
 }
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
 window.openSendMessageModal = async function() {
-  chatReplyContext = null;
-  await _openChatModal({ title: 'New Message', showSendTo: true });
+  if (_chatSendModalOpening) return;
+  _chatSendModalOpening = true;
+  const btn = document.getElementById('chatSendBtn');
+  const originalBtnHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+  }
+  try {
+    chatReplyContext = null;
+    // Make sure profile is ready — the Chat top bar is rendered as soon as the
+    // screen becomes visible, which means the New Message button can be clicked
+    // before initChatScreen() finishes. _openChatModal silently returns when
+    // chatUserProfile is null, which looks like "button does nothing".
+    if (!chatUserProfile) {
+      await loadChatUserProfile();
+    }
+    if (!chatUserProfile) {
+      console.warn('[Chat] openSendMessageModal: no chatUserProfile after load; aborting.');
+      if (typeof window.ffStyledAlert === 'function') {
+        window.ffStyledAlert('Unable to open New Message — please refresh and try again.');
+      }
+      return;
+    }
+    await _openChatModal({ title: 'New Message', showSendTo: true });
+  } catch (e) {
+    console.error('[Chat] openSendMessageModal error', e);
+  } finally {
+    _chatSendModalOpening = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml || 'New Message';
+    }
+  }
 };
 
 // ─── Shared Modal Renderer ─────────────────────────────────────────────────────
 async function _openChatModal({ title, showSendTo }) {
   if (!chatUserProfile) return;
-  await loadChatTemplates();
-  await loadChatFlows();
-  await loadChatSalonUsers();
-
-  chatSendMode = 'template';
-  chatSelectedFlow = null;
-  chatFlowAnswers = [];
-
-  const role = (chatUserProfile.role || '').toLowerCase();
-  const roleForFilter = role === 'staff' ? 'technician' : role;
-
-  const sendableTemplates = chatTemplates.filter(t => {
-    if (!Array.isArray(t.allowedSenders) || t.allowedSenders.length === 0) return true;
-    return t.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
-  const sendableFlows = chatFlows.filter(f => {
-    if (!Array.isArray(f.allowedSenders) || f.allowedSenders.length === 0) return true;
-    return f.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
-
   const modal         = document.getElementById('chatSendModal');
   const messageList   = document.getElementById('chatSendMessageList');
   const recipientList = document.getElementById('chatSendRecipientList');
@@ -491,21 +1582,128 @@ async function _openChatModal({ title, showSendTo }) {
 
   modal.querySelector('.chat-modal-title').textContent = title;
   if (sendToSection) sendToSection.style.display = showSendTo ? 'block' : 'none';
-  if (!showSendTo && panel) panel.style.display = 'none';
+  if (panel) panel.style.display = 'none';
+  const allCb = document.getElementById('chatRecipientAll');
+  if (allCb) allCb.checked = false;
+  if (!showSendTo) {
+    recipientList.innerHTML = '';
+    if (pickerLabel) pickerLabel.textContent = '';
+  }
+  messageList.innerHTML =
+    '<div style="padding:18px;color:#6b7280;text-align:center;font-size:14px;">Loading message options...</div>';
+  if (showSendTo) {
+    recipientList.innerHTML =
+      '<div style="padding:10px;color:#6b7280;font-size:13px;">Loading recipients...</div>';
+  }
+  modal.style.display = 'flex';
+  const initialSendBtn = document.getElementById('chatSendConfirmBtn');
+  if (initialSendBtn) initialSendBtn.disabled = true;
+
+  await Promise.all([loadChatTemplates(), loadChatFlows(), loadChatSalonUsers()]);
+
+  chatSendMode = 'template';
+  chatSelectedFlow = null;
+  chatFlowAnswers = [];
+
+  const sendableTemplates = chatTemplates.filter(t =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, t.allowedSenders)
+  );
+  const sendableFlows = chatFlows.filter(f =>
+    _chatUserMatchesAllowedSenders(chatUserProfile.role, f.allowedSenders)
+  );
 
   const items = [];
-  sendableTemplates.forEach(t => items.push({ type: 'template', id: t.id, title: t.title, preview: t.message }));
+  sendableTemplates.forEach(t => items.push({ type: 'template', id: t.id, title: t.title, category: t.category || '', preview: t.message }));
   sendableFlows.forEach(f => items.push({
     type: 'flow',
     id: f.id,
     title: f.title,
+    category: f.category || '',
     preview: f.steps?.[0]?.prompt || ''
   }));
 
+  const freeAllowed = _chatFreeTextAllowed();
+  if (freeAllowed && chatReplyContext && items.length === 0) {
+    modal.style.display = 'none';
+    document.getElementById('chatConvFreeTextInput')?.focus();
+    return;
+  }
+  const hideModalFreeComposer = !!(freeAllowed && chatReplyContext);
+  const pickLabel = document.getElementById('chatSendPickLabel');
+  const freeSec = document.getElementById('chatSendFreeTextSection');
+  const freeIn = document.getElementById('chatSendFreeTextInput');
+  const freeLbl = document.getElementById('chatSendFreeTextLabel');
+  if (freeSec && freeIn) {
+    if (freeAllowed && !hideModalFreeComposer) {
+      freeSec.style.display = 'block';
+      freeIn.value = '';
+      if (!freeIn.__ffChatFreeBound) {
+        freeIn.__ffChatFreeBound = true;
+        freeIn.addEventListener('input', () => {
+          const v = String(freeIn.value || '').trim();
+          if (v) {
+            document.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
+              r.checked = false;
+            });
+            chatSendMode = 'template';
+            chatSelectedFlow = null;
+            chatFlowAnswers = [];
+            document.querySelectorAll('.chat-message-option-block .chat-flow-accordion').forEach(acc => {
+              acc.style.display = 'none';
+              acc.innerHTML = '';
+            });
+            document.querySelectorAll('.chat-option-caret').forEach(c => {
+              c.textContent = '▼';
+            });
+          }
+          _updateChatSendBtn();
+        });
+      }
+      if (pickLabel) {
+        pickLabel.textContent = items.length ? 'Templates & guided flows' : 'Message';
+        pickLabel.style.display = items.length ? 'block' : 'none';
+      }
+      if (freeLbl) freeLbl.textContent = items.length ? 'Or type your own message' : 'Write your message';
+    } else if (freeAllowed && hideModalFreeComposer) {
+      freeSec.style.display = 'none';
+      freeIn.value = '';
+      if (pickLabel) {
+        pickLabel.style.display = 'block';
+        pickLabel.textContent = items.length ? 'Templates & guided flows' : 'Choose message to send';
+      }
+      if (freeLbl) freeLbl.textContent = items.length ? 'Or type your own message' : 'Write your message';
+    } else {
+      freeSec.style.display = 'none';
+      freeIn.value = '';
+      if (pickLabel) {
+        pickLabel.style.display = 'block';
+        pickLabel.textContent = 'Choose message to send';
+      }
+    }
+  }
+
   if (items.length === 0) {
-    messageList.innerHTML = '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add messages.</div>';
+    if (freeAllowed) {
+      messageList.innerHTML =
+        '<div style="padding:12px 4px;color:#6b7280;font-size:13px;line-height:1.5;text-align:left;">No templates or guided flows are set up for your role. Use the box below to write your own message.</div>';
+    } else {
+      messageList.innerHTML =
+        '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add templates, or ask the owner to turn on <b>Free-text chat messages</b> for your account.</div>';
+    }
   } else {
-    messageList.innerHTML = items.map(it => {
+    const groupedItems = _chatGroupByCategory(items);
+    messageList.innerHTML = groupedItems.map(([categoryName, groupItems], categoryIdx) => {
+      const categoryOpen = groupedItems.length === 1;
+      return `
+      <div class="chat-category-section" data-chat-send-category="${categoryIdx}" style="margin-bottom:10px;">
+        <button type="button" onclick="window._chatToggleSendCategory && window._chatToggleSendCategory(${categoryIdx})"
+          class="chat-category-section-title"
+          style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;border:none;background:transparent;cursor:pointer;text-align:left;padding:4px 2px;">
+          <span>${escHtml(categoryName)} <span style="color:#9ca3af;font-weight:700;">(${groupItems.length})</span></span>
+          <span class="chat-send-category-arrow" style="font-size:10px;color:#9ca3af;">${categoryOpen ? '▲' : '▼'}</span>
+        </button>
+        <div class="chat-category-section-items" style="display:${categoryOpen ? 'flex' : 'none'};">
+          ${groupItems.map(it => {
       const isFlow = it.type === 'flow';
       const caretHtml = isFlow
         ? `<span class="chat-option-caret" aria-hidden="true" style="flex-shrink:0;font-size:10px;color:#9ca3af;transition:transform 0.2s;">▼</span>`
@@ -523,10 +1721,16 @@ async function _openChatModal({ title, showSendTo }) {
           ${isFlow ? `<div class="chat-flow-accordion" data-flow-id="${escHtml(it.id)}" style="display:none;margin-top:4px;margin-left:0;padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"></div>` : ''}
         </div>
       `;
+          }).join('')}
+        </div>
+      </div>
+    `;
     }).join('');
 
     messageList.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
       r.addEventListener('change', () => {
+        const ft = document.getElementById('chatSendFreeTextInput');
+        if (ft) ft.value = '';
         const v = r.value;
         const [type, id] = v.includes(':') ? v.split(/:(.+)/).slice(0, 2) : ['template', v];
         const block = r.closest('.chat-message-option-block');
@@ -563,7 +1767,13 @@ async function _openChatModal({ title, showSendTo }) {
 
   // Recipients
   if (showSendTo) {
-    const pool = isMgrPlus(role) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
+    const myRole = chatUserProfile && chatUserProfile.role;
+    // Base pool: leaders see everyone, non-leaders only see leadership they can
+    // message (existing rule). Then apply STRICT location filter so each branch
+    // only sees the staff actually assigned to it (mirrors the staff list and
+    // queue behavior elsewhere in the app).
+    const basePool = isMgrPlus(myRole) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
+    const pool = basePool.filter(_userAllowedInActiveLocation);
     // Reset UI
     if (searchInput) searchInput.value = '';
     if (panel) panel.style.display = 'none';
@@ -573,7 +1783,11 @@ async function _openChatModal({ title, showSendTo }) {
     recipientList.innerHTML = pool.length === 0
       ? '<div style="padding:10px;color:#6b7280;font-size:13px;">No recipients available.</div>'
       : pool.map(u => {
-          const displayName = (u.name || u.email || u.uid || '').trim();
+          const displayName =
+            _memberDisplayNameFromRow(u) ||
+            _staffDisplayNameForUid(u.uid) ||
+            _trimStr(u.email) ||
+            'Unknown';
           const search = `${displayName} ${u.email || ''} ${roleLabel(u.role)}`.toLowerCase();
           const avatarUrl = _avatarUrlForUid(u.uid);
           const avatarHtml = avatarUrl
@@ -687,10 +1901,11 @@ function _chatRenderFlowWizard(container) {
       <button type="button" onclick="window._chatFlowResetWizard && window._chatFlowResetWizard()" style="margin-top:8px;padding:6px 12px;font-size:12px;color:#7c3aed;background:none;border:none;cursor:pointer;">Start over</button>`;
     return;
   }
+  const orderedOptions = _chatSortByOrder(step.options);
   wizard.innerHTML = `
     <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px;">${escHtml(step.prompt || 'Choose an option:')}</div>
     <div style="display:flex;flex-direction:column;gap:6px;" id="chatFlowStepOptions">
-      ${step.options.map(o => `
+      ${orderedOptions.map(o => `
         <button type="button" class="chat-flow-opt-btn" data-step-id="${escHtml(step.id)}" data-opt-id="${escHtml(o.id)}" data-opt-label="${escHtml(o.label || '')}"
           style="padding:10px 14px;text-align:left;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;color:#111827;">${escHtml(o.label || '(no label)')}</button>
       `).join('')}
@@ -739,8 +1954,12 @@ window._chatToggleAllRecipients = function(checked) {
 
 function _updateChatSendBtn() {
   let ready = false;
+  const freeRaw = _getChatFreeTextTrimmed();
+  if (freeRaw) {
+    ready = true;
+  }
   const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
-  if (chatSendMode === 'flow') {
+  if (!ready && chatSendMode === 'flow') {
     if (chatSelectedFlow && chatFlowAnswers.length) {
       const flow = chatSelectedFlow;
       const steps = flow.steps || [];
@@ -755,7 +1974,7 @@ function _updateChatSendBtn() {
       }
       ready = !stepId;
     }
-  } else {
+  } else if (!ready) {
     ready = !!(radio && String(radio.value || '').startsWith('template:'));
   }
   let rcpt = true;
@@ -766,7 +1985,7 @@ function _updateChatSendBtn() {
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) {
     btn.disabled = !ready;
-    btn.title = ready && !rcpt ? 'Select at least one recipient' : '';
+    btn.title = '';
   }
   _updateRecipientSummary();
 }
@@ -776,6 +1995,8 @@ window.closeSendMessageModal = function() {
   if (modal) modal.style.display = 'none';
   const panel = document.getElementById('chatRecipientPanel');
   if (panel) panel.style.display = 'none';
+  const freeIn = document.getElementById('chatSendFreeTextInput');
+  if (freeIn) freeIn.value = '';
   chatReplyContext = null;
 };
 
@@ -795,7 +2016,7 @@ function _updateRecipientSummary() {
     label.textContent = 'Select recipients…';
     return;
   }
-  const firstName = checked[0].getAttribute('data-name') || checked[0].value;
+  const firstName = checked[0].getAttribute('data-name') || _nameForUidForSend(checked[0].value);
   label.textContent = checked.length === 1 ? firstName : `${firstName} +${checked.length - 1}`;
 }
 
@@ -804,7 +2025,18 @@ window.confirmSendChatMessage = async function() {
   if (!chatUserProfile) return;
   let title, message, templateId = null, flowId = null, flowTitle = null, flowAnswers = null, renderedText = null;
 
-  if (chatSendMode === 'flow' && chatSelectedFlow && chatFlowAnswers?.length) {
+  const freeAllowed = _chatFreeTextAllowed();
+  const freeRaw = freeAllowed ? _getChatFreeTextTrimmed() : '';
+  if (freeRaw) {
+    const maxFree = 8000;
+    if (freeRaw.length > maxFree) {
+      alert(`Message is too long (max ${maxFree} characters).`);
+      return;
+    }
+    const lines = freeRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    title = (lines[0] || 'Message').slice(0, 120);
+    message = freeRaw;
+  } else if (chatSendMode === 'flow' && chatSelectedFlow && chatFlowAnswers?.length) {
     const flow = chatSelectedFlow;
     const steps = flow.steps || [];
     const findStep = id => steps.find(s => String(s.id) === String(id));
@@ -838,6 +2070,10 @@ window.confirmSendChatMessage = async function() {
   if (chatReplyContext) {
     recipientUids  = [chatReplyContext.uid];
     recipientNames = [chatReplyContext.name];
+    if (!recipientUids[0] || recipientUids.length !== 1) {
+      console.warn('[Chat] blocked invalid reply recipient set', { recipientUids, chatReplyContext });
+      return;
+    }
   } else {
     const allChecked = document.getElementById('chatRecipientAll')?.checked;
     if (allChecked) {
@@ -845,74 +2081,138 @@ window.confirmSendChatMessage = async function() {
         ? chatSalonUsers
         : chatSalonUsers.filter(u => isMgrPlus(u.role));
       recipientUids  = pool.map(u => u.uid);
-      recipientNames = pool.map(u => u.name || u.uid);
+      recipientNames = pool.map(
+        u =>
+          _memberDisplayNameFromRow(u) ||
+          _staffDisplayNameForUid(u.uid) ||
+          _trimStr(u.email) ||
+          'Someone'
+      );
     } else {
       document.querySelectorAll('input[name="chatRecipient"]:checked').forEach(cb => {
         recipientUids.push(cb.value);
-        recipientNames.push(cb.getAttribute('data-name') || cb.value);
+        recipientNames.push(cb.getAttribute('data-name') || _nameForUidForSend(cb.value));
       });
     }
-    if (!recipientUids.length) { alert('Please select at least one recipient.'); return; }
+    if (!recipientUids.length) {
+      const msg = 'Please select at least one recipient.';
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert(msg, 'Choose recipient');
+      } else {
+        alert(msg);
+      }
+      return;
+    }
   }
 
   const btn = document.getElementById('chatSendConfirmBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  let firstSentConvId = null;
 
   try {
-    const salonId = chatUserProfile.salonId;
-    const senderUid  = chatUserProfile.uid;
-    const senderName = chatUserProfile.name || chatUserProfile.displayName || '';
-    const senderRole = chatUserProfile.role || '';
-
-    for (let i = 0; i < recipientUids.length; i++) {
-      const rUid  = recipientUids[i];
-      const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
-      const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
-
-      const convRef = doc(db, `salons/${salonId}/conversations`, convId);
-      // IMPORTANT: security rules for messages verify participants by reading the
-      // conversation doc. So we must ensure the conversation exists BEFORE writing messages.
-      await setDoc(
-        convRef,
-        { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
-        { merge: true }
-      );
-
-      const msgRef  = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
-      const batch   = writeBatch(db);
-
-      const msgData = {
-        senderUid, senderName, senderRole, recipientUid: rUid, recipientName: rName,
-        sentAt: serverTimestamp(), readBy: [senderUid]
-      };
-      if (flowId) {
-        msgData.flowId = flowId; msgData.flowTitle = flowTitle; msgData.renderedText = renderedText;
-        msgData.flowAnswers = flowAnswers; msgData.title = title; msgData.message = renderedText;
-      } else {
-        msgData.templateId = templateId; msgData.title = title; msgData.message = message;
+    if (freeRaw) {
+      const convOverride = chatReplyContext?.conversationId || null;
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
+        const sentConvId = await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
+        if (!firstSentConvId) firstSentConvId = sentConvId;
       }
-      batch.set(msgRef, msgData);
+    } else {
+      const salonId = chatUserProfile.salonId;
+      const senderUid = chatUserProfile.uid;
+      const senderName =
+        _trimStr(chatUserProfile.displayName) ||
+        _trimStr(chatUserProfile.name) ||
+        (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+        '';
+      const senderRole = chatUserProfile.role || '';
+      const locKey = _chatEffectiveLocKey();
 
-      // Update conversation summary + unread count for recipient (merge-safe)
-      batch.set(convRef, {
-        lastMessageAt: serverTimestamp(),
-        lastMessageAtMs: Date.now(),
-        lastTitle: title,
-        lastMessage: message || renderedText,
-        lastSenderUid: senderUid,
-        lastSenderName: senderName,
-        lastSenderRole: senderRole,
-        updatedAt: serverTimestamp(),
-        updatedAtMs: Date.now(),
-        unreadFor: { [rUid]: increment(1) }
-      }, { merge: true });
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
+        const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid, locKey);
+        if (!firstSentConvId) firstSentConvId = convId;
+        console.log('[Chat] send → locKey=', locKey, ' convId=', convId);
 
-      await batch.commit();
+        const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+        await setDoc(
+          convRef,
+          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+          { merge: true }
+        );
+
+        const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+        const batch = writeBatch(db);
+
+        const msgData = {
+          senderUid,
+          senderName,
+          senderRole,
+          recipientUid: rUid,
+          recipientName: rName,
+          sentAt: serverTimestamp(),
+          readBy: [senderUid]
+        };
+        if (flowId) {
+          msgData.flowId = flowId;
+          msgData.flowTitle = flowTitle;
+          msgData.renderedText = renderedText;
+          msgData.flowAnswers = flowAnswers;
+          msgData.title = title;
+          msgData.message = renderedText;
+        } else {
+          msgData.templateId = templateId;
+          msgData.title = title;
+          msgData.message = message;
+        }
+        batch.set(msgRef, msgData);
+
+        batch.set(
+          convRef,
+          {
+            lastMessageAt: serverTimestamp(),
+            lastMessageAtMs: Date.now(),
+            lastTitle: title,
+            lastMessage: message || renderedText,
+            lastSenderUid: senderUid,
+            lastSenderName: senderName,
+            lastSenderRole: senderRole,
+            updatedAt: serverTimestamp(),
+            updatedAtMs: Date.now(),
+            unreadFor: { [rUid]: increment(1) }
+          },
+          { merge: true }
+        );
+
+        await batch.commit();
+      }
     }
 
+    const replyConvId = chatReplyContext?.conversationId || null;
     window.closeSendMessageModal();
-    if (chatReplyContext?.conversationId && currentConvId === chatReplyContext.conversationId) {
-      renderConversation(chatReplyContext.conversationId);
+    if (replyConvId && currentConvId === replyConvId) {
+      renderConversation(replyConvId);
+    } else if (firstSentConvId && recipientUids.length === 1) {
+      _rememberConversationForList({
+        id: firstSentConvId,
+        participants: [chatUserProfile.uid, recipientUids[0]].sort(),
+        locationId: _chatEffectiveLocKey(),
+        lastTitle: title,
+        lastMessage: message || renderedText || freeRaw || '',
+        lastSenderUid: chatUserProfile.uid,
+        lastSenderName:
+          _trimStr(chatUserProfile.displayName) ||
+          _trimStr(chatUserProfile.name) ||
+          (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+          '',
+        lastSenderRole: chatUserProfile.role || '',
+        lastMessageAtMs: Date.now(),
+        updatedAtMs: Date.now()
+      });
+      renderThreadList();
+      window._openThread(firstSentConvId);
     }
   } catch(e) {
     console.error('[Chat] send error', e);
@@ -922,31 +2222,93 @@ window.confirmSendChatMessage = async function() {
   }
 };
 
+// ─── Nav unread badge (top nav “Chat”) ───────────────────────────────────────
+function _unreadCountForUid(data, uid) {
+  const ur = data && data.unreadFor;
+  if (!ur || typeof ur !== 'object') return 0;
+  let raw = ur[uid];
+  if (raw == null && typeof uid === 'string') raw = ur[String(uid)];
+  const n = Number(raw);
+  return isNaN(n) ? 0 : n;
+}
+
+/**
+ * Total unread for the bottom/top nav badge.
+ * Intentionally does NOT filter by active location: that filter is for the in-chat
+ * thread list only. Including location here caused the badge to flash then drop to
+ * 0 after staff + location hydration (~1s) even though unreadFor was unchanged.
+ * Scope is already limited by Firestore: this salon’s conversations + participant uid.
+ */
+function _computeChatNavUnreadFromSnapDocs(snapDocs, uid) {
+  if (!uid || !snapDocs || !snapDocs.length) return 0;
+  return snapDocs.reduce((sum, d) => {
+    const data = d.data() || {};
+    return sum + _unreadCountForUid(data, uid);
+  }, 0);
+}
+
+function _paintChatNavBadge(unread) {
+  const badge = document.getElementById('chatNavBadge');
+  if (!badge) return;
+  if (unread > 0) {
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    badge.style.setProperty('display', 'inline-flex', 'important');
+    badge.style.setProperty('visibility', 'visible', 'important');
+  } else {
+    badge.textContent = '';
+    badge.style.removeProperty('display');
+    badge.style.removeProperty('visibility');
+  }
+}
+
+function _applyChatNavBadgeFromConversationSnap(snap, uid) {
+  if (!snap || !uid) return;
+  const unread = _computeChatNavUnreadFromSnapDocs(snap.docs, uid);
+  _paintChatNavBadge(unread);
+}
+
 // ─── Badge ─────────────────────────────────────────────────────────────────────
+// Remember last auth context so the location-change listener can re-subscribe.
+let _chatAuthUid = null;
+let _chatAuthSalonId = null;
+
 export function subscribeToChatBadge(uid, salonId) {
   if (!uid || !salonId) return;
+  // Avoid churn: auth + chat module both call this with the same context on load.
+  // Unsub/resub leaves the badge blank until the next snapshot arrives.
+  if (chatBadgeUnsub && _chatAuthUid === uid && _chatAuthSalonId === salonId) {
+    return;
+  }
+  _chatAuthUid = uid;
+  _chatAuthSalonId = salonId;
   if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
+  _chatNavBadgeFirstSnapLogged = false;
+  _chatNavBadgeRenderDoneLogged = false;
+  console.log('[ChatBadgePerf] subscribe-start nav-badge', performance.now(), Date.now(), 'loc=', _chatEffectiveLocKey());
   chatBadgeUnsub = onSnapshot(
     query(
       collection(db, `salons/${salonId}/conversations`),
       where('participants', 'array-contains', uid)
     ),
     snap => {
-      const unread = snap.docs.reduce((sum, d) => {
-        const data = d.data() || {};
-        const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
-        return sum + (isNaN(n) ? 0 : n);
-      }, 0);
-      const badge = document.getElementById('chatNavBadge');
-      if (!badge) return;
-      badge.textContent = unread > 99 ? '99+' : String(unread);
-      badge.style.display = unread > 0 ? 'inline-flex' : 'none';
-    }
+      if (!_chatNavBadgeFirstSnapLogged) {
+        _chatNavBadgeFirstSnapLogged = true;
+        console.log('[ChatBadgePerf] first-snapshot nav-badge', performance.now(), Date.now());
+      }
+      _applyChatNavBadgeFromConversationSnap(snap, uid);
+      if (!_chatNavBadgeRenderDoneLogged) {
+        _chatNavBadgeRenderDoneLogged = true;
+        console.log('[ChatBadgePerf] render-done nav-badge', performance.now(), Date.now());
+      }
+    },
+    err => console.error('[Chat] nav badge snapshot error', err)
   );
 }
 
 // ─── Toast Notifications ───────────────────────────────────────────────────────
 const CHAT_TOAST_DURATION_MS = 5000;
+/** Per-conversation last lastMessageAtMs we already surfaced — avoids duplicate toasts when Firestore emits the same update twice (e.g. two commits on one send). */
+const _lastChatToastLastMsgMsByConv = new Map();
 
 function isChatScreenVisible() {
   const cs = document.getElementById('chatScreen');
@@ -990,6 +2352,8 @@ function showChatToast({ senderName, role, preview, convId }) {
 
 export function subscribeToChatToastNotifications(myUid, salonId) {
   if (!myUid || !salonId) return;
+  _chatAuthUid = myUid;
+  _chatAuthSalonId = salonId;
   if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
   chatToastUnsub = onSnapshot(
     query(
@@ -997,13 +2361,20 @@ export function subscribeToChatToastNotifications(myUid, salonId) {
       where('participants', 'array-contains', myUid)
     ),
     snap => {
+      const locKey = _chatEffectiveLocKey();
       snap.docChanges().forEach(change => {
         if (change.type !== 'modified') return;
         const data = change.doc.data() || {};
+        data.id = change.doc.id;
+        if (!_convMatchesLocation(data, locKey)) return;
         const convId = change.doc.id;
+        const lastMs = Number(data.lastMessageAtMs) || 0;
+        const prevShown = _lastChatToastLastMsgMsByConv.get(convId);
+        if (lastMs && prevShown !== undefined && lastMs <= prevShown) return;
         const lastSenderUid = data.lastSenderUid;
         if (!lastSenderUid || lastSenderUid === myUid) return;
         if (currentConvId === convId && isChatScreenVisible()) return;
+        if (lastMs) _lastChatToastLastMsgMsByConv.set(convId, lastMs);
         showChatToast({
           senderName: data.lastSenderName || 'Someone',
           role: data.lastSenderRole || '',
@@ -1020,26 +2391,111 @@ function _subscribeToMessages(convId) {
   if (!chatUserProfile?.salonId) return;
   if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
 
+  const msgQuery = query(
+    collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
+    orderBy('sentAt','asc'),
+    limit(300)
+  );
+
   chatMsgsUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt','asc'),
-      limit(300)
-    ),
+    msgQuery,
     snap => {
       currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (currentConvId === convId) renderConversation(convId);
+      chatMessagesLoading = false;
+      if (currentConvId === convId) {
+        renderConversation(convId);
+        if (isChatScreenVisible()) markThreadRead(convId);
+      }
     },
-    err => console.error('[Chat] messages snapshot error', err)
+    err => {
+      chatMessagesLoading = false;
+      console.error('[Chat] messages snapshot error', err);
+      if (currentConvId === convId) renderConversation(convId);
+    }
   );
+
+  setTimeout(async () => {
+    if (currentConvId !== convId || !chatMessagesLoading) return;
+    try {
+      const snap = await getDocs(msgQuery);
+      if (currentConvId !== convId) return;
+      currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      chatMessagesLoading = false;
+      renderConversation(convId);
+      if (isChatScreenVisible()) markThreadRead(convId);
+    } catch (e) {
+      if (currentConvId !== convId) return;
+      chatMessagesLoading = false;
+      console.error('[Chat] messages fallback load error', e);
+      renderConversation(convId);
+    }
+  }, 900);
 }
 
 // ─── Admin Templates + Flows Settings ───────────────────────────────────────────
+function _ensureChatCategoryFields() {
+  const ensureField = ({ id, afterId, placeholder }) => {
+    if (document.getElementById(id)) return;
+    const anchor = document.getElementById(afterId);
+    const anchorRow = anchor?.closest?.('.chat-tmpl-field-row');
+    if (!anchorRow?.parentNode) return;
+    const row = document.createElement('div');
+    row.className = 'chat-tmpl-field-row';
+    row.innerHTML = `<input id="${id}" type="text" list="chatCategorySuggestions" placeholder="${placeholder}" maxlength="40" class="chat-tmpl-input">`;
+    anchorRow.parentNode.insertBefore(row, anchorRow.nextSibling);
+  };
+  ensureField({
+    id: 'chatTmplCategory',
+    afterId: 'chatTmplTitle',
+    placeholder: 'Category (optional, e.g. Timing, Client, Drinks)'
+  });
+  ensureField({
+    id: 'chatFlowCategory',
+    afterId: 'chatFlowTitle',
+    placeholder: 'Category (optional, e.g. Timing, Client, Drinks)'
+  });
+  if (!document.getElementById('chatCategorySuggestions')) {
+    const datalist = document.createElement('datalist');
+    datalist.id = 'chatCategorySuggestions';
+    document.body.appendChild(datalist);
+  }
+  _chatRefreshCategorySuggestions();
+}
+
 window.openChatTemplatesSettings = async function() {
+  if (!_chatManageAllowed()) return;
   if (!chatUserProfile) await loadChatUserProfile();
-  if (!isAdmin(chatUserProfile?.role)) return;
-  await loadChatTemplates();
-  await loadChatFlows();
+  await Promise.all([loadChatTemplates(), loadChatFlows()]);
+  _ensureChatCategoryFields();
+  _chatRefreshCategorySuggestions();
+  // Reset the compact form to its default "new" state each time we open
+  chatEditingTmplId = null;
+  const titleEl = document.getElementById('chatTmplTitle');
+  const categoryEl = document.getElementById('chatTmplCategory');
+  const msgEl   = document.getElementById('chatTmplMessage');
+  if (titleEl) titleEl.value = '';
+  if (categoryEl) categoryEl.value = '';
+  if (msgEl)   msgEl.value   = '';
+  ['Tech','Mgr','Admin'].forEach(s => {
+    const cb = document.getElementById(`chatTmplSender${s}`);
+    if (cb) cb.checked = false;
+  });
+  _setChatTmplSaveBtn('add');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'New Template';
+  _setChatTmplDetailsOpen(false);
+
+  // Wire up the Options toggle (idempotent — uses a dataset flag so multiple opens don't stack listeners)
+  const toggle = document.getElementById('chatTmplDetailsToggle');
+  if (toggle && !toggle.dataset.ffBound) {
+    toggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      const currentlyOpen = toggle.getAttribute('aria-expanded') === 'true';
+      _setChatTmplDetailsOpen(!currentlyOpen);
+    });
+    toggle.dataset.ffBound = '1';
+  }
+
   _renderTmplList();
   _chatSettingsTab('templates');
   document.getElementById('chatTemplatesModal').style.display = 'flex';
@@ -1049,9 +2505,12 @@ window.closeChatTemplatesModal = function() {
   chatEditingTmplId = null;
   chatEditingFlowId = null;
   chatFlowDraft = null;
+  _setChatTmplDetailsOpen(false);
 };
 
 window._chatSettingsTab = function(tab) {
+  if (!_chatManageAllowed()) return;
+  _ensureChatCategoryFields();
   document.querySelectorAll('.chat-settings-tab').forEach(b => { b.classList.remove('active'); });
   const t = document.getElementById('chatSettingsTab' + (tab === 'templates' ? 'Templates' : 'Flows'));
   if (t) t.classList.add('active');
@@ -1060,6 +2519,22 @@ window._chatSettingsTab = function(tab) {
   if (fp) {
     fp.style.display = tab === 'flows' ? 'flex' : 'none';
     if (tab === 'flows') {
+      // Wire the flow options toggle once
+      const flowToggle = document.getElementById('chatFlowDetailsToggle');
+      if (flowToggle && !flowToggle.dataset.ffBound) {
+        flowToggle.addEventListener('click', function(e) {
+          e.preventDefault();
+          const open = flowToggle.getAttribute('aria-expanded') === 'true';
+          _setChatFlowDetailsOpen(!open);
+        });
+        flowToggle.dataset.ffBound = '1';
+      }
+      // If not editing, keep form collapsed and save button in "add" mode
+      if (!chatEditingFlowId) {
+        _setChatFlowSaveBtn('add');
+        const label = document.getElementById('chatFlowFormLabel');
+        if (label) label.textContent = 'New Flow';
+      }
       _renderFlowsAdminList();
       _renderFlowBuilder();
     }
@@ -1067,149 +2542,97 @@ window._chatSettingsTab = function(tab) {
 };
 
 window._chatFlowAddStep = function() {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const id = 's' + Date.now();
-  chatFlowDraft.steps.push({ id, prompt: '', order: 0, options: [{ id: 'o' + Date.now(), label: '', finish: true }] });
+  chatFlowDraft = addFlowStep(chatFlowDraft, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveStep = function(idx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (chatFlowDraft?.steps?.[idx] === undefined) return;
-  chatFlowDraft.steps.splice(idx, 1);
+  chatFlowDraft = removeFlowStepAt(chatFlowDraft, idx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveStepById = function(stepId) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const idx = chatFlowDraft?.steps?.findIndex(s => s.id === stepId);
-  if (idx === undefined || idx < 0) return;
-  chatFlowDraft.steps.splice(idx, 1);
+  chatFlowDraft = removeFlowStepById(chatFlowDraft, stepId, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddOption = function(stepIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]) return;
-  const step = chatFlowDraft.steps[stepIdx];
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
+  chatFlowDraft = addFlowOptionAt(chatFlowDraft, stepIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddOptionById = function(stepId) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step) return;
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
+  chatFlowDraft = addFlowOptionByStepId(chatFlowDraft, stepId, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveOption = function(stepIdx, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]?.options) return;
-  chatFlowDraft.steps[stepIdx].options.splice(optIdx, 1);
+  chatFlowDraft = removeFlowOptionAt(chatFlowDraft, stepIdx, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step?.options) return;
-  step.options.splice(optIdx, 1);
+  chatFlowDraft = removeFlowOptionByStepId(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 // Add a new step and link the given option to it (for branching)
 window._chatFlowAddStepAndLink = function(stepIdx, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const opt = chatFlowDraft.steps[stepIdx]?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
+  chatFlowDraft = addFlowStepAndLinkAt(chatFlowDraft, stepIdx, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowAddStepAndLinkById = function(stepId, optIdx) {
   _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const step = chatFlowDraft.steps.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
+  chatFlowDraft = addFlowStepAndLinkByStepId(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
 window._chatFlowUnlinkStep = function(stepId, optIdx) {
+  if (!_chatManageAllowed()) return;
   _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (!opt) return;
-  opt.nextStepId = null;
-  opt.finish = true;
+  chatFlowDraft = unlinkFlowOption(chatFlowDraft, stepId, optIdx, { title: '', category: '', allowedSenders: [] });
   _renderFlowBuilder();
 };
 
-// Collect steps from tree DOM (depth-first, root first)
+// Collect steps from the flat builder DOM, preserving the visible question order.
 function _collectStepsFromTreeDOM() {
-  const steps = [];
-  const seen = new Set();
-  function collect(node) {
-    if (!node || node.classList?.contains?.('chat-flow-answer-block')) return;
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || seen.has(stepId)) return;
-    seen.add(stepId);
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block, oidx) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const existingStep = chatFlowDraft?.steps?.find(s => s.id === stepId);
-        const existingOpt = existingStep?.options?.[oidx];
-        options.push({
-          id: existingOpt?.id || 'o' + Date.now() + '_' + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
-      });
-    }
-    steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node').forEach(collect);
-  return steps;
+  return collectFlowStepsFromDom({
+    nodeSelector: '#chatFlowStepsList > .chat-flow-node',
+    stepIdAttr: 'data-step-id',
+    promptSelector: '.chat-flow-step-prompt',
+    optionsContainerClass: 'chat-flow-options',
+    optionBlockClass: 'chat-flow-answer-block',
+    optionLabelSelector: '.chat-flow-opt-label',
+    optionNextSelector: '.chat-flow-next-select',
+    draft: chatFlowDraft
+  });
 }
 
-// Sync current form values from DOM into chatFlowDraft (tree structure)
+// Sync current form values from DOM into chatFlowDraft.
 function _syncFlowDraftFromUI() {
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
+  chatFlowDraft = ensureFlowDraft(chatFlowDraft, { title: '', category: '', allowedSenders: [] });
   chatFlowDraft.title = document.getElementById('chatFlowTitle')?.value ?? '';
+  chatFlowDraft.category = _chatCategoryValue(document.getElementById('chatFlowCategory')?.value);
   chatFlowDraft.allowedSenders = ['technician','manager','admin'].filter((_, i) =>
     document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
-  const treeNodes = document.querySelectorAll?.('.chat-flow-node');
+  const treeNodes = document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node');
   if (treeNodes?.length) {
     chatFlowDraft.steps = _collectStepsFromTreeDOM();
   }
@@ -1219,61 +2642,93 @@ function _collectFlowDraftFromUI() {
   if (!chatFlowDraft) return null;
   const title = document.getElementById('chatFlowTitle')?.value?.trim();
   if (!title) return null;
+  const category = _chatCategoryValue(document.getElementById('chatFlowCategory')?.value);
   const allowedSenders = ['technician','manager','admin'].filter((_,i) =>
     document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
   const treeNodes = document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node');
   if (!treeNodes?.length) return null;
-  const steps = [];
-  const stepIds = new Set();
-  function collect(node) {
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || stepIds.has(stepId)) return;
-    stepIds.add(stepId);
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const step = chatFlowDraft.steps.find(s => s.id === stepId);
-        const oidx = options.length;
-        options.push({
-          id: step?.options?.[oidx]?.id || 'o' + Date.now() + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
-      });
-    }
-    steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  treeNodes.forEach(n => collect(n));
+  const steps = _collectStepsFromTreeDOM();
   if (steps.length === 0) return null;
   const root = steps[0];
   if (!root?.prompt?.trim()) { alert('Please fill in the first question.'); return null; }
   if (!root?.options?.length || root.options.every(o => !(o.label || '').trim())) { alert('Please add at least one answer to the first question.'); return null; }
-  return { title, allowedSenders, steps };
+  return { title, category, allowedSenders, steps };
 }
 
-window.saveChatFlow = async function() {
-  const draft = _collectFlowDraftFromUI();
-  if (!draft) { alert('Please add at least one step with options, and fill flow title.'); return; }
+// Helpers for the compact Flow form
+function _setChatFlowSaveBtn(mode) {
   const btn = document.getElementById('chatFlowSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  if (!btn) return;
+  const plusSvg  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  const checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  if (mode === 'saving') btn.innerHTML = '<span>Saving…</span>';
+  else if (mode === 'update') btn.innerHTML = `${checkSvg}<span>Save</span>`;
+  else btn.innerHTML = `${plusSvg}<span>Add</span>`;
+}
+function _setChatFlowDetailsOpen(open) {
+  const details = document.getElementById('chatFlowDetails');
+  const toggle  = document.getElementById('chatFlowDetailsToggle');
+  if (!details || !toggle) return;
+  details.style.display = open ? 'flex' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+window._setChatFlowDetailsOpen = _setChatFlowDetailsOpen;
+
+window.saveChatFlow = async function() {
+  if (!_chatManageAllowed()) return;
+  _ensureChatCategoryFields();
+
+  // Specific, per-field validation so the user knows exactly what's missing
+  const titleEl = document.getElementById('chatFlowTitle');
+  const rawTitle = (titleEl?.value || '').trim();
+  if (!rawTitle) {
+    if (titleEl) {
+      titleEl.focus();
+      titleEl.style.borderColor = '#ef4444';
+      titleEl.style.background = '#fef2f2';
+      const clear = () => {
+        titleEl.style.borderColor = '';
+        titleEl.style.background = '';
+        titleEl.removeEventListener('input', clear);
+      };
+      titleEl.addEventListener('input', clear);
+    }
+    const msg = 'Please enter a flow title first.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    return;
+  }
+  // Make sure the draft is up-to-date before validating the tree
+  try { _syncFlowDraftFromUI(); } catch (_) {}
+  const treeNodes = document.querySelectorAll('#chatFlowStepsList > .chat-flow-node');
+  if (!treeNodes || !treeNodes.length) {
+    const msg = 'Please add at least one question in the decision tree.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    const addBtn = document.getElementById('chatFlowAddStepBtn');
+    if (addBtn) addBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+  const draft = _collectFlowDraftFromUI();
+  if (!draft) {
+    // Most common: questions or answers are blank
+    const msg = 'Please fill in every question with at least one answer before saving.';
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
+    return;
+  }
+  const btn = document.getElementById('chatFlowSaveBtn');
+  const wasEditing = !!chatEditingFlowId;
+  if (btn) { btn.disabled = true; }
+  _setChatFlowSaveBtn('saving');
+  const locKey = _chatEffectiveLocKey();
   try {
     const salonId = chatUserProfile.salonId;
     const flowsRef = collection(db, `salons/${salonId}/chatFlows`);
     let flowId = chatEditingFlowId;
     if (flowId) {
       await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), {
-        title: draft.title, allowedSenders: draft.allowedSenders, updatedAt: serverTimestamp()
+        title: draft.title, category: draft.category, allowedSenders: draft.allowedSenders, locationId: locKey, updatedAt: serverTimestamp()
       });
       // Delete old steps/options and recreate (simplest)
       const oldSteps = await getDocs(collection(db, `salons/${salonId}/chatFlows/${flowId}/steps`));
@@ -1284,7 +2739,7 @@ window.saveChatFlow = async function() {
       }
     } else {
       const ref = await addDoc(flowsRef, {
-        title: draft.title, allowedSenders: draft.allowedSenders, status: 'active',
+        title: draft.title, category: draft.category, allowedSenders: draft.allowedSenders, status: 'active', locationId: locKey,
         startStepId: draft.steps[0]?.id, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid
       });
       flowId = ref.id;
@@ -1300,49 +2755,71 @@ window.saveChatFlow = async function() {
       const s = draft.steps[i];
       const firestoreStepId = stepIdMap[s.id];
       const optsRef = collection(db, 'salons', salonId, 'chatFlows', flowId, 'steps', firestoreStepId, 'options');
-      for (const o of s.options) {
+      for (let oidx = 0; oidx < s.options.length; oidx++) {
+        const o = s.options[oidx];
         const nextId = o.nextStepId ? (stepIdMap[o.nextStepId] || o.nextStepId) : null;
-        await addDoc(optsRef, { label: o.label, nextStepId: nextId, finish: !!o.finish });
+        await addDoc(optsRef, { label: o.label, order: oidx, nextStepId: nextId, finish: !!o.finish });
       }
       if (i === 0) await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), { startStepId: firestoreStepId });
     }
     window.cancelEditChatFlow();
-    await loadChatFlows();
+    await loadChatFlows({ force: true });
     _renderFlowsAdminList();
-    alert('Saved! Flow appears in the list above.');
-    document.getElementById('chatFlowsSavedSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof window.showToast === 'function') window.showToast('Flow saved', 'success');
   } catch(e) {
     console.error('[Chat] save flow error', e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to save: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingFlowId ? 'Update Flow' : 'Create Flow'; }
+    if (btn) { btn.disabled = false; }
+    _setChatFlowSaveBtn(chatEditingFlowId ? 'update' : 'add');
   }
 };
 
 window.cancelEditChatFlow = function() {
   chatEditingFlowId = null;
-  chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  document.getElementById('chatFlowTitle').value = '';
+  _ensureChatCategoryFields();
+  chatFlowDraft = { title: '', category: '', allowedSenders: [], steps: [] };
+  const titleEl = document.getElementById('chatFlowTitle');
+  const categoryEl = document.getElementById('chatFlowCategory');
+  if (titleEl) titleEl.value = '';
+  if (categoryEl) categoryEl.value = '';
   ['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'].forEach(id => {
     const cb = document.getElementById(id);
     if (cb) cb.checked = false;
   });
-  document.getElementById('chatFlowFormLabel').textContent = 'Create Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Create Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'none';
+  const label = document.getElementById('chatFlowFormLabel');
+  if (label) label.textContent = 'New Flow';
+  _setChatFlowSaveBtn('add');
+  const cancelBtn = document.getElementById('chatFlowCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'none';
+  _setChatFlowDetailsOpen(false);
   _renderFlowBuilder();
   _renderFlowsAdminList();
 };
 
 window.editChatFlow = function(id) {
+  if (!_chatManageAllowed()) return;
+  _ensureChatCategoryFields();
   const f = chatFlows.find(x => x.id === id);
   if (!f) return;
+  if (f.isSharedFlow) {
+    alert('Shared flows are managed in Settings → Shared Setup.');
+    return;
+  }
   chatEditingFlowId = id;
   let stepList = (f.steps || []).map(s => ({
     id: s.id,
     prompt: s.prompt,
     order: s.order,
-    options: (s.options || []).map(o => ({ id: o.id, label: o.label, nextStepId: o.nextStepId, finish: !!o.finish }))
+    options: _chatSortByOrder(s.options || []).map((o, oidx) => ({
+      id: o.id,
+      label: o.label,
+      order: _chatOrderValue(o.order, oidx),
+      nextStepId: o.nextStepId,
+      finish: !!o.finish
+    }))
   }));
   const rootId = f.startStepId;
   if (rootId && stepList.length > 1) {
@@ -1352,22 +2829,35 @@ window.editChatFlow = function(id) {
       stepList = [root, ...stepList];
     }
   }
-  chatFlowDraft = { title: f.title, allowedSenders: f.allowedSenders || [], steps: stepList };
+  chatFlowDraft = { title: f.title, category: f.category || '', allowedSenders: f.allowedSenders || [], steps: stepList };
   document.getElementById('chatFlowTitle').value = f.title || '';
+  const categoryEl = document.getElementById('chatFlowCategory');
+  if (categoryEl) categoryEl.value = f.category || '';
   ['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'].forEach((id, i) => {
     const cb = document.getElementById(id);
     if (cb) cb.checked = Array.isArray(f.allowedSenders) && f.allowedSenders.includes(['technician','manager','admin'][i]);
   });
-  document.getElementById('chatFlowFormLabel').textContent = 'Edit Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Update Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'inline-block';
+  const label = document.getElementById('chatFlowFormLabel');
+  if (label) label.textContent = 'Edit Flow';
+  _setChatFlowSaveBtn('update');
+  const cancelBtn = document.getElementById('chatFlowCancelBtn');
+  if (cancelBtn) cancelBtn.style.display = 'inline-block';
+  _setChatFlowDetailsOpen(true);
   _renderFlowBuilder();
+  _renderFlowsAdminList();
+  document.getElementById('chatFlowForm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
 window.deleteChatFlow = async function(id) {
-  if (!confirm('Delete this flow?')) return;
+  if (!_chatManageAllowed()) return;
+  const flow = chatFlows.find(x => x.id === id);
+  if (flow?.isSharedFlow) {
+    alert('Shared flows are managed in Settings → Shared Setup.');
+    return;
+  }
+  const titleStr = flow?.title ? `"${flow.title}"` : 'this flow';
+  if (!confirm(`Delete ${titleStr}?`)) return;
   try {
-    const flow = chatFlows.find(x => x.id === id);
     if (flow?.steps) {
       for (const s of flow.steps) {
         if (s.options) for (const o of s.options) {
@@ -1377,204 +2867,541 @@ window.deleteChatFlow = async function(id) {
         try { await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps`, s.id)); } catch(_) {}
       }
     }
+    if (chatEditingFlowId === id) window.cancelEditChatFlow();
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows`, id));
-    await loadChatFlows();
+    await loadChatFlows({ force: true });
     _renderFlowsAdminList();
   } catch(e) {
     console.error('[Chat] delete flow error', e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to delete: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
 };
 
 function _renderFlowsAdminList() {
+  _chatRefreshCategorySuggestions();
   const el = document.getElementById('chatFlowsAdminList');
+  const countEl = document.getElementById('chatFlowsCountBadge');
+  if (countEl) countEl.textContent = String(chatFlows.length || 0);
   if (!el) return;
-  el.innerHTML = chatFlows.length === 0
-    ? '<div style="padding:12px;color:#6b7280;font-size:13px;">No saved flows. Fill in below and click Create Flow — it will appear here.</div>'
-    : chatFlows.map(f => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(f.title)}</div>
-            <div style="font-size:11px;color:#9ca3af;">${(f.steps||[]).length} steps · Can use: ${Array.isArray(f.allowedSenders) && f.allowedSenders.length ? f.allowedSenders.map(roleLabel).join(', ') : 'Everyone'}</div>
+
+  if (chatFlows.length === 0) {
+    el.innerHTML = `
+      <div class="chat-tmpl-bank-empty">
+        No flows yet. Use the form above to add your first one.
+      </div>`;
+    return;
+  }
+
+  const editSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+  const delSvg  = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>';
+  const roleShort = r => ({ technician: 'SP', manager: 'M', admin: 'A' }[r] || (r || '').slice(0,2).toUpperCase());
+
+  el.innerHTML = _chatGroupByCategory(chatFlows).map(([categoryName, groupItems]) => `
+    <div class="chat-category-section">
+      <div class="chat-category-section-title">${escHtml(categoryName)}</div>
+      <div class="chat-category-section-items">
+        ${groupItems.map(f => {
+    const idEsc = escHtml(f.id);
+    const isEditing = chatEditingFlowId === f.id;
+    const stepCount = (f.steps || []).length;
+    const hasRoles = Array.isArray(f.allowedSenders) && f.allowedSenders.length > 0;
+    const rolesInline = hasRoles
+      ? `<span class="chat-tmpl-card-roles-inline" title="${escHtml(f.allowedSenders.map(roleLabel).join(', '))}">${escHtml(f.allowedSenders.map(roleShort).join(' · '))}</span>`
+      : '<span class="chat-tmpl-card-roles-inline everyone" title="Everyone can use">ALL</span>';
+    return `
+      <div class="chat-tmpl-card${isEditing ? ' editing' : ''}" data-flow-id="${idEsc}">
+        <div class="chat-tmpl-card-main">
+          <div class="chat-tmpl-card-top">
+            <span class="chat-tmpl-card-title">${escHtml(f.title)}</span>
+            ${rolesInline}
           </div>
-          <div style="display:flex;gap:6px;">
-            <button type="button" onclick="window.editChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">Edit</button>
-            <button type="button" onclick="window.deleteChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
+          <div class="chat-tmpl-card-message">${stepCount} ${stepCount === 1 ? 'question' : 'questions'}</div>
         </div>
-      `).join('');
+        <div class="chat-tmpl-card-actions">
+          <button type="button" class="chat-tmpl-icon-btn" title="Edit" aria-label="Edit flow"
+            onclick="window.editChatFlow('${idEsc}')">${editSvg}</button>
+          <button type="button" class="chat-tmpl-icon-btn is-danger" title="Delete" aria-label="Delete flow"
+            onclick="window.deleteChatFlow('${idEsc}')">${delSvg}</button>
+        </div>
+      </div>
+    `;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
 }
 
 function _renderFlowBuilder() {
-  if (!chatFlowDraft && !chatEditingFlowId) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
+  if (!chatFlowDraft && !chatEditingFlowId) chatFlowDraft = { title: '', category: '', allowedSenders: [], steps: [] };
   if (chatEditingFlowId && !chatFlowDraft) {
     const f = chatFlows.find(x => x.id === chatEditingFlowId);
-    if (f) chatFlowDraft = { title: f.title, allowedSenders: f.allowedSenders || [], steps: (f.steps||[]).map(s => ({ ...s, options: s.options||[] })) };
+    if (f) chatFlowDraft = { title: f.title, category: f.category || '', allowedSenders: f.allowedSenders || [], steps: (f.steps||[]).map(s => ({ ...s, options: s.options||[] })) };
   }
   const list = document.getElementById('chatFlowStepsList');
   if (!list) return;
   const steps = chatFlowDraft?.steps || [];
+  const mobileFlow =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 768px)').matches;
 
-  function renderStepNode(s, depth, parentStepId, parentOptIdx) {
+  function stepOptionsHtml(currentStepId, selectedId) {
+    if (mobileFlow) {
+      let html = '<option value="" title="End flow here (no next question)">END</option>';
+      steps.forEach((candidate, idx) => {
+        if (candidate.id === currentStepId) return;
+        const longLabel = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
+        const shortLabel = `Q${idx + 1}`;
+        html += `<option value="${escHtml(candidate.id)}" title="${escHtml(longLabel)}"${candidate.id === selectedId ? ' selected' : ''}>${escHtml(shortLabel)}</option>`;
+      });
+      return html;
+    }
+    let html = '<option value="">End flow</option>';
+    steps.forEach((candidate, idx) => {
+      if (candidate.id === currentStepId) return;
+      const label = `Question ${idx + 1}${candidate.prompt ? ': ' + candidate.prompt : ''}`;
+      html += `<option value="${escHtml(candidate.id)}"${candidate.id === selectedId ? ' selected' : ''}>${escHtml(label)}</option>`;
+    });
+    return html;
+  }
+
+  function renderStepNode(s, idx) {
     if (!s) return '';
-    const indent = depth * 20;
     const opts = s.options || [];
-    const isNested = parentStepId != null;
-    return `
-    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="${depth}" style="margin-left:${indent}px;margin-bottom:1px;">
-      <div style="display:flex;gap:4px;align-items:center;padding:3px 6px;border-left:2px solid #c4b5fd;border-radius:2px;background:#faf5ff;margin-bottom:2px;">
-        <span style="font-size:10px;font-weight:600;color:#7c3aed;">Q</span>
-        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
-          style="flex:1;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;min-width:0;">
-        ${isNested ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(parentStepId)}',${parentOptIdx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>` : `<button type="button" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Delete" style="padding:1px 5px;font-size:9px;color:#b91c1c;background:#fef2f2;border:none;border-radius:2px;cursor:pointer;">×</button>`}
-      </div>
-      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="margin-left:12px;">
-        ${opts.map((o, oidx) => {
-          const nextStep = o.nextStepId ? steps.find(x => x.id === o.nextStepId) : null;
-          return `
-          <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="margin-bottom:1px;">
-            <div class="chat-flow-option-row" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:2px 0;">
-              <span style="color:#059669;font-size:10px;">→</span>
-              <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:70px;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;">
-              ${nextStep
-                ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(s.id)}',${oidx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>`
-                : `<button type="button" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:1px 5px;font-size:9px;color:#7c3aed;background:#ede9fe;border:none;border-radius:2px;cursor:pointer;">↳ Add next question</button>`}
-              <button type="button" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:1px 4px;color:#9ca3af;cursor:pointer;font-size:9px;background:none;border:none;">×</button>
+    const answersHtml = opts.map((o, oidx) => {
+      if (mobileFlow) {
+        return `
+          <div class="chat-flow-answer-block chat-flow-answer-block--mobile" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}">
+            <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:0;width:100%;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;box-sizing:border-box;">
+            <div class="chat-flow-answer-actions">
+              <select class="chat-flow-next-select" title="Next step after this answer (END = finish here)">
+                ${stepOptionsHtml(s.id, o.nextStepId || '')}
+              </select>
+              <button type="button" class="chat-flow-next-q-btn" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" title="Add next question and link this answer">+ Next</button>
+              <button type="button" class="chat-flow-remove-opt-btn" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" aria-label="Remove answer">×</button>
             </div>
-            ${nextStep ? `<div style="margin-left:16px;margin-top:1px;border-left:1px solid #e5e7eb;">${renderStepNode(nextStep, depth + 1, s.id, oidx)}</div>` : ''}
           </div>
-          `;
-        }).join('')}
-        <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="margin:1px 0;padding:1px 5px;font-size:9px;color:#7c3aed;background:none;border:none;cursor:pointer;">+ Add answer</button>
+        `;
+      }
+      return `
+          <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="display:grid;grid-template-columns:minmax(150px,1fr) minmax(140px,190px) auto auto;gap:6px;align-items:center;">
+            <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+            <select class="chat-flow-next-select" style="min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;">
+              ${stepOptionsHtml(s.id, o.nextStepId || '')}
+            </select>
+            <button type="button" class="chat-flow-next-q-btn" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:6px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;white-space:nowrap;">+ Next question</button>
+            <button type="button" class="chat-flow-remove-opt-btn" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:6px 8px;color:#9ca3af;cursor:pointer;font-size:12px;background:#fff;border:none;border-radius:7px;">×</button>
+          </div>
+        `;
+    }).join('');
+
+    return `
+    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="0" style="margin-bottom:10px;padding:10px;border:1px solid #ede9fe;border-radius:12px;background:#faf5ff;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;${mobileFlow ? 'min-width:0;' : ''}">
+        <span style="font-size:12px;font-weight:800;color:#7c3aed;">Question ${idx + 1}</span>
+        <button type="button" class="chat-flow-remove-step-btn" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Remove question" style="padding:3px 7px;font-size:12px;color:#b91c1c;background:#fef2f2;border:none;border-radius:6px;cursor:pointer;${mobileFlow ? 'flex-shrink:0;' : ''}">Remove</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;${mobileFlow ? 'min-width:0;' : ''}">
+        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
+          style="flex:1;min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;background:#fff;${mobileFlow ? 'box-sizing:border-box;' : ''}">
+      </div>
+      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="display:flex;flex-direction:column;gap:6px;${mobileFlow ? 'min-width:0;' : ''}">
+        ${answersHtml}
+        <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="align-self:flex-start;padding:5px 8px;font-size:11px;font-weight:800;color:#7c3aed;background:#ede9fe;border:none;border-radius:7px;cursor:pointer;">+ Add answer</button>
       </div>
     </div>
     `;
   }
 
-  const rootStep = steps[0];
-  const stepHtml = rootStep ? renderStepNode(rootStep, 0, null, null) : '';
-  list.innerHTML = stepHtml || '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add first question" below.</div>';
+  list.innerHTML = steps.length
+    ? steps.map(renderStepNode).join('')
+    : '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add first question" below.</div>';
 
   const addBtn = document.getElementById('chatFlowAddStepBtn');
-  if (addBtn) addBtn.style.display = steps.length ? 'none' : 'inline-block';
+  if (addBtn) {
+    addBtn.style.display = 'inline-block';
+    addBtn.textContent = steps.length ? '+ Add question' : '+ Add first question';
+  }
 }
 
 function _renderTmplList() {
+  _chatRefreshCategorySuggestions();
   const el = document.getElementById('chatTemplatesAdminList');
+  const countEl = document.getElementById('chatTemplatesCountBadge');
+  if (countEl) countEl.textContent = String(chatTemplates.length || 0);
   if (!el) return;
-  el.innerHTML = chatTemplates.length === 0
-    ? '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:14px;">No templates yet.</div>'
-    : chatTemplates.map(t => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(t.title)}</div>
-            ${t.message ? `<div style="font-size:13px;color:#6b7280;margin-bottom:4px;">${escHtml(t.message)}</div>` : ''}
-            <div style="font-size:11px;color:#9ca3af;">Can send: ${
-              Array.isArray(t.allowedSenders) && t.allowedSenders.length
-                ? t.allowedSenders.map(roleLabel).join(', ') : 'Everyone'
-            }</div>
+
+  if (chatTemplates.length === 0) {
+    el.innerHTML = `
+      <div class="chat-tmpl-bank-empty">
+        No templates yet. Use the form above to add your first one.
+      </div>`;
+    return;
+  }
+
+  const editSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+  const delSvg  = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>';
+
+  // Short role codes: Service Provider → SP, Manager → M, Admin → A
+  const roleShort = r => ({ technician: 'SP', manager: 'M', admin: 'A' }[r] || (r || '').slice(0,2).toUpperCase());
+
+  el.innerHTML = _chatGroupByCategory(chatTemplates).map(([categoryName, groupItems]) => `
+    <div class="chat-category-section">
+      <div class="chat-category-section-title">${escHtml(categoryName)}</div>
+      <div class="chat-category-section-items">
+        ${groupItems.map(t => {
+    const idEsc = escHtml(t.id);
+    const isEditing = chatEditingTmplId === t.id;
+    const hasRoles = Array.isArray(t.allowedSenders) && t.allowedSenders.length > 0;
+    const rolesInline = hasRoles
+      ? `<span class="chat-tmpl-card-roles-inline" title="${escHtml(t.allowedSenders.map(roleLabel).join(', '))}">${escHtml(t.allowedSenders.map(roleShort).join(' · '))}</span>`
+      : '<span class="chat-tmpl-card-roles-inline everyone" title="Everyone can send">ALL</span>';
+    return `
+      <div class="chat-tmpl-card${isEditing ? ' editing' : ''}" data-tmpl-id="${idEsc}">
+        <div class="chat-tmpl-card-main">
+          <div class="chat-tmpl-card-top">
+            <span class="chat-tmpl-card-title">${escHtml(t.title)}</span>
+            ${rolesInline}
           </div>
-          <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" onclick="window.editChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">Edit</button>
-            <button type="button" onclick="window.deleteChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
+          ${t.message ? `<div class="chat-tmpl-card-message">${escHtml(t.message)}</div>` : ''}
         </div>
-      `).join('');
+        <div class="chat-tmpl-card-actions">
+          <button type="button" class="chat-tmpl-icon-btn" title="Edit" aria-label="Edit template"
+            onclick="window.editChatTemplate('${idEsc}')">${editSvg}</button>
+          <button type="button" class="chat-tmpl-icon-btn is-danger" title="Delete" aria-label="Delete template"
+            onclick="window.deleteChatTemplate('${idEsc}')">${delSvg}</button>
+        </div>
+      </div>
+    `;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
 }
+// Helpers for the compact form
+function _setChatTmplSaveBtn(mode) {
+  // mode: 'add' | 'update' | 'saving'
+  const btn = document.getElementById('chatTmplSaveBtn');
+  if (!btn) return;
+  const plusSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+  const checkSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+  if (mode === 'saving') {
+    btn.innerHTML = '<span>Saving…</span>';
+  } else if (mode === 'update') {
+    btn.innerHTML = `${checkSvg}<span>Save</span>`;
+  } else {
+    btn.innerHTML = `${plusSvg}<span>Add</span>`;
+  }
+}
+function _setChatTmplDetailsOpen(open) {
+  const details = document.getElementById('chatTmplDetails');
+  const toggle  = document.getElementById('chatTmplDetailsToggle');
+  if (!details || !toggle) return;
+  details.style.display = open ? 'flex' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+window._setChatTmplDetailsOpen = _setChatTmplDetailsOpen;
+
 window.editChatTemplate = function(id) {
+  if (!_chatManageAllowed()) return;
+  _ensureChatCategoryFields();
+  if (String(id || '').startsWith('shared:')) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Shared templates are managed in Settings → Shared Setup.');
+    else alert('Shared templates are managed in Settings → Shared Setup.');
+    return;
+  }
   const t = chatTemplates.find(x => x.id === id);
   if (!t) return;
   chatEditingTmplId = id;
   document.getElementById('chatTmplTitle').value   = t.title   || '';
+  const categoryEl = document.getElementById('chatTmplCategory');
+  if (categoryEl) categoryEl.value = t.category || '';
   document.getElementById('chatTmplMessage').value = t.message || '';
   ['Tech','Mgr','Admin'].forEach((s,i) => {
     const cb = document.getElementById(`chatTmplSender${s}`);
     if (cb) cb.checked = Array.isArray(t.allowedSenders) && t.allowedSenders.includes(['technician','manager','admin'][i]);
   });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Update Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Edit Template';
-  document.getElementById('chatTmplForm')?.scrollIntoView({ behavior:'smooth' });
+  _setChatTmplSaveBtn('update');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'Edit Template';
+  _setChatTmplDetailsOpen(true);
+  document.getElementById('chatTmplForm')?.scrollIntoView({ behavior:'smooth', block:'start' });
+  _renderTmplList();
 };
 window.cancelEditChatTemplate = function() {
   chatEditingTmplId = null;
-  document.getElementById('chatTmplTitle').value   = '';
-  document.getElementById('chatTmplMessage').value = '';
+  _ensureChatCategoryFields();
+  const titleEl = document.getElementById('chatTmplTitle');
+  const categoryEl = document.getElementById('chatTmplCategory');
+  const msgEl   = document.getElementById('chatTmplMessage');
+  if (titleEl) titleEl.value = '';
+  if (categoryEl) categoryEl.value = '';
+  if (msgEl)   msgEl.value   = '';
   ['Tech','Mgr','Admin'].forEach(s => {
     const cb = document.getElementById(`chatTmplSender${s}`);
     if (cb) cb.checked = false;
   });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Create Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Create Structured Message Template';
+  _setChatTmplSaveBtn('add');
+  const label = document.getElementById('chatTmplFormLabel');
+  if (label) label.textContent = 'New Template';
+  _setChatTmplDetailsOpen(false);
+  _renderTmplList();
 };
 window.saveChatTemplate = async function() {
+  if (!_chatManageAllowed()) return;
+  _ensureChatCategoryFields();
   const title   = document.getElementById('chatTmplTitle')?.value.trim();
+  const category = _chatCategoryValue(document.getElementById('chatTmplCategory')?.value);
   const message = document.getElementById('chatTmplMessage')?.value.trim() || '';
   const allowedSenders = ['technician','manager','admin'].filter((_,i) => {
     return document.getElementById(`chatTmplSender${['Tech','Mgr','Admin'][i]}`)?.checked;
   });
-  if (!title) { alert('Please enter a title.'); return; }
+  if (!title) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Please enter a title.');
+    else alert('Please enter a title.');
+    return;
+  }
   const btn = document.getElementById('chatTmplSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const wasEditing = !!chatEditingTmplId;
+  if (btn) { btn.disabled = true; }
+  _setChatTmplSaveBtn('saving');
+  const locKey = _chatEffectiveLocKey();
   try {
     if (chatEditingTmplId) {
       await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, chatEditingTmplId),
-        { title, message, allowedSenders, updatedAt: serverTimestamp() });
+        { title, category, message, allowedSenders, locationId: locKey, updatedAt: serverTimestamp() });
     } else {
       await addDoc(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-        { title, message, allowedSenders, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
+        { title, category, message, allowedSenders, locationId: locKey, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
     }
     window.cancelEditChatTemplate();
-    await loadChatTemplates();
+    await loadChatTemplates({ force: true });
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] save template error', e?.code, e?.message, e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to save: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
   finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingTmplId ? 'Update Template' : 'Create Template'; }
+    if (btn) { btn.disabled = false; }
+    _setChatTmplSaveBtn(chatEditingTmplId ? 'update' : 'add');
   }
 };
 window.deleteChatTemplate = async function(id) {
-  if (!confirm('Delete this template?')) return;
+  if (!_chatManageAllowed()) return;
+  if (String(id || '').startsWith('shared:')) {
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert('Shared templates are managed in Settings → Shared Setup.');
+    else alert('Shared templates are managed in Settings → Shared Setup.');
+    return;
+  }
+  const tmpl = chatTemplates.find(x => x.id === id);
+  const titleStr = tmpl?.title ? `"${tmpl.title}"` : 'this template';
+  if (!confirm(`Delete ${titleStr}?`)) return;
   try {
     await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
-    await loadChatTemplates();
+    if (chatEditingTmplId === id) window.cancelEditChatTemplate();
+    await loadChatTemplates({ force: true });
     _renderTmplList();
   } catch(e) {
     console.error('[Chat] delete template error', e?.code, e?.message, e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
+    const msg = 'Failed to delete: ' + (e?.code || e?.message || 'unknown');
+    if (typeof window.ffStyledAlert === 'function') window.ffStyledAlert(msg);
+    else alert(msg);
   }
+};
+
+window.ffReloadChatTemplates = async function() {
+  await Promise.all([loadChatTemplates({ force: true }), loadChatFlows({ force: true })]);
+  _renderTmplList();
+  _renderFlowsAdminList();
+  renderSendOptions();
 };
 
 // ─── Settings Section ──────────────────────────────────────────────────────────
 async function initChatSettingsSection() {
   if (!chatUserProfile) await loadChatUserProfile();
   const s = document.getElementById('chatSettingsSection');
-  if (s) s.style.display = isAdmin(chatUserProfile?.role) ? 'block' : 'none';
+  if (s) {
+    const show =
+      typeof window.ffCurrentUserHasChatManagePermission === 'function'
+        ? window.ffCurrentUserHasChatManagePermission()
+        : isAdmin(chatUserProfile?.role);
+    s.style.display = show ? 'block' : 'none';
+  }
+}
+
+window.ffRefreshChatManageUi = function () {
+  try {
+    if (chatUserProfile) renderChatHeaderForRole(chatUserProfile.role);
+    else renderChatHeaderForRole(null);
+  } catch (e) {}
+  void initChatSettingsSection();
+};
+
+if (typeof document !== 'undefined' && !window.__ff_chatStaffPermListener) {
+  window.__ff_chatStaffPermListener = true;
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+  });
 }
 
 // ─── Auth Listener ─────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   if (user) {
+    // Defer chat badge subscriptions until salon is resolved. When the user has
+    // multiple memberships, currentSalonId is null until they pick one in the
+    // Choose Salon screen — subscribing here with the legacy users/{uid}.salonId
+    // would race with the salon selection and could attach to the wrong salon.
+    if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+      return;
+    }
     try {
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         const p = { uid: user.uid, ...snap.data() };
-        if (p.salonId) {
-          subscribeToChatBadge(user.uid, p.salonId);
-          subscribeToChatToastNotifications(user.uid, p.salonId);
+        // Multi-salon: same reason as loadChatUserProfile — prefer the salon
+        // the user actively picked, otherwise badge/toast subscriptions point
+        // at the legacy primary salon and cross-salon notifications leak in.
+        const activeSalonId = (typeof window !== 'undefined' && window.currentSalonId)
+          ? String(window.currentSalonId).trim()
+          : '';
+        const targetSalonId = activeSalonId || p.salonId || '';
+        if (targetSalonId) {
+          subscribeToChatBadge(user.uid, targetSalonId);
+          subscribeToChatToastNotifications(user.uid, targetSalonId);
         }
       }
     } catch(e) {}
   } else {
+    _chatAuthUid = null;
+    _chatAuthSalonId = null;
     if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
     if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+    _lastChatToastLastMsgMsByConv.clear();
     const badge = document.getElementById('chatNavBadge');
-    if (badge) badge.style.display = 'none';
+    if (badge) {
+      badge.textContent = '';
+      badge.style.removeProperty('display');
+    }
   }
 });
+
+// ─── Location-change Listener (per-location chat isolation) ────────────────────
+// When the active location changes, reset thread UI and re-attach listeners that
+// depend on location filtering. The nav chat badge subscription is intentionally
+// NOT restarted: it already sums unread for the whole salon participant set, and
+// tearing it down + clearing the DOM produced a flash-then-empty badge after load.
+if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
+  window.__ff_chatLocationListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    try {
+      console.log('[Chat] location changed → resetting chat state, new loc=', _activeLocKey());
+      if (chatConvsUnsub) { chatConvsUnsub(); chatConvsUnsub = null; }
+      if (chatMsgsUnsub)  { chatMsgsUnsub();  chatMsgsUnsub  = null; }
+      if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+      _lastChatToastLastMsgMsByConv.clear();
+
+      allConversations = [];
+      lastNonEmptyConversations = [];
+      currentMessages  = [];
+      currentConvId    = null;
+
+      try { renderThreadList(); } catch (_) {}
+      try { _renderEmptyConversation(); } catch (_) {}
+
+      if (_chatAuthUid && _chatAuthSalonId) {
+        subscribeToChatToastNotifications(_chatAuthUid, _chatAuthSalonId);
+      }
+      if (chatUserProfile?.salonId) {
+        subscribeToConversationList();
+        // Also reload per-location salon data (templates, flows) so the
+        // settings modal and the "New Message" picker show only what the
+        // currently active location has configured.
+        (async () => {
+          try {
+            await loadChatTemplates();
+            await loadChatFlows();
+            try { if (typeof _renderTmplList === 'function') _renderTmplList(); } catch (_) {}
+            try { if (typeof _renderFlowsAdminList === 'function') _renderFlowsAdminList(); } catch (_) {}
+          } catch (err) {
+            console.warn('[Chat] reload templates/flows after loc change failed', err);
+          }
+        })();
+      }
+    } catch (e) {
+      console.warn('[Chat] location change handler error', e);
+    }
+  });
+}
+
+/**
+ * Sends a Chat free-text reminder with a Training deep link (?ff_training=).
+ * Wired from Training → Reports admin "Send Reminder" (index.html).
+ */
+window.ffSendTrainingReminderChat = async function (payload = {}) {
+  await loadChatUserProfile();
+  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) {
+    throw new Error(
+      chatUserProfile == null
+        ? 'Chat profile could not be loaded (users document missing or network error). Refresh and try again, or open the Chat tab once.'
+        : 'Sign in is required to send chat reminders.'
+    );
+  }
+  const salonId = chatUserProfile.salonId;
+
+  let rUid = String(payload.recipientFirebaseUid || payload.recipientUid || '').trim();
+  const staffId = String(payload.staffId || '').trim();
+
+  if (!rUid && staffId) {
+    try {
+      const staffSnap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+      if (staffSnap.exists()) {
+        const d = staffSnap.data() || {};
+        rUid = String(d.firebaseUid || d.uid || d.firebaseAuthUid || d.userUid || '').trim();
+      }
+    } catch (e) {
+      console.warn('[Chat] Training reminder: staff lookup failed', e);
+    }
+  }
+
+  if (!rUid && payload.recipientEmail) {
+    const email = String(payload.recipientEmail || '').trim().toLowerCase();
+    if (email && typeof window.ffGetStaffStore === 'function') {
+      const row =
+        (window.ffGetStaffStore()?.staff || []).find((s) => String(s.email || '').trim().toLowerCase() === email) ||
+        null;
+      if (row) rUid = String(row.firebaseUid || row.uid || '').trim();
+    }
+  }
+
+  if (!rUid) {
+    throw new Error(
+      'This employee needs a Fair Flow login linked on their staff profile before Chat reminders work.'
+    );
+  }
+
+  const trainingId = String(payload.trainingId || '').trim();
+  const title = String(payload.trainingTitle || 'Training').trim() || 'Training';
+  const recipientName =
+    String(payload.recipientName || payload.staffName || '').trim() || _nameForUidForSend(rUid);
+
+  let deepLink = '';
+  try {
+    const u = new URL(window.location.href);
+    u.hash = '';
+    if (trainingId) u.searchParams.set('ff_training', trainingId);
+    deepLink = u.toString();
+  } catch (_) {
+    deepLink = window.location.href;
+  }
+
+  const intro = String(payload.leadInText || 'Please complete this assigned training when you can.').trim();
+  const body = `${intro}\n\n${title}\n\nOpen training:\n${deepLink}`;
+
+  await _sendFreeTextDirect(rUid, recipientName, null, body);
+};
 
 // ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
 window.goToChat = goToChat;

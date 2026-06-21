@@ -3,16 +3,20 @@
  * Connects to media-cloud.js.
  */
 
-import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { getDoc, getDocs, doc, collection, query, where, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js?v=20260412_storage_bucket_explicit";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
   createWorkWithMedia,
+  createWorkWithMediaBestEffort,
   addMediaToExistingWork,
+  addMediaToExistingWorkBestEffort,
   subscribeContentWorks,
   getContentWork,
   getMediaItems,
   getPostedHistory,
+  resolveWorkCardPreviewUrl,
+  resolveMediaItemsForDisplay,
   addPostedHistory,
   updateContentWork,
   archiveContentWork,
@@ -25,7 +29,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260402_firebase_sdk_align";
+} from "./media-cloud.js?v=20260618_multi_image_upload_internal_fallback";
 
 let currentUserProfile = null;
 let userWorks = [];
@@ -40,6 +44,13 @@ let currentMediaEmployeeFilter = "all"; // staffId or "all"; only used in TO HAN
 let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by category
 let mediaCategories = [];
 let unsubMediaCategories = null;
+const MEDIA_UPLOAD_POINTS_DAILY_CAP = 10;
+const MEDIA_MAX_IMAGES_PER_UPLOAD = 15;
+/** First Firestore snapshot received (avoid empty-state flash while queries run). */
+let mediaMyWorksHydrated = false;
+let mediaAllWorksHydrated = false;
+/** Skip tearing down subscriptions when uid/staff/salon/to-handle unchanged (faster return to Media). */
+let _mediaWorkListSubKey = "";
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {
@@ -81,9 +92,17 @@ async function waitForSalonId(maxMs = 3500) {
 
 async function resolveSalonStaffDoc(salonId, user, userData) {
   if (!salonId) {
-    return { data: null, docId: userData?.staffId || user.uid };
+    return { data: null, docId: (typeof window !== "undefined" && window.__ff_authedStaffId) || userData?.staffId || user.uid };
   }
   const tryIds = [];
+  if (typeof window !== "undefined" && window.__ff_authedStaffId) tryIds.push(window.__ff_authedStaffId);
+  try {
+    const membershipSnap = await getDoc(doc(db, `users/${user.uid}/memberships/${salonId}`));
+    if (membershipSnap.exists()) {
+      const membershipStaffId = membershipSnap.data()?.staffId;
+      if (membershipStaffId && typeof membershipStaffId === "string") tryIds.push(membershipStaffId);
+    }
+  } catch (_) {}
   try {
     const memSnap = await getDoc(doc(db, `salons/${salonId}/members`, user.uid));
     if (memSnap.exists()) {
@@ -91,12 +110,11 @@ async function resolveSalonStaffDoc(salonId, user, userData) {
       if (mid && typeof mid === "string") tryIds.push(mid);
     }
   } catch (_) {}
-  if (userData?.staffId) tryIds.push(userData.staffId);
-  if (typeof window !== "undefined" && window.__ff_authedStaffId) tryIds.push(window.__ff_authedStaffId);
   try {
     const ls = typeof localStorage !== "undefined" ? localStorage.getItem("ff_authedStaffId_v1") : "";
     if (ls) tryIds.push(ls);
   } catch (_) {}
+  if (userData?.staffId) tryIds.push(userData.staffId);
   tryIds.push(user.uid);
   const seen = new Set();
   for (const id of tryIds) {
@@ -125,7 +143,7 @@ async function resolveSalonStaffDoc(salonId, user, userData) {
       }
     }
   } catch (_) {}
-  return { data: null, docId: userData?.staffId || user.uid };
+  return { data: null, docId: (typeof window !== "undefined" && window.__ff_authedStaffId) || userData?.staffId || user.uid };
 }
 
 /** When direct paths miss, one full scan — must attach full doc for permissions.media_handle */
@@ -150,6 +168,13 @@ async function enrichStaffDocIfMissing(salonId, user, userData, existing) {
 async function loadUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
+  const sidPre = typeof window !== "undefined" && window.currentSalonId ? String(window.currentSalonId).trim() : "";
+  const authedPre =
+    typeof window !== "undefined" && window.__ff_authedStaffId ? String(window.__ff_authedStaffId).trim() : "";
+  const profileCacheKey = `${user.uid}|${sidPre}|${authedPre}`;
+  if (currentUserProfile && currentUserProfile._ffMediaProfileKey === profileCacheKey) {
+    return currentUserProfile;
+  }
   try {
     const snap = await getDoc(doc(db, "users", user.uid));
     let d;
@@ -169,7 +194,7 @@ async function loadUserProfile() {
       };
     }
 
-    let salonId = d.salonId || (typeof window !== "undefined" ? window.currentSalonId : null);
+    let salonId = (typeof window !== "undefined" && window.currentSalonId) ? window.currentSalonId : d.salonId;
     if (!salonId) {
       salonId = await waitForSalonId();
     }
@@ -202,19 +227,30 @@ async function loadUserProfile() {
     }
 
     const mediaHandleAllowed = computeMediaHandleAllowed(staffDocData, role);
+    const staffName = String(
+      staffDocData?.name ||
+      staffDocData?.displayName ||
+      d.name ||
+      d.displayName ||
+      user.displayName ||
+      user.email ||
+      "User"
+    ).trim() || "User";
 
     currentUserProfile = {
       uid: user.uid,
       staffId,
-      staffName: d.name || d.displayName || user.email || "User",
+      staffName,
       createdByRole: role,
       salonId,
       mediaHandleAllowed,
+      _ffMediaProfileKey: profileCacheKey,
     };
     if (salonId) {
       setDoc(doc(db, `salons/${salonId}/members`, user.uid), {
         name: currentUserProfile.staffName,
         role: currentUserProfile.createdByRole,
+        staffId: currentUserProfile.staffId,
       }, { merge: true }).catch(() => {});
     }
     return currentUserProfile;
@@ -248,6 +284,8 @@ function setMediaTab(tab) {
   currentMediaTab = tab;
   currentMediaFilter = "all";
   currentMediaEmployeeFilter = "all";
+  const screenEl = document.getElementById("mediaScreen");
+  if (screenEl) screenEl.setAttribute("data-media-tab", tab);
   const myBtn = document.getElementById("mediaTabMyUploads");
   const toHandleBtn = document.getElementById("mediaTabToHandle");
   if (myBtn) {
@@ -372,11 +410,54 @@ function getSortLabel(id) {
   return SORT_OPTIONS.find((s) => s.id === id)?.label || "Sort";
 }
 
+const MEDIA_DROPDOWN_FLOAT_MQ = "(max-width: 768px)";
+
+function _clearMediaDropdownPanelPosition(panel) {
+  if (!panel) return;
+  panel.style.position = "";
+  panel.style.top = "";
+  panel.style.left = "";
+  panel.style.right = "";
+  panel.style.width = "";
+  panel.style.minWidth = "";
+  panel.style.maxWidth = "";
+  panel.style.zIndex = "";
+}
+
+/** Narrow viewports: use fixed + viewport clamp so menus aren’t clipped when the toolbar overflows horizontally. */
+function _positionMediaDropdownPanel(panel, trigger) {
+  if (!panel || !trigger) return;
+  try {
+    if (typeof window.matchMedia === "function" && window.matchMedia(MEDIA_DROPDOWN_FLOAT_MQ).matches) {
+      const rect = trigger.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const margin = 10;
+      const desiredW = Math.min(260, Math.max(140, vw - margin * 2));
+      let left = rect.left;
+      if (left + desiredW > vw - margin) left = vw - margin - desiredW;
+      if (left < margin) left = margin;
+      panel.style.position = "fixed";
+      panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.right = "auto";
+      panel.style.width = `${Math.round(desiredW)}px`;
+      panel.style.minWidth = "";
+      panel.style.maxWidth = "";
+      panel.style.zIndex = "5000";
+    } else {
+      _clearMediaDropdownPanelPosition(panel);
+    }
+  } catch (_) {
+    _clearMediaDropdownPanelPosition(panel);
+  }
+}
+
 function closeMediaDropdowns() {
   const fd = document.getElementById("mediaFilterDropdown");
   const sd = document.getElementById("mediaSortDropdown");
   const ed = document.getElementById("mediaEmployeeFilterDropdown");
   const cd = document.getElementById("mediaCategoryFilterDropdown");
+  [fd, sd, ed, cd].forEach(_clearMediaDropdownPanelPosition);
   if (fd) fd.style.display = "none";
   if (sd) sd.style.display = "none";
   if (ed) ed.style.display = "none";
@@ -519,17 +600,14 @@ function renderMediaFilters() {
 // Card rendering
 // =====================
 
-function getPreviewUrl(work) {
-  return work._firstMediaUrl || null;
-}
-
 async function enrichWorkWithPreview(work) {
   if (work._firstMediaUrl) return work;
   try {
-    const items = await getMediaItems(work.id);
-    const first = items[0];
-    if (first?.mediaUrl) work._firstMediaUrl = first.mediaUrl;
-  } catch (_) {}
+    const url = await resolveWorkCardPreviewUrl(work);
+    if (url) work._firstMediaUrl = url;
+  } catch (e) {
+    console.warn("[Media] enrichWorkWithPreview", work?.id, e);
+  }
   return work;
 }
 
@@ -630,7 +708,7 @@ function applyToHandleVisibility() {
   if (!showToHandle) currentMediaTab = "my_uploads";
   const tabsWrap = document.getElementById("mediaTabsWrap");
   if (tabsWrap) {
-    tabsWrap.style.setProperty("display", "flex", "important");
+    tabsWrap.style.setProperty("display", showToHandle ? "flex" : "none", "important");
   }
   const toHandleBtn = document.getElementById("mediaTabToHandle");
   if (toHandleBtn) {
@@ -640,6 +718,18 @@ function applyToHandleVisibility() {
   const myUploadsBtn = document.getElementById("mediaTabMyUploads");
   if (myUploadsBtn) myUploadsBtn.style.borderRadius = showToHandle ? "8px 0 0 8px" : "8px";
   updateMediaUploadWorkButtonVisibility();
+  const mediaScreenEl = document.getElementById("mediaScreen");
+  if (mediaScreenEl) mediaScreenEl.setAttribute("data-media-tab", currentMediaTab);
+}
+
+/** Thumbnail for grid: enriched cache, or denormalized preview on work doc (no subcollection read). */
+function syncCardPreviewUrlFromDoc(work) {
+  if (!work) return "";
+  const injected = work._firstMediaUrl != null ? String(work._firstMediaUrl).trim() : "";
+  if (injected && /^https?:\/\//i.test(injected)) return injected;
+  const pre = work.previewMediaUrl != null ? String(work.previewMediaUrl).trim() : "";
+  if (pre && /^https?:\/\//i.test(pre)) return pre;
+  return "";
 }
 
 function getStatusLabels(work) {
@@ -657,7 +747,21 @@ function renderMediaList() {
   const list = document.getElementById("mediaList");
   const empty = document.getElementById("mediaListEmpty");
   const loading = document.getElementById("mediaListLoading");
-  if (!list || !empty) return;
+  if (!list || !empty || !loading) return;
+
+  const awaitingMy =
+    currentMediaTab === "my_uploads" && auth.currentUser && !mediaMyWorksHydrated;
+  const awaitingAll =
+    currentMediaTab === "to_handle" &&
+    auth.currentUser &&
+    canHandleMediaWork() &&
+    !mediaAllWorksHydrated;
+  if (awaitingMy || awaitingAll) {
+    loading.style.display = "block";
+    list.style.display = "none";
+    empty.style.display = "none";
+    return;
+  }
 
   const works = currentMediaTab === "my_uploads" ? userWorks : allWorks;
   const filtered = works.filter((w) => w.status !== "deleted");
@@ -668,7 +772,7 @@ function renderMediaList() {
   const filteredByCategory = applyCategoryFilter(filteredByEmployee, currentMediaCategoryFilter);
   const sorted = applySort(filteredByCategory, currentMediaSort);
 
-  if (works.length === 0 && currentMediaTab === "my_uploads") {
+  if (works.length === 0 && currentMediaTab === "my_uploads" && mediaMyWorksHydrated) {
     loading.style.display = "none";
     list.style.display = "none";
     empty.style.display = "block";
@@ -689,7 +793,7 @@ function renderMediaList() {
     card.style.cssText = "background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;cursor:pointer;transition:box-shadow 0.2s;";
     card.onclick = () => openWorkDetails(work.id);
 
-    const previewUrl = work._firstMediaUrl || "";
+    const previewUrl = syncCardPreviewUrlFromDoc(work);
     const preview = previewUrl
       ? `<div style="aspect-ratio:1;background:#f3f4f6;overflow:hidden;"><img src="${previewUrl}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
       : `<div style="aspect-ratio:1;background:#f3f4f6;display:flex;align-items:center;justify-content:center;color:#9ca3af;">
@@ -745,20 +849,211 @@ function hideUploadMessage() {
   if (el) el.style.display = "none";
 }
 
+function getUploadSelectedFiles(mediaType = getMediaType()) {
+  if (mediaType === "before_after") {
+    return [
+      document.getElementById("uploadWorkFileBefore")?.files?.[0],
+      document.getElementById("uploadWorkFileAfter")?.files?.[0],
+    ].filter(Boolean);
+  }
+  const input = document.getElementById("uploadWorkFileInput");
+  const files = Array.from(input?.files || []).filter(Boolean);
+  return mediaType === "photo" ? files : files.slice(0, 1);
+}
+
+function buildMediaUploadSummary(successCount, failureCount) {
+  if (failureCount > 0 && successCount > 0) {
+    return `Upload complete: ${successCount} succeeded, ${failureCount} failed.`;
+  }
+  if (failureCount > 0) {
+    return `Upload failed: 0 succeeded, ${failureCount} failed.`;
+  }
+  return `Success! ${successCount} media item(s) added.`;
+}
+
+function getMediaPointsAccountId() {
+  const candidates = [
+    typeof window !== "undefined" ? window.currentSalonId : "",
+    currentUserProfile?.salonId,
+    typeof window !== "undefined" ? window.currentAccountId : "",
+    typeof window !== "undefined" ? window.accountId : "",
+  ];
+  for (const value of candidates) {
+    const clean = String(value || "").trim();
+    if (clean) return clean;
+  }
+  return "";
+}
+
+function getMediaPointsLocationId(work) {
+  const fromWork = String(work?.locationId || "").trim();
+  if (fromWork) return fromWork;
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const value = window.ffGetActiveLocationId();
+      const clean = String(value || "").trim();
+      if (clean) return clean;
+    }
+  } catch (_) {}
+  return typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
+    ? window.__ff_active_location_id.trim()
+    : "";
+}
+
+function resolveMediaPointsType(mediaType) {
+  if (mediaType === "before_after") return { key: "beforeAfterUpload", eventType: "image", beforeAfter: true };
+  if (mediaType === "video") return { key: "videoUpload", eventType: "video", beforeAfter: false };
+  return { key: "photoUpload", eventType: "image", beforeAfter: false };
+}
+
+async function sha256File(file) {
+  if (!file || !window.crypto?.subtle) return "";
+  const buffer = await file.arrayBuffer();
+  const hash = await window.crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashMediaPointFiles(files, mediaType) {
+  const fileList = Array.isArray(files) ? files : [files].filter(Boolean);
+  if (mediaType === "before_after") {
+    const hashes = await Promise.all(fileList.map((file) => sha256File(file)));
+    return [hashes.filter(Boolean).join(":")].filter(Boolean);
+  }
+  return Promise.all(fileList.map((file) => sha256File(file)));
+}
+
+function mediaPointsTodayKey(date = new Date()) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+
+function mediaPointsWeekKey(date = new Date()) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const year = d.getUTCFullYear();
+  const yearStart = Date.UTC(year, 0, 1);
+  const week = Math.ceil((((d.getTime() - yearStart) / 86400000) + 1) / 7);
+  return year + "-W" + String(week).padStart(2, "0");
+}
+
+function mediaPointsTimestampDayKey(value) {
+  try {
+    const date = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+    return mediaPointsTodayKey(date);
+  } catch (_) {
+    return "";
+  }
+}
+
+async function getTodayMediaUploadPointEvents(accountId, staffId) {
+  const now = new Date();
+  const todayKey = mediaPointsTodayKey(now);
+  const snap = await getDocs(query(
+    collection(db, `accounts/${accountId}/pointsEvents`),
+    where("weekKey", "==", mediaPointsWeekKey(now))
+  ));
+  return snap.docs
+    .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() || {}) }))
+    .filter((event) => {
+      if (event.voided === true) return false;
+      if (String(event.type || "") !== "media_upload") return false;
+      if (String(event.sourceModule || "") !== "media") return false;
+      if (String(event.staffId || "") !== staffId) return false;
+      return mediaPointsTimestampDayKey(event.createdAt) === todayKey;
+    });
+}
+
+async function awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes }) {
+  try {
+    const ids = Array.isArray(mediaIds) ? mediaIds.filter(Boolean) : [mediaIds].filter(Boolean);
+    if (!ids.length) return;
+    const accountId = getMediaPointsAccountId();
+    const locationId = getMediaPointsLocationId(work);
+    const staffId = String(currentUserProfile?.staffId || "").trim();
+    const staffName = String(currentUserProfile?.staffName || "").trim();
+    if (!accountId || !locationId || !staffId) return;
+    if (typeof window.ffGetPointsSettings !== "function" || typeof window.ffCreatePointsEvent !== "function") return;
+
+    console.log("[Points] media upload detected", { mediaIds: ids, staffId, locationId });
+    const resolved = resolveMediaPointsType(mediaType);
+    console.log("[Points] media type resolved", resolved);
+    const settings = await window.ffGetPointsSettings(accountId, locationId);
+    const points = Number(settings?.[resolved.key]);
+    const awardIds = resolved.beforeAfter ? ids.slice(0, 1) : ids;
+    const todayEvents = await getTodayMediaUploadPointEvents(accountId, staffId);
+    const existingHashes = new Set(todayEvents.map((event) => String(event.fileHash || "")).filter(Boolean));
+    const hashList = Array.isArray(fileHashes) ? fileHashes : [];
+    const awardPairs = awardIds.map((mediaId, idx) => ({
+      mediaId,
+      fileHash: String(hashList[idx] || "").trim(),
+    })).filter((pair) => {
+      if (pair.fileHash && existingHashes.has(pair.fileHash)) {
+        console.log("[Points] media duplicate skipped", { mediaId: pair.mediaId, fileHash: pair.fileHash });
+        return false;
+      }
+      return true;
+    });
+    const todayCount = todayEvents.length;
+    const remaining = Math.max(0, MEDIA_UPLOAD_POINTS_DAILY_CAP - todayCount);
+    if (remaining <= 0) {
+      console.log("[Points AntiSpam] daily cap reached", { staffId, cap: MEDIA_UPLOAD_POINTS_DAILY_CAP });
+      return;
+    }
+    const cappedAwardPairs = awardPairs.slice(0, remaining);
+    if (cappedAwardPairs.length < awardPairs.length) {
+      console.log("[Points AntiSpam] daily cap reached", { staffId, cap: MEDIA_UPLOAD_POINTS_DAILY_CAP });
+    }
+
+    await Promise.all(cappedAwardPairs.map(async ({ mediaId, fileHash }) => {
+      const result = await window.ffCreatePointsEvent({
+        accountId,
+        staffId,
+        staffName,
+        locationId,
+        type: "media_upload",
+        sourceModule: "media",
+        sourceId: String(mediaId),
+        points: Number.isFinite(points) ? points : 0,
+        uniquePerSource: true,
+        fileHash,
+        sourceMeta: {
+          mediaType: resolved.eventType,
+          beforeAfter: resolved.beforeAfter,
+        },
+      });
+      if (result?.duplicate) {
+        console.log("[Points] media duplicate skipped", { mediaId });
+      } else if (result?.created) {
+        console.log("[Points] media points added", { mediaId, points: Number.isFinite(points) ? points : 0 });
+      }
+    }));
+  } catch (err) {
+    console.warn("[Points] media upload failed", err);
+  }
+}
+
 function toggleFileInputs() {
   const mediaType = getMediaType();
   const single = document.getElementById("uploadWorkFileSingle");
   const beforeAfter = document.getElementById("uploadWorkFileBeforeAfter");
   const fileInput = document.getElementById("uploadWorkFileInput");
+  const hint = document.getElementById("uploadWorkFileHint");
   if (!single || !beforeAfter || !fileInput) return;
   if (mediaType === "before_after") {
     single.style.display = "none";
     beforeAfter.style.display = "block";
     fileInput.accept = "";
+    fileInput.multiple = false;
+    if (hint) hint.textContent = "Choose one Before image and one After image.";
   } else {
     single.style.display = "block";
     beforeAfter.style.display = "none";
     fileInput.accept = mediaType === "photo" ? "image/*" : "video/*";
+    fileInput.multiple = mediaType === "photo";
+    if (hint) hint.textContent = mediaType === "photo"
+      ? `You can choose up to ${MEDIA_MAX_IMAGES_PER_UPLOAD} images at once.`
+      : "Choose one video.";
   }
 }
 
@@ -784,6 +1079,14 @@ function populateMediaCategoriesDropdown() {
   if (!dropdown || !trigger) return;
   const active = mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
   dropdown.innerHTML = "";
+  if (!active.length) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "font-size:10px;color:#6b7280;padding:12px 14px;line-height:1.35;background:#fff;";
+    empty.textContent = "No media categories yet. Add categories in Settings > Media Categories.";
+    dropdown.appendChild(empty);
+    updateUploadCategoryTriggerText();
+    return;
+  }
   active.forEach((c) => {
     const label = document.createElement("label");
     label.style.cssText = "display:flex;align-items:center;gap:8px;cursor:pointer;font-size:10px;padding:10px 14px;border-bottom:1px solid #f3f4f6;";
@@ -807,14 +1110,70 @@ function populateMediaCategoriesDropdown() {
 
 function toggleUploadCategoryDropdown() {
   const dropdown = document.getElementById("uploadWorkCategoryDropdown");
+  const trigger = document.getElementById("uploadWorkCategoryTrigger");
   if (!dropdown) return;
   const isOpen = dropdown.style.display === "block";
-  dropdown.style.display = isOpen ? "none" : "block";
+  if (isOpen) {
+    closeUploadCategoryDropdown();
+    return;
+  }
+  if (dropdown.parentElement !== document.body) {
+    document.body.appendChild(dropdown);
+  }
+  positionUploadCategoryDropdown(dropdown, trigger);
+  dropdown.style.display = "block";
 }
 
 function closeUploadCategoryDropdown() {
   const dropdown = document.getElementById("uploadWorkCategoryDropdown");
-  if (dropdown) dropdown.style.display = "none";
+  if (dropdown) {
+    dropdown.style.display = "none";
+    clearUploadCategoryDropdownPosition(dropdown);
+  }
+}
+
+function clearUploadCategoryDropdownPosition(dropdown) {
+  if (!dropdown) return;
+  dropdown.style.position = "";
+  dropdown.style.top = "";
+  dropdown.style.left = "";
+  dropdown.style.right = "";
+  dropdown.style.width = "";
+  dropdown.style.maxHeight = "";
+  dropdown.style.zIndex = "";
+}
+
+function positionUploadCategoryDropdown(dropdown, trigger) {
+  if (!dropdown || !trigger) return;
+  try {
+    const rect = trigger.getBoundingClientRect();
+    const margin = 12;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const width = Math.max(180, Math.min(rect.width, vw - margin * 2));
+    let left = rect.left;
+    if (left + width > vw - margin) left = vw - margin - width;
+    if (left < margin) left = margin;
+
+    const below = Math.max(120, vh - rect.bottom - margin);
+    const above = Math.max(120, rect.top - margin);
+    const openAbove = below < 180 && above > below;
+    const maxHeight = Math.min(260, openAbove ? above : below);
+
+    dropdown.style.position = "fixed";
+    dropdown.style.left = `${Math.round(left)}px`;
+    dropdown.style.right = "auto";
+    dropdown.style.width = `${Math.round(width)}px`;
+    dropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    dropdown.style.zIndex = "100500";
+    if (openAbove) {
+      dropdown.style.top = `${Math.round(Math.max(margin, rect.top - maxHeight - 4))}px`;
+    } else {
+      dropdown.style.top = `${Math.round(rect.bottom + 4)}px`;
+    }
+  } catch (_) {
+    clearUploadCategoryDropdownPosition(dropdown);
+  }
 }
 
 function populateWorksDropdown() {
@@ -839,9 +1198,13 @@ function validateUpload() {
     return false;
   }
   if (mediaType === "photo" || mediaType === "video") {
-    const file = document.getElementById("uploadWorkFileInput")?.files?.[0];
-    if (!file) {
+    const files = getUploadSelectedFiles(mediaType);
+    if (!files.length) {
       showUploadMessage(mediaType === "photo" ? "Please choose an image." : "Please choose a video.", true);
+      return false;
+    }
+    if (mediaType === "photo" && files.length > MEDIA_MAX_IMAGES_PER_UPLOAD) {
+      showUploadMessage(`Please choose up to ${MEDIA_MAX_IMAGES_PER_UPLOAD} images per upload. You selected ${files.length}.`, true);
       return false;
     }
   }
@@ -875,6 +1238,11 @@ function validateUpload() {
   return true;
 }
 
+function formatMediaUploadError(err) {
+  const raw = err && (err.message || err.code) ? `${err.code || ""} ${err.message || err}`.trim() : String(err || "");
+  return raw || "Upload failed";
+}
+
 async function doUpload() {
   if (auth.currentUser && !currentUserProfile) {
     try {
@@ -902,56 +1270,84 @@ async function doUpload() {
       const categoryIds = [...checked].map((el) => el.value?.trim()).filter(Boolean);
       const categoryNames = [...checked].map((el) => el.dataset?.name || el.value || "").filter(Boolean);
       const caption = document.getElementById("uploadWorkCaption")?.value?.trim() || "";
-      let files;
-      if (mediaType === "before_after") {
-        files = [
-          document.getElementById("uploadWorkFileBefore")?.files?.[0],
-          document.getElementById("uploadWorkFileAfter")?.files?.[0],
-        ].filter(Boolean);
-      } else {
-        files = document.getElementById("uploadWorkFileInput")?.files?.[0];
+      const files = getUploadSelectedFiles(mediaType);
+      const workPayload = {
+        staffId: currentUserProfile.staffId,
+        staffName: currentUserProfile.staffName,
+        createdByRole: currentUserProfile.createdByRole,
+        categoryIds,
+        categoryNames,
+        serviceType: categoryNames[0] || "", // backward compat
+        caption,
+      };
+      showUploadMessage(`Uploading 0/${files.length}...`, false);
+      const uploadResult = mediaType === "photo"
+        ? await createWorkWithMediaBestEffort(workPayload, files, mediaType, ({ done, total }) => {
+          showUploadMessage(`Uploading ${done}/${total}...`, false);
+        })
+        : {
+          ...(await createWorkWithMedia(workPayload, mediaType === "before_after" ? files : files[0], mediaType)),
+          failures: [],
+          successfulFiles: files,
+        };
+      const { workId, mediaIds, successfulFiles = [], failures = [] } = uploadResult;
+      if (!mediaIds.length) {
+        showUploadMessage(buildMediaUploadSummary(0, failures.length || files.length), true);
+        return;
       }
-      const { workId, mediaIds } = await createWorkWithMedia(
-        {
-          staffId: currentUserProfile.staffId,
-          staffName: currentUserProfile.staffName,
-          createdByRole: currentUserProfile.createdByRole,
-          categoryIds,
-          categoryNames,
-          serviceType: categoryNames[0] || "", // backward compat
-          caption,
-        },
-        files,
-        mediaType
-      );
-      showUploadMessage(`Success! Work created. ${mediaIds.length} media item(s) added.`, false);
+      const fileHashes = await hashMediaPointFiles(successfulFiles.length ? successfulFiles : files, mediaType);
+      void awardMediaUploadPoints({
+        mediaIds,
+        mediaType,
+        fileHashes,
+        work: { locationId: typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function" ? window.ffGetActiveLocationId() : "" },
+      });
+      showUploadMessage(`Work created. ${buildMediaUploadSummary(mediaIds.length, failures.length)}`, failures.length > 0);
       userWorks.unshift({ id: workId, categoryIds, categoryNames, categoryId: categoryIds[0], categoryName: categoryNames[0], serviceType: categoryNames[0], caption, status: "active" });
       populateWorksDropdown();
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";
       document.getElementById("uploadWorkFileAfter").value = "";
-      setTimeout(() => closeUploadModal(), 1500);
+      if (!failures.length) setTimeout(() => closeUploadModal(), 1500);
     } else {
       const workId = document.getElementById("uploadWorkExistingSelect")?.value?.trim();
-      let files;
-      if (mediaType === "before_after") {
-        files = [
-          document.getElementById("uploadWorkFileBefore")?.files?.[0],
-          document.getElementById("uploadWorkFileAfter")?.files?.[0],
-        ].filter(Boolean);
-      } else {
-        files = document.getElementById("uploadWorkFileInput")?.files?.[0];
+      const files = getUploadSelectedFiles(mediaType);
+      showUploadMessage(`Uploading 0/${files.length}...`, false);
+      const uploadResult = mediaType === "photo"
+        ? await addMediaToExistingWorkBestEffort(workId, files, mediaType, ({ done, total }) => {
+          showUploadMessage(`Uploading ${done}/${total}...`, false);
+        })
+        : {
+          mediaIds: await addMediaToExistingWork(workId, mediaType === "before_after" ? files : files[0], mediaType),
+          failures: [],
+          successfulFiles: files,
+        };
+      const { mediaIds, successfulFiles = [], failures = [] } = uploadResult;
+      if (!mediaIds.length) {
+        showUploadMessage(buildMediaUploadSummary(0, failures.length || files.length), true);
+        return;
       }
-      const mediaIds = await addMediaToExistingWork(workId, files, mediaType);
-      showUploadMessage(`Success! ${mediaIds.length} media item(s) added.`, false);
+      const fileHashes = await hashMediaPointFiles(successfulFiles.length ? successfulFiles : files, mediaType);
+      getContentWork(workId)
+        .then((work) => awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes }))
+        .catch(() => awardMediaUploadPoints({ mediaIds, mediaType, work: null, fileHashes }));
+      showUploadMessage(buildMediaUploadSummary(mediaIds.length, failures.length), failures.length > 0);
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";
       document.getElementById("uploadWorkFileAfter").value = "";
-      setTimeout(() => closeUploadModal(), 1500);
+      if (!failures.length) setTimeout(() => closeUploadModal(), 1500);
     }
   } catch (e) {
     console.error("[Media] Upload failed", e);
-    showUploadMessage(`Error: ${e.message || "Upload failed"}`, true);
+    const msg = formatMediaUploadError(e);
+    showUploadMessage(msg, true);
+    if (/storage|owner|upgrade|נפח/i.test(msg)) {
+      if (typeof window.ffStyledAlert === "function") {
+        window.ffStyledAlert(msg, "Storage");
+      } else {
+        alert(msg);
+      }
+    }
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
@@ -1023,6 +1419,188 @@ function normalizeStoragePath(p) {
   return s.replace(/^\/+/, "") || null;
 }
 
+/**
+ * ===== Capacitor helpers (iOS/Android native) =====
+ * Access the Capacitor runtime + plugins that the native shell injects into the
+ * WebView. When running in a regular browser (or in Capacitor without the
+ * plugin installed in the native binary) these all return null and the code
+ * falls back to standard web APIs.
+ */
+function ffGetCapacitor() {
+  return (typeof window !== "undefined" && window.Capacitor) ? window.Capacitor : null;
+}
+function ffTimeoutPromise(label, ms) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+  });
+}
+function ffWithTimeout(promise, label, ms) {
+  return Promise.race([promise, ffTimeoutPromise(label, ms)]);
+}
+function ffIsNativeCapacitor() {
+  const Cap = ffGetCapacitor();
+  if (!Cap) return false;
+  try {
+    if (typeof Cap.isNativePlatform === "function") return !!Cap.isNativePlatform();
+    if (typeof Cap.getPlatform === "function") {
+      const p = Cap.getPlatform();
+      return p === "ios" || p === "android";
+    }
+  } catch (_) {}
+  return false;
+}
+/** Low-level Capacitor bridge handle — works regardless of whether plugin JS packages were imported. */
+function ffNativeBridge() {
+  const Cap = ffGetCapacitor();
+  if (!Cap) return null;
+  if (typeof Cap.nativePromise !== "function") return null;
+  return Cap;
+}
+/**
+ * Call a native Capacitor plugin method by name via the low-level bridge.
+ * This works without `import { Foo } from '@capacitor/foo'` (we can't bundle
+ * in this app — the JS is served as-is from Firebase hosting). The plugin
+ * just needs to be installed natively (gradle/podspec), which `npx cap sync`
+ * handles after `npm install @capacitor/<plugin>`.
+ */
+async function ffCallNative(pluginName, methodName, options) {
+  const Cap = ffNativeBridge();
+  if (!Cap) throw new Error("Capacitor native bridge unavailable");
+  return ffWithTimeout(
+    Cap.nativePromise(pluginName, methodName, options || {}),
+    `${pluginName}.${methodName}`,
+    8000
+  );
+}
+function ffGetCapShare() {
+  const Cap = ffGetCapacitor();
+  if (Cap && Cap.Plugins && Cap.Plugins.Share) return Cap.Plugins.Share;
+  // Fallback: if we have the native bridge, expose a tiny stub that forwards to nativePromise.
+  if (ffNativeBridge()) return { share: (opts) => ffCallNative("Share", "share", opts) };
+  return null;
+}
+function ffGetCapFs() {
+  const Cap = ffGetCapacitor();
+  if (Cap && Cap.Plugins && Cap.Plugins.Filesystem) return Cap.Plugins.Filesystem;
+  if (ffNativeBridge()) {
+    return {
+      writeFile: (opts) => ffCallNative("Filesystem", "writeFile", opts),
+      getUri: (opts) => ffCallNative("Filesystem", "getUri", opts),
+    };
+  }
+  return null;
+}
+function ffCapDir() {
+  return "CACHE";
+}
+function ffBlobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      const comma = typeof result === "string" ? result.indexOf(",") : -1;
+      if (comma >= 0) resolve(result.slice(comma + 1));
+      else reject(new Error("blob → base64 failed"));
+    };
+    reader.onerror = () => reject(reader.error || new Error("blob read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
+/** Write blob → native file → return URI ("file://..."). Tries custom Android
+ * plugin first (pure Java, ships in this app's APK), then falls back to the
+ * standard @capacitor/filesystem plugin. The custom plugin is more reliable
+ * because @capacitor/filesystem is implemented in Kotlin and requires the
+ * Android project to have the Kotlin Gradle plugin configured to compile. */
+async function ffWriteBlobToCapCache(blob, fileName) {
+  const base64 = await ffBlobToBase64(blob);
+
+  // Try our custom Java plugin first (Android only; iOS doesn't ship it).
+  if (ffNativeBridge()) {
+    try {
+      const res = await ffCallNative("FfFileShare", "writeAndGetUri", {
+        fileName,
+        data: base64,
+      });
+      if (res && res.uri) return res.uri;
+    } catch (e) {
+      console.warn("[Media] FfFileShare unavailable, falling back to @capacitor/filesystem", e);
+    }
+  }
+
+  // Fallback: standard @capacitor/filesystem (works on iOS, and on Android if
+  // Kotlin gradle plugin is configured).
+  const Filesystem = ffGetCapFs();
+  if (!Filesystem) throw new Error("No native file-write plugin available");
+  await Filesystem.writeFile({
+    path: fileName,
+    data: base64,
+    directory: ffCapDir(),
+    recursive: true,
+  });
+  const res = await Filesystem.getUri({ path: fileName, directory: ffCapDir() });
+  return res && res.uri ? res.uri : null;
+}
+/** True if the error message looks like a user cancellation from Capacitor Share. */
+function ffIsShareCancel(err) {
+  if (!err) return false;
+  const msg = String(err.message || err.code || err || "").toLowerCase();
+  return msg.includes("cancel") || msg.includes("dismiss") || msg.includes("user denied");
+}
+function ffMediaFastUrlMode() {
+  try {
+    // Technicians need the action sheet to open immediately. Managers/admins keep
+    // the heavier "share actual file" path because their flow already performs well.
+    return ffIsNativeCapacitor() && !canHandleMediaWork();
+  } catch (_) {
+    return false;
+  }
+}
+async function ffShareMediaUrlFast(mediaUrl, title, text, dialogTitle) {
+  if (!mediaUrl) throw new Error("No media URL");
+  const Share = ffGetCapShare();
+  if (ffIsNativeCapacitor() && Share) {
+    await ffWithTimeout(Share.share({
+      title: title || "Media",
+      text: text || "",
+      url: mediaUrl,
+      dialogTitle: dialogTitle || "Share"
+    }), "native media url share", 2500);
+    return true;
+  }
+  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    await ffWithTimeout(navigator.share({
+      title: title || "Media",
+      text: text || "",
+      url: mediaUrl
+    }), "web media url share", 2500);
+    return true;
+  }
+  return false;
+}
+/** Persist a blob to the user's device (Photos sheet on iOS, Save sheet on Android). */
+async function ffSaveBlobToDeviceViaShare(blob, fileName) {
+  const Share = ffGetCapShare();
+  if (!ffIsNativeCapacitor() || !Share) throw new Error("Capacitor Share not available");
+  const uri = await ffWriteBlobToCapCache(blob, fileName);
+  if (!uri) throw new Error("Failed to write file to cache");
+  await Share.share({
+    title: fileName,
+    files: [uri],
+    dialogTitle: "Save image",
+  });
+}
+/** Share a blob as an actual image file via the native share sheet. */
+async function ffShareBlobNative(blob, fileName, title, text) {
+  const Share = ffGetCapShare();
+  if (!ffIsNativeCapacitor() || !Share) throw new Error("Capacitor Share not available");
+  const uri = await ffWriteBlobToCapCache(blob, fileName);
+  if (!uri) throw new Error("Failed to write file to cache");
+  const payload = { files: [uri], dialogTitle: title || "Share" };
+  if (title) payload.title = title;
+  if (text) payload.text = text;
+  await Share.share(payload);
+}
+
 /** Cloud Function `mediaDownloadFile` via Hosting rewrite — no direct Storage URL fetch. */
 async function fetchBlobViaHttpProxy(storagePath) {
   if (!storagePath || !auth.currentUser) {
@@ -1032,7 +1610,14 @@ async function fetchBlobViaHttpProxy(storagePath) {
   const url = `/api/mediaDownloadFile?path=${encodeURIComponent(storagePath)}&token=${encodeURIComponent(idToken)}`;
   const urlForLog = `/api/mediaDownloadFile?path=${encodeURIComponent(storagePath)}&token=<redacted>`;
   console.log("[MediaDownload] fetch url", urlForLog);
-  const res = await fetch(url);
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : null;
+  let res;
+  try {
+    res = await fetch(url, ctrl ? { signal: ctrl.signal } : undefined);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   console.log("[MediaDownload] res.status", res.status);
   if (!res.ok) {
     const errText = await res.text();
@@ -1102,7 +1687,16 @@ async function triggerMediaFileDownload(blob, fileName, mediaUrlFallback, opts =
 
   closeIosTabIfUnused();
 
-  // Primary: classic download (works after async; showSaveFilePicker often loses user activation or Cancel = no file).
+  if (_isCapacitorAndroid()) {
+    try {
+      await _capDownloadToDevice(blob, fileName);
+      showMediaMessage("Image saved to your device.");
+      return;
+    } catch (e) {
+      console.warn("[Media] Capacitor download failed, trying fallback", e);
+    }
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1127,14 +1721,73 @@ async function openWorkDetails(workId) {
   const work = await getContentWork(workId);
   if (!work) return;
 
-  const items = await getMediaItems(workId);
-  const history = await getPostedHistory(workId);
+  const sid = work.salonId != null && String(work.salonId).trim() !== "" ? String(work.salonId).trim() : null;
+  let items = await getMediaItems(workId, sid);
+  items = await resolveMediaItemsForDisplay(items);
+  const history = await getPostedHistory(workId, sid);
   await enrichWorkWithPreview(work);
   const canHandleMedia = canHandleMediaWork();
   const isAdminUser = isAdmin();
   const inToHandleView = currentMediaTab === "to_handle";
   const showManagerRow = inToHandleView && canHandleMedia;
   const showAdminRow = inToHandleView && isAdminUser;
+
+  /** Crowded toolbar: collapse into one "Actions" menu on narrow screens, only on To handle with manager/admin controls. */
+  const useMobileActionMenu =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(max-width: 640px)").matches &&
+    inToHandleView &&
+    (showManagerRow || showAdminRow);
+
+  const pendingButtons = [];
+  const pendingExtras = [];
+  const addActionBtn = (btn) => {
+    pendingButtons.push(btn);
+  };
+  const addActionExtra = (el) => {
+    pendingExtras.push(el);
+  };
+
+  const btnStyle = "font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;";
+
+  const flushWorkDetailActions = () => {
+    if (useMobileActionMenu && pendingButtons.length > 0) {
+      const wrap = document.createElement("div");
+      wrap.className = "media-work-detail-actions-menu";
+      wrap.style.cssText = "width:100%;";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "btn-pill media-action-btn";
+      toggle.textContent = "Actions \u25BE";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.style.cssText = btnStyle + "width:100%;box-sizing:border-box;font-weight:600;";
+      const panel = document.createElement("div");
+      panel.className = "media-work-detail-actions-panel";
+      panel.style.cssText = "display:none;flex-direction:column;gap:8px;width:100%;margin-top:8px;";
+      toggle.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const open = panel.style.display !== "flex";
+        panel.style.display = open ? "flex" : "none";
+        toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      };
+      pendingButtons.forEach((btn) => {
+        btn.style.width = "100%";
+        btn.style.boxSizing = "border-box";
+        panel.appendChild(btn);
+      });
+      pendingExtras.forEach((el) => {
+        panel.appendChild(el);
+      });
+      wrap.appendChild(toggle);
+      wrap.appendChild(panel);
+      actions.appendChild(wrap);
+    } else {
+      pendingButtons.forEach((btn) => actions.appendChild(btn));
+      pendingExtras.forEach((el) => actions.appendChild(el));
+    }
+  };
 
   const previewsHtml = items
     .map((m) => {
@@ -1168,12 +1821,102 @@ async function openWorkDetails(workId) {
 
   const firstMedia = items[0];
 
-  const btnStyle = "font-size:11px;padding:5px 10px;border-radius:6px;border:1px solid #d1d5db;background:#fff;color:#374151;cursor:pointer;";
+  // Pre-compute share metadata + start prefetching the media blob right away.
+  // Android Chrome/WebView times out the user-activation that authorizes
+  // navigator.share() after a few seconds — if we wait to fetch the blob only
+  // AFTER the user taps Share, the activation has expired by the time share()
+  // is called and the OS share sheet refuses to open the file. By prefetching
+  // here, the blob is usually ready by the time the user taps the button, and
+  // share() is invoked synchronously within the same gesture.
+  const shareMeta = (() => {
+    const sp =
+      normalizeStoragePath(firstMedia?.storagePath || "")
+      || extractStoragePathFromMediaUrl(firstMedia?.mediaUrl || "");
+    const ext = (
+      (sp || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf|heic|heif)$/i)?.[1]
+      || (firstMedia?.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf)(?:\?|$)/i)?.[1]
+      || "jpg"
+    ).toLowerCase();
+    const mime =
+      ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+      : ext === "png" ? "image/png"
+      : ext === "gif" ? "image/gif"
+      : ext === "webp" ? "image/webp"
+      : ext === "heic" || ext === "heif" ? "image/heic"
+      : ext === "mp4" ? "video/mp4"
+      : ext === "webm" ? "video/webm"
+      : ext === "mov" ? "video/quicktime"
+      : ext === "pdf" ? "application/pdf"
+      : "image/jpeg";
+    const safeExt = ext === "jpeg" ? "jpg" : ext;
+    return { storagePath: sp, ext: safeExt, mime, fileName: `work-${workId}.${safeExt}` };
+  })();
+
+  let shareBlobPromise = null;
+  const startShareBlobPrefetch = (preferDirect = false) => {
+    if (shareBlobPromise) return shareBlobPromise;
+    const { storagePath } = shareMeta;
+    const mediaUrl = firstMedia?.mediaUrl || "";
+    shareBlobPromise = (async () => {
+      let blob = null;
+      if (preferDirect && mediaUrl) {
+        let timer = null;
+        try {
+          const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+          timer = ctrl ? setTimeout(() => ctrl.abort(), 4500) : null;
+          const r = await fetch(mediaUrl, {
+            credentials: "omit",
+            mode: "cors",
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+          });
+          if (r.ok) blob = await r.blob();
+        } catch (e) {
+          console.warn("[Media] share prefetch: fast direct fetch failed", e);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+        if (blob && blob.size > 0) return blob;
+      }
+      try {
+        if (storagePath && auth.currentUser) {
+          blob = await fetchBlobViaHttpProxy(storagePath);
+        }
+      } catch (e) {
+        console.warn("[Media] share prefetch: proxy failed, trying direct", e);
+      }
+      if ((!blob || blob.size === 0) && mediaUrl) {
+        let timer = null;
+        try {
+          const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+          timer = ctrl ? setTimeout(() => ctrl.abort(), 9000) : null;
+          const r = await fetch(mediaUrl, {
+            credentials: "omit",
+            mode: "cors",
+            ...(ctrl ? { signal: ctrl.signal } : {}),
+          });
+          if (r.ok) blob = await r.blob();
+        } catch (e) {
+          console.warn("[Media] share prefetch: direct fetch failed", e);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
+      return blob;
+    })();
+    return shareBlobPromise;
+  };
+
   const downloadBtn = document.createElement("button");
   downloadBtn.type = "button";
   downloadBtn.className = "btn-pill media-action-btn";
   downloadBtn.textContent = "Download";
   downloadBtn.style.cssText = btnStyle + "min-width:96px;white-space:nowrap;box-sizing:border-box;";
+  // Warm the share-blob prefetch so the file is ready by tap time on native too.
+  const warmDownload = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
+  downloadBtn.addEventListener("pointerdown", warmDownload, { passive: true });
+  downloadBtn.addEventListener("touchstart", warmDownload, { passive: true });
+  downloadBtn.addEventListener("mouseenter", warmDownload);
+
   downloadBtn.onclick = async (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1181,36 +1924,81 @@ async function openWorkDetails(workId) {
       alert("No media to download");
       return;
     }
+
+    const isNative = ffIsNativeCapacitor();
     const isIOSDevice =
       /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    /** Must open before any await — iOS blocks async window.open (lost user activation). */
+
+    /** Web/iOS Safari: must open before any await — iOS blocks async window.open (lost user activation). */
     let iosDownloadTab = null;
-    if (isIOSDevice) {
+    if (!isNative && isIOSDevice) {
       try {
         iosDownloadTab = window.open("about:blank", "_blank");
       } catch (_) {}
     }
+
     downloadBtn.disabled = true;
     downloadBtn.textContent = "Loading…";
+
+    const { fileName, mime: mimeFromExt } = shareMeta;
     const dlOpts = { iosTab: iosDownloadTab };
-    let storagePath =
-      normalizeStoragePath(firstMedia.storagePath) || extractStoragePathFromMediaUrl(firstMedia.mediaUrl);
-    const ext =
-      (storagePath || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf|heic|heif)$/i)?.[1] ||
-      (firstMedia.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf)(?:\?|$)/i)?.[1] ||
-      "jpg";
-    const fileName = `work-${workId}.${ext}`;
+
     try {
+      if (ffMediaFastUrlMode() && firstMedia?.mediaUrl) {
+        try {
+          downloadBtn.textContent = "Opening…";
+          await ffShareMediaUrlFast(firstMedia.mediaUrl, fileName, "", "Download image");
+          return;
+        } catch (fastErr) {
+          if (ffIsShareCancel(fastErr)) return;
+          console.warn("[Media] download: fast URL share failed, falling back to file", fastErr);
+        }
+      }
+
+      // Get the blob (reuses the share prefetch if it's already in flight / done).
       let blob = null;
-      if (storagePath && auth.currentUser) {
-        blob = await fetchBlobViaHttpProxy(storagePath);
+      try {
+        blob = await ffWithTimeout(startShareBlobPrefetch(true), "media download prefetch", 8000);
+      } catch (e2) {
+        console.warn("[Media] download: prefetch promise rejected", e2);
       }
-      if (blob && blob.size > 0) {
-        await triggerMediaFileDownload(blob, fileName, undefined, dlOpts);
-      } else {
-        showMediaMessage("Download failed");
+
+      // Last-chance direct proxy fetch if prefetch returned nothing.
+      if ((!blob || blob.size === 0) && shareMeta.storagePath && auth.currentUser) {
+        try {
+          blob = await fetchBlobViaHttpProxy(shareMeta.storagePath);
+        } catch (e3) {
+          console.warn("[Media] download: proxy fetch failed", e3);
+        }
       }
+
+      if (!blob || blob.size === 0) {
+        if (firstMedia?.mediaUrl) {
+          showMediaMessage("Could not prepare file download. Use Share or try again.");
+        } else {
+          showMediaMessage("Download failed");
+        }
+        return;
+      }
+
+      const fixedBlob = blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt });
+
+      // ---- Native (Capacitor iOS / Android): open the system share sheet so the
+      // user can save the image to Photos / Files / Downloads. This is the
+      // expected native UX in lieu of a hidden browser "download".
+      if (isNative && ffGetCapShare() && ffNativeBridge()) {
+        try {
+          await ffWithTimeout(ffSaveBlobToDeviceViaShare(fixedBlob, fileName), "native media download share", 12000);
+          return;
+        } catch (e4) {
+          if (ffIsShareCancel(e4)) return;
+          console.warn("[Media] download: native share failed, falling back to web", e4);
+        }
+      }
+
+      // ---- Web / browser fallback: existing <a download> or iOS-tab blob URL.
+      await triggerMediaFileDownload(fixedBlob, fileName, undefined, dlOpts);
     } catch (err) {
       console.warn("[Media] download", err);
       showMediaMessage("Download failed");
@@ -1229,24 +2017,163 @@ async function openWorkDetails(workId) {
       }
     }
   };
-  actions.appendChild(downloadBtn);
+  addActionBtn(downloadBtn);
 
   const shareBtn = document.createElement("button");
+  shareBtn.type = "button";
   shareBtn.className = "btn-pill";
   shareBtn.textContent = "Share";
   shareBtn.style.cssText = btnStyle;
+
+  // Warm the prefetch the moment the user just touches/hovers the button — gives
+  // us even more head-start before the actual click that triggers the share.
+  const warmShare = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
+  shareBtn.addEventListener("pointerdown", warmShare, { passive: true });
+  shareBtn.addEventListener("touchstart", warmShare, { passive: true });
+  shareBtn.addEventListener("mouseenter", warmShare);
+
   shareBtn.onclick = async () => {
-    if (firstMedia?.mediaUrl && navigator.share) {
-      try {
-        await navigator.share({ title: Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "Work", url: firstMedia.mediaUrl, text: work.caption || "" });
-      } catch (e) {
-        if (e.name !== "AbortError") alert("Share failed: " + (e.message || "Unknown error"));
+    if (!firstMedia?.mediaUrl && !firstMedia?.storagePath) {
+      alert("No media to share");
+      return;
+    }
+
+    const shareTitle = Array.isArray(work.categoryNames)
+      ? work.categoryNames.join(", ")
+      : work.categoryName || work.serviceType || "Work";
+    const shareText = work.caption || "";
+    const mediaUrl = firstMedia?.mediaUrl || "";
+    const { mime: mimeFromExt, fileName } = shareMeta;
+
+    shareBtn.disabled = true;
+    const origText = shareBtn.textContent;
+    shareBtn.textContent = ffMediaFastUrlMode() ? "Opening…" : "Preparing…";
+
+    try {
+      if (ffMediaFastUrlMode() && mediaUrl) {
+        try {
+          await ffShareMediaUrlFast(mediaUrl, shareTitle, shareText, "Share media");
+          return;
+        } catch (fastErr) {
+          if (ffIsShareCancel(fastErr)) return;
+          console.warn("[Media] share: fast URL share failed, falling back to file", fastErr);
+          shareBtn.textContent = "Preparing…";
+        }
       }
-    } else if (firstMedia?.mediaUrl) {
-      navigator.clipboard?.writeText(firstMedia.mediaUrl).then(() => alert("Link copied"));
-    } else alert("No media to share");
+
+      // Get the pre-fetched blob. If it's already resolved by the time we await
+      // here, the await completes in a microtask and preserves user-activation
+      // — critical for navigator.share() to be allowed by Android Chrome.
+      let blob = null;
+      try {
+        blob = await ffWithTimeout(startShareBlobPrefetch(true), "media share prefetch", 8000);
+      } catch (e) {
+        console.warn("[Media] share: prefetch promise rejected", e);
+      }
+
+      const fixedBlob = (blob && blob.size > 0)
+        ? (blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt }))
+        : null;
+
+      // ---- Native (Capacitor iOS / Android): use the native Share plugin with
+      // a real file URI written to the app's cache. This bypasses Web Share API
+      // entirely, so it works on every Android device regardless of WebView age.
+      const isNative = ffIsNativeCapacitor();
+      const capShare = ffGetCapShare();
+      const hasBridge = !!ffNativeBridge();
+      console.log("[Media] share: native detection", {
+        hasCapacitor: !!ffGetCapacitor(),
+        isNative,
+        hasShare: !!capShare,
+        hasBridge,
+        hasBlob: !!fixedBlob,
+        blobSize: fixedBlob?.size || 0,
+      });
+      if (fixedBlob && isNative && capShare && hasBridge) {
+        try {
+          await ffWithTimeout(ffShareBlobNative(fixedBlob, fileName, shareTitle, shareText), "native media share", 12000);
+          return;
+        } catch (eNative) {
+          if (ffIsShareCancel(eNative)) return;
+          console.warn("[Media] share: Capacitor native share failed, falling back to web", eNative);
+          // Surface the actual failure to help diagnose on real devices where
+          // we can't attach chrome://inspect easily.
+          try {
+            alert("Native share failed: " + (eNative && (eNative.message || eNative.code || eNative)));
+          } catch (_) {}
+        }
+      } else if (isNative && !capShare) {
+        try {
+          alert(
+            "Native share plugin missing.\n" +
+            "Please reinstall the latest APK so the plugin is bundled in the native binary."
+          );
+        } catch (_) {}
+      }
+
+      const canDoFileShare =
+        typeof navigator !== "undefined"
+        && typeof navigator.share === "function";
+
+      if (canDoFileShare && fixedBlob) {
+        const file = new File([fixedBlob], fileName, { type: mimeFromExt });
+
+        let canShareFiles = true;
+        if (typeof navigator.canShare === "function") {
+          try { canShareFiles = !!navigator.canShare({ files: [file] }); }
+          catch (_) { canShareFiles = false; }
+        }
+        console.log("[Media] share: trying web file share", {
+          fileName, size: fixedBlob.size, mime: mimeFromExt, canShareFiles,
+        });
+
+        // First try with title+text+files; some Android targets reject the
+        // combination, so retry with files only.
+        try {
+          await navigator.share({ files: [file], title: shareTitle, text: shareText });
+          return;
+        } catch (e1) {
+          if (e1 && (e1.name === "AbortError" || e1.name === "NotAllowedError")) return;
+          console.warn("[Media] share: files+text rejected, retrying files-only", e1);
+          try {
+            await navigator.share({ files: [file] });
+            return;
+          } catch (e2) {
+            if (e2 && (e2.name === "AbortError" || e2.name === "NotAllowedError")) return;
+            console.warn("[Media] share: file share failed, falling back to URL", e2);
+          }
+        }
+      } else if (!fixedBlob) {
+        console.warn("[Media] share: no blob available, falling back to URL");
+      }
+
+      // Fallback: share as URL via Web Share API (older devices / browsers without file support).
+      if (mediaUrl && typeof navigator !== "undefined" && typeof navigator.share === "function") {
+        try {
+          await navigator.share({ title: shareTitle, text: shareText, url: mediaUrl });
+          return;
+        } catch (e) {
+          if (e && (e.name === "AbortError" || e.name === "NotAllowedError")) return;
+          console.warn("[Media] share: URL share failed, will copy instead", e);
+        }
+      }
+
+      // Last fallback: copy link to clipboard.
+      if (mediaUrl && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(mediaUrl);
+          alert("Link copied");
+          return;
+        } catch (_) {}
+      }
+
+      alert("Share not supported on this device");
+    } finally {
+      shareBtn.disabled = false;
+      shareBtn.textContent = origText;
+    }
   };
-  actions.appendChild(shareBtn);
+  addActionBtn(shareBtn);
 
   const role = (currentUserProfile?.createdByRole || "").toLowerCase();
   const uid = auth.currentUser?.uid;
@@ -1302,7 +2229,7 @@ async function openWorkDetails(workId) {
         }
       });
     };
-    actions.appendChild(selfDeleteBtn);
+    addActionBtn(selfDeleteBtn);
     if (!isEligible) {
       let hintText = "";
       if ((work?.postedCount || 0) > 0) hintText = "Posted – you can only delete before posting.";
@@ -1313,7 +2240,7 @@ async function openWorkDetails(workId) {
       hint.className = "action-hint";
       hint.style.cssText = "font-size:10px;color:#9ca3af;margin-top:4px;";
       hint.textContent = hintText;
-      actions.appendChild(hint);
+      addActionExtra(hint);
     }
   }
 
@@ -1323,7 +2250,7 @@ async function openWorkDetails(workId) {
     markPostedBtn.textContent = "Mark as Posted";
     markPostedBtn.style.cssText = btnStyle;
     markPostedBtn.onclick = () => openMarkPostedModal(workId);
-    actions.appendChild(markPostedBtn);
+    addActionBtn(markPostedBtn);
 
     const featuredBtn = document.createElement("button");
     featuredBtn.className = "btn-pill media-action-btn";
@@ -1334,7 +2261,7 @@ async function openWorkDetails(workId) {
       openWorkDetails(workId);
       renderMediaList();
     };
-    actions.appendChild(featuredBtn);
+    addActionBtn(featuredBtn);
   }
 
   if (showAdminRow) {
@@ -1346,27 +2273,7 @@ async function openWorkDetails(workId) {
       closeWorkDetails();
       renderMediaList();
     };
-    actions.appendChild(archiveBtn);
-
-    const deleteMediaBtn = document.createElement("button");
-    deleteMediaBtn.className = "btn-pill media-action-btn";
-    deleteMediaBtn.textContent = "Delete Media";
-    deleteMediaBtn.style.cssText = btnStyle;
-    deleteMediaBtn.disabled = items.length === 0;
-    if (items.length === 0) deleteMediaBtn.title = "No media to delete";
-    deleteMediaBtn.onclick = async () => {
-      if (items.length === 0) return;
-      if (confirm("This will remove the uploaded media files but keep the work record and history.")) {
-        try {
-          await deleteAllMediaFromWork(workId);
-          openWorkDetails(workId);
-          renderMediaList();
-        } catch (e) {
-          alert("Failed: " + (e.message || "Unknown error"));
-        }
-      }
-    };
-    actions.appendChild(deleteMediaBtn);
+    addActionBtn(archiveBtn);
 
     const duplicateBtn = document.createElement("button");
     duplicateBtn.className = "btn-pill media-action-btn";
@@ -1377,7 +2284,7 @@ async function openWorkDetails(workId) {
       openWorkDetails(workId);
       renderMediaList();
     };
-    actions.appendChild(duplicateBtn);
+    addActionBtn(duplicateBtn);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "btn-pill btn-danger media-action-btn";
@@ -1390,8 +2297,10 @@ async function openWorkDetails(workId) {
         renderMediaList();
       }
     };
-    actions.appendChild(deleteBtn);
+    addActionBtn(deleteBtn);
   }
+
+  flushWorkDetailActions();
 
   content.onclick = async (e) => {
     const mediaId = e.target?.closest?.("[data-media-id]")?.dataset?.mediaId;
@@ -1545,41 +2454,86 @@ async function saveMarkPosted() {
 // =====================
 
 export async function goToMedia() {
+  if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   const tasksScreen = document.getElementById("tasksScreen");
   const inboxScreen = document.getElementById("inboxScreen");
   const chatScreen = document.getElementById("chatScreen");
+  const ticketsScreen = document.getElementById("ticketsScreen");
+  const trainingScreen = document.getElementById("trainingScreen");
+  const scheduleScreen = document.getElementById("scheduleScreen");
+  const timeClockScreen = document.getElementById("timeClockScreen");
+  const inventoryScreen = document.getElementById("inventoryScreen");
+  const pointsAppScreen = document.getElementById("pointsAppScreen");
+  const userProfileScreen = document.getElementById("userProfileScreen");
+  const myProfileScreen = document.getElementById("myProfileScreen");
+  const manageQueueScreen = document.getElementById("manageQueueScreen");
   const ownerView = document.getElementById("owner-view");
   const joinBar = document.getElementById("joinBar");
   const queueControls = document.getElementById("queueControls");
+  const wrapEl = document.querySelector(".wrap");
 
   if (tasksScreen) tasksScreen.style.display = "none";
   if (inboxScreen) inboxScreen.style.display = "none";
   if (chatScreen) chatScreen.style.display = "none";
+  if (ticketsScreen) ticketsScreen.style.display = "none";
+  if (trainingScreen) trainingScreen.style.display = "none";
+  if (scheduleScreen) scheduleScreen.style.display = "none";
+  if (timeClockScreen) timeClockScreen.style.display = "none";
+  if (inventoryScreen) inventoryScreen.style.display = "none";
+  if (pointsAppScreen) pointsAppScreen.style.display = "none";
+  if (userProfileScreen) userProfileScreen.style.display = "none";
+  if (myProfileScreen) myProfileScreen.style.display = "none";
+  if (manageQueueScreen) manageQueueScreen.style.display = "none";
   if (ownerView) ownerView.style.display = "none";
   if (joinBar) joinBar.style.display = "none";
   if (queueControls) queueControls.style.display = "none";
-
-  if (auth.currentUser) {
-    try {
-      await loadUserProfile();
-      setupMediaWorkListSubscriptions();
-    } catch (e) {
-      console.warn("[Media] goToMedia profile/subscriptions", e);
-    }
-  } else {
-    applyToHandleVisibility();
-  }
+  if (wrapEl) wrapEl.style.display = "none";
 
   const screen = document.getElementById("mediaScreen");
   if (screen) {
     screen.style.display = "flex";
+    screen.setAttribute("data-media-tab", currentMediaTab);
     document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
     const btn = document.getElementById("mediaBtn");
     if (btn) btn.classList.add("active");
   }
   updateMediaUploadWorkButtonVisibility();
   renderMediaFilters();
-  renderMediaList();
+  if (auth.currentUser) {
+    renderMediaList();
+  } else {
+    mediaMyWorksHydrated = true;
+    mediaAllWorksHydrated = true;
+    renderMediaList();
+  }
+
+  if (auth.currentUser) {
+    void (async () => {
+      try {
+        await loadUserProfile();
+        applyToHandleVisibility();
+        setupMediaWorkListSubscriptions();
+        updateMediaUploadWorkButtonVisibility();
+        renderMediaFilters();
+        renderMediaList();
+      } catch (e) {
+        console.warn("[Media] goToMedia profile/subscriptions", e);
+        mediaMyWorksHydrated = true;
+        mediaAllWorksHydrated = true;
+        renderMediaList();
+      }
+    })();
+  } else {
+    applyToHandleVisibility();
+  }
+
+  try {
+    if (typeof window.ffApplyQueueViewGate === "function") window.ffApplyQueueViewGate();
+  } catch (_) {}
 }
 
 function hideMediaScreen() {
@@ -1673,7 +2627,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = filterDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) filterDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(filterDropdown, filterTrigger);
+        filterDropdown.style.display = "block";
+      }
     };
   }
   if (sortTrigger && sortDropdown) {
@@ -1681,7 +2638,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = sortDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) sortDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(sortDropdown, sortTrigger);
+        sortDropdown.style.display = "block";
+      }
     };
   }
   const employeeTrigger = document.getElementById("mediaEmployeeFilterTrigger");
@@ -1691,7 +2651,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = employeeDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open && currentMediaTab === "to_handle") employeeDropdown.style.display = "block";
+      if (!open && currentMediaTab === "to_handle") {
+        _positionMediaDropdownPanel(employeeDropdown, employeeTrigger);
+        employeeDropdown.style.display = "block";
+      }
     };
   }
   const categoryTrigger = document.getElementById("mediaCategoryFilterTrigger");
@@ -1701,7 +2664,10 @@ function initMediaModule() {
       e.stopPropagation();
       const open = categoryDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open) categoryDropdown.style.display = "block";
+      if (!open) {
+        _positionMediaDropdownPanel(categoryDropdown, categoryTrigger);
+        categoryDropdown.style.display = "block";
+      }
     };
   }
   [filterDropdown, sortDropdown, employeeDropdown, categoryDropdown].forEach((el) => {
@@ -1729,6 +2695,15 @@ function initMediaModule() {
 }
 
 function setupMediaWorkListSubscriptions() {
+  const canAll = canHandleMediaWork();
+  const subKey = `${currentUserProfile?.uid || ""}|${currentUserProfile?.staffId || ""}|${currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
+  if (unsubMyWorks && _mediaWorkListSubKey === subKey) {
+    applyToHandleVisibility();
+    renderMediaList();
+    return;
+  }
+  _mediaWorkListSubKey = subKey;
+
   if (unsubMyWorks) {
     unsubMyWorks();
     unsubMyWorks = null;
@@ -1738,25 +2713,65 @@ function setupMediaWorkListSubscriptions() {
     unsubAllWorks = null;
   }
 
-  if (currentUserProfile?.staffId) {
-    unsubMyWorks = subscribeContentWorks({ staffId: currentUserProfile.staffId }, async (works) => {
-      const toEnrich = works.slice(0, 20);
+  mediaMyWorksHydrated = false;
+  mediaAllWorksHydrated = false;
+
+  if (currentUserProfile?.staffId || currentUserProfile?.uid) {
+    const staffIdForQuery = String(currentUserProfile?.staffId || "").trim();
+    unsubMyWorks = subscribeContentWorks(staffIdForQuery ? { staffId: staffIdForQuery } : {}, async (works) => {
+      const uid = String(currentUserProfile?.uid || "").trim();
+      const staffId = String(currentUserProfile?.staffId || "").trim();
+      const ownWorks = (Array.isArray(works) ? works : []).filter((work) => {
+        const workStaffId = String(work?.staffId || "").trim();
+        const workCreatedByUid = String(work?.createdByUid || "").trim();
+        return (staffId && workStaffId === staffId) || (uid && workCreatedByUid === uid);
+      });
+      mediaMyWorksHydrated = true;
+      userWorks = ownWorks.slice();
+      populateWorksDropdown();
+      renderMediaList();
+      const toEnrich = ownWorks.slice(0, 8);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      userWorks = [...enriched, ...works.slice(20)];
+      for (const w of enriched) {
+        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
+        if (url && /^https?:\/\//i.test(url) && !hasPre) {
+          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
+        }
+      }
+      userWorks = [...enriched, ...ownWorks.slice(toEnrich.length)];
       populateWorksDropdown();
       renderMediaList();
     });
+  } else {
+    mediaMyWorksHydrated = true;
+    userWorks = [];
   }
 
   applyToHandleVisibility();
   if (canHandleMediaWork()) {
     unsubAllWorks = subscribeContentWorks({}, async (works) => {
-      const toEnrich = works.slice(0, 20);
+      const arr = Array.isArray(works) ? works : [];
+      mediaAllWorksHydrated = true;
+      allWorks = arr.slice();
+      renderMediaFilters();
+      renderMediaList();
+      const toEnrich = arr.slice(0, 8);
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      allWorks = [...enriched, ...works.slice(20)];
+      for (const w of enriched) {
+        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
+        if (url && /^https?:\/\//i.test(url) && !hasPre) {
+          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
+        }
+      }
+      allWorks = [...enriched, ...arr.slice(toEnrich.length)];
       renderMediaFilters();
       renderMediaList();
     });
+  } else {
+    mediaAllWorksHydrated = true;
+    allWorks = [];
   }
 }
 
@@ -1764,6 +2779,12 @@ export function initMediaUpload() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
       hideMediaScreen();
+      currentUserProfile = null;
+      _mediaWorkListSubKey = "";
+      mediaMyWorksHydrated = true;
+      mediaAllWorksHydrated = true;
+      userWorks = [];
+      allWorks = [];
       if (unsubMyWorks) {
         unsubMyWorks();
         unsubMyWorks = null;
@@ -1977,16 +2998,19 @@ async function reorderMediaCategories(cats, fromIdx, toIdx) {
 }
 
 async function addMediaCategoryFromSettings() {
+  // Kept as a programmatic helper (callable from the inline Add Category
+  // form in index.html). The native alert was removed because the inline
+  // form handles the empty-name case by simply returning, and shows styled
+  // errors via ffStyledAlert instead of the browser's black popup.
   const input = document.getElementById("userProfileAddMediaCategoryInput");
   if (!input) return;
   const name = input.value.trim();
-  if (!name) {
-    alert("Please enter a category name.");
-    return;
-  }
+  if (!name) return;
   try {
     await createMediaCategory({ name });
     input.value = "";
+    const form = document.getElementById("userProfileAddMediaCategoryForm");
+    if (form) form.style.display = "none";
     await renderMediaCategoriesSettings();
   } catch (e) {
     console.error("[Media] createMediaCategory failed", e);
@@ -1994,32 +3018,56 @@ async function addMediaCategoryFromSettings() {
       e && e.message
         ? String(e.message)
         : "Could not save category. If you use Media “To handle”, you need permission to manage media categories.";
-    alert(msg + "\n\nIf this is a permission error, ask an owner to set your role to Manager/Admin or enable Media → To handle for your staff profile.");
+    if (typeof window !== "undefined" && typeof window.ffStyledAlert === "function") {
+      window.ffStyledAlert(msg);
+    } else {
+      alert(msg);
+    }
   }
 }
 
 function initMediaCategoriesSettingsListeners() {
-  const addBtn = document.getElementById("userProfileAddMediaCategoryBtn");
-  if (addBtn && !addBtn.__mediaCatBound) {
-    addBtn.__mediaCatBound = true;
-    addBtn.addEventListener("click", addMediaCategoryFromSettings);
-  }
-  const input = document.getElementById("userProfileAddMediaCategoryInput");
-  if (input && !input.__mediaCatBound) {
-    input.__mediaCatBound = true;
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        addMediaCategoryFromSettings();
-      }
-    });
-  }
+  // NOTE: The inline form in index.html (openSettings + "+ Add category"
+  // button, Save/Cancel + input with Enter) owns the UX. Binding this
+  // function's own click+Enter here caused a second handler to fire on
+  // "+ Add category" with an empty input, which popped the ugly native
+  // alert. We intentionally no-op here and rely on index.html's
+  // `window.initMediaCategoriesSettingsListeners` instead.
 }
 
 if (typeof window !== "undefined") {
   window.renderMediaCategoriesSettings = renderMediaCategoriesSettings;
   window.addMediaCategoryFromSettings = addMediaCategoryFromSettings;
-  window.initMediaCategoriesSettingsListeners = initMediaCategoriesSettingsListeners;
+  // Expose Firestore CRUD so index.html's inline Save handler can write
+  // directly to the correct `salons/{salonId}/mediaCategories` subcollection
+  // (the snapshot listener re-renders the list automatically).
+  window.ffCreateMediaCategory = createMediaCategory;
+  window.ffUpdateMediaCategory = updateMediaCategory;
+  window.ffDeleteMediaCategory = deleteMediaCategory;
+  // DO NOT overwrite index.html's own initMediaCategoriesSettingsListeners.
+  // See note above. Keep this no-op reference only if nothing else set it,
+  // so callers that guard with `typeof ... === "function"` still succeed.
+  if (typeof window.initMediaCategoriesSettingsListeners !== "function") {
+    window.initMediaCategoriesSettingsListeners = initMediaCategoriesSettingsListeners;
+  }
+
+  // Media Categories are PER-LOCATION. When the user switches locations,
+  // re-run the list renderer if the Settings card is visible so the list
+  // reflects only the active branch. The media-cloud subscribe helper also
+  // re-emits filtered cats to the Upload Work dropdown consumer.
+  if (typeof document !== "undefined" && !document.__ffMediaCatLocBound) {
+    document.__ffMediaCatLocBound = true;
+    document.addEventListener("ff-active-location-changed", () => {
+      try {
+        const card = document.getElementById("userProfileCardMediaCategories");
+        if (card && card.style.display !== "none") {
+          renderMediaCategoriesSettings();
+        }
+      } catch (e) {
+        console.warn("[Media] re-render categories on location change failed", e);
+      }
+    });
+  }
 }
 
 initMediaUpload();

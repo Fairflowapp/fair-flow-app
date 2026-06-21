@@ -2,7 +2,7 @@ import {
   normalizeStaffSchedulingData,
   getDayNameFromDateKey,
   normalizeBusinessHours,
-} from "./schedule-helpers.js?v=20260403_reception_split";
+} from "./schedule-helpers.js?v=20260420_per_loc_no_default";
 
 function normalizeDateKey(value) {
   if (!value) return "";
@@ -401,6 +401,25 @@ function applyAvailabilityOverrides(defaultAvailability, overrides) {
   };
 }
 
+function clipDailyAvailabilityToShiftSegments(applied, dateKey, options) {
+  if (!applied?.isAvailable || !applied.startTime || !applied.endTime) return applied;
+  const bh = options.businessHours ? normalizeBusinessHours(options.businessHours) : null;
+  if (!bh) return applied;
+  const dayName = getDayNameFromDateKey(dateKey);
+  if (!dayName) return applied;
+  const businessDay = bh[dayName];
+  if (businessDay && businessDay.isOpen === false) {
+    return {
+      ...applied,
+      isAvailable: false,
+      startTime: null,
+      endTime: null,
+      overrideApplied: true,
+    };
+  }
+  return applied;
+}
+
 function getEffectiveAvailabilityForDate(staff, requests, dateKey, options = {}) {
   const normalizedDate = normalizeDateKey(dateKey);
   if (!normalizedDate) {
@@ -428,7 +447,8 @@ function getEffectiveAvailabilityForDate(staff, requests, dateKey, options = {})
     bhNormalized,
     dayOverrides,
   );
-  const applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
+  let applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
+  applied = clipDailyAvailabilityToShiftSegments(applied, normalizedDate, options);
   return {
     date: normalizedDate,
     isAvailable: applied.isAvailable,
@@ -451,7 +471,8 @@ function getEffectiveAvailability(staff, requests, dateRange, options = {}) {
   const availability = dates.map((dateKey) => {
     const dayOverrides = overridesByDate[dateKey] || [];
     const defaultAvailability = resolveDefaultAvailabilityForOverrides(staff, dateKey, bhNormalized, dayOverrides);
-    const applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
+    let applied = applyAvailabilityOverrides(defaultAvailability, dayOverrides);
+    applied = clipDailyAvailabilityToShiftSegments(applied, dateKey, options);
     return {
       date: dateKey,
       isAvailable: applied.isAvailable,

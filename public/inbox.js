@@ -21,12 +21,21 @@ import {
   deleteDoc,
   onSnapshot,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  increment,
+  runTransaction,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "./app.js";
+import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
+import {
+  ffSyncStaffDocumentOnInboxApprove,
+  ffSyncStaffDocumentOnInboxReject,
+  ffSendExpiryChatReminderForStaffDocContext,
+  ffStaffDocumentTypeSelectOptionsHtml,
+  ffExpirationTimestampToYmdInput,
+} from "./staff-documents.js?v=20260505_full_specialist_doc_type";
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
 const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
@@ -59,7 +68,16 @@ const BUILTIN_TYPES = [
   { id: 'staff_birthday_reminder', icon: '🎂', label: 'Staff birthday reminder', description: 'Automated — upcoming staff birthday (management only)', category: 'operations' },
   // Documents
   { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
+  {
+    id: 'document_renewal_request',
+    icon: '📩',
+    label: 'Request a new document (from staff)',
+    description: 'Ask a service provider to upload a renewed document (e.g. insurance or license before it expires).',
+    category: 'documents',
+  },
   { id: 'document_upload', icon: '📤', label: 'Upload a Document', description: 'Upload a document to the business (license, insurance, certification)', category: 'documents' },
+  { id: 'document_expiring_soon', icon: '⏳', label: 'Document expiring soon', description: 'Automated — staff document expires within 30 days (management only)', category: 'documents' },
+  { id: 'document_expired', icon: '⚠️', label: 'Document expired', description: 'Automated — staff document past expiration (management only)', category: 'documents' },
   // Other (always last)
   { id: 'other', icon: '📝', label: 'Other', description: 'Other request', category: 'other' }
 ];
@@ -68,7 +86,16 @@ const BUILTIN_TYPES = [
 const LEGACY_INBOX_TYPE_INFO = {
   day_off: { id: 'day_off', icon: '📴', label: 'Day off', description: 'Legacy request', category: 'schedule' },
   time_off: { id: 'time_off', icon: '🕐', label: 'Time off', description: 'Legacy request', category: 'schedule' },
+  inventory_suggestion: { id: 'inventory_suggestion', icon: '📉', label: 'Smart Inventory Alert', description: 'Automated — item forecast to run out soon', category: 'operations' },
 };
+
+/** Normalize Firestore/string date to YYYY-MM-DD for &lt;input type="date"&gt;. */
+function ffInboxYmdFromRaw(v) {
+  if (v == null || v === "") return "";
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return ffExpirationTimestampToYmdInput(v);
+}
 
 /** Inclusive YYYY-MM-DD list — same shape schedule-availability expects for ranges / affectedDates. */
 function enumerateInclusiveDateKeysForInbox(startDateStr, endDateStr) {
@@ -96,9 +123,292 @@ let currentInboxTab = 'open';
 let inboxViewMode = 'to_handle'; // 'mine' | 'to_handle' — only for admin/manager
 let inboxUnsubscribe = null;
 let currentUserProfile = null;
+/** Technicians: merge outgoing (createdByUid) + incoming (forUid) inbox queries. */
+let _techInboxOutgoing = [];
+let _techInboxIncoming = [];
+
+/** Automated inbox items for management ("To handle") only — never list for technicians. */
+const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "document_expiring_soon", "document_expired", "inventory_suggestion"]);
+
+function inboxExpiringDateToMillis(v) {
+  if (v == null) return null;
+  try {
+    if (typeof v.toMillis === "function") return v.toMillis();
+    if (typeof v.toDate === "function") return v.toDate().getTime();
+  } catch (_) {}
+  if (typeof v === "number") return v;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "string") {
+    const s = v.trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00.000Z`).getTime();
+  }
+  return null;
+}
+
+/** document_expiring_soon rows past expiration → group under document_expired (To handle). */
+function inboxEffectiveTypeForGrouping(req) {
+  const t = String(req?.type || "").trim();
+  if (t !== "document_expiring_soon") return t || "other";
+  const expRaw = req?.expirationDate ?? req?.data?.expirationDate;
+  const expMs = inboxExpiringDateToMillis(expRaw);
+  if (expMs != null && Date.now() > expMs) return "document_expired";
+  return "document_expiring_soon";
+}
+
+/** True if this doc-alert row should show as "expired" in the card (type or past expiry date). */
+function inboxDocAlertIsExpiredForUi(request) {
+  const t = String(request?.type || "").trim();
+  if (t === "document_expired") return true;
+  if (t !== "document_expiring_soon") return false;
+  const expMs = inboxExpiringDateToMillis(request?.expirationDate ?? request?.data?.expirationDate);
+  return expMs != null && Date.now() > expMs;
+}
+
+/** Mistaken "Other" rows (e.g. staff-call noise) — hide from admin My Requests and from technicians' Inbox. */
+function ffInboxIsStaffCallOtherNoise(r) {
+  const t = String(r?.type || "").trim();
+  if (t !== "other") return false;
+  const d = r?.data || {};
+  const msg = String(r?.message || "").toLowerCase();
+  const subj = String(r?.title || r?.subject || d.subject || d.title || "").toLowerCase();
+  const det = String(d.details || "").toLowerCase();
+  if (String(d.source || "").toLowerCase() === "staff_call") return true;
+  if (msg.includes("staff call") || subj.includes("staff call") || det.includes("staff call")) return true;
+  return false;
+}
+
+/** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
+function inboxTechnicianNoiseFilter(rows) {
+  return (rows || [])
+    .filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()))
+    .filter((r) => !ffInboxIsStaffCallOtherNoise(r));
+}
+
+function inboxItemActivityMs(r) {
+  const la = r && r.lastActivityAt;
+  const ca = r && r.createdAt;
+  if (la && typeof la.toMillis === 'function') return la.toMillis();
+  if (ca && typeof ca.toMillis === 'function') return ca.toMillis();
+  return 0;
+}
+
+function inboxErrorNeedsIndex(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return error?.code === "failed-precondition" &&
+    (msg.includes("requires an index") || msg.includes("index is currently building"));
+}
+
+function applyInboxSnapshotRows(snapshot, loadingEl) {
+  if (loadingEl) loadingEl.style.display = 'none';
+  currentRequests = snapshot.docs
+    .map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }))
+    .sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+
+  console.log('[Inbox] Loaded', currentRequests.length, 'requests');
+  updateInboxStaffFilterOptions();
+  updateInboxBadges();
+  renderInboxList();
+}
+
+function showInboxLoadError(error, loadingEl, listEl, emptyEl) {
+  if (loadingEl) loadingEl.style.display = 'none';
+  currentRequests = [];
+  if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
+  if (emptyEl) {
+    emptyEl.style.display = 'block';
+    emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+  }
+}
+
+function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, emptyEl }) {
+  const field = mode === "mine" ? "createdByUid" : "forUid";
+  console.warn('[Inbox] Composite index not ready; using fallback query', { mode, field });
+  const fallbackQuery = query(
+    collection(db, `salons/${salonId}/inboxItems`),
+    where(field, '==', uid),
+    limit(100)
+  );
+  return onSnapshot(
+    fallbackQuery,
+    (snapshot) => applyInboxSnapshotRows(snapshot, loadingEl),
+    (fallbackError) => {
+      console.error('[Inbox] Fallback query error', fallbackError);
+      showInboxLoadError(fallbackError, loadingEl, listEl, emptyEl);
+    }
+  );
+}
+
+function applyTechInboxMerge(loadingEl) {
+  const map = new Map();
+  _techInboxOutgoing.forEach((row) => map.set(row.id, row));
+  _techInboxIncoming.forEach((row) => map.set(row.id, row));
+  currentRequests = Array.from(map.values()).sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+  currentRequests = inboxTechnicianNoiseFilter(currentRequests);
+  if (loadingEl) loadingEl.style.display = 'none';
+  console.log('[Inbox] Loaded (technician merged)', currentRequests.length, 'requests');
+  updateInboxStaffFilterOptions();
+  updateInboxBadges();
+  renderInboxList();
+}
+
+/** Map users/membership role strings to the Inbox notion of "line staff" (= technician). */
+function inboxNormalizeLineStaffRoleLc(raw) {
+  const r = String(raw || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+  if (
+    r === "technician" ||
+    r === "tech" ||
+    r === "staff" ||
+    r === "service_provider" ||
+    r === "service provider" ||
+    r === "serviceprovider"
+  ) {
+    return "technician";
+  }
+  return r;
+}
 
 function inboxUserRoleLc() {
-  return String((currentUserProfile && currentUserProfile.role) || "").toLowerCase();
+  return inboxNormalizeLineStaffRoleLc((currentUserProfile && currentUserProfile.role) || "");
+}
+
+/** Roles that historically had full inbox access before per-staff permission flags. */
+function inboxLegacyDeskRoleLc(roleLc) {
+  return ["manager", "admin", "owner", "front_desk", "assistant_manager"].includes(roleLc);
+}
+
+/** Merge salons/{salonId}/staff/{staffId} (permissions, managerType) into a user profile object. */
+async function mergeSalonStaffIntoUserProfile(profile) {
+  if (!profile?.salonId) return profile;
+  const sid = String(profile.staffId || "").trim();
+  if (!sid) return profile;
+  try {
+    const snap = await getDoc(doc(db, `salons/${profile.salonId}/staff`, sid));
+    if (snap.exists()) {
+      const st = snap.data() || {};
+      profile.permissions = { ...(profile.permissions || {}), ...(st.permissions || {}) };
+      if (st.managerType) profile.managerType = st.managerType;
+      // Multi-salon: prefer the staff doc's display name over users/{uid}.name.
+      // Without this, requests created by a user who picked test_salon_001 from
+      // Choose Salon are saved with "createdByName" = legacy primary-salon name
+      // (e.g. "Test Multi") instead of the staff name in the chosen salon
+      // (e.g. "TEST TECH"), which surfaces as the wrong "Requested by" label.
+      const staffName = String(st.name || "").trim();
+      if (staffName) profile.name = staffName;
+    }
+  } catch (e) {
+    console.warn("[Inbox] merge salon staff", e.message);
+  }
+  return profile;
+}
+
+async function resolveCurrentInboxActorName() {
+  const fallback =
+    currentUserProfile?.name ||
+    currentUserProfile?.displayName ||
+    currentUserProfile?.email ||
+    "";
+  try {
+    const w = (typeof window !== "undefined") ? window : {};
+    const salonId = w.currentSalonId ? String(w.currentSalonId).trim() : String(currentUserProfile?.salonId || "").trim();
+    const staffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : String(currentUserProfile?.staffId || "").trim();
+    if (!salonId || !staffId) return fallback;
+    const snap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+    if (!snap.exists()) return fallback;
+    const st = snap.data() || {};
+    const staffName = String(st.name || st.firstName || "").trim();
+    return staffName || fallback;
+  } catch (e) {
+    console.warn("[Inbox] resolve actor name failed", e.message);
+    return fallback;
+  }
+}
+
+function inboxCanViewInboxEval(profile) {
+  if (!profile) return false;
+  // Owner/admin/manager always have inbox_view access, even if the permissions map
+  // is missing (e.g. a brand-new owner whose users/{uid} doc has no staff merge yet).
+  // This mirrors the legacy desk-role behaviour used by inboxCanManageInboxEval below.
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
+  if (inboxLegacyDeskRoleLc(role)) return true;
+  const p = profile.permissions || {};
+  return p.inbox_view === true;
+}
+
+function inboxCanManageInboxEval(profile) {
+  if (!profile) return false;
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
+  const p = profile.permissions || {};
+  if (p.inbox_manage === false) return false;
+  if (p.inbox_manage === true) return true;
+  return inboxLegacyDeskRoleLc(role);
+}
+
+function inboxCanSendRequestsEval(profile) {
+  if (!profile) return false;
+  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
+  const p = profile.permissions || {};
+  if (inboxCanManageInboxEval(profile)) return true;
+  if (p.inbox_send === false) return false;
+  if (p.inbox_send === true) return true;
+  if (role === "technician") {
+    return true;
+  }
+  if (p.inbox_manage === false) return false;
+  return inboxLegacyDeskRoleLc(role);
+}
+
+/** Firestore inboxItems create rules require string identity fields; staging user/staff docs sometimes store role as a number. */
+function ffInboxRuleString(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  return String(v);
+}
+
+function inboxCanViewInbox() {
+  return inboxCanViewInboxEval(currentUserProfile);
+}
+
+function inboxCanManageInbox() {
+  return inboxCanManageInboxEval(currentUserProfile);
+}
+
+function inboxCanSendRequests() {
+  return inboxCanSendRequestsEval(currentUserProfile);
+}
+
+/** Hide INBOX nav when the signed-in user has no inbox access (uses users + staff permissions). */
+export async function ffRefreshInboxNavVisibility() {
+  const user = auth.currentUser;
+  const btn = document.getElementById("inboxBtn");
+  if (!btn) return;
+  if (!user) {
+    btn.style.display = "";
+    return;
+  }
+  if (typeof window.ffUpdateMainNavTabVisibility === "function") {
+    window.ffUpdateMainNavTabVisibility();
+    return;
+  }
+  try {
+    const userDoc = await getDoc(doc(db, "users", user.uid));
+    if (!userDoc.exists()) return;
+    let profile = { uid: user.uid, ...userDoc.data() };
+    profile = await mergeSalonStaffIntoUserProfile(profile);
+    btn.style.display = inboxCanViewInboxEval(profile) ? "" : "none";
+  } catch (e) {
+    console.warn("[Inbox] ffRefreshInboxNavVisibility", e.message);
+  }
 }
 
 let currentRequests = [];
@@ -122,7 +432,7 @@ async function loadSalonUsersForRecipients() {
           uid: d.id,
           name: (u.name || '').trim(),
           staffId: u.staffId || '',
-          role: (u.role || '').toLowerCase()
+          role: inboxNormalizeLineStaffRoleLc(u.role || ''),
         };
       })
       .filter(u => u.name);
@@ -176,14 +486,33 @@ function getCreateRequestSelectedRecipients() {
 // =====================
 // Navigation
 // =====================
-export function goToInbox() {
+export function goToInbox(onReady) {
   console.log('[Inbox] Opening inbox');
+
+  if (typeof window.ffCurrentUserHasInboxViewPermission === 'function' && !window.ffCurrentUserHasInboxViewPermission()) {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    if (typeof showToast === 'function') {
+      showToast('Inbox is turned off for this staff profile (enable View Inbox in permissions).', 'error');
+    }
+    return;
+  }
 
   // Staff Members modal uses z-index above main screens — close it so the Inbox view is actually visible
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
-  
+  // Close Settings, History, Tasks info, Media upload, password modal, Apps, orphaned inbox modals, etc.
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    window.ffCloseGlobalBlockingOverlays();
+  } else {
+    try {
+      const appsBd = document.getElementById('appsOverlayBackdrop');
+      const appsPn = document.getElementById('appsPanel');
+      if (appsBd) appsBd.style.display = 'none';
+      if (appsPn) appsPn.style.display = 'none';
+    } catch (_) {}
+  }
+
   const tasksScreen = document.getElementById('tasksScreen');
   const ownerView = document.getElementById('owner-view');
   const joinBar = document.querySelector('.joinBar');
@@ -211,22 +540,57 @@ export function goToInbox() {
   if (mediaScreen) mediaScreen.style.display = 'none';
   const trainingScreen = document.getElementById('trainingScreen');
   if (trainingScreen) trainingScreen.style.display = 'none';
+  const ticketsScreenNav = document.getElementById('ticketsScreen');
+  if (ticketsScreenNav) ticketsScreenNav.style.display = 'none';
+  const scheduleScreenNav = document.getElementById('scheduleScreen');
+  if (scheduleScreenNav) scheduleScreenNav.style.display = 'none';
+  const timeClockScreenInbox = document.getElementById('timeClockScreen');
+  if (timeClockScreenInbox) timeClockScreenInbox.style.display = 'none';
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
-  if (inboxScreen) inboxScreen.style.display = 'flex';
+  if (inboxScreen) {
+    inboxScreen.style.display = 'flex';
+    /* Undo stuck inline pointer-events:none from logout (app.js); without this, toolbars work but list area does not. */
+    inboxScreen.style.pointerEvents = '';
+  }
   if (inboxContent) inboxContent.style.opacity = '0';
   
   document.querySelectorAll('.btn-pill').forEach(btn => btn.classList.remove('active'));
   const inboxBtn = document.getElementById('inboxBtn');
-  if (inboxBtn) inboxBtn.classList.add('active');
-  
+  if (inboxBtn && typeof window.ffCurrentUserHasInboxViewPermission === 'function' && window.ffCurrentUserHasInboxViewPermission()) {
+    inboxBtn.classList.add('active');
+  }
+
   loadCurrentUserProfile().then(() => {
+    if (!inboxCanViewInbox()) {
+      if (typeof showToast === "function") {
+        showToast("You do not have permission to open Inbox.", "error");
+      } else {
+        console.warn("[Inbox] Blocked: inbox_view is not enabled for this profile");
+      }
+      if (inboxScreen) inboxScreen.style.display = "none";
+      if (inboxContent) inboxContent.style.opacity = "1";
+      if (inboxBtn) inboxBtn.classList.remove("active");
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+      return;
+    }
+    if (!inboxCanManageInbox() && inboxCanSendRequests()) {
+      inboxViewMode = "mine";
+    }
     loadCustomTypes().then(() => {
       loadInboxSettings().then(() => {
         setupInboxUI();
         loadInboxItems();
         // Show content when UI is ready and loading has started
         if (inboxContent) inboxContent.style.opacity = '1';
+        if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+        if (typeof onReady === 'function') {
+          try {
+            onReady();
+          } catch (e) {
+            console.warn('[Inbox] goToInbox onReady', e);
+          }
+        }
       });
     });
   });
@@ -280,14 +644,28 @@ function getAllRequestTypes() {
     category: 'custom',
     fields: Array.isArray(t.fields) ? t.fields : []
   }));
+  const automatedInboxTypes = new Set(['staff_birthday_reminder', 'document_expiring_soon', 'document_expired']);
+  const managerOnlyNewRequestTypes = new Set(['document_renewal_request']);
+  const hideRenewalForStaff = inboxUserRoleLc() === 'technician';
   const withoutOther = BUILTIN_TYPES.filter(
-    (t) => t.category !== 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+    (t) =>
+      t.category !== 'other' &&
+      !hidden.has(t.id) &&
+      !automatedInboxTypes.has(t.id) &&
+      !(hideRenewalForStaff && managerOnlyNewRequestTypes.has(t.id))
   );
   const otherOnly = BUILTIN_TYPES.filter(
-    (t) => t.category === 'other' && !hidden.has(t.id) && t.id !== 'staff_birthday_reminder'
+    (t) => t.category === 'other' && !hidden.has(t.id) && !automatedInboxTypes.has(t.id)
   );
   const customVisible = custom.filter(t => !hidden.has(t.id));
-  return [...withoutOther, ...customVisible, ...otherOnly];
+  const combined = [...withoutOther, ...customVisible, ...otherOnly];
+  const seen = new Set();
+  return combined.filter((t) => {
+    const id = t && t.id != null ? String(t.id) : '';
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /** Returns types grouped by category for the New Request modal (Schedule, Payments, Operations, Documents, Custom, Other). */
@@ -309,15 +687,40 @@ async function loadCurrentUserProfile() {
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
-      currentUserProfile = { uid: user.uid, ...userDoc.data() };
-      console.log('[Inbox] User profile loaded', { role: currentUserProfile.role });
+      const data = userDoc.data() || {};
+      // Multi-salon: prefer the salon picked from Choose Salon (or the single
+      // auto-selected membership) over the legacy users/{uid}.salonId. Without
+      // this override, inbox queries below build paths from currentUserProfile
+      // .salonId and read items from the legacy primary salon instead of the
+      // one the user chose.
+      // We also override staffId + role with the membership-scoped values
+      // (set by ffApplyActiveMembership in app.js). Otherwise
+      // mergeSalonStaffIntoUserProfile would query
+      // salons/{newSalonId}/staff/{legacyStaffId} which doesn't exist, so no
+      // permissions get merged and the user gets "You do not have permission
+      // to open Inbox" even if they have full inbox access in the picked salon.
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      currentUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: activeSalonId || data.salonId || null,
+        staffId: activeStaffId || data.staffId || null,
+        role: activeRole || data.role || '',
+      };
+      await mergeSalonStaffIntoUserProfile(currentUserProfile);
+      console.log('[Inbox] User profile loaded', { role: currentUserProfile.role, permissions: currentUserProfile.permissions });
       // Register in members directory so others can find this user in "Send to"
       if (currentUserProfile.salonId) {
         const memberData = {
-          name: currentUserProfile.name || currentUserProfile.displayName || user.email || '',
-          role: currentUserProfile.role || '',
-          staffId: currentUserProfile.staffId || '',
-          email: user.email || ''
+          name: ffInboxRuleString(
+            currentUserProfile.name || currentUserProfile.displayName || user.email || ''
+          ),
+          role: ffInboxRuleString(currentUserProfile.role),
+          staffId: ffInboxRuleString(currentUserProfile.staffId),
+          email: ffInboxRuleString(user.email)
         };
         // Include avatarUrl so Chat, Tickets, Staff Members show the correct photo
         if (currentUserProfile.avatarUrl) {
@@ -351,59 +754,68 @@ function setupInboxUI() {
   if (!currentUserProfile) return;
 
   const role = inboxUserRoleLc();
+  const canManageInbox = inboxCanManageInbox();
+  const canSend = inboxCanSendRequests();
+  const sendOnlyDesk = !canManageInbox && canSend && role !== 'technician';
 
-  // "New Request" — header button is #inboxCreateRequestBtn (inside #inboxViewSwitcher), NOT inside #inboxContentContainer
+  // "New Request" — #inboxCreateRequestBtn lives in #inboxContentHeaderRow (visible for technicians; switcher is hidden for them)
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
+  const headerRow = document.getElementById('inboxContentHeaderRow');
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
-  const listTitle      = document.getElementById('inboxListTitle');
 
-  const canCreateRequests = ['technician', 'manager', 'admin', 'owner'].includes(role);
+  const canCreateRequests = canSend;
   const isAdminOrOwner = (role === 'admin' || role === 'owner');
   const manageTypesBtn = document.getElementById('btnManageRequestTypes');
   const settingsBtn = document.getElementById('inboxSettingsBtn');
 
-  // New Request: show only in "My Requests" (managers) or any time for technician; hide in "To handle"
-  const showNewRequest = canCreateRequests && (role === 'technician' || inboxViewMode === 'mine');
+  // New Request: show only when inbox_send (or manage) allows; hide in "To handle"
+  const showNewRequest =
+    canCreateRequests &&
+    (role === 'technician' || sendOnlyDesk || inboxViewMode === 'mine');
   if (headerNewBtn) headerNewBtn.style.display = showNewRequest ? '' : 'none';
   // Hide empty-state New Request — only the header button is used
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
   if (manageTypesBtn) manageTypesBtn.style.display = 'none'; // use gear only
-  // Gear settings button — ONLY for admin/owner, after Archived tab
+  // Gear settings button — ONLY for admin/owner with manage inbox, after Archived tab
   if (settingsBtn) {
-    settingsBtn.style.display = isAdminOrOwner ? 'flex' : 'none';
+    settingsBtn.style.display = isAdminOrOwner && canManageInbox ? 'flex' : 'none';
     settingsBtn.onclick = () => window.openInboxSettingsModal();
   }
 
   const filterRow = document.getElementById('inboxFilterRow');
-  const staffFilterTrigger = document.getElementById('inboxStaffFilterTrigger');
-  const staffFilterPanel = document.getElementById('inboxStaffFilterPanel');
+  const staffFilterSelect = document.getElementById('inboxStaffFilterSelect');
   if (filterRow) filterRow.style.display = (role === 'technician') ? 'none' : 'flex';
-  if (staffFilterTrigger && staffFilterPanel) {
-    staffFilterTrigger.onclick = (e) => {
-      e.stopPropagation();
-      const open = staffFilterPanel.style.display === 'block';
-      staffFilterPanel.style.display = open ? 'none' : 'block';
-      staffFilterTrigger.setAttribute('aria-expanded', !open);
+  if (staffFilterSelect) {
+    staffFilterSelect.onchange = () => {
+      inboxStaffFilterUid = staffFilterSelect.value || '';
+      renderInboxList();
     };
-    document.addEventListener('click', function closeStaffFilterPanel(e) {
-      const wrap = document.getElementById('inboxStaffFilterWrap');
-      if (staffFilterPanel.style.display === 'block' && wrap && !wrap.contains(e.target)) {
-        staffFilterPanel.style.display = 'none';
-        staffFilterTrigger.setAttribute('aria-expanded', 'false');
-      }
-    });
   }
 
   if (role === 'technician') {
     // Technicians see their own requests only — hide status tabs and view switcher
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
     if (inboxTabs) inboxTabs.classList.add('hidden');
-    if (listTitle) listTitle.textContent = 'My Requests';
+    if (emptyStateMsg) emptyStateMsg.textContent = canSend ? 'No requests yet' : 'No updates yet';
     currentInboxTab = 'my_requests';
-  } else {
+  } else if (sendOnlyDesk) {
+    inboxViewMode = 'mine';
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (filterRow) filterRow.style.display = 'none';
+    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
+    if (inboxTabs) {
+      inboxTabs.classList.add('hidden');
+      inboxTabs.style.display = 'none';
+    }
+    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+    currentInboxTab = 'my_requests';
+    if (emptyStateMsg) emptyStateMsg.textContent = 'No requests yet';
+  } else if (canManageInbox) {
     // Manager / Admin / Owner — show view switcher (My Requests | To handle)
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'flex';
@@ -411,8 +823,7 @@ function setupInboxUI() {
       btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxViewMode);
     });
     if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
-    if (listTitle) listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
-    if (listTitle) listTitle.textContent = 'My Requests';
+    if (headerRow) headerRow.style.display = inboxViewMode === 'mine' && showNewRequest ? '' : 'none';
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
     if (inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
@@ -425,6 +836,19 @@ function setupInboxUI() {
     document.querySelectorAll('.inbox-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.inboxTab === currentInboxTab);
     });
+    syncInboxStatusFilterSelect();
+  } else {
+    // View inbox without send/manage — minimal UI
+    const viewSwitcher = document.getElementById('inboxViewSwitcher');
+    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    if (filterRow) filterRow.style.display = 'none';
+    if (headerRow) headerRow.style.display = 'none';
+    if (inboxTabs) {
+      inboxTabs.classList.add('hidden');
+      inboxTabs.style.display = 'none';
+    }
+    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+    if (emptyStateMsg) emptyStateMsg.textContent = 'No access to requests for this account';
   }
 }
 
@@ -433,37 +857,61 @@ function setupInboxUI() {
 // =====================
 window.setInboxViewMode = function(mode) {
   if (!currentUserProfile || inboxUserRoleLc() === "technician") return;
+  if (mode === "to_handle" && !inboxCanManageInbox()) return;
   inboxViewMode = mode;
   document.querySelectorAll('.inbox-view-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
   });
-  const listTitle = document.getElementById('inboxListTitle');
   const filterRow = document.getElementById('inboxFilterRow');
   const inboxTabs = document.getElementById('inboxTabs');
   const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
   const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
-  if (listTitle) listTitle.style.display = mode === 'mine' ? '' : 'none';
-  if (listTitle) listTitle.textContent = 'My Requests';
+  const headerRow = document.getElementById('inboxContentHeaderRow');
+  if (headerRow) headerRow.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
   if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
   if (mode === 'mine') {
     if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
   } else {
     if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
+    syncInboxStatusFilterSelect();
   }
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' ? '' : 'none';
+  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
   loadInboxItems();
 };
+
+function syncInboxStatusFilterSelect() {
+  const statusSel = document.getElementById("inboxStatusFilterSelect");
+  if (!statusSel) return;
+  const t = String(currentInboxTab || "").trim();
+  if (statusSel.querySelector(`option[value="${t}"]`)) statusSel.value = t;
+}
+
+function ffWireInboxStatusFilterSelect() {
+  const sel = document.getElementById("inboxStatusFilterSelect");
+  if (!sel || sel.__ffInboxStatusBound) return;
+  sel.__ffInboxStatusBound = true;
+  sel.addEventListener("change", () => {
+    const v = String(sel.value || "").trim();
+    if (!v) return;
+    if (typeof window.setInboxTab === "function") window.setInboxTab(v);
+  });
+}
 
 // =====================
 // Tab Management
 // =====================
-window.setInboxTab = function(tab) {
+window.setInboxTab = function (tab) {
   currentInboxTab = tab;
   // Update active tab
-  document.querySelectorAll('.inbox-tab').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.inboxTab === tab);
+  document.querySelectorAll(".inbox-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.inboxTab === tab);
   });
+  const statusSel = document.getElementById("inboxStatusFilterSelect");
+  if (statusSel) {
+    const opt = statusSel.querySelector(`option[value="${tab}"]`);
+    if (opt) statusSel.value = tab;
+  }
   loadInboxItems();
 };
 
@@ -519,15 +967,79 @@ async function loadInboxItems() {
     let q;
     
     if (role === 'technician') {
-      // Technicians see requests they created (sent to a manager)
-      q = query(
+      // Technicians: outgoing (to managers) + incoming (e.g. document renewal directed to them)
+      _techInboxOutgoing = [];
+      _techInboxIncoming = [];
+      const qOut = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
         orderBy('createdAt', 'desc'),
         limit(50)
       );
-    } else if (inboxViewMode === 'mine') {
-      // Admin/Manager "My Requests": ordered by createdAt (stable — doesn't reorder when status changes)
+      const qIn = query(
+        collection(db, `salons/${salonId}/inboxItems`),
+        where('forUid', '==', uid),
+        orderBy('lastActivityAt', 'desc'),
+        limit(50)
+      );
+      const unsubOut = onSnapshot(
+        qOut,
+        (snapshot) => {
+          _techInboxOutgoing = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          applyTechInboxMerge(loadingEl);
+        },
+        (error) => {
+          console.error('[Inbox] Technician outgoing query error', error);
+          if (loadingEl) loadingEl.style.display = 'none';
+          currentRequests = [];
+          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
+          if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+          }
+        }
+      );
+      const unsubIn = onSnapshot(
+        qIn,
+        (snapshot) => {
+          _techInboxIncoming = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          applyTechInboxMerge(loadingEl);
+        },
+        (error) => {
+          console.error('[Inbox] Technician incoming query error', error);
+          if (loadingEl) loadingEl.style.display = 'none';
+          currentRequests = [];
+          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
+          if (emptyEl) {
+            emptyEl.style.display = 'block';
+            emptyEl.innerHTML = `
+          <div style="color:#ef4444;">
+            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
+            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
+          </div>
+        `;
+          }
+        }
+      );
+      inboxUnsubscribe = () => {
+        unsubOut();
+        unsubIn();
+      };
+      return;
+    } else if (role !== "technician" && !inboxCanManageInbox() && !inboxCanSendRequests()) {
+      if (loadingEl) loadingEl.style.display = "none";
+      currentRequests = [];
+      updateInboxStaffFilterOptions();
+      updateInboxBadges();
+      renderInboxList();
+      return;
+    } else if (inboxViewMode === "mine" || !inboxCanManageInbox()) {
+      // "My Requests" (created by me) — send-only staff use this path only
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
@@ -535,12 +1047,12 @@ async function loadInboxItems() {
         limit(50)
       );
     } else {
-      // Admin/Manager "To handle": only requests sent TO me (forUid)
+      // "To handle" — full inbox managers only
       if (currentInboxTab === 'open') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
-          where('status', '==', 'open'),
+          where('status', 'in', ['open', 'pending']),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
@@ -580,7 +1092,7 @@ async function loadInboxItems() {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
-          where('status', '==', 'open'),
+          where('status', 'in', ['open', 'pending']),
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
@@ -589,32 +1101,24 @@ async function loadInboxItems() {
     
     // Listen for changes
     inboxUnsubscribe = onSnapshot(q, (snapshot) => {
-      if (loadingEl) loadingEl.style.display = 'none';
-
-      currentRequests = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      console.log('[Inbox] Loaded', currentRequests.length, 'requests');
-      updateInboxStaffFilterOptions();
-      updateInboxBadges();
-      // Always call renderInboxList — it cleans up old DOM elements even when empty
-      renderInboxList();
+      applyInboxSnapshotRows(snapshot, loadingEl);
     }, (error) => {
       console.error('[Inbox] Query error', error);
-      if (loadingEl) loadingEl.style.display = 'none';
-      currentRequests = [];
-      if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
-      if (emptyEl) {
-        emptyEl.style.display = 'block';
-        emptyEl.innerHTML = `
-          <div style="color:#ef4444;">
-            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
-            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
-          </div>
-        `;
+      if (inboxErrorNeedsIndex(error)) {
+        try {
+          if (typeof inboxUnsubscribe === 'function') inboxUnsubscribe();
+        } catch (_) {}
+        inboxUnsubscribe = subscribeInboxIndexFallback({
+          salonId,
+          uid,
+          mode: inboxViewMode === "mine" || !inboxCanManageInbox() ? "mine" : "to_handle",
+          loadingEl,
+          listEl,
+          emptyEl
+        });
+        return;
       }
+      showInboxLoadError(error, loadingEl, listEl, emptyEl);
     });
     
   } catch (error) {
@@ -626,20 +1130,38 @@ async function loadInboxItems() {
 /** Update red badges: Open tab + INBOX nav button */
 /** Update unread badges on tabs and nav INBOX button. */
 function updateInboxBadges() {
-  const role = inboxUserRoleLc();
-  const isManager = ["manager", "admin", "owner"].includes(role);
-  if (!isManager) return;
+  if (!inboxCanManageInbox()) return;
 
   const uid = currentUserProfile.uid;
 
+  // Scope the counts to the currently active branch so the badges match
+  // what the user actually sees in the list for that location.
+  let activeLocId = null;
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+    }
+    if (!activeLocId && typeof window.__ff_active_location_id === 'string'
+        && window.__ff_active_location_id.trim()) {
+      activeLocId = window.__ff_active_location_id.trim();
+    }
+  } catch (_) {}
+  const staffLocMap = activeLocId ? inboxGetStaffLocationMap() : null;
+  const inActiveLoc = (r) => !activeLocId || inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
+
   // Open: new requests not yet seen by recipient
   const openCount = currentRequests.filter(
-    r => r.forUid === uid && r.status === 'open' && r.unreadForManagers === true
+    (r) =>
+      r.forUid === uid &&
+      (r.status === "open" || r.status === "pending") &&
+      r.unreadForManagers === true &&
+      inActiveLoc(r)
   ).length;
 
   // Needs Info: requests where staff replied but recipient hasn't seen it yet
   const needsInfoCount = currentRequests.filter(
-    r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true
+    r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true && inActiveLoc(r)
   ).length;
 
   const totalCount = openCount + needsInfoCount;
@@ -652,16 +1174,27 @@ function updateInboxBadges() {
   const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
   if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
 
+  const statusSel = document.getElementById('inboxStatusFilterSelect');
+  if (statusSel) {
+    const setOpt = (val, base, n) => {
+      const o = statusSel.querySelector(`option[value="${val}"]`);
+      if (o) o.textContent = n > 0 ? `${base} (${n})` : base;
+    };
+    setOpt('open', 'Open', openCount);
+    setOpt('needs_info', 'Needs Info', needsInfoCount);
+    setOpt('approved', 'Approved', 0);
+    setOpt('denied', 'Denied', 0);
+    setOpt('archived', 'Archived', 0);
+  }
+
   // Nav INBOX badge = total unread (Open + Needs Info)
   const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
   if (navBadge) navBadge.textContent = totalCount > 0 ? totalCount : '';
 }
 
 function updateInboxStaffFilterOptions() {
-  const trigger = document.getElementById('inboxStaffFilterTrigger');
-  const labelEl = document.getElementById('inboxStaffFilterLabel');
-  const panel = document.getElementById('inboxStaffFilterPanel');
-  if (!trigger || !labelEl || !panel) return;
+  const sel = document.getElementById('inboxStaffFilterSelect');
+  if (!sel) return;
   const role = inboxUserRoleLc();
   if (role === "technician") return;
 
@@ -671,46 +1204,129 @@ function updateInboxStaffFilterOptions() {
     const name = (req.forStaffName || req.createdByName || '').trim() || uid || 'Unknown';
     if (uid && !seen.has(uid)) seen.set(uid, name);
   });
-  const options = [['', 'All staff']];
+  const options = [['', 'ALL STAFF']];
   seen.forEach((name, uid) => options.push([uid, name]));
   const current = inboxStaffFilterUid;
   if (!options.some(([v]) => v === current)) inboxStaffFilterUid = '';
 
-  const currentLabel = options.find(([v]) => v === inboxStaffFilterUid)?.[1] || 'All staff';
-  labelEl.textContent = currentLabel;
-
-  panel.innerHTML = options.map(([val, lab]) => {
-    const isSelected = val === inboxStaffFilterUid;
-    const style = 'padding:10px 14px;cursor:pointer;font-size:13px;color:#374151;border-bottom:1px solid #f3f4f6;' + (isSelected ? 'background:#f9fafb;font-weight:500;' : '');
-    return `<div role="option" data-value="${escapeHtml(val)}" aria-selected="${isSelected}" style="${style}">${isSelected ? '✓ ' : ''}${escapeHtml(lab)}</div>`;
-  }).join('');
-
-  panel.querySelectorAll('[role="option"]').forEach(opt => {
-    opt.onclick = (e) => {
-      e.stopPropagation();
-      inboxStaffFilterUid = opt.dataset.value || '';
-      labelEl.textContent = opt.textContent.replace(/^✓\s*/, '').trim();
-      panel.style.display = 'none';
-      trigger.setAttribute('aria-expanded', 'false');
-      renderInboxList();
-    };
-  });
+  sel.innerHTML = '';
+  for (const [val, lab] of options) {
+    const o = document.createElement('option');
+    o.value = val;
+    o.textContent = lab;
+    sel.appendChild(o);
+  }
+  sel.value = inboxStaffFilterUid;
 }
 
 function renderInboxList() {
+  try {
+    _renderInboxListInner();
+  } catch (e) {
+    console.error('[Inbox] renderInboxList failed', e);
+    const loadingEl = document.getElementById('inboxLoading');
+    if (loadingEl) loadingEl.style.display = 'none';
+  }
+}
+
+// Re-render the Inbox list when the active location switches, so the
+// location filter in _renderInboxListInner reflects the new scope. Without
+// this, a birthday reminder for a Brickell-only staff would remain visible
+// when the user switches to Key Biscayne.
+if (typeof document !== 'undefined' && !window.__ffInboxLocationListenerBound) {
+  window.__ffInboxLocationListenerBound = true;
+  document.addEventListener('ff-active-location-changed', function () {
+    try { renderInboxList(); } catch (_) {}
+  });
+  // Staff locations may change (e.g. owner just toggled a location on/off in
+  // Staff Member → Locations). Re-render so we pick up the new
+  // allowedLocationIds for the subject staff.
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    try { renderInboxList(); } catch (_) {}
+  });
+}
+
+/** Build a quick map { staffId -> allowedLocationIds[] } from the local staff cache. */
+function inboxGetStaffLocationMap() {
+  try {
+    if (typeof window.ffGetStaffStore === 'function') {
+      const store = window.ffGetStaffStore();
+      const map = Object.create(null);
+      (store.staff || []).forEach(function (s) {
+        if (s && s.id != null) {
+          map[String(s.id)] = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds.slice() : [];
+        }
+      });
+      return map;
+    }
+  } catch (_) {}
+  try {
+    const raw = localStorage.getItem('ff_staff_v1');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed && parsed.staff) ? parsed.staff : [];
+    const map = Object.create(null);
+    list.forEach(function (s) {
+      if (s && s.id != null) {
+        map[String(s.id)] = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds.slice() : [];
+      }
+    });
+    return map;
+  } catch (_) {
+    return {};
+  }
+}
+
+/** The staff member an inbox item is "about". Different types use different fields. */
+function inboxItemSubjectStaffId(req) {
+  if (!req) return '';
+  const d = req.data || {};
+  const candidates = [
+    d.subjectStaffId,
+    d.staffId,
+    d.targetStaffId,
+    req.forStaffId,
+    req.createdByStaffId,
+  ];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const v = candidates[i];
+    if (v != null && String(v).trim() !== '') return String(v).trim();
+  }
+  return '';
+}
+
+/**
+ * Whether an inbox item should be visible under the currently active
+ * location. Rule:
+ *   - If no active location (single-branch salon), show everything.
+ *   - If the item has an explicit locationId stamped on it, match against
+ *     that directly.
+ *   - Otherwise, resolve the "subject" staff member and check their
+ *     allowedLocationIds. Missing / empty allowedLocationIds is treated as
+ *     "visible in all locations" (legacy staff, or admins who work across
+ *     every branch).
+ *   - If we cannot resolve any staff at all (e.g. an operational reminder
+ *     with no staff tied to it), fall through and show it — we should not
+ *     silently hide inbox rows.
+ */
+function inboxItemMatchesActiveLocation(req, activeLocationId, staffLocMap) {
+  if (!activeLocationId) return true;
+  const explicit = req && typeof req.locationId === 'string' ? req.locationId.trim() : '';
+  if (explicit) {
+    return explicit === activeLocationId;
+  }
+  const staffId = inboxItemSubjectStaffId(req);
+  if (!staffId) return true;
+  const allowed = staffLocMap && staffLocMap[staffId];
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+  return allowed.indexOf(activeLocationId) !== -1;
+}
+
+function _renderInboxListInner() {
   const listEl = document.getElementById('inboxList');
   if (!listEl) return;
 
-  // Title by role and view: technician = "My Requests"; manager "mine" / "To handle"
-  const listTitle = document.getElementById('inboxListTitle');
   const role = inboxUserRoleLc();
-  if (listTitle) {
-    if (role === "technician") listTitle.textContent = "My Requests";
-    else {
-      listTitle.style.display = inboxViewMode === 'mine' ? '' : 'none';
-      listTitle.textContent = 'My Requests';
-    }
-  }
 
   // Remove only dynamically-added group elements (preserve loading/empty state divs)
   listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
@@ -720,10 +1336,21 @@ function renderInboxList() {
 
   let requestsToShow = currentRequests;
 
+  // Technician merged list is already noise-filtered in applyTechInboxMerge; keep filter here if data came from elsewhere.
+  if (role === "technician") {
+    requestsToShow = inboxTechnicianNoiseFilter(requestsToShow);
+  }
+
+  // Admin/manager "My Requests": createdByUid query can still return automated rows (scanner uid) + staff-call noise
+  if (role !== "technician" && inboxViewMode === "mine" && inboxCanManageInbox()) {
+    requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
+    requestsToShow = requestsToShow.filter((r) => !ffInboxIsStaffCallOtherNoise(r));
+  }
+
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
   if (inboxViewMode === 'to_handle' || role === 'technician') {
     if (currentInboxTab === 'open') {
-      requestsToShow = requestsToShow.filter(r => r.status === 'open');
+      requestsToShow = requestsToShow.filter((r) => r.status === "open" || r.status === "pending");
     } else if (currentInboxTab === 'needs_info') {
       requestsToShow = requestsToShow.filter(r => r.status === 'needs_info');
     } else if (currentInboxTab === 'approved') {
@@ -737,6 +1364,27 @@ function renderInboxList() {
 
   if (role !== 'technician' && inboxViewMode !== 'mine' && inboxStaffFilterUid) {
     requestsToShow = requestsToShow.filter(r => (r.forUid || r.createdByUid) === inboxStaffFilterUid);
+  }
+
+  // Scope the Inbox to the active location. An item for a staff member who
+  // only works at Brickell must not show up when the user is viewing Key
+  // Biscayne in the header switcher. See inboxItemMatchesActiveLocation for
+  // the exact rule set (explicit locationId → staff allowedLocationIds →
+  // fall-through for legacy / unattributed rows).
+  try {
+    const activeLocId =
+      (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
+      (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
+        ? window.__ff_active_location_id
+        : null);
+    if (activeLocId) {
+      const staffLocMap = inboxGetStaffLocationMap();
+      requestsToShow = requestsToShow.filter(function (r) {
+        return inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
+      });
+    }
+  } catch (e) {
+    console.warn('[Inbox] location filter failed, showing all', e);
   }
 
   if (requestsToShow.length === 0) {
@@ -753,12 +1401,12 @@ function renderInboxList() {
   if (emptyEl) emptyEl.style.display = 'none';
   if (loadingEl) loadingEl.style.display = 'none';
 
-  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const showMgrUnread = inboxCanManageInbox();
 
   // Group requests by type (use filtered list)
   const groups = {};
   requestsToShow.forEach(req => {
-    const key = req.type || 'other';
+    const key = inboxEffectiveTypeForGrouping(req) || 'other';
     if (!groups[key]) groups[key] = [];
     groups[key].push(req);
   });
@@ -768,7 +1416,7 @@ function renderInboxList() {
     'vacation','day_off','time_off','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
     'commission_review','tip_adjustment','payment_issue',
     'supplies','maintenance','client_issue','staff_birthday_reminder',
-    'document_request','document_upload',
+    'document_request','document_renewal_request','document_upload','document_expiring_soon','document_expired',
     'other'
   ];
   const sortedKeys = Object.keys(groups).sort((a, b) => {
@@ -783,7 +1431,7 @@ function renderInboxList() {
   sortedKeys.forEach(type => {
     const requests = groups[type];
     const typeInfo = getRequestTypeInfo(type);
-    const unreadCount = isManager ? requests.filter(r => r.unreadForManagers === true).length : 0;
+    const unreadCount = showMgrUnread ? requests.filter(r => r.unreadForManagers === true).length : 0;
     const hasUnread = unreadCount > 0;
 
     // Left: icon + label. Right: (total) grey, unread count red when > 0, then arrow
@@ -809,7 +1457,7 @@ function renderInboxList() {
     // Group body — collapsed by default
     const body = document.createElement('div');
     body.className = 'inbox-group-body';
-    body.style.cssText = 'display:none; margin-bottom:8px; display:flex; flex-direction:column; gap:8px;';
+    body.style.cssText = 'flex-direction:column;gap:8px;margin-bottom:8px;';
     body.style.display = 'none';
 
     requests.forEach(req => {
@@ -834,24 +1482,62 @@ function createRequestCard(request) {
   const card = document.createElement('div');
   card.className = 'inbox-item-card';
   card.onclick = () => showRequestDetails(request.id);
-  
-  // Type icon & label
+
   const typeInfo = getRequestTypeInfo(request.type);
-  
-  // Status badge
-  const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
-  
-  // Format date
+  const statusStr = String(request.status != null ? request.status : "open");
+  const statusDisplay = inboxSupplyStatusDisplayLabel(request) || statusStr.replace(/_/g, " ");
+  const statusClass = `inbox-status-${statusStr.replace(/_/g, "-")}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const dateStr = formatRelativeDate(createdDate);
-  
+
+  // Smart Inventory Suggestion — compact card, no raw data dump.
+  if (request.type === 'inventory_suggestion') {
+    return ffRenderInventorySuggestionCard(request, card, dateStr, statusStr);
+  }
+
+  if (request.type === 'document_expiring_soon' || request.type === 'document_expired') {
+    const isSoon = !inboxDocAlertIsExpiredForUi(request);
+    const he = ffDocAlertIsHebrewUI();
+    const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
+    const boxStyle = isSoon
+      ? 'border-left:4px solid #d97706;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;'
+      : 'border-left:4px solid #b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 14px;';
+    const badgeBg = isSoon ? '#fef3c7' : '#fee2e2';
+    const badgeColor = isSoon ? '#92400e' : '#991b1b';
+    const msg = (request.message || request.data?.message || '').trim();
+    card.innerHTML = `
+      <div style="${boxStyle}">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div style="font-size:26px;line-height:1;">${typeInfo.icon}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
+              <span class="inbox-status-badge ${statusClass}">${statusStr.replace(/_/g, ' ')}</span>
+            </div>
+            <div style="font-size:14px;font-weight:600;color:#111827;line-height:1.45;margin-bottom:6px;">
+              ${escapeHtml(ffDocAlertHumanSummary(request))}
+            </div>
+            <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12px;color:#4b5563;">
+              <span style="color:#9ca3af;">${he ? 'עובד' : 'Employee'}</span><span style="font-weight:500;">${escapeHtml(ffDocAlertStaffName(request))}</span>
+              <span style="color:#9ca3af;">${he ? 'מסמך' : 'Document'}</span><span style="font-weight:500;word-break:break-word;">${escapeHtml(ffDocAlertDocTitle(request))}</span>
+              <span style="color:#9ca3af;">${he ? 'תפוגה' : 'Expires'}</span><span>${escapeHtml(ffDocAlertExpFormattedLong(request) || '—')}</span>
+            </div>
+            ${msg ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);font-size:12px;color:#374151;line-height:1.4;">${escapeHtml(msg)}</div>` : ''}
+            <div style="margin-top:8px;font-size:11px;color:#9ca3af;">${he ? 'נוצר' : 'Logged'} · ${escapeHtml(dateStr)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+    return card;
+  }
+
   card.innerHTML = `
     <div style="display:flex;align-items:flex-start;gap:12px;">
       <div style="font-size:24px;">${typeInfo.icon}</div>
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
-          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusDisplay}</span>
           ${request.priority === 'urgent' ? '<span style="color:#ef4444;font-size:12px;">🔥 Urgent</span>' : ''}
         </div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
@@ -865,7 +1551,7 @@ function createRequestCard(request) {
       </div>
     </div>
   `;
-  
+
   return card;
 }
 
@@ -883,6 +1569,1058 @@ function escapeHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+/** Format a numeric daysLeft value for display: 1 decimal when small, integer when big. */
+function ffSuggestionFmtDays(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  if (n < 0) return '0';
+  if (n < 10) return (Math.round(n * 10) / 10).toString();
+  return Math.round(n).toString();
+}
+
+/** Human-readable avg use per day for the smart card (e.g. "3.5/day" or "0.4/day"). */
+function ffSuggestionFmtRate(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  if (n >= 10) return `${Math.round(n)}/day`;
+  return `${Math.round(n * 10) / 10}/day`;
+}
+
+/** Open a compact modal presenting a Smart Inventory Suggestion — no raw data dump. */
+function ffShowInventorySuggestionModal(request) {
+  const rd = (request && request.data && typeof request.data === 'object') ? request.data : {};
+  const itemName = rd.itemName ? String(rd.itemName) : 'Inventory item';
+  const categoryName = rd.categoryName ? String(rd.categoryName) : '';
+  const subcategoryName = rd.subcategoryName ? String(rd.subcategoryName) : '';
+  const groupName = rd.groupName ? String(rd.groupName) : '';
+  const pathLine = [categoryName, subcategoryName, groupName].filter((p) => p && p.trim()).join(' · ');
+  const daysLeftStr = ffSuggestionFmtDays(rd.daysLeft);
+  const rateStr = ffSuggestionFmtRate(rd.dailyUsage);
+  const current = rd.current != null ? String(rd.current) : '—';
+  const suggestedQty = rd.suggestedQty != null ? String(rd.suggestedQty) : '—';
+  const isReorder = rd.kind === 'reorder_point';
+  const reorderPointStr = rd.reorderPoint != null ? String(rd.reorderPoint) : '—';
+  const statusStr = String(request.status || 'open');
+  const isOpen = statusStr === 'open';
+
+  const modal = document.createElement('div');
+  modal.id = 'requestDetailsModal';
+  modal.style.cssText = `
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999999; padding: 20px;
+  `;
+  const content = document.createElement('div');
+  content.style.cssText = `
+    background: #fff; border-radius: 14px;
+    width: 100%; max-width: 440px;
+    max-height: 90vh; overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.24);
+    border-left: 4px solid #ef4444;
+    font-family: inherit;
+  `;
+  content.innerHTML = `
+    <div style="padding:20px 22px 16px 22px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <span style="font-size:24px;line-height:1;">📉</span>
+          <div style="min-width:0;">
+            <div style="font-size:16px;font-weight:700;color:#111827;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(itemName)}</div>
+            ${pathLine ? `<div style="font-size:11px;color:#9ca3af;margin-top:3px;">${escapeHtml(pathLine)}</div>` : ''}
+          </div>
+        </div>
+        ${isOpen ? `<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:600;background:#f1f5f9;color:#475569;flex-shrink:0;">Open</span>` : ''}
+      </div>
+      <div style="padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-size:14px;font-weight:600;color:#b91c1c;margin:12px 0 16px;">
+        ${isReorder
+          ? `Low stock — at or below reorder point (${escapeHtml(reorderPointStr)})`
+          : `Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}`}
+      </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:13px;color:#374151;align-items:center;">
+        <span style="color:#9ca3af;">Current:</span><span style="font-weight:600;">${escapeHtml(current)}</span>
+        ${isReorder
+          ? `<span style="color:#9ca3af;">Reorder point:</span><span style="font-weight:600;">${escapeHtml(reorderPointStr)}</span>`
+          : `<span style="color:#9ca3af;">Avg use:</span><span style="font-weight:600;">${escapeHtml(rateStr)}</span>`}
+        <span style="color:#9ca3af;">${isReorder ? 'Suggested order:' : 'Order qty:'}</span>
+        ${isReorder
+          ? `<span style="font-weight:700;color:#7c3aed;">${escapeHtml(suggestedQty)}</span>`
+          : `<div style="display:flex;align-items:center;gap:6px;">
+          <input type="number" min="1" step="1"
+            data-ff-suggestion-qty-input
+            value="${escapeHtml(suggestedQty)}"
+            style="width:90px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;font-weight:700;color:#0f172a;text-align:center;font-variant-numeric:tabular-nums;"
+          />
+          <span style="font-size:11px;color:#9ca3af;">Suggested: <strong style="color:#7c3aed;">${escapeHtml(suggestedQty)}</strong></span>
+        </div>`}
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;padding:14px 22px 20px;border-top:1px solid #f1f5f9;">
+      ${statusStr === 'archived'
+        ? `<button type="button" data-ff-suggestion-delete="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid #ef4444;background:#fef2f2;color:#dc2626;font-weight:700;font-size:13px;cursor:pointer;">
+            🗑 Delete permanently
+          </button>`
+        : `<button type="button" data-ff-suggestion-dismiss="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-weight:600;font-size:13px;cursor:pointer;">
+            Dismiss
+          </button>
+          ${isReorder ? '' : `<button type="button" data-ff-suggestion-add-to-order="${escapeHtml(request.id)}"
+            style="flex:1;padding:10px 14px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;cursor:pointer;">
+            Add to Order
+          </button>`}`}
+    </div>
+  `;
+  modal.appendChild(content);
+
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal) modal.remove();
+  });
+  const deleteBtn = content.querySelector('[data-ff-suggestion-delete]');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      if (typeof window.deleteArchivedRequest === 'function') {
+        window.deleteArchivedRequest(request.id);
+      }
+    });
+  }
+  const dismissBtn = content.querySelector('[data-ff-suggestion-dismiss]');
+  if (dismissBtn) {
+    dismissBtn.addEventListener('click', async () => {
+      dismissBtn.disabled = true;
+      try {
+        await ffDismissInventorySuggestion(request);
+        showToast('Suggestion dismissed', 'success');
+      } catch (e) {
+        console.error('[Inbox] Dismiss suggestion failed', e);
+        showToast('Could not dismiss. Try again.', 'error');
+        dismissBtn.disabled = false;
+        return;
+      }
+      modal.remove();
+    });
+  }
+  const addBtn = content.querySelector('[data-ff-suggestion-add-to-order]');
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      // Read the user-edited qty (defaults to suggestedQty). Validate > 0.
+      const qtyInput = content.querySelector('[data-ff-suggestion-qty-input]');
+      const overrideQtyRaw = qtyInput instanceof HTMLInputElement ? qtyInput.value : '';
+      const overrideQty = Number(overrideQtyRaw);
+      if (!Number.isFinite(overrideQty) || overrideQty <= 0) {
+        showToast('Order qty must be greater than 0', 'error');
+        if (qtyInput instanceof HTMLInputElement) {
+          qtyInput.focus();
+          qtyInput.select();
+        }
+        return;
+      }
+      addBtn.disabled = true;
+      if (typeof window.ffAddInventorySuggestionToOrder !== 'function') {
+        showToast('Create Order is not available right now', 'error');
+        addBtn.disabled = false;
+        return;
+      }
+      let added = false;
+      try {
+        added = await window.ffAddInventorySuggestionToOrder(request, { qtyOverride: overrideQty });
+      } catch (e) {
+        console.error('[Inbox] Add to Order failed', e);
+      }
+      if (!added) {
+        showToast('Could not add this item. Try again.', 'error');
+        addBtn.disabled = false;
+        return;
+      }
+      // Archive the suggestion so it disappears from the Open tab and the scanner
+      // won't re-create a duplicate for this cell. We don't delete, so a record remains
+      // that this cell was already acted on.
+      let archiveOk = false;
+      let lastError = null;
+      try {
+        await ffDismissInventorySuggestion(request, { addedToOrder: true });
+        archiveOk = true;
+      } catch (e) {
+        lastError = e;
+        console.error('[Inbox] Archive suggestion failed:', e && (e.code || e.message) ? (e.code || e.message) : e);
+      }
+      // Optimistic local cleanup — remove from in-memory list so UI updates immediately
+      // even if the Firestore listener is slow to reflect the change.
+      try {
+        if (Array.isArray(currentRequests)) {
+          currentRequests = currentRequests.filter((r) => r && r.id !== request.id);
+        }
+        if (typeof _techInboxOutgoing !== 'undefined' && Array.isArray(_techInboxOutgoing)) {
+          _techInboxOutgoing = _techInboxOutgoing.filter((r) => r && r.id !== request.id);
+        }
+        if (typeof _techInboxIncoming !== 'undefined' && Array.isArray(_techInboxIncoming)) {
+          _techInboxIncoming = _techInboxIncoming.filter((r) => r && r.id !== request.id);
+        }
+        if (typeof renderInboxList === 'function') renderInboxList();
+        if (typeof updateInboxBadges === 'function') updateInboxBadges();
+      } catch (e) {
+        console.warn('[Inbox] Local cleanup after Add to Order failed', e);
+      }
+      modal.remove();
+      const name = (request.data && request.data.itemName) || 'item';
+      if (archiveOk) {
+        showToast(`Added ${overrideQty} × ${name} to Create Order`, 'success');
+      } else {
+        const errMsg = lastError ? (lastError.code || lastError.message || String(lastError)) : 'unknown';
+        showToast(`Added to Order, but archive failed: ${errMsg}`, 'error');
+      }
+    });
+  }
+
+  document.body.appendChild(modal);
+}
+
+/** Archive an inventory suggestion (Dismiss or Add-to-Order). Status update respects inbox rules. */
+async function ffDismissInventorySuggestion(request, opts) {
+  if (!request || !request.id) throw new Error('Missing request id');
+  const salonId = currentUserProfile && currentUserProfile.salonId;
+  if (!salonId) throw new Error('No salonId in profile');
+  const patch = {
+    status: 'archived',
+    decidedBy: currentUserProfile.uid || null,
+    decidedAt: serverTimestamp(),
+    lastActivityAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    unreadForManagers: false,
+  };
+  // If called from Add to Order, we leave a trail via responseNote so later UI can show "Added to order".
+  if (opts && opts.addedToOrder === true) {
+    patch.responseNote = 'Added to Create Order';
+  }
+  await updateDoc(doc(db, `salons/${salonId}/inboxItems`, request.id), patch);
+}
+
+/** Render a Smart Inventory Suggestion as a compact smart card (card list view). */
+function ffRenderInventorySuggestionCard(request, card, dateStr, statusStr) {
+  const rd = (request && request.data && typeof request.data === 'object') ? request.data : {};
+  const itemName = rd.itemName ? String(rd.itemName) : (request.title ? String(request.title) : 'Inventory item');
+  const categoryName = rd.categoryName ? String(rd.categoryName) : '';
+  const subcategoryName = rd.subcategoryName ? String(rd.subcategoryName) : '';
+  const groupName = rd.groupName ? String(rd.groupName) : '';
+  const pathParts = [categoryName, subcategoryName, groupName].filter((p) => p && p.trim());
+  const pathLine = pathParts.join(' · ');
+  const daysLeftStr = ffSuggestionFmtDays(rd.daysLeft);
+  const rateStr = ffSuggestionFmtRate(rd.dailyUsage);
+  const current = rd.current != null ? String(rd.current) : '—';
+  const suggestedQty = rd.suggestedQty != null ? String(rd.suggestedQty) : '—';
+  const isReorder = rd.kind === 'reorder_point';
+  const reorderPointStr = rd.reorderPoint != null ? String(rd.reorderPoint) : '—';
+  const isOpen = statusStr === 'open';
+  const statusBadge = isOpen
+    ? `<span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;background:#f1f5f9;color:#475569;letter-spacing:0.02em;">Open</span>`
+    : `<span style="display:inline-block;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:600;background:#e5e7eb;color:#6b7280;letter-spacing:0.02em;text-transform:capitalize;">${escapeHtml(String(statusStr).replace(/_/g, ' '))}</span>`;
+
+  card.style.cssText = `
+    background:#fff;
+    border:1px solid #fecaca;
+    border-left:4px solid #ef4444;
+    border-radius:10px;
+    padding:12px 14px;
+    cursor:pointer;
+    transition: box-shadow 0.15s ease, transform 0.1s ease;
+  `;
+  card.onmouseenter = () => { card.style.boxShadow = '0 2px 8px rgba(239,68,68,0.12)'; };
+  card.onmouseleave = () => { card.style.boxShadow = ''; };
+
+  card.innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:10px;">
+      <div style="font-size:22px;line-height:1;flex-shrink:0;">📉</div>
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px;">
+          <div style="font-size:14px;font-weight:700;color:#111827;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(itemName)}</div>
+          ${statusBadge}
+        </div>
+        ${pathLine ? `<div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">${escapeHtml(pathLine)}</div>` : ''}
+        <div style="font-size:13px;font-weight:600;color:#b91c1c;margin-bottom:8px;">
+          ${isReorder
+            ? `Low stock — at or below reorder point (${escapeHtml(reorderPointStr)})`
+            : `Running low — may run out in ${escapeHtml(daysLeftStr)} day${daysLeftStr === '1' ? '' : 's'}`}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:#374151;">
+          <span><span style="color:#9ca3af;">Current:</span> <strong>${escapeHtml(current)}</strong></span>
+          ${isReorder
+            ? `<span><span style="color:#9ca3af;">Reorder point:</span> <strong>${escapeHtml(reorderPointStr)}</strong></span>`
+            : `<span><span style="color:#9ca3af;">Avg use:</span> <strong>${escapeHtml(rateStr)}</strong></span>`}
+          <span><span style="color:#9ca3af;">Suggested order:</span> <strong>${escapeHtml(suggestedQty)}</strong></span>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:#9ca3af;">${escapeHtml(dateStr)}</div>
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+/** Supply requests use pending → approved | denied; legacy supplies may still be status open. */
+function inboxSupplyRequestIsPending(request) {
+  if (!request || String(request.type || "").trim() !== "supplies") return false;
+  const s = String(request.status || "").trim();
+  return s === "pending" || s === "open";
+}
+
+/** Human-readable decision label for supply requests (modal + cards + details). */
+function inboxSupplyStatusDisplayLabel(request) {
+  if (!request || String(request.type || "").trim() !== "supplies") return null;
+  const s = String(request.status || "").trim();
+  if (s === "pending" || s === "open") return "Pending";
+  if (s === "approved") return "Approved";
+  if (s === "denied") return "Denied";
+  return s.replace(/_/g, " ");
+}
+
+const FF_INVENTORY_SUPPLY_VARIANT_KEYS = new Set(["dip", "gel", "regular"]);
+
+function parseApprovedSupplyLineQty(line) {
+  const q = line?.qty;
+  if (q == null || q === "") return null;
+  const n = typeof q === "number" ? q : Number(String(q).trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function parseApprovedSupplyLineUnit(line) {
+  const u = line?.unit;
+  if (u == null || u === "") return null;
+  const t = String(u).trim();
+  return t === "" ? null : t.slice(0, 80);
+}
+
+/** Parse a cell's approved qty + contributions (mirrors inventory.js getCellApprovedInfo). */
+function ffGetCellApprovedInfoInbox(cell) {
+  if (!cell || typeof cell !== "object") return { approved: 0, approvedRequests: [] };
+  const list = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
+  const approved = list.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : Number(e?.qty) || 0), 0);
+  return { approved, approvedRequests: list };
+}
+
+/**
+ * Apply approved Supply Request to inventory (Order Quantity contribution only).
+ *
+ * Adds the requested qty to the target row × group cell's `approvedRequests[]` array inside the
+ * subcategory doc. Computes `cell.approved = sum(qty)` as a denormalized field. Idempotent via
+ * inbox doc's `appliedToInventory === true`. Does NOT touch stock or current.
+ */
+async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return;
+  const rid = String(requestId || "").trim();
+  if (!rid) return;
+
+  // Idempotency guard — skip if request already applied.
+  try {
+    const inboxSnap = await getDoc(doc(db, `salons/${salonId}/inboxItems`, rid));
+    if (inboxSnap.exists() && inboxSnap.data()?.appliedToInventory === true) return;
+  } catch (e) {
+    console.warn("[Inbox] apply supply: idempotency check failed, proceeding", e);
+  }
+
+  const items = Array.isArray(requestData?.items) ? requestData.items : [];
+  if (items.length === 0) {
+    console.warn("[Inbox] apply supply: request has no items", rid);
+    return;
+  }
+
+  // Group items by subcategory doc so we touch each doc once.
+  /** @type {Map<string, { catId: string, subId: string, lines: Array<{rowId: string, groupId: string | null, qty: number, unit: string | null, itemName: string, note: string | null}> }>} */
+  const bySub = new Map();
+  let skippedForMissingKeys = 0;
+  for (const line of items) {
+    const catId = String(line?.categoryId || "").trim();
+    const subId = String(line?.subcategoryId || "").trim();
+    const rowId = String(line?.rowId || "").trim() || (typeof line?.itemId === "string" && line.itemId.includes(":")
+      ? line.itemId.split(":")[0]
+      : String(line?.itemId || "").trim());
+    const groupId = line?.groupId != null && String(line.groupId).trim() !== "" ? String(line.groupId).trim() : null;
+    const qty = Number(line?.qty);
+    if (!catId || !subId || !rowId || !Number.isFinite(qty) || qty <= 0) {
+      console.warn("[Inbox] apply supply: skipping line (missing key fields)", {
+        rid,
+        itemId: line?.itemId,
+        hasCat: !!catId,
+        hasSub: !!subId,
+        hasRow: !!rowId,
+        qty,
+      });
+      skippedForMissingKeys += 1;
+      continue;
+    }
+    const unit = line?.unit != null && String(line.unit).trim() !== "" ? String(line.unit).trim() : null;
+    const itemName = line?.itemName != null ? String(line.itemName) : "";
+    const noteSrc =
+      (requestData?.note != null ? String(requestData.note).trim() : "") ||
+      (line?.note != null ? String(line.note).trim() : "");
+    const note = noteSrc !== "" ? noteSrc : null;
+    const key = `${catId}:${subId}`;
+    if (!bySub.has(key)) bySub.set(key, { catId, subId, lines: [] });
+    bySub.get(key).lines.push({ rowId, groupId, qty, unit, itemName, note });
+  }
+  if (bySub.size === 0) {
+    const msg = skippedForMissingKeys > 0
+      ? `Supply request has no inventory-linked items (skipped ${skippedForMissingKeys}). The request lacks rowId/groupId — it was likely created before the inventory-link feature.`
+      : "Supply request has no inventory items to contribute.";
+    console.warn("[Inbox] apply supply:", msg, rid);
+    throw new Error(msg);
+  }
+
+  const byName =
+    currentUserProfile && currentUserProfile.name ? String(currentUserProfile.name) : "";
+  const byUid =
+    currentUserProfile && currentUserProfile.uid ? String(currentUserProfile.uid) : "";
+  /** @type {Array<{catId: string, subId: string, rowId: string, groupId: string | null}>} */
+  const appliedInventoryRefs = [];
+  /** @type {string[]} */
+  const subcategoryErrors = [];
+  let totalContributions = 0;
+  let totalSkippedUnmatched = 0;
+
+  for (const { catId, subId, lines } of bySub.values()) {
+    const subRef = doc(db, `salons/${salonId}/inventoryCategories/${catId}/inventorySubcategories/${subId}`);
+    try {
+      await runTransaction(db, async (transaction) => {
+        const snap = await transaction.get(subRef);
+        if (!snap.exists()) {
+          subcategoryErrors.push(`Subcategory ${catId}/${subId} not found.`);
+          return;
+        }
+        const data = snap.data() || {};
+        const rows = Array.isArray(data.rows) ? data.rows.map((r) => (r && typeof r === "object" ? { ...r, byGroup: { ...(r.byGroup || {}) } } : r)) : [];
+        const groupsRaw = Array.isArray(data.groups) ? data.groups : [];
+        const singleGroupId = groupsRaw.length === 1 && groupsRaw[0]?.id ? String(groupsRaw[0].id) : null;
+        let touched = false;
+        for (const ln of lines) {
+          const row = rows.find((r) => r && r.id === ln.rowId);
+          if (!row) {
+            console.warn("[Inbox] apply supply: row not found in subcategory", {
+              catId,
+              subId,
+              wantedRowId: ln.rowId,
+              availableRowIds: rows.map((r) => r && r.id),
+            });
+            totalSkippedUnmatched += 1;
+            continue;
+          }
+          const byGroup = row.byGroup || {};
+          let gid = ln.groupId;
+          if (!gid) {
+            if (singleGroupId) gid = singleGroupId;
+            else {
+              console.warn("[Inbox] apply supply: groupId missing and multiple groups exist", {
+                catId,
+                subId,
+                rowId: ln.rowId,
+                availableGroups: groupsRaw.map((g) => g?.id),
+              });
+              totalSkippedUnmatched += 1;
+              continue;
+            }
+          }
+          const cell = byGroup[gid] && typeof byGroup[gid] === "object" ? { ...byGroup[gid] } : { stock: 0, current: 0, price: "" };
+          const list = Array.isArray(cell.approvedRequests) ? cell.approvedRequests.slice() : [];
+          // Skip if a contribution with the same requestId already exists (idempotency).
+          if (list.some((e) => String(e?.requestId) === rid)) {
+            continue;
+          }
+          /** @type {Record<string, unknown>} */
+          const entry = {
+            requestId: rid,
+            qty: ln.qty,
+            at: Timestamp.now(),
+          };
+          if (byUid) entry.by = byUid;
+          if (byName) entry.byName = byName;
+          if (ln.itemName) entry.itemName = ln.itemName;
+          if (ln.unit) entry.unit = ln.unit;
+          if (ln.note) entry.note = ln.note;
+          list.push(entry);
+          const approvedSum = list.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : Number(e?.qty) || 0), 0);
+          byGroup[gid] = { ...cell, approvedRequests: list, approved: approvedSum };
+          row.byGroup = byGroup;
+          touched = true;
+          totalContributions += 1;
+          appliedInventoryRefs.push({ catId, subId, rowId: ln.rowId, groupId: gid });
+        }
+        if (!touched) return;
+        transaction.update(subRef, { rows, updatedAt: serverTimestamp() });
+      });
+    } catch (e) {
+      console.error("[Inbox] apply supply: subcategory update failed", catId, subId, e);
+      const code = e && typeof e.code === "string" ? e.code : "";
+      subcategoryErrors.push(`Subcategory ${catId}/${subId} update failed${code ? ` (${code})` : ""}.`);
+    }
+  }
+
+  if (totalContributions > 0) {
+    // Mark the inbox request as applied so subsequent re-approves don't double up.
+    try {
+      const inboxRef = doc(db, `salons/${salonId}/inboxItems`, rid);
+      await updateDoc(inboxRef, {
+        appliedToInventory: true,
+        appliedToInventoryAt: serverTimestamp(),
+        appliedInventoryRefs,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn("[Inbox] apply supply: mark applied flag failed", e);
+    }
+    // Tell the Inventory screen to refresh each affected subcategory so the Order cell updates live
+    // without requiring a full page reload.
+    try {
+      const seen = new Set();
+      for (const r of appliedInventoryRefs) {
+        const key = `${r.catId}:${r.subId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (typeof window !== "undefined" && typeof window.ffInventoryReloadSub === "function") {
+          window.ffInventoryReloadSub(r.catId, r.subId);
+        }
+      }
+    } catch (e) {
+      console.warn("[Inbox] apply supply: inventory refresh hook failed", e);
+    }
+  }
+
+  if (totalContributions === 0) {
+    const parts = [];
+    if (totalSkippedUnmatched > 0) {
+      parts.push(`${totalSkippedUnmatched} line(s) could not be matched to a row/group in inventory`);
+    }
+    if (subcategoryErrors.length > 0) parts.push(subcategoryErrors.join(" "));
+    const msg = parts.length > 0 ? parts.join("; ") : "No inventory rows were updated.";
+    throw new Error(msg);
+  }
+
+  return { totalContributions, appliedInventoryRefs, errors: subcategoryErrors };
+}
+
+async function approveSupplyRequest(requestId, requestData) {
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+  // 1) Update inbox status first (safe, uses only allowed keys).
+  await updateDoc(inboxRef, {
+    status: "approved",
+    decidedAt: serverTimestamp(),
+    decidedBy: currentUserProfile.uid,
+    lastActivityAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    unreadForManagers: false,
+  });
+  // 2) Then contribute the approved quantity to the Order column in Inventory.
+  try {
+    const result = await applyApprovedSupplyRequestToInventory(requestId, requestData);
+    if (result && typeof showToast === "function") {
+      const n = result.totalContributions || 0;
+      showToast(
+        n === 1 ? "Approved · added 1 item to inventory Order." : `Approved · added ${n} items to inventory Order.`,
+        "success"
+      );
+    }
+  } catch (e) {
+    console.error("[Inbox] Supply approve: apply to inventory failed", e);
+    const msg = e && typeof e.message === "string" ? e.message : "";
+    if (typeof showToast === "function") {
+      showToast(`Approved, but inventory Order not updated: ${msg || "unknown error"}`, "error");
+    }
+  }
+}
+
+async function denySupplyRequest(requestId, responseNote) {
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+  await updateDoc(inboxRef, {
+    status: "denied",
+    deniedAt: serverTimestamp(),
+    deniedBy: currentUserProfile.uid,
+    decidedAt: serverTimestamp(),
+    decidedBy: currentUserProfile.uid,
+    responseNote: responseNote != null && String(responseNote).trim() !== "" ? String(responseNote).trim() : null,
+    lastActivityAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    unreadForManagers: false,
+  });
+}
+
+// --- Supplies request form: inventory master (categories → subcategories → items) ---
+
+const SUPPLIES_VARIANT_LABELS = { dip: "Dip", gel: "Gel", regular: "Regular" };
+
+/** Heuristic: category/subcategory names suggest dip/gel/regular inventory. */
+function suppliesCategorySubcategoryVariantsRelevant(categoryName, subcategoryName) {
+  const s = `${categoryName || ""} ${subcategoryName || ""}`.toLowerCase();
+  if (!s.trim()) return false;
+  return /(dip|gel|powder|acrylic|lacquer|polish|color|nail)/.test(s);
+}
+
+/**
+ * No longer needed — groups in the inventory row now act as variants, captured via the item select's
+ * composite `rowId:groupId` value. Kept as a no-op for back-compat with existing call sites.
+ */
+function suppliesRowRequiresVariant(_row) {
+  return false;
+}
+
+function syncSuppliesRowVariantUi(row) {
+  const varWrap = row.querySelector(".supplies-variant-wrap");
+  const varSel = row.querySelector(".supplies-variant-select");
+  if (!varWrap || !varSel) return;
+  varWrap.style.display = "none";
+  varSel.disabled = true;
+  varSel.value = "";
+}
+
+const SUPPLIES_ITEM_ROW_INNER_HTML = `
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+    <div style="flex:1;min-width:140px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Category</span>
+      <select class="supplies-cat-select" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div style="flex:1;min-width:140px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Subcategory</span>
+      <select class="supplies-sub-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div style="flex:1.2;min-width:180px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Item</span>
+      <select class="supplies-item-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+      </select>
+    </div>
+    <div class="supplies-variant-wrap" style="display:none;min-width:108px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Variant</span>
+      <select class="supplies-variant-select" disabled style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;opacity:0.88;">
+        <option value="">Select…</option>
+        <option value="dip">Dip</option>
+        <option value="gel">Gel</option>
+        <option value="regular">Regular</option>
+      </select>
+    </div>
+    <div style="width:76px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Qty</span>
+      <input type="number" class="supplies-item-quantity" min="0" step="1" placeholder="—" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;" />
+    </div>
+    <div style="min-width:104px;">
+      <span style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Unit</span>
+      <select class="supplies-item-unit" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <option value="pcs">pcs</option>
+        <option value="box">box</option>
+        <option value="bottle">bottle</option>
+        <option value="case">case</option>
+        <option value="roll">roll</option>
+        <option value="pack">pack</option>
+        <option value="lb">lb</option>
+        <option value="oz">oz</option>
+        <option value="ml">ml</option>
+        <option value="gal">gal</option>
+      </select>
+    </div>
+    <button type="button" class="supplies-item-remove" title="Remove line" style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;align-self:flex-end;">🗑️</button>
+  </div>
+`.trim();
+
+async function ffFetchInventoryCategoriesForSupplies() {
+  const salonId = currentUserProfile?.salonId;
+  if (!salonId) return [];
+  const q = query(
+    collection(db, `salons/${salonId}/inventoryCategories`),
+    orderBy("order", "asc"),
+    orderBy("name", "asc")
+  );
+  const snap = await getDocs(q);
+  const arr = [];
+  snap.forEach((d) => {
+    const data = d.data();
+    arr.push({
+      id: d.id,
+      name: String(data.name || "").trim() || "Untitled",
+    });
+  });
+  return arr;
+}
+
+async function ffFetchInventorySubcategoriesForSupplies(categoryId) {
+  const cid = String(categoryId || "").trim();
+  const salonId = currentUserProfile?.salonId;
+  if (!cid || !salonId) return [];
+  const q = query(
+    collection(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories`),
+    orderBy("order", "asc"),
+    orderBy("name", "asc")
+  );
+  const snap = await getDocs(q);
+  const arr = [];
+  snap.forEach((d) => {
+    const data = d.data();
+    arr.push({
+      id: d.id,
+      name: String(data.name || "").trim() || "Untitled",
+    });
+  });
+  return arr;
+}
+
+/**
+ * Inventory items live inside the subcategory doc as `rows` (items) × `groups` (variants like Gel/Dipping/Regular).
+ * We flatten to row×group options so the requester picks a precise (row, group) line; id = "rowId:groupId" keeps
+ * disambiguation between same-named items across groups.
+ */
+async function ffFetchInventoryItemsForSupplies(categoryId, subcategoryId) {
+  const cid = String(categoryId || "").trim();
+  const sid = String(subcategoryId || "").trim();
+  const salonId = currentUserProfile?.salonId;
+  if (!cid || !sid || !salonId) return [];
+  const ref = doc(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories/${sid}`);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return [];
+  const data = snap.data() || {};
+  const groupsRaw = Array.isArray(data.groups) ? data.groups.slice() : [];
+  groupsRaw.sort((a, b) => (a?.order ?? 0) - (b?.order ?? 0));
+  const groups = groupsRaw.map((g) => ({
+    id: String(g?.id ?? "").trim(),
+    name: g?.name != null ? String(g.name).trim() : "",
+  })).filter((g) => g.id !== "");
+  const rowsRaw = Array.isArray(data.rows) ? data.rows.slice() : [];
+  rowsRaw.sort((a, b) => {
+    const an = a?.rowNo != null ? Number(a.rowNo) : NaN;
+    const bn = b?.rowNo != null ? Number(b.rowNo) : NaN;
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    const as = String(a?.name ?? "").toLowerCase();
+    const bs = String(b?.name ?? "").toLowerCase();
+    return as.localeCompare(bs);
+  });
+  /** @type {Array<{id: string, rowId: string, groupId: string | null, groupName: string | null, name: string, label: string, code: string | null, internalNumber: number | null, hasVariants: false}>} */
+  const arr = [];
+  for (const row of rowsRaw) {
+    const rowId = row?.id != null ? String(row.id).trim() : "";
+    const rowName = String(row?.name ?? "").trim();
+    if (!rowId || !rowName) continue;
+    const code = row?.code != null && String(row.code).trim() !== "" ? String(row.code).trim() : null;
+    const rowNoRaw = row?.rowNo;
+    let internalNumber = null;
+    if (rowNoRaw != null && rowNoRaw !== "") {
+      const n = typeof rowNoRaw === "number" ? rowNoRaw : Number(rowNoRaw);
+      internalNumber = Number.isFinite(n) ? n : null;
+    }
+    if (groups.length === 0) {
+      arr.push({
+        id: rowId,
+        rowId,
+        groupId: null,
+        groupName: null,
+        name: rowName,
+        label: internalNumber != null ? `#${internalNumber} ${rowName}` : rowName,
+        code,
+        internalNumber,
+        hasVariants: false,
+      });
+      continue;
+    }
+    for (const g of groups) {
+      const label = `${rowName}${g.name ? ` (${g.name})` : ""}`;
+      arr.push({
+        id: `${rowId}:${g.id}`,
+        rowId,
+        groupId: g.id,
+        groupName: g.name || null,
+        name: rowName,
+        label: internalNumber != null ? `#${internalNumber} ${label}` : label,
+        code,
+        internalNumber,
+        hasVariants: false,
+      });
+    }
+  }
+  return arr;
+}
+
+function wireSuppliesItemRow(row, categories) {
+  const catSel = row.querySelector(".supplies-cat-select");
+  const subSel = row.querySelector(".supplies-sub-select");
+  const itemSel = row.querySelector(".supplies-item-select");
+  if (!catSel || !subSel || !itemSel) return;
+
+  catSel.innerHTML = "";
+  const ph = document.createElement("option");
+  ph.value = "";
+  ph.textContent = "Select…";
+  catSel.appendChild(ph);
+  for (const c of categories) {
+    const o = document.createElement("option");
+    o.value = c.id;
+    o.textContent = c.name;
+    o.setAttribute("data-category-name", c.name);
+    catSel.appendChild(o);
+  }
+
+  const onCatChange = async () => {
+    const cid = catSel.value.trim();
+    subSel.innerHTML = "";
+    const sph = document.createElement("option");
+    sph.value = "";
+    sph.textContent = "Select…";
+    subSel.appendChild(sph);
+    itemSel.innerHTML = "";
+    const iph = document.createElement("option");
+    iph.value = "";
+    iph.textContent = "Select…";
+    itemSel.appendChild(iph);
+    itemSel.disabled = true;
+    if (!cid) {
+      subSel.disabled = true;
+      syncSuppliesRowVariantUi(row);
+      return;
+    }
+    subSel.disabled = false;
+    let subs = [];
+    try {
+      subs = await ffFetchInventorySubcategoriesForSupplies(cid);
+    } catch (e) {
+      console.error("[Inbox] supplies subcategories", e);
+    }
+    for (const s of subs) {
+      const o = document.createElement("option");
+      o.value = s.id;
+      o.textContent = s.name;
+      o.setAttribute("data-subcategory-name", s.name);
+      subSel.appendChild(o);
+    }
+    syncSuppliesRowVariantUi(row);
+  };
+
+  const onSubChange = async () => {
+    const cid = catSel.value.trim();
+    const sid = subSel.value.trim();
+    itemSel.innerHTML = "";
+    const iph = document.createElement("option");
+    iph.value = "";
+    iph.textContent = "Select…";
+    itemSel.appendChild(iph);
+    if (!cid || !sid) {
+      itemSel.disabled = true;
+      syncSuppliesRowVariantUi(row);
+      return;
+    }
+    itemSel.disabled = false;
+    let items = [];
+    try {
+      items = await ffFetchInventoryItemsForSupplies(cid, sid);
+    } catch (e) {
+      console.error("[Inbox] supplies items", e);
+    }
+    for (const it of items) {
+      const o = document.createElement("option");
+      o.value = it.id;
+      o.textContent = it.label;
+      o.setAttribute("data-item-name", it.name);
+      o.setAttribute("data-row-id", it.rowId);
+      if (it.groupId) o.setAttribute("data-group-id", it.groupId);
+      if (it.groupName) o.setAttribute("data-group-name", it.groupName);
+      o.setAttribute("data-has-variants", "0");
+      if (it.internalNumber != null && it.internalNumber !== "") {
+        o.setAttribute("data-internal-number", String(it.internalNumber));
+      }
+      if (it.code) o.setAttribute("data-code", it.code);
+      itemSel.appendChild(o);
+    }
+    syncSuppliesRowVariantUi(row);
+  };
+
+  catSel.addEventListener("change", () => {
+    void onCatChange();
+  });
+  subSel.addEventListener("change", () => {
+    void onSubChange();
+  });
+  itemSel.addEventListener("change", () => {
+    syncSuppliesRowVariantUi(row);
+  });
+
+  const rm = row.querySelector(".supplies-item-remove");
+  rm?.addEventListener("click", () => {
+    row.remove();
+  });
+
+  syncSuppliesRowVariantUi(row);
+}
+
+function classifySuppliesRow(row) {
+  const cat = (row.querySelector(".supplies-cat-select")?.value || "").trim();
+  const sub = (row.querySelector(".supplies-sub-select")?.value || "").trim();
+  const item = (row.querySelector(".supplies-item-select")?.value || "").trim();
+  if (!cat && !sub && !item) return "empty";
+  if (cat && sub && item) return "ok";
+  return "incomplete";
+}
+
+function readSuppliesRowSnapshot(row) {
+  const cat = row.querySelector(".supplies-cat-select");
+  const sub = row.querySelector(".supplies-sub-select");
+  const item = row.querySelector(".supplies-item-select");
+  const qtyIn = row.querySelector(".supplies-item-quantity");
+  const unitIn = row.querySelector(".supplies-item-unit");
+  const catOpt = cat?.selectedOptions?.[0];
+  const subOpt = sub?.selectedOptions?.[0];
+  const itemOpt = item?.selectedOptions?.[0];
+  const categoryId = (cat?.value || "").trim();
+  const subcategoryId = (sub?.value || "").trim();
+  const itemId = (item?.value || "").trim();
+  if (!categoryId || !subcategoryId || !itemId) return null;
+
+  const categoryName = catOpt?.getAttribute("data-category-name") || "";
+  const subcategoryName = subOpt?.getAttribute("data-subcategory-name") || "";
+  const itemName = itemOpt?.getAttribute("data-item-name") || "";
+  const rowId = itemOpt?.getAttribute("data-row-id") || (itemId.includes(":") ? itemId.split(":")[0] : itemId);
+  const groupIdRaw = itemOpt?.getAttribute("data-group-id");
+  const groupId = groupIdRaw && String(groupIdRaw).trim() !== "" ? String(groupIdRaw).trim() : null;
+  const groupNameRaw = itemOpt?.getAttribute("data-group-name");
+  const groupName = groupNameRaw && String(groupNameRaw).trim() !== "" ? String(groupNameRaw).trim() : null;
+  const codeRaw = itemOpt?.getAttribute("data-code");
+  const code = codeRaw && String(codeRaw).trim() !== "" ? String(codeRaw).trim() : null;
+  let internalNumber = null;
+  const ins = itemOpt?.getAttribute("data-internal-number");
+  if (ins != null && ins !== "") {
+    const n = Number(ins);
+    internalNumber = Number.isFinite(n) ? n : null;
+  }
+
+  const qtyRaw = qtyIn?.value;
+  let qty = null;
+  if (qtyRaw != null && String(qtyRaw).trim() !== "") {
+    const q = parseInt(String(qtyRaw).trim(), 10);
+    qty = Number.isFinite(q) ? q : null;
+  }
+  const unit = (unitIn?.value ?? "").trim() || "pcs";
+
+  /** @type {Record<string, unknown>} */
+  const out = {
+    categoryId,
+    categoryName,
+    subcategoryId,
+    subcategoryName,
+    itemId,
+    rowId,
+    itemName,
+    internalNumber,
+    qty,
+    unit,
+  };
+  if (groupId) out.groupId = groupId;
+  if (groupName) out.groupName = groupName;
+  if (code) out.code = code;
+  return out;
+}
+
+async function initSuppliesRequestForm(fieldsContainer) {
+  const list = fieldsContainer.querySelector("#suppliesItemsList");
+  const hint = fieldsContainer.querySelector("#suppliesInventoryEmptyHint");
+  if (!list) return;
+  let categories = [];
+  try {
+    categories = await ffFetchInventoryCategoriesForSupplies();
+  } catch (e) {
+    console.error("[Inbox] supplies categories", e);
+    if (typeof showToast === "function") showToast("Could not load inventory categories.", "error");
+  }
+  if (typeof window !== "undefined") {
+    window._suppliesFormCategoriesCache = categories;
+  }
+  if (hint) hint.style.display = categories.length === 0 ? "block" : "none";
+  list.querySelectorAll(".supplies-item-row").forEach((row) => wireSuppliesItemRow(row, categories));
+}
+
+// --- Staff document Inbox alerts (document_expiring_soon / document_expired) — Phase 4 UI ---
+
+function ffDocAlertIsHebrewUI() {
+  if (typeof document === 'undefined') return false;
+  const lang = (document.documentElement.getAttribute('lang') || '').toLowerCase();
+  return lang.startsWith('he');
+}
+
+function ffDocAlertStaffName(request) {
+  const rd = request.data || {};
+  const s = (rd.subjectStaffName || '').trim();
+  if (s) return s;
+  return ffDocAlertIsHebrewUI() ? 'עובד לא ידוע' : 'Unknown employee';
+}
+
+function ffDocAlertDocTitle(request) {
+  const rd = request.data || {};
+  const s = (request.documentTitle || rd.documentTitle || '').trim();
+  if (s) return s;
+  return ffDocAlertIsHebrewUI() ? 'מסמך ללא שם' : 'Untitled document';
+}
+
+function ffDocAlertDocType(request) {
+  const rd = request.data || {};
+  const s = (request.documentType || rd.documentType || '').trim();
+  if (s) return s;
+  return '—';
+}
+
+function ffDocAlertExpirationDate(request) {
+  const rd = request.data || {};
+  const ex = request.expirationDate || rd.expirationDate;
+  try {
+    if (ex && typeof ex.toDate === 'function') return ex.toDate();
+  } catch (_) {}
+  return null;
+}
+
+function ffDocAlertExpFormattedLong(request) {
+  const d = ffDocAlertExpirationDate(request);
+  if (!d) return '';
+  const locale = ffDocAlertIsHebrewUI() ? 'he-IL' : undefined;
+  try {
+    return d.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch (_) {
+    return d.toLocaleDateString();
+  }
+}
+
+function ffDocAlertHumanSummary(request) {
+  const kind = request.type === 'document_expired' ? 'expired' : 'soon';
+  const staff = ffDocAlertStaffName(request);
+  const docName = ffDocAlertDocTitle(request);
+  const expStr = ffDocAlertExpFormattedLong(request);
+  const he = ffDocAlertIsHebrewUI();
+  if (kind === 'expired') {
+    return he
+      ? `מסמך "${docName}" של ${staff} פג תוקף${expStr ? ` בתאריך ${expStr}` : ''}.`
+      : `Document "${docName}" for ${staff} expired${expStr ? ` on ${expStr}` : ''}.`;
+  }
+  return he
+    ? `המסמך "${docName}" של ${staff} יפוג${expStr ? ` בתאריך ${expStr}` : ''}.`
+    : `Document "${docName}" for ${staff} expires${expStr ? ` on ${expStr}` : ''}.`;
+}
+
+function ffDocAlertStaffId(request) {
+  const rd = request.data || {};
+  return String(request.staffId || rd.staffId || '').trim();
+}
+
+function ffDocAlertWhatToDoLine() {
+  return ffDocAlertIsHebrewUI()
+    ? 'בדקו את המסמך בפרופיל העובד, ועדכנו או חדשו לפי הצורך.'
+    : 'Review the document on the staff profile, then renew or update as needed.';
+}
+
+function ffDocAlertModalFooterIds(request) {
+  const rd = request.data || {};
+  const did = String(request.documentId || rd.documentId || '').trim();
+  const sid = ffDocAlertStaffId(request);
+  if (!did && !sid) return '';
+  const he = ffDocAlertIsHebrewUI();
+  const parts = [];
+  if (sid) parts.push(`${he ? 'עובד' : 'Staff'} ID: ${escapeHtml(sid)}`);
+  if (did) parts.push(`${he ? 'מסמך' : 'Document'} ID: ${escapeHtml(did)}`);
+  return `<div style="font-size:11px;color:#9ca3af;line-height:1.45;">${parts.join(' · ')}</div>`;
 }
 
 /** Returns Promise<boolean> - true if confirmed, false if cancelled */
@@ -956,7 +2694,7 @@ function showPromptModal(options) {
             cursor:pointer;font-size:14px;font-weight:500;
           ">${escapeHtml(cancelLabel)}</button>
           <button class="inbox-prompt-ok" style="
-            padding:12px 24px;border:none;background:#111;color:#fff;border-radius:10px;
+            padding:12px 24px;border:none;background:#7c3aed;color:#fff;border-radius:10px;
             cursor:pointer;font-size:14px;font-weight:600;
           ">${escapeHtml(confirmLabel)}</button>
         </div>
@@ -1010,17 +2748,48 @@ function getRequestSummary(request) {
     case 'payment_issue':
     case 'client_issue':
       return data.subject || (data.details || 'View details').substring(0, 60);
-    case 'supplies':
-      const itemCount = data.items?.length || 0;
-      return `${itemCount} item${itemCount !== 1 ? 's' : ''} - ${data.urgency || 'routine'}`;
+    case 'supplies': {
+      const arr = data.items || [];
+      const itemCount = arr.length;
+      const first = arr[0];
+      let label = "";
+      if (first && (first.itemName || first.name)) {
+        const base = String(first.itemName || first.name).slice(0, 32);
+        const group = first.groupName && String(first.groupName).trim()
+          ? String(first.groupName).trim()
+          : first.variantLabel && String(first.variantLabel).trim()
+            ? String(first.variantLabel).trim()
+            : "";
+        label = group ? `${base} — ${group.slice(0, 14)}` : base.slice(0, 36);
+      }
+      return itemCount
+        ? `${itemCount} item${itemCount !== 1 ? "s" : ""}${label ? `: ${label}` : ""} · ${data.urgency || "routine"}`
+        : `${data.urgency || "routine"}`;
+    }
     case 'maintenance':
       return `${data.area || 'Unknown area'} - ${data.severity || 'minor'} issue`;
-    case 'staff_birthday_reminder':
-      return data.details || `${data.subjectStaffName || 'Staff'} · ${data.birthdayDisplay || ''}`;
+    case 'staff_birthday_reminder': {
+      const birthdayName = String(data.subjectStaffName || 'Staff').trim();
+      const daysUntil = Number(data.daysUntil);
+      const daysPart = !Number.isFinite(daysUntil)
+        ? ''
+        : daysUntil === 0
+          ? ' (today)'
+          : ` in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`;
+      const displayRaw = String(data.birthdayDisplay || '').trim();
+      const displayIsEnglishSafe = displayRaw && !/[\u0590-\u05FF\u0600-\u06FF]/.test(displayRaw);
+      const datePart = displayIsEnglishSafe ? ` ${displayRaw}` : '';
+      return `${birthdayName}'s birthday is${datePart}${daysPart}.`;
+    }
     case 'document_request':
       return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;
+    case 'document_renewal_request':
+      return `${data.documentType || 'Document'} – ${(data.message || '').substring(0, 40)}`;
     case 'document_upload':
       return `${data.documentType || 'Document'}${data.expirationDate ? ` · Expires ${data.expirationDate}` : ''}`;
+    case 'document_expiring_soon':
+    case 'document_expired':
+      return ffDocAlertHumanSummary(request);
     case 'other':
       return data.subject || data.details?.substring(0, 60) || 'Request details';
     default:
@@ -1051,6 +2820,10 @@ function formatRelativeDate(date) {
 // Create Request Modal
 // =====================
 window.openCreateRequestModal = function() {
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
   console.log('[Inbox] Opening create request modal');
   
   // Create modal
@@ -1328,7 +3101,7 @@ function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
       <input type="hidden" id="customTypeIcon" value="📝">
     </div>
     <div style="display:flex;gap:8px;">
-      <button type="button" id="btnSaveCustomType" style="padding:8px 16px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save</button>
+      <button type="button" id="btnSaveCustomType" style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Save</button>
       <button type="button" onclick="document.getElementById('addCustomTypeForm').remove()" style="padding:8px 16px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
     </div>
   `;
@@ -1398,9 +3171,85 @@ window.backToTypeSelection = function() {
   document.getElementById('stepRequestForm').style.display = 'none';
 };
 
+/**
+ * Match `salons/{salonId}/staff/{docId}` by firebaseUid or email (same id as Staff modal).
+ * Kept in inbox.js so a stale cached staff-documents.js cannot break the whole app.
+ */
+async function ffResolveStaffFirestoreIdByScanInbox(salonId, uid, emailHint) {
+  const sid = String(salonId || "").trim();
+  const u = String(uid || "").trim();
+  if (!sid || !u) return "";
+  let em = String(emailHint || "").trim().toLowerCase();
+  if (!em) {
+    try {
+      const uSnap = await getDoc(doc(db, "users", u));
+      if (uSnap.exists()) em = String(uSnap.data()?.email || "").trim().toLowerCase();
+    } catch (e) {
+      console.warn("[Inbox] scan: users email", e);
+    }
+  }
+  try {
+    const snap = await getDocs(collection(db, `salons/${sid}/staff`));
+    for (const d of snap.docs) {
+      const row = d.data() || {};
+      const fid = String(row.firebaseUid || row.firebaseAuthUid || row.authUid || "").trim();
+      if (fid && fid === u) return d.id;
+      // Firestore rules (staffDocUidMatches) also accept staff row `uid` / `userUid`
+      const uidOnRow = String(row.uid || row.userUid || "").trim();
+      if (uidOnRow && uidOnRow === u) return d.id;
+    }
+    if (em) {
+      for (const d of snap.docs) {
+        const row = d.data() || {};
+        const mail = String(row.email || "").trim().toLowerCase();
+        if (mail && mail === em) return d.id;
+      }
+    }
+  } catch (e) {
+    console.warn("[Inbox] scan staff collection", e);
+  }
+  return "";
+}
+
+/** Firestore staff doc id for the signed-in uploader (scan uid/email first, then profile/members/users). */
+async function resolveSubmittingStaffIdForDocumentUpload(salonId) {
+  const sid = String(salonId || "").trim();
+  const uid = String(auth?.currentUser?.uid || currentUserProfile?.uid || "").trim();
+  if (!sid || !uid) return "";
+  const emailHint = String(currentUserProfile?.email || "").trim();
+  const scanned = await ffResolveStaffFirestoreIdByScanInbox(sid, uid, emailHint);
+  if (scanned) return scanned;
+  let id = String(currentUserProfile?.staffId || "").trim();
+  if (id) return id;
+  try {
+    const mSnap = await getDoc(doc(db, "salons", sid, "members", uid));
+    if (mSnap.exists()) {
+      const ms = String(mSnap.data()?.staffId || "").trim();
+      if (ms) return ms;
+    }
+  } catch (e) {
+    console.warn("[Inbox] uploader members", e);
+  }
+  try {
+    const uSnap = await getDoc(doc(db, "users", uid));
+    if (uSnap.exists()) {
+      const us = String(uSnap.data()?.staffId || "").trim();
+      if (us) return us;
+    }
+  } catch (e) {
+    console.warn("[Inbox] uploader users", e);
+  }
+  return "";
+}
+
 window.selectRequestType = async function(type) {
   console.log('[Inbox] Selected type:', type);
-  
+
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
+
   document.getElementById('stepSelectType').style.display = 'none';
   document.getElementById('stepRequestForm').style.display = 'block';
   
@@ -1418,6 +3267,43 @@ window.selectRequestType = async function(type) {
     const emailEl = document.getElementById('doc_req_email');
     if (emailEl && auth.currentUser?.email) emailEl.value = auth.currentUser.email;
   }
+  if (type === 'document_upload') {
+    const p = window.__ffDocUploadPrefill;
+    if (p) {
+      if (p.documentType) {
+        const sel = document.getElementById('doc_up_type');
+        const val = String(p.documentType || '').trim();
+        if (sel && val && Array.from(sel.options).some((o) => o.value === val)) {
+          sel.value = val;
+        }
+      }
+      if (p.renewForDocId) {
+        const hid = document.getElementById('doc_up_renew_for_doc_id');
+        if (hid) hid.value = String(p.renewForDocId).trim();
+      }
+    }
+    window.__ffDocUploadPrefill = null;
+  }
+  if (type === 'document_renewal_request') {
+    const p = window.__ffDocRenewalPrefill;
+    if (p && (p.staffId || p.documentType || p.documentId)) {
+      if (p.staffId) {
+        const sel = document.getElementById('doc_renew_staff');
+        if (sel) {
+          const opt = Array.from(sel.options).find((o) => (o.getAttribute('data-staff-id') || '') === p.staffId);
+          if (opt) sel.value = opt.value;
+        }
+      }
+      const dt = document.getElementById('doc_renew_type');
+      if (dt && p.documentType) {
+        const val = p.documentType;
+        if (Array.from(dt.options).some((o) => o.value === val)) dt.value = val;
+      }
+      const hid = document.getElementById('doc_renew_related_document_id');
+      if (hid && p.documentId) hid.value = p.documentId;
+    }
+    window.__ffDocRenewalPrefill = null;
+  }
 };
 
 function createRequestForm(type) {
@@ -1428,7 +3314,31 @@ function createRequestForm(type) {
   const instructionsHtml = (typeInfo.description && typeInfo.description.trim())
     ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280;text-align:center;max-width:400px;margin-left:auto;margin-right:auto;">${esc(typeInfo.description.trim())}</p>`
     : '';
-  const sendToRowHtml = recipientsList.length === 0
+  const isRenewal = type === 'document_renewal_request';
+  const technicians = isRenewal
+    ? (_inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician')
+    : [];
+  const renewalStaffHtml =
+    technicians.length === 0
+      ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #fecaca;border-radius:8px;font-size:13px;color:#b91c1c;">No service providers in the directory. Staff must sign in once so they appear under members.</div>`
+      : `
+    <div style="margin-bottom:16px;">
+      <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Who should upload the document?</label>
+      <select id="doc_renew_staff" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;">
+        <option value="">Select staff member…</option>
+        ${technicians.map((u) => {
+          const id = esc(u.uid || '');
+          const sid = esc(u.staffId || '');
+          const nm = esc(u.name || '');
+          return `<option value="${id}" data-uid="${id}" data-staff-id="${sid}" data-name="${nm}">${nm}</option>`;
+        }).join('')}
+      </select>
+      <input type="hidden" id="doc_renew_related_document_id" value="" />
+    </div>
+  `;
+  const sendToRowHtml = isRenewal
+    ? renewalStaffHtml
+    : recipientsList.length === 0
     ? `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;color:#6b7280;">Send to: No managers or admins in list.</div>`
     : `
     <div id="sendToFilterRow" role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;background:#f9fafb;font-size:13px;">
@@ -1457,7 +3367,7 @@ function createRequestForm(type) {
     </div>
   `;
   
-  if (recipientsList.length > 0) {
+  if (!isRenewal && recipientsList.length > 0) {
     const row = form.querySelector('#sendToFilterRow');
     const panel = form.querySelector('#sendToPanel');
     const summary = form.querySelector('#sendToSummary');
@@ -1627,18 +3537,29 @@ function createRequestForm(type) {
         <textarea id="${type}_details" rows="4" required placeholder="Explain your request" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
       </div>
     `;
+  } else if (type === 'document_renewal_request') {
+    fieldsContainer.innerHTML = `
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
+        <select id="doc_renew_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
+        </select>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Message to staff</label>
+        <textarea id="doc_renew_message" rows="3" required placeholder="e.g. Please upload a renewed certificate before the current one expires." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
+      </div>
+      <div>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Due date (optional)</label>
+        <input type="date" id="doc_renew_due" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+      </div>
+    `;
   } else if (type === 'document_request') {
     fieldsContainer.innerHTML = `
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_req_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">Select...</option>
-          <option value="1099">1099</option>
-          <option value="W-2">W-2</option>
-          <option value="Employment Letter">Employment Letter</option>
-          <option value="Contract">Contract</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Other">Other</option>
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
         </select>
       </div>
       <div>
@@ -1664,14 +3585,11 @@ function createRequestForm(type) {
     `;
   } else if (type === 'document_upload') {
     fieldsContainer.innerHTML = `
+      <input type="hidden" id="doc_up_renew_for_doc_id" value="" />
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Document type</label>
         <select id="doc_up_type" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
-          <option value="">Select...</option>
-          <option value="License">License</option>
-          <option value="Insurance">Insurance</option>
-          <option value="Certification">Certification</option>
-          <option value="Other">Other</option>
+          ${ffStaffDocumentTypeSelectOptionsHtml()}
         </select>
       </div>
       <div>
@@ -1690,15 +3608,14 @@ function createRequestForm(type) {
   } else if (type === 'supplies') {
     fieldsContainer.innerHTML = `
       <div>
-        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Items Needed</label>
-        <div id="suppliesItemsList" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;">
-          <div class="supplies-item-row" style="display:flex;gap:8px;">
-            <input type="text" placeholder="Item name" class="supplies-item-name" style="flex:2;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-            <input type="number" placeholder="Qty" class="supplies-item-quantity" min="1" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-            <input type="text" placeholder="Unit" class="supplies-item-unit" value="pcs" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Items needed</label>
+        <p id="suppliesInventoryEmptyHint" style="display:none;margin:0 0 8px;font-size:12px;color:#b45309;">No inventory categories yet. Add categories in Inventory.</p>
+        <div id="suppliesItemsList" style="display:flex;flex-direction:column;gap:10px;margin-bottom:8px;">
+          <div class="supplies-item-row" style="display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;">
+            ${SUPPLIES_ITEM_ROW_INNER_HTML}
           </div>
         </div>
-        <button onclick="addSuppliesItem()" type="button" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">+ Add Item</button>
+        <button type="button" onclick="addSuppliesItem()" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">+ Add Item</button>
       </div>
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Urgency</label>
@@ -1709,10 +3626,11 @@ function createRequestForm(type) {
         </select>
       </div>
       <div>
-        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Note (optional)</label>
+        <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Additional details</label>
         <textarea id="supplies_note" rows="2" placeholder="Additional details" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;"></textarea>
       </div>
     `;
+    void initSuppliesRequestForm(fieldsContainer);
   } else if (type === 'maintenance') {
     fieldsContainer.innerHTML = `
       <div>
@@ -1788,7 +3706,7 @@ function createRequestForm(type) {
   submitBtn.style.cssText = `
     width: 100%;
     padding: 12px;
-    background: #111;
+    background: #7c3aed;
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -1805,29 +3723,53 @@ function createRequestForm(type) {
 }
 
 window.addSuppliesItem = function() {
-  const list = document.getElementById('suppliesItemsList');
+  const list = document.getElementById("suppliesItemsList");
   if (!list) return;
-  
-  const row = document.createElement('div');
-  row.className = 'supplies-item-row';
-  row.style.cssText = 'display:flex;gap:8px;';
-  row.innerHTML = `
-    <input type="text" placeholder="Item name" class="supplies-item-name" style="flex:2;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <input type="number" placeholder="Qty" class="supplies-item-quantity" min="1" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <input type="text" placeholder="Unit" class="supplies-item-unit" value="pcs" style="flex:1;padding:8px;border:1px solid #d1d5db;border-radius:6px;">
-    <button onclick="this.parentElement.remove()" type="button" style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;cursor:pointer;">🗑️</button>
-  `;
+  const categories = (typeof window !== "undefined" && window._suppliesFormCategoriesCache) || [];
+  const row = document.createElement("div");
+  row.className = "supplies-item-row";
+  row.style.cssText = "display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fafafa;";
+  row.innerHTML = SUPPLIES_ITEM_ROW_INNER_HTML;
   list.appendChild(row);
+  wireSuppliesItemRow(row, categories);
 };
 
 async function submitRequest(type) {
   console.log('[Inbox] Submitting request:', type);
-  
+
+  await loadCurrentUserProfile();
   if (!currentUserProfile) {
     showToast('User profile not loaded', 'error');
     return;
   }
-  
+
+  const salonIdForStaff = String(currentUserProfile.salonId || '').trim();
+  if (!salonIdForStaff) {
+    showToast('No salon is selected for this account.', 'error');
+    return;
+  }
+
+  let creatorStaffId = String(currentUserProfile.staffId || '').trim();
+  if (!creatorStaffId) {
+    creatorStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonIdForStaff);
+  }
+  if (!creatorStaffId) {
+    showToast(
+      'Your login is not linked to a staff profile in this salon. Ask a manager to link your account, then try again.',
+      'error'
+    );
+    return;
+  }
+  if (String(currentUserProfile.staffId || '').trim() !== creatorStaffId) {
+    currentUserProfile.staffId = creatorStaffId;
+    await mergeSalonStaffIntoUserProfile(currentUserProfile);
+  }
+
+  if (!inboxCanSendRequests()) {
+    showToast('You do not have permission to create requests.', 'error');
+    return;
+  }
+
   try {
     // Collect form data
     let data = {};
@@ -1979,6 +3921,17 @@ async function submitRequest(type) {
       if (!details) { showToast('Please enter details', 'error'); return; }
       data = { subject, details };
 
+    } else if (type === 'document_renewal_request') {
+      const documentType = document.getElementById('doc_renew_type')?.value;
+      const message = document.getElementById('doc_renew_message')?.value?.trim();
+      const dueDate = document.getElementById('doc_renew_due')?.value || null;
+      const relatedDocumentId = (document.getElementById('doc_renew_related_document_id')?.value || '').trim();
+      if (!documentType || !message) {
+        showToast('Please select document type and enter a message', 'error');
+        return;
+      }
+      data = { documentType, message, dueDate, relatedDocumentId: relatedDocumentId || null, promptKind: 'renewal' };
+
     } else if (type === 'document_request') {
       const documentType = document.getElementById('doc_req_type')?.value;
       const reason = document.getElementById('doc_req_reason')?.value?.trim();
@@ -1991,47 +3944,67 @@ async function submitRequest(type) {
     } else if (type === 'document_upload') {
       const documentType = document.getElementById('doc_up_type')?.value;
       const expirationDate = document.getElementById('doc_up_expiry')?.value || null;
+      const renewForDocId = (document.getElementById('doc_up_renew_for_doc_id')?.value || '').trim();
       const fileInput = document.getElementById('doc_up_file');
       const notes = document.getElementById('doc_up_notes')?.value?.trim() || null;
+      const salonId = currentUserProfile.salonId;
+      const ownerStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonId);
+      if (!ownerStaffId) {
+        showToast(
+          'Your login is not linked to a staff profile in this salon. Ask a manager to link your account, then try again.',
+          'error'
+        );
+        return;
+      }
       if (!documentType || !fileInput?.files?.length) { showToast('Please select document type and choose a file', 'error'); return; }
       const file = fileInput.files[0];
       const maxSize = 10 * 1024 * 1024;
       if (file.size > maxSize) { showToast('File must be under 10 MB', 'error'); return; }
-      const salonId = currentUserProfile.salonId;
-      const staffId = auth.currentUser?.uid || currentUserProfile.uid;
       const yyyyMm = new Date().toISOString().slice(0, 7);
       const fileId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
       const safeName = (file.name || 'file').replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 80);
-      const ext = (file.name && file.name.includes('.')) ? file.name.split('.').pop().toLowerCase() : 'pdf';
-      const path = `salons/${salonId}/staff/${staffId}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
+      const path = `salons/${salonId}/staff/${ownerStaffId}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
       showToast('Uploading file...', 'info');
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, file);
       const fileUrl = await getDownloadURL(fileRef);
-      data = { documentType, expirationDate, filePath: path, fileUrl, fileName: file.name, notes };
+      data = {
+        documentType,
+        expirationDate,
+        filePath: path,
+        fileUrl,
+        fileName: file.name,
+        notes,
+        documentOwnerStaffId: ownerStaffId,
+        ...(renewForDocId ? { staffDocumentId: renewForDocId } : {}),
+      };
       
     } else if (type === 'supplies') {
-      const rows = document.querySelectorAll('.supplies-item-row');
+      const rows = document.querySelectorAll(".supplies-item-row");
       const items = [];
-      
-      rows.forEach(row => {
-        const name = row.querySelector('.supplies-item-name')?.value?.trim();
-        const quantity = parseInt(row.querySelector('.supplies-item-quantity')?.value) || 0;
-        const unit = row.querySelector('.supplies-item-unit')?.value?.trim() || 'pcs';
-        
-        if (name && quantity > 0) {
-          items.push({ name, quantity, unit });
+      for (const row of rows) {
+        const st = classifySuppliesRow(row);
+        if (st === "empty") continue;
+        if (st === "incomplete") {
+          showToast("Each line with a selection needs category, subcategory, and item.", "error");
+          return;
         }
-      });
-      
+        if (suppliesRowRequiresVariant(row)) {
+          const vk = (row.querySelector(".supplies-variant-select")?.value || "").trim();
+          if (vk !== "dip" && vk !== "gel" && vk !== "regular") {
+            showToast("Select a variant (Dip, Gel, or Regular) for each line that uses variants.", "error");
+            return;
+          }
+        }
+        const snap = readSuppliesRowSnapshot(row);
+        if (snap) items.push(snap);
+      }
       if (items.length === 0) {
-        showToast('Please add at least one item', 'error');
+        showToast("Add at least one complete line (category, subcategory, and item).", "error");
         return;
       }
-      
-      const urgency = document.getElementById('supplies_urgency')?.value || 'routine';
-      const note = document.getElementById('supplies_note')?.value || null;
-      
+      const urgency = document.getElementById("supplies_urgency")?.value || "routine";
+      const note = document.getElementById("supplies_note")?.value || null;
       data = { items, urgency, note };
       
     } else if (type === 'maintenance') {
@@ -2082,14 +4055,37 @@ async function submitRequest(type) {
       }
     }
     
-    const { uids: sentToUids, staffIds: sentToStaffIds, names: sentToNames } = getCreateRequestSelectedRecipients();
+    let sentToUids = [];
+    let sentToStaffIds = [];
+    let sentToNames = [];
+
+    if (type === 'document_renewal_request') {
+      const sel = document.getElementById('doc_renew_staff');
+      const opt = sel?.selectedOptions?.[0];
+      const uid = opt?.getAttribute('data-uid') || '';
+      const sid = opt?.getAttribute('data-staff-id') || '';
+      const nm = (opt?.getAttribute('data-name') || '').trim() || (opt?.textContent || '').trim();
+      if (!uid) {
+        showToast('Please select a staff member', 'error');
+        return;
+      }
+      sentToUids = [uid];
+      sentToStaffIds = [sid];
+      sentToNames = [nm];
+    } else {
+      const sel = getCreateRequestSelectedRecipients();
+      sentToUids = sel.uids;
+      sentToStaffIds = sel.staffIds;
+      sentToNames = sel.names;
+    }
+
     const hasAnySelected = (sentToUids && sentToUids.length > 0) || (sentToNames && sentToNames.length > 0);
     const hasValidUid = sentToUids && sentToUids.some(u => u && u.trim());
-    if (getInboxRecipientsList().length > 0 && !hasAnySelected) {
+    if (type !== 'document_renewal_request' && getInboxRecipientsList().length > 0 && !hasAnySelected) {
       showToast('Please choose who receives this request', 'error');
       return;
     }
-    if (hasAnySelected && !hasValidUid) {
+    if (type !== 'document_renewal_request' && hasAnySelected && !hasValidUid) {
       // Recipient selected but uid not known — try one more time to load from members
       await loadSalonUsersForRecipients();
       const recipName = sentToNames[0] || '';
@@ -2106,12 +4102,33 @@ async function submitRequest(type) {
     }
     
     const salonId = currentUserProfile.salonId;
+    const creatorName = await resolveCurrentInboxActorName();
+
+    const docUploadOwnerExtra =
+      type === 'document_upload' && data && data.documentOwnerStaffId
+        ? { documentOwnerStaffId: String(data.documentOwnerStaffId).trim() }
+        : {};
+
+    // Stamp the active location on every user-created request so the Inbox
+    // can keep it scoped to the branch where it was submitted. Without this
+    // the item falls back to the subject staff's allowedLocationIds, which
+    // makes requests leak into every branch the staff member is allowed in.
+    let activeLocationIdForCreate = null;
+    try {
+      if (typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocationIdForCreate = v.trim();
+      }
+      if (!activeLocationIdForCreate && typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id.trim()) {
+        activeLocationIdForCreate = window.__ff_active_location_id.trim();
+      }
+    } catch (_) {}
 
     const baseDoc = {
       tenantId: salonId,
-      locationId: null,
-      type: type,
-      status: 'open',
+      locationId: activeLocationIdForCreate,
+      type: ffInboxRuleString(type),
+      status: type === "supplies" ? "pending" : "open",
       priority: 'normal',
       assignedTo: null,
       sentToStaffIds: Array.isArray(sentToStaffIds) ? sentToStaffIds : [],
@@ -2124,7 +4141,8 @@ async function submitRequest(type) {
       needsInfoQuestion: null,
       staffReply: null,
       visibility: 'managers_only',
-      unreadForManagers: true
+      unreadForManagers: true,
+      ...docUploadOwnerExtra,
     };
     
     const hasRecipients = sentToUids && sentToUids.some(u => u && u.trim());
@@ -2134,9 +4152,17 @@ async function submitRequest(type) {
       const forStaffId = sentToStaffIds[0] || '';
       const forStaffName = sentToNames[0] || '';
 
-      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUid, 'forName=', forStaffName);
+      const forUidStr = ffInboxRuleString(forUid).trim();
+      const forStaffIdStr = ffInboxRuleString(forStaffId);
+      const forStaffNameStr = ffInboxRuleString(forStaffName);
+      const createdByNameStr = ffInboxRuleString(
+        creatorName || currentUserProfile.name || currentUserProfile.displayName
+      );
+      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
 
-      if (forUid === currentUserProfile.uid) {
+      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUidStr, 'forName=', forStaffNameStr);
+
+      if (forUidStr === currentUserProfile.uid) {
         showToast('Cannot send a request to yourself', 'error');
         return;
       }
@@ -2144,29 +4170,33 @@ async function submitRequest(type) {
       const requestDoc = {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
-        createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: currentUserProfile.name || '',
-        createdByRole: currentUserProfile.role || '',
-        forUid,
-        forStaffId,
-        forStaffName,
+        createdByStaffId: creatorStaffId,
+        createdByName: createdByNameStr,
+        createdByRole: createdByRoleStr,
+        forUid: forUidStr,
+        forStaffId: forStaffIdStr,
+        forStaffName: forStaffNameStr,
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         updatedAt: null
       };
       const docRef = await addDoc(collection(db, `salons/${salonId}/inboxItems`), requestDoc);
-      console.log('[Inbox] Request created with forUid=', forUid, 'docId=', docRef.id);
+      console.log('[Inbox] Request created with forUid=', forUidStr, 'docId=', docRef.id);
     } else {
       // Technician creating for self — direct Firestore (forUid = creator)
+      const createdByNameStr = ffInboxRuleString(
+        creatorName || currentUserProfile.name || currentUserProfile.displayName
+      );
+      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
       const requestDoc = {
         ...baseDoc,
         createdByUid: currentUserProfile.uid,
-        createdByStaffId: currentUserProfile.staffId || '',
-        createdByName: currentUserProfile.name || '',
-        createdByRole: currentUserProfile.role || '',
+        createdByStaffId: creatorStaffId,
+        createdByName: createdByNameStr,
+        createdByRole: createdByRoleStr,
         forUid: currentUserProfile.uid,
-        forStaffId: currentUserProfile.staffId || '',
-        forStaffName: currentUserProfile.name || '',
+        forStaffId: creatorStaffId,
+        forStaffName: createdByNameStr,
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         updatedAt: null
@@ -2198,58 +4228,17 @@ async function submitRequest(type) {
 }
 
 // =====================
-// Toast Notifications
+// Toast Notifications (global Fair Flow API — public/ff-toast.js)
 // =====================
 function showToast(message, type = 'success') {
-  const toast = document.createElement('div');
-  toast.style.cssText = `
-    position: fixed;
-    top: 80px;
-    right: 20px;
-    background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
-    color: #fff;
-    padding: 16px 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 999999;
-    font-size: 14px;
-    font-weight: 500;
-    max-width: 400px;
-    animation: slideIn 0.3s ease-out;
-  `;
-  
-  const icon = type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ';
-  toast.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span style="font-size:18px;">${icon}</span>
-      <span>${message}</span>
-    </div>
-  `;
-  
-  document.body.appendChild(toast);
-  
-  // Auto-remove after 3 seconds
-  setTimeout(() => {
-    toast.style.animation = 'slideOut 0.3s ease-in';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
-}
-
-// Add animation styles if not exists
-if (!document.getElementById('toastAnimations')) {
-  const style = document.createElement('style');
-  style.id = 'toastAnimations';
-  style.textContent = `
-    @keyframes slideIn {
-      from { transform: translateX(400px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-      from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(400px); opacity: 0; }
-    }
-  `;
-  document.head.appendChild(style);
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    const v =
+      type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    const ms = type === 'error' ? 6500 : 4500;
+    window.ffToast.show(String(message), { variant: v, durationMs: ms });
+    return;
+  }
+  console.warn('[Inbox]', message, type);
 }
 
 // =====================
@@ -2262,7 +4251,7 @@ function showRequestDetails(requestId) {
   console.log('[Inbox] Showing request details', requestId);
 
   // Mark as read only if the current user IS the recipient (forUid), not the sender
-  const isManagerRole = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const isManagerRole = inboxCanManageInbox();
   const isRecipientViewing = isManagerRole && request.forUid === currentUserProfile.uid;
   if (isRecipientViewing && request.unreadForManagers === true && currentUserProfile.salonId) {
     // Optimistic: update local state immediately
@@ -2273,6 +4262,12 @@ function showRequestDetails(requestId) {
     updateDoc(doc(db, `salons/${currentUserProfile.salonId}/inboxItems`, requestId), {
       unreadForManagers: false
     }).catch(err => console.warn('[Inbox] Mark read failed', err));
+  }
+
+  // Smart Inventory Suggestion — dedicated smart-card modal (no raw data dump).
+  if (request.type === 'inventory_suggestion') {
+    ffShowInventorySuggestionModal(request);
+    return;
   }
   
   const modal = document.createElement('div');
@@ -2303,15 +4298,51 @@ function showRequestDetails(requestId) {
   `;
   
   const typeInfo = getRequestTypeInfo(request.type);
-  const statusClass = `inbox-status-${request.status.replace('_', '-')}`;
+  const statusStrModal = String(request.status != null ? request.status : "open");
+  const statusModalDisplay = inboxSupplyStatusDisplayLabel(request) || statusStrModal.replace(/_/g, " ");
+  const statusClass = `inbox-status-${statusStrModal.replace(/_/g, "-")}`;
   const createdDate = request.createdAt?.toDate ? request.createdAt.toDate() : new Date();
   const rd = request.data || {};
-  
+  const isDocAlert = request.type === 'document_expiring_soon' || request.type === 'document_expired';
+
   // Role checks
-  const isManager = currentUserProfile && ["manager", "admin", "owner"].includes(inboxUserRoleLc());
+  const isManager = inboxCanManageInbox();
   const isTechnician = currentUserProfile && inboxUserRoleLc() === "technician";
   const isMyRequest = currentUserProfile && request.forUid === currentUserProfile.uid;
-  
+
+  let docAlertPanelHtml = '';
+  if (isDocAlert) {
+    const isSoon = !inboxDocAlertIsExpiredForUi(request);
+    const he = ffDocAlertIsHebrewUI();
+    const badgeLabel = isSoon ? (he ? 'יפוג בקרוב' : 'Expiring soon') : (he ? 'פג תוקף' : 'Expired');
+    const panelStyle = isSoon
+      ? 'border-left:4px solid #d97706;background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);border:1px solid #fde68a;border-radius:12px;padding:18px 18px 16px;margin-bottom:20px;'
+      : 'border-left:4px solid #b91c1c;background:linear-gradient(180deg,#fef2f2 0%,#ffffff 100%);border:1px solid #fecaca;border-radius:12px;padding:18px 18px 16px;margin-bottom:20px;';
+    const badgeBg = isSoon ? '#fef3c7' : '#fee2e2';
+    const badgeColor = isSoon ? '#92400e' : '#991b1b';
+    const msg = (request.message || rd.message || '').trim();
+    const docAlertMgmtNote = isManager
+      ? `<span style="font-size:11px;color:#6b7280;">${he ? 'העובד לא קיבל התראה · נראה למנהלים בלבד' : 'Employee not notified · managers only'}</span>`
+      : '';
+    docAlertPanelHtml = `
+    <div style="${panelStyle}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="display:inline-block;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeLabel)}</span>
+        ${docAlertMgmtNote}
+      </div>
+      <p style="margin:0 0 12px;font-size:15px;font-weight:600;color:#111827;line-height:1.45;">${escapeHtml(ffDocAlertHumanSummary(request))}</p>
+      <p style="margin:0 0 14px;font-size:13px;color:#4b5563;line-height:1.5;">${escapeHtml(ffDocAlertWhatToDoLine())}</p>
+      <div style="display:grid;gap:10px;font-size:13px;color:#374151;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'שם העובד' : 'Employee'}</span><strong style="font-weight:600;">${escapeHtml(ffDocAlertStaffName(request))}</strong></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'שם המסמך' : 'Document name'}</span><span style="word-break:break-word;">${escapeHtml(ffDocAlertDocTitle(request))}</span></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'סוג המסמך' : 'Document type'}</span><span>${escapeHtml(ffDocAlertDocType(request))}</span></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'תאריך תפוגה' : 'Expiration date'}</span><span>${escapeHtml(ffDocAlertExpFormattedLong(request) || '—')}</span></div>
+        ${msg ? `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="min-width:108px;color:#9ca3af;flex-shrink:0;">${he ? 'הודעה' : 'Message'}</span><span style="flex:1;line-height:1.45;">${escapeHtml(msg)}</span></div>` : ''}
+      </div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:4px;">${he ? 'מקור' : 'Source'}: ${escapeHtml(rd.source || request.source || 'staff_documents')} · ${he ? 'נוצר' : 'Logged'} ${escapeHtml(createdDate.toLocaleString())}</div>
+    </div>`;
+  }
+
   const birthdayMeta =
     request.type === 'staff_birthday_reminder'
       ? `
@@ -2321,18 +4352,38 @@ function showRequestDetails(requestId) {
         <p style="margin:0 0 12px;color:#6b7280;font-size:12px;">The employee is not notified. Visible to management only.</p>
         <div style="display:grid;gap:8px;font-size:13px;">
           <div><span style="color:#6b7280;">Staff member:</span> <strong>${escapeHtml(rd.subjectStaffName || '')}</strong></div>
-          <div><span style="color:#6b7280;">Birthday:</span> ${escapeHtml(rd.birthdayDisplay || '')}</div>
+          <div><span style="color:#6b7280;">Birthday:</span> ${(() => { const s = String(rd.birthdayDisplay || '').trim(); return s && !/[\u0590-\u05FF\u0600-\u06FF]/.test(s) ? escapeHtml(s) : '—'; })()}</div>
           <div><span style="color:#6b7280;">When:</span> ${rd.daysUntil === 0 ? 'Today' : `In ${Number(rd.daysUntil) || 0} day(s)`}</div>
           <div><span style="color:#6b7280;">Logged:</span> ${createdDate.toLocaleString()}</div>
         </div>
       </div>
     </div>`
+      : request.type === 'document_renewal_request'
+      ? `
+    <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">From</div>
+          <div style="font-weight:500;">${escapeHtml(request.createdByName || '')}</div>
+        </div>
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">Asked to upload</div>
+          <div style="font-weight:500;">${escapeHtml(request.forStaffName || '')}</div>
+        </div>
+        <div>
+          <div style="color:#6b7280;margin-bottom:4px;">Created</div>
+          <div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div>
+        </div>
+      </div>
+    </div>`
+      : isDocAlert
+      ? docAlertPanelHtml
       : `
     <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:20px;">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
         <div>
           <div style="color:#6b7280;margin-bottom:4px;">Requested by</div>
-          <div style="font-weight:500;">${request.forStaffName}</div>
+          <div style="font-weight:500;">${escapeHtml(request.createdByName || request.createdByUid || '')}</div>
         </div>
         <div>
           <div style="color:#6b7280;margin-bottom:4px;">Created</div>
@@ -2353,7 +4404,7 @@ function showRequestDetails(requestId) {
         <span style="font-size:28px;">${typeInfo.icon}</span>
         <div>
           <h2 style="margin:0;font-size:18px;font-weight:600;">${typeInfo.label}</h2>
-          <span class="inbox-status-badge ${statusClass}">${request.status.replace('_', ' ')}</span>
+          <span class="inbox-status-badge ${statusClass}">${statusModalDisplay}</span>
         </div>
       </div>
       <button onclick="closeRequestDetailsModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
@@ -2362,8 +4413,8 @@ function showRequestDetails(requestId) {
     ${birthdayMeta}
     
     <div style="margin-bottom:20px;">
-      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${request.type === 'staff_birthday_reminder' ? 'Summary' : 'Request Details'}</h3>
-      ${renderRequestData(request)}
+      ${isDocAlert ? '' : `<h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${request.type === 'staff_birthday_reminder' ? 'Summary' : 'Request Details'}</h3>`}
+      ${isDocAlert ? ffDocAlertModalFooterIds(request) : renderRequestData(request)}
     </div>
     
     ${request.needsInfoQuestion ? `
@@ -2387,8 +4438,44 @@ function showRequestDetails(requestId) {
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your Reply</h3>
         <textarea id="staffReplyInput" rows="3" placeholder="Answer the question..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;margin-bottom:12px;box-sizing:border-box;"></textarea>
-        <button onclick="submitStaffReply('${requestId}')" style="width:100%;padding:10px;background:#111;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+        <button onclick="submitStaffReply('${requestId}')" style="width:100%;padding:10px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
           Submit Reply
+        </button>
+      </div>
+    `;
+  }
+
+  if (
+    isTechnician &&
+    isMyRequest &&
+    request.type === 'document_renewal_request' &&
+    request.status === 'open' &&
+    inboxCanSendRequests()
+  ) {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your action</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Upload a renewed document for management to review.</p>
+        <button type="button" onclick="closeRequestDetailsModal(); openCreateRequestModal(); selectRequestType('document_upload');" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+          📤 Upload a Document
+        </button>
+      </div>
+    `;
+  }
+
+  const isRenewalCreator =
+    inboxCanSendRequests() &&
+    currentUserProfile &&
+    request.createdByUid === currentUserProfile.uid &&
+    request.type === 'document_renewal_request' &&
+    request.createdByUid !== request.forUid;
+  if (isRenewalCreator && (request.status === 'open' || request.status === 'needs_info')) {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Follow-up</h3>
+        <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Archive this when the staff member has uploaded or you no longer need the reminder.</p>
+        <button type="button" onclick="archiveRequest('${requestId}')" style="width:100%;padding:10px;border:1px solid #9ca3af;background:#fff;color:#374151;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;">
+          📦 Archive
         </button>
       </div>
     `;
@@ -2404,8 +4491,80 @@ function showRequestDetails(requestId) {
         </button>
       </div>
     `;
-  } else if (isManager && isRecipient && request.status === 'open') {
+  } else if (isManager && isRecipient && request.status === 'open' && isDocAlert) {
+    const docAlertBtnBase =
+      'display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:999px;line-height:1.2;font-family:inherit;box-sizing:border-box;white-space:nowrap;';
+    const docAlertBtnOutline = `${docAlertBtnBase}background:#fff;color:#374151;border:1px solid #d1d5db;cursor:pointer;`;
+    const docAlertBtnChat = `${docAlertBtnBase}cursor:pointer;border:1px solid #7c3aed;background:#ede9fe;color:#5b21b6;touch-action:manipulation;`;
+    const docAlertBtnDone = `${docAlertBtnBase}background:#7c3aed;color:#fff;border:none;cursor:pointer;`;
+    const sid = ffDocAlertStaffId(request);
+    const openStaffBtn = sid && typeof window.openStaffMembersModal === 'function'
+      ? `<button type="button" data-ff-doc-alert-open-staff="${encodeURIComponent(sid)}" style="${docAlertBtnOutline}">
+          ${ffDocAlertIsHebrewUI() ? 'פתח עובד' : 'Open Staff Member'}
+        </button>`
+      : '';
+    const renewPayload = {
+      staffId: ffDocAlertStaffId(request),
+      documentType: (rd.documentType || request.documentType || '').trim(),
+      documentId: (rd.documentId || request.documentId || '').trim(),
+    };
+    const chatPayload = {
+      salonId: currentUserProfile.salonId,
+      staffId: renewPayload.staffId,
+      documentId: renewPayload.documentId,
+    };
+    const chatPayloadAttr =
+      renewPayload.staffId && renewPayload.documentId
+        ? encodeURIComponent(JSON.stringify(chatPayload))
+        : '';
+    const chatBtn =
+      chatPayloadAttr
+        ? `<button type="button" data-ff-doc-alert-chat="1" data-payload="${chatPayloadAttr}" style="${docAlertBtnChat}" title="${ffDocAlertIsHebrewUI() ? 'שליחת תזכורת בצ׳אט לעובד' : 'Send this staff member a chat reminder'}">
+          ${ffDocAlertIsHebrewUI() ? 'שלח תזכורת בצ׳אט' : 'Send chat reminder'}
+        </button>`
+        : '';
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">${ffDocAlertIsHebrewUI() ? 'פעולות' : 'Actions'}</h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          ${openStaffBtn}
+          ${chatBtn}
+          <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="${docAlertBtnDone}">
+            ✓ ${ffDocAlertIsHebrewUI() ? 'סמן כבוצע וארכב' : 'Mark done &amp; archive'}
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (isManager && isRecipient && request.type === "supplies" && inboxSupplyRequestIsPending(request)) {
+    detailsHTML += `
+      <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <button type="button" onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
+            ✓ Approve
+          </button>
+          <button type="button" onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
+            ✗ Deny
+          </button>
+        </div>
+      </div>
+    `;
+  } else if (isManager && isRecipient && request.status === "open") {
     const isDocRequest = request.type === 'document_request';
+    const isDocMeta = request.type === 'document_upload' || request.type === 'document_request';
+    const docMetaEditBtn = isDocMeta
+      ? `<button type="button" onclick="ffInboxOpenDocumentMetadataEdit('${requestId}')" title="Edit document type, expiration, etc. before approving" style="min-width:44px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✏️</button>`
+      : '';
+    const approveRow = isDocMeta
+      ? `<div style="display:flex;align-items:stretch;gap:8px;margin-bottom:12px;">
+          <button onclick="approveRequest('${requestId}')" style="flex:1;padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+            ✓ Approve
+          </button>
+          ${docMetaEditBtn}
+        </div>`
+      : `<button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:12px;">
+            ✓ Approve
+          </button>`;
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
@@ -2424,9 +4583,7 @@ function showRequestDetails(requestId) {
             ❓ Request More Info
           </button>
           
-          <button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
-            ✓ Approve
-          </button>
+          ${approveRow}
           
           <button onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
             ✗ Deny
@@ -2438,15 +4595,27 @@ function showRequestDetails(requestId) {
   
   // Manager actions for needs_info status — only for recipient
   if (isManager && isRecipient && request.status === 'needs_info') {
+    const isDocMetaNi = request.type === 'document_upload' || request.type === 'document_request';
+    const docMetaEditBtnNi = isDocMetaNi
+      ? `<button type="button" onclick="ffInboxOpenDocumentMetadataEdit('${requestId}')" title="Edit document details" style="min-width:44px;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:16px;line-height:1;flex-shrink:0;">✏️</button>`
+      : '';
+    const approveAnywayRow = isDocMetaNi
+      ? `<div style="display:flex;align-items:stretch;gap:8px;margin-bottom:8px;">
+          <button onclick="approveRequest('${requestId}')" style="flex:1;padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;">
+            ✓ Approve Anyway
+          </button>
+          ${docMetaEditBtnNi}
+        </div>`
+      : `<button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:8px;">
+          ✓ Approve Anyway
+        </button>`;
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Manager Actions</h3>
         <div style="font-size:13px;color:#6b7280;margin-bottom:12px;">
           Waiting for staff response...
         </div>
-        <button onclick="approveRequest('${requestId}')" style="padding:10px;border:1px solid #10b981;background:#10b981;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-bottom:8px;">
-          ✓ Approve Anyway
-        </button>
+        ${approveAnywayRow}
         <button onclick="denyRequest('${requestId}')" style="padding:10px;border:1px solid #ef4444;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;width:100%;">
           ✗ Deny
         </button>
@@ -2477,6 +4646,44 @@ function showRequestDetails(requestId) {
   }
   
   content.innerHTML = detailsHTML;
+  try {
+    const openStaffEl = content.querySelector('[data-ff-doc-alert-open-staff]');
+    if (openStaffEl) {
+      openStaffEl.addEventListener('click', () => {
+        const raw = openStaffEl.getAttribute('data-ff-doc-alert-open-staff') || '';
+        const id = decodeURIComponent(raw);
+        if (typeof window.openDocumentAlertStaffMember === 'function') {
+          window.openDocumentAlertStaffMember(id);
+        }
+      });
+    }
+    const chatEl = content.querySelector('[data-ff-doc-alert-chat]');
+    if (chatEl) {
+      chatEl.addEventListener('click', async () => {
+        if (chatEl.disabled) return;
+        const raw = chatEl.getAttribute('data-payload');
+        if (!raw) return;
+        try {
+          const payload = JSON.parse(decodeURIComponent(raw));
+          if (typeof window.ffDocAlertSendChatReminder !== 'function') return;
+          chatEl.disabled = true;
+          chatEl.style.opacity = '0.65';
+          chatEl.style.pointerEvents = 'none';
+          try {
+            await window.ffDocAlertSendChatReminder(payload);
+          } finally {
+            chatEl.disabled = false;
+            chatEl.style.opacity = '';
+            chatEl.style.pointerEvents = '';
+          }
+        } catch (err) {
+          console.warn('[Inbox] doc alert chat payload', err);
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('[Inbox] doc alert action wiring', e);
+  }
   modal.appendChild(content);
   document.body.appendChild(modal);
   
@@ -2491,6 +4698,55 @@ function showRequestDetails(requestId) {
 window.closeRequestDetailsModal = function() {
   const modal = document.getElementById('requestDetailsModal');
   if (modal) modal.remove();
+};
+
+/**
+ * Files live in Firebase Storage; the UI must use a download URL (link). The stored `fileName`
+ * sometimes matches the storage basename (`{generatedId}_{sanitizedOriginal}`) — strip a long
+ * generated first segment so the link label looks like the real filename.
+ */
+function inboxDisplayUploadedFileLinkLabel(data) {
+  const d = data || {};
+  let name = d.fileName != null ? String(d.fileName).trim() : "";
+  const base = (d.filePath || "").split("/").filter(Boolean).pop() || "";
+  if (!name) name = base;
+  if (name) {
+    const parts = name.split("_");
+    if (parts.length >= 2) {
+      const first = parts[0];
+      if (first.length >= 12 && /^[a-zA-Z0-9.-]+$/.test(first)) {
+        name = parts.slice(1).join("_");
+      }
+    }
+  }
+  if (!name) name = "View file";
+  if (name.length > 72) name = `${name.slice(0, 69)}…`;
+  return name;
+}
+
+/** True when filename/path/url suggests an image (thumbnail + lightbox in inbox). */
+function inboxUploadedFileLooksLikeImage(data) {
+  const d = data || {};
+  const hint = `${d.fileName || ""} ${d.fileUrl || ""} ${d.filePath || ""}`.toLowerCase();
+  return /\.(jpg|jpeg|png|gif|webp|heic|heif)(\?|#|$)/i.test(hint);
+}
+
+window.ffInboxOverlayPreviewImage = function (url) {
+  try {
+    const safe = String(url || "").trim();
+    if (!/^https?:\/\//i.test(safe)) return;
+    const wrap = document.createElement("div");
+    wrap.style.cssText =
+      "position:fixed;inset:0;z-index:1000000;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;";
+    const img = document.createElement("img");
+    img.src = safe;
+    img.alt = "";
+    img.style.cssText =
+      "max-width:96vw;max-height:92vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.45);cursor:default;";
+    wrap.appendChild(img);
+    wrap.onclick = () => wrap.remove();
+    document.body.appendChild(wrap);
+  } catch (_) {}
 };
 
 function renderRequestData(request) {
@@ -2571,23 +4827,60 @@ function renderRequestData(request) {
         </div>
       `;
       
-    case 'supplies':
-      const itemsHTML = (data.items || []).map(item => 
-        `<li>${item.name} - ${item.quantity} ${item.unit || 'pcs'}</li>`
-      ).join('');
+    case 'supplies': {
+      const decision = escapeHtml(inboxSupplyStatusDisplayLabel(request) || "—");
+      const itemsHTML = (data.items || [])
+        .map((item) => {
+          if (item.itemId && item.itemName) {
+            const path = [item.categoryName, item.subcategoryName].filter(Boolean).join(" › ");
+            const groupLabelRaw =
+              item.groupName && String(item.groupName).trim() !== ""
+                ? String(item.groupName).trim()
+                : item.variantLabel && String(item.variantLabel).trim() !== ""
+                  ? String(item.variantLabel).trim()
+                  : "";
+            const meta = [
+              item.internalNumber != null && item.internalNumber !== "" ? `#${item.internalNumber}` : "",
+              item.code ? String(item.code) : "",
+              item.brand || "",
+              item.brandCode || "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            const qtyDisp = item.qty != null && item.qty !== "" ? String(item.qty) : "—";
+            const unitDisp = escapeHtml(item.unit || "pcs");
+            const titleLine = groupLabelRaw
+              ? `${escapeHtml(item.itemName)} <span style="color:#6d28d9;font-weight:500;">(${escapeHtml(groupLabelRaw)})</span>`
+              : escapeHtml(item.itemName);
+            return `<li style="margin-bottom:10px;">
+              <div style="font-weight:600;color:#111827;">${titleLine}</div>
+              ${meta ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${escapeHtml(meta)}</div>` : ""}
+              ${path ? `<div style="font-size:12px;color:#9ca3af;margin-top:2px;">${escapeHtml(path)}</div>` : ""}
+              <div style="font-size:13px;margin-top:4px;">Qty: <strong>${escapeHtml(qtyDisp)}</strong> ${unitDisp}</div>
+            </li>`;
+          }
+          const legacyQty = item.quantity != null ? item.quantity : item.qty;
+          return `<li>${escapeHtml(item.name || "")} — ${escapeHtml(String(legacyQty ?? "—"))} ${escapeHtml(item.unit || "pcs")}</li>`;
+        })
+        .join("");
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
+          <div style="padding:10px 12px;border-radius:8px;background:#f9fafb;border:1px solid #e5e7eb;">
+            <span style="color:#6b7280;font-size:12px;">Decision status</span>
+            <div style="font-weight:600;font-size:15px;margin-top:4px;color:#111827;">${decision}</div>
+          </div>
           <div>
             <span style="color:#6b7280;">Items:</span>
-            <ul style="margin:8px 0;padding-left:20px;">${itemsHTML}</ul>
+            <ul style="margin:8px 0;padding-left:20px;list-style:disc;">${itemsHTML}</ul>
           </div>
           <div>
             <span style="color:#6b7280;">Urgency:</span>
-            <span style="font-weight:500;margin-left:8px;text-transform:capitalize;">${data.urgency || 'routine'}</span>
+            <span style="font-weight:500;margin-left:8px;text-transform:capitalize;">${escapeHtml(data.urgency || "routine")}</span>
           </div>
-          ${data.note ? `<div><span style="color:#6b7280;">Note:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${data.note}</div></div>` : ''}
+          ${data.note ? `<div><span style="color:#6b7280;">Additional details:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.note)}</div></div>` : ""}
         </div>
       `;
+    }
       
     case 'maintenance':
       return `
@@ -2650,7 +4943,32 @@ function renderRequestData(request) {
         </div>
       `;
 
-    case 'document_request':
+    case 'document_renewal_request':
+      return `
+        <div style="display:grid;gap:12px;font-size:13px;">
+          <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
+          <div><span style="color:#6b7280;">Message:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.message || 'N/A')}</div></div>
+          ${data.dueDate ? `<div><span style="color:#6b7280;">Due date:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.dueDate)}</span></div>` : ''}
+          ${data.relatedDocumentId ? `<div><span style="color:#6b7280;">Related document ID:</span><span style="font-weight:500;margin-left:8px;word-break:break-all;">${escapeHtml(String(data.relatedDocumentId))}</span></div>` : ''}
+        </div>
+      `;
+
+    case 'document_request': {
+      const respThumb = (() => {
+        const u = data.responseFileUrl;
+        if (!u) return "";
+        const faux = { fileUrl: u, fileName: data.responseFileName, filePath: data.responseFilePath };
+        if (!inboxUploadedFileLooksLikeImage(faux)) return "";
+        const esc = escapeHtml(u);
+        const jsEsc = JSON.stringify(u);
+        return `
+        <div style="margin-top:4px;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">Preview</div>
+          <button type="button" onclick="window.ffInboxOverlayPreviewImage(${jsEsc})" style="padding:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;max-width:min(240px,100%);display:block;">
+            <img src="${esc}" alt="" style="display:block;width:100%;max-height:200px;object-fit:contain;background:#f9fafb;" loading="lazy" />
+          </button>
+        </div>`;
+      })();
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
           <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
@@ -2658,26 +4976,57 @@ function renderRequestData(request) {
           ${data.dueDate ? `<div><span style="color:#6b7280;">Due date:</span><span style="font-weight:500;margin-left:8px;">${data.dueDate}</span></div>` : ''}
           <div><span style="color:#6b7280;">Delivery:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.deliveryMethod || 'Email')}</span></div>
           ${data.contactEmail ? `<div><span style="color:#6b7280;">Contact email:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.contactEmail)}</span></div>` : ''}
-          ${data.responseFileUrl ? `<div><span style="color:#6b7280;">Response file:</span> <a href="${escapeHtml(data.responseFileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">Download</a></div>` : ''}
+          ${data.responseFileUrl ? `<div><span style="color:#6b7280;">Response file:</span> <a href="${escapeHtml(data.responseFileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">Download</a></div>${respThumb}` : ''}
         </div>
       `;
+    }
 
-    case 'document_upload':
+    case 'document_upload': {
+      const uploadThumb = (() => {
+        const u = data.fileUrl;
+        if (!u || !inboxUploadedFileLooksLikeImage(data)) return "";
+        const esc = escapeHtml(u);
+        const jsEsc = JSON.stringify(u);
+        return `
+        <div style="margin-top:4px;">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">Preview</div>
+          <button type="button" onclick="window.ffInboxOverlayPreviewImage(${jsEsc})" style="padding:0;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;cursor:zoom-in;max-width:min(240px,100%);display:block;">
+            <img src="${esc}" alt="" style="display:block;width:100%;max-height:200px;object-fit:contain;background:#f9fafb;" loading="lazy" />
+          </button>
+        </div>`;
+      })();
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
           <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
           ${data.expirationDate ? `<div><span style="color:#6b7280;">Expiration date:</span><span style="font-weight:500;margin-left:8px;">${data.expirationDate}</span></div>` : ''}
           ${data.notes ? `<div><span style="color:#6b7280;">Notes:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.notes)}</div></div>` : ''}
-          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" style="color:#2563eb;">${escapeHtml(data.fileName || 'Download')}</a></div>` : ''}
+          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" title="${escapeHtml(String(data.fileName || data.filePath || '').trim() || 'Open in new tab')}" style="color:#2563eb;">${escapeHtml(inboxDisplayUploadedFileLinkLabel(data))}</a></div>${uploadThumb}` : ''}
         </div>
       `;
+    }
 
-    case 'staff_birthday_reminder':
+    case 'staff_birthday_reminder': {
+      const bdName = String(data.subjectStaffName || 'Staff').trim();
+      const bdDays = Number(data.daysUntil);
+      const bdDaysPart = !Number.isFinite(bdDays)
+        ? ''
+        : bdDays === 0
+          ? ' (today)'
+          : ` in ${bdDays} day${bdDays === 1 ? '' : 's'}`;
+      const bdDisplayRaw = String(data.birthdayDisplay || '').trim();
+      const bdDisplaySafe = bdDisplayRaw && !/[\u0590-\u05FF\u0600-\u06FF]/.test(bdDisplayRaw);
+      const bdDatePart = bdDisplaySafe ? ` ${bdDisplayRaw}` : '';
+      const bdLine = `${bdName}'s birthday is${bdDatePart}${bdDaysPart}.`;
       return `
         <div style="font-size:13px;line-height:1.5;color:#374151;">
-          ${data.details ? `<div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(data.details)}</div>` : '<div style="color:#9ca3af;">—</div>'}
+          <div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(bdLine)}</div>
         </div>
       `;
+    }
+
+    case 'document_expiring_soon':
+    case 'document_expired':
+      return `<div style="font-size:13px;color:#374151;line-height:1.5;">${escapeHtml(ffDocAlertHumanSummary(request))}</div>`;
       
     default:
       if (data.details) {
@@ -2721,6 +5070,10 @@ window.submitStaffReply = async function(requestId) {
 };
 
 window.needsMoreInfo = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to update requests.", "error");
+    return;
+  }
   const question = await showPromptModal({
     title: 'Request More Info',
     message: 'What information do you need from the staff member?',
@@ -2753,6 +5106,10 @@ window.needsMoreInfo = async function(requestId) {
 };
 
 window.uploadDocumentResponse = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to upload a response.", "error");
+    return;
+  }
   const request = currentRequests.find(r => r.id === requestId);
   if (!request || request.type !== 'document_request') return;
   const fileInput = document.getElementById('docResponseFile_' + requestId);
@@ -2796,6 +5153,10 @@ window.uploadDocumentResponse = async function(requestId) {
 };
 
 window.markBirthdayReminderDone = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to archive this item.", "error");
+    return;
+  }
   closeRequestDetailsModal();
   currentRequests = currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
@@ -2817,7 +5178,193 @@ window.markBirthdayReminderDone = async function(requestId) {
   }
 };
 
+/** Opens Staff Members modal on the given staff id (Documents tab). Uses global openStaffMembersModal from index.html. */
+window.openDocumentAlertStaffMember = function(staffId) {
+  const id = String(staffId || '').trim();
+  if (!id) return;
+  if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
+  if (typeof window.openStaffMembersModal === 'function') {
+    window.openStaffMembersModal({ jumpToStaffId: id, jumpToTab: 'documents' });
+  }
+};
+
+/** Same chat reminder as Staff → Documents (expiring soon). Payload: { salonId, staffId, documentId }. */
+window.ffDocAlertSendChatReminder = async function (payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const salonId = String(p.salonId || currentUserProfile?.salonId || '').trim();
+  const staffId = String(p.staffId || '').trim();
+  const docId = String(p.documentId || '').trim();
+  if (!salonId || !staffId || !docId) {
+    if (typeof showToast === 'function') showToast('Missing staff or document.', 'error');
+    return;
+  }
+  try {
+    await ffSendExpiryChatReminderForStaffDocContext({ salonId, staffId, docId });
+  } catch (e) {
+    console.warn('[Inbox] ffDocAlertSendChatReminder', e);
+  }
+};
+
+/** Opens New Request → "Request a new document (from staff)" with staff / type / related doc prefilled (e.g. from expiry alert). */
+window.ffOpenDocumentRenewalFromAlert = function (opts) {
+  if (!inboxCanSendRequests()) {
+    if (typeof showToast === 'function') showToast('You do not have permission to create requests.', 'error');
+    return;
+  }
+  const o = opts && typeof opts === 'object' ? opts : {};
+  window.__ffDocRenewalPrefill = {
+    staffId: String(o.staffId || '').trim(),
+    documentType: String(o.documentType || '').trim(),
+    documentId: String(o.documentId || '').trim(),
+  };
+  if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal();
+  if (typeof window.closeCreateRequestModal === 'function') window.closeCreateRequestModal();
+  if (typeof window.openCreateRequestModal === 'function') window.openCreateRequestModal();
+  if (typeof window.selectRequestType === 'function') window.selectRequestType('document_renewal_request');
+};
+
+/**
+ * Manager: edit document type / expiration on inbox item before approving (document_upload / document_request).
+ */
+window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to edit this request.", "error");
+    return;
+  }
+  const rid = String(requestId || "").trim();
+  if (!rid || !currentUserProfile?.salonId) return;
+  const salonId = currentUserProfile.salonId;
+  const inboxRef = doc(db, `salons/${salonId}/inboxItems`, rid);
+  let snap;
+  try {
+    snap = await getDoc(inboxRef);
+  } catch (e) {
+    console.warn("[Inbox] edit metadata get", e);
+    showToast("Could not load request.", "error");
+    return;
+  }
+  if (!snap.exists()) {
+    showToast("Request not found.", "error");
+    return;
+  }
+  const item = { id: rid, ...snap.data() };
+  const t = String(item.type || "").trim();
+  if (t !== "document_upload" && t !== "document_request") {
+    showToast("Editing is only for document upload or request.", "info");
+    return;
+  }
+  const d = item.data || {};
+  const curType = String(d.documentType || "").trim();
+  let curExp = "";
+  if (t === "document_upload") {
+    curExp =
+      ffInboxYmdFromRaw(d.expirationDate) || ffInboxYmdFromRaw(d.expiryDate) || ffInboxYmdFromRaw(d.dueDate);
+  } else {
+    curExp = ffInboxYmdFromRaw(d.dueDate) || ffInboxYmdFromRaw(d.expirationDate);
+  }
+
+  const overlayRid = `ffinbox_editdoc_${Date.now()}`;
+  const overlay = document.createElement("div");
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText =
+    "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000000;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;overflow-y:auto;";
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 25px 50px rgba(0,0,0,0.2);">
+      <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#111827;">Edit document details</div>
+      <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">Updates what will be saved to the staff profile when you approve.</p>
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Document type</label>
+      <select id="${overlayRid}_type" style="width:100%;padding:12px;margin-bottom:12px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;">${ffStaffDocumentTypeSelectOptionsHtml()}</select>
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">Expiration / due date</label>
+      <input type="date" id="${overlayRid}_exp" style="width:100%;padding:12px;margin-bottom:8px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;" />
+      <p style="margin:0 0 16px;font-size:11px;color:#9ca3af;">Clear the date field if not applicable.</p>
+      <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+        <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" data-ff-save style="padding:10px 18px;border-radius:8px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Save</button>
+      </div>
+    </div>`;
+  const sel = overlay.querySelector(`#${overlayRid}_type`);
+  if (sel && curType) {
+    try {
+      sel.value = curType;
+    } catch (_) {}
+  }
+  const expIn = overlay.querySelector(`#${overlayRid}_exp`);
+  if (expIn) expIn.value = curExp;
+
+  const remove = () => {
+    try {
+      overlay.remove();
+    } catch (_) {}
+  };
+  const onKey = (ev) => {
+    if (ev.key === "Escape") remove();
+  };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) remove();
+  });
+  overlay.querySelector("[data-ff-cancel]").onclick = () => {
+    document.removeEventListener("keydown", onKey);
+    remove();
+  };
+  overlay.querySelector("[data-ff-save]").onclick = async () => {
+    const ty = String(sel?.value || "").trim();
+    const ex = String(expIn?.value || "").trim();
+    if (!ty) {
+      showToast("Select a document type.", "error");
+      return;
+    }
+    const merged = { ...d };
+    merged.documentType = ty;
+    if (t === "document_upload") {
+      if (ex) {
+        merged.expirationDate = ex;
+        merged.expiryDate = ex;
+        merged.dueDate = ex;
+      } else {
+        merged.expirationDate = null;
+        merged.expiryDate = null;
+        merged.dueDate = null;
+      }
+    } else {
+      if (ex) {
+        merged.dueDate = ex;
+        merged.expirationDate = ex;
+      } else {
+        merged.dueDate = null;
+        merged.expirationDate = null;
+      }
+    }
+    try {
+      await updateDoc(inboxRef, {
+        data: merged,
+        updatedAt: serverTimestamp(),
+      });
+      const fresh = await getDoc(inboxRef);
+      if (fresh.exists()) {
+        const row = { id: rid, ...fresh.data() };
+        const idx2 = currentRequests.findIndex((r) => r.id === rid);
+        if (idx2 !== -1) currentRequests[idx2] = row;
+      }
+      showToast("Details saved.", "success");
+      document.removeEventListener("keydown", onKey);
+      remove();
+      if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+      showRequestDetails(rid);
+    } catch (err) {
+      console.warn("[Inbox] save document metadata", err);
+      showToast(String(err?.message || err || "Could not save."), "error");
+    }
+  };
+  document.body.appendChild(overlay);
+};
+
 window.approveRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to approve requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Approve request?',
     message: 'This will mark the request as approved.',
@@ -2834,14 +5381,61 @@ window.approveRequest = async function(requestId) {
 
   try {
     const salonId = currentUserProfile.salonId;
-    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+    const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+    const snap = await getDoc(inboxRef);
+    if (!snap.exists()) {
+      showToast('Request not found.', 'error');
+      loadInboxItems();
+      return;
+    }
+    const item = snap.data();
+    if (String(item.status || "").trim() === "approved") {
+      showToast("Already approved.", "info");
+      loadInboxItems();
+      return;
+    }
+
+    if (String(item.type || "").trim() === "supplies") {
+      if (!inboxSupplyRequestIsPending({ type: "supplies", status: item.status })) {
+        showToast("This supply request is no longer pending.", "info");
+        loadInboxItems();
+        return;
+      }
+      await approveSupplyRequest(requestId, item.data || {});
+      showToast("Request approved!", "success");
+      return;
+    }
+
+    let staffDocumentId = null;
+    if (item.type === 'document_upload' || item.type === 'document_request') {
+      staffDocumentId = await ffSyncStaffDocumentOnInboxApprove(db, {
+        salonId,
+        inboxItemId: requestId,
+        inboxItem: { id: requestId, ...item },
+        approverUid: currentUserProfile.uid,
+      });
+      if (!staffDocumentId) {
+        console.warn('[Inbox] Approve sync returned no staff document id', requestId, item.type, item.data);
+        showToast(
+          'Could not attach this file to a staff profile (missing staff link). Open the request details and check Document belongs to / staff fields, or contact support.',
+          'error'
+        );
+        loadInboxItems();
+        return;
+      }
+    }
+
+    const approvePayload = {
       status: 'approved',
       decidedBy: currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-      unreadForManagers: false
-    });
+      unreadForManagers: false,
+    };
+    if (staffDocumentId) approvePayload.staffDocumentId = staffDocumentId;
+
+    await updateDoc(inboxRef, approvePayload);
     showToast('Request approved!', 'success');
   } catch (error) {
     console.error('[Inbox] approve error', error);
@@ -2851,6 +5445,10 @@ window.approveRequest = async function(requestId) {
 };
 
 window.denyRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to deny requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Deny request?',
     message: 'This will mark the request as denied. You can add a note below.',
@@ -2877,7 +5475,30 @@ window.denyRequest = async function(requestId) {
 
   try {
     const salonId = currentUserProfile.salonId;
-    await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
+    const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
+    const snap = await getDoc(inboxRef);
+    if (!snap.exists()) {
+      showToast('Request not found.', 'error');
+      loadInboxItems();
+      return;
+    }
+    const item = snap.data();
+    if (String(item.type || "").trim() === "supplies") {
+      if (String(item.status || "").trim() === "denied") {
+        showToast("Already denied.", "info");
+        loadInboxItems();
+        return;
+      }
+      await denySupplyRequest(requestId, reason || null);
+      showToast("Request denied", "success");
+      return;
+    }
+
+    if (item.type === 'document_upload' || item.type === 'document_request') {
+      await ffSyncStaffDocumentOnInboxReject(db, { salonId, inboxItem: item });
+    }
+
+    await updateDoc(inboxRef, {
       status: 'denied',
       decidedBy: currentUserProfile.uid,
       decidedAt: serverTimestamp(),
@@ -2894,7 +5515,65 @@ window.denyRequest = async function(requestId) {
   }
 };
 
+window.applyApprovedSupplyRequestToInventory = applyApprovedSupplyRequestToInventory;
+window.approveSupplyRequest = approveSupplyRequest;
+window.denySupplyRequest = denySupplyRequest;
+
+/** Retry path for already-approved supply requests that never hit Inventory. */
+window.ffInboxApplySupplyToInventory = async function (requestId, btnEl) {
+  try {
+    if (!inboxCanManageInbox()) {
+      if (typeof showToast === "function") showToast("You do not have permission.", "error");
+      return;
+    }
+    const salonId = currentUserProfile?.salonId;
+    if (!salonId || !requestId) return;
+    if (btnEl instanceof HTMLButtonElement) {
+      btnEl.disabled = true;
+      btnEl.textContent = "Applying…";
+    }
+    const snap = await getDoc(doc(db, `salons/${salonId}/inboxItems`, requestId));
+    if (!snap.exists()) {
+      if (typeof showToast === "function") showToast("Request not found.", "error");
+      return;
+    }
+    const item = snap.data();
+    if (String(item.status || "").trim() !== "approved") {
+      if (typeof showToast === "function") showToast("Request is not approved yet.", "error");
+      return;
+    }
+    if (item.appliedToInventory === true) {
+      if (typeof showToast === "function") showToast("Already applied.", "info");
+      if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+      showRequestDetails(requestId);
+      return;
+    }
+    const result = await applyApprovedSupplyRequestToInventory(requestId, item.data || {});
+    const n = result && typeof result.totalContributions === "number" ? result.totalContributions : 0;
+    if (typeof showToast === "function") {
+      showToast(
+        n === 1 ? "Added 1 item to inventory Order." : `Added ${n} items to inventory Order.`,
+        "success"
+      );
+    }
+    if (typeof closeRequestDetailsModal === "function") closeRequestDetailsModal();
+    showRequestDetails(requestId);
+  } catch (e) {
+    console.error("[Inbox] Apply to Inventory retry failed", e);
+    if (btnEl instanceof HTMLButtonElement) {
+      btnEl.disabled = false;
+      btnEl.textContent = "Apply to Inventory";
+    }
+    const msg = e && typeof e.message === "string" ? e.message : "Unknown error";
+    if (typeof showToast === "function") showToast(`Could not apply: ${msg}`, "error");
+  }
+};
+
 window.archiveRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to archive requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Move to Archive?',
     message: 'This request will be moved to the archive. You can delete it later from there.',
@@ -2928,6 +5607,10 @@ window.archiveRequest = async function(requestId) {
 };
 
 window.deleteArchivedRequest = async function(requestId) {
+  if (!inboxCanManageInbox()) {
+    if (typeof showToast === "function") showToast("You do not have permission to delete requests.", "error");
+    return;
+  }
   const confirmed = await showConfirmModal({
     title: 'Delete permanently?',
     message: 'This request will be deleted and cannot be recovered.',
@@ -2951,9 +5634,57 @@ window.deleteArchivedRequest = async function(requestId) {
 };
 
 // =====================
+// Deep link: ?ffInboxUpload=1&docType=…&renewForDoc=… — open Inbox → New Request → Upload a Document
+// =====================
+function ffTryConsumeInboxUploadDeepLink() {
+  if (window.__ffInboxUploadConsumed) return;
+  const sp = new URLSearchParams(window.location.search);
+  if (sp.get('ffInboxUpload') !== '1') return;
+  window.__ffInboxUploadConsumed = true;
+  const docType = String(sp.get('docType') || '').trim();
+  const renewForDoc = String(sp.get('renewForDoc') || '').trim();
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('ffInboxUpload');
+    url.searchParams.delete('docType');
+    url.searchParams.delete('renewForDoc');
+    const qs = url.searchParams.toString();
+    window.history.replaceState({}, '', url.pathname + (qs ? '?' + qs : '') + (url.hash || ''));
+  } catch (e) {
+    console.warn('[Inbox] strip deep link params', e);
+  }
+  window.__ffDocUploadPrefill = {
+    documentType: docType || null,
+    renewForDocId: renewForDoc || null,
+  };
+  goToInbox(() => {
+    setTimeout(() => {
+      try {
+        if (typeof window.openCreateRequestModal === 'function') window.openCreateRequestModal();
+        setTimeout(() => {
+          if (typeof window.selectRequestType === 'function') void window.selectRequestType('document_upload');
+        }, 60);
+      } catch (e) {
+        console.warn('[Inbox] open upload from deep link', e);
+      }
+    }, 120);
+  });
+}
+window.ffTryConsumeInboxUploadDeepLink = ffTryConsumeInboxUploadDeepLink;
+
+// =====================
 // Initialization
 // =====================
 export function initInbox() {
+  window.goToInbox = goToInbox;
+  ffWireInboxStatusFilterSelect();
+
+  if (typeof window !== 'undefined' && window.__ffInboxInitV1) {
+    console.log('[Inbox] Already initialized');
+    return;
+  }
+  if (typeof window !== 'undefined') window.__ffInboxInitV1 = true;
+
   console.log('[Inbox] Initializing');
   
   // Wire up inbox button
@@ -2985,12 +5716,15 @@ export function initInbox() {
         else if (bid === 'ticketsBtn' && typeof window.goToTickets === 'function') window.goToTickets();
         else if (bid === 'tasksBtn' && typeof window.openTasks === 'function') window.openTasks();
         else if (bid === 'chatBtn' && typeof window.goToChat === 'function') window.goToChat();
+        else if (bid === 'mediaBtn' && typeof window.goToMedia === 'function') window.goToMedia();
         else if (bid === 'logBtn' && (typeof window.openLog === 'function' || typeof openLog === 'function')) (window.openLog || openLog)();
         else if (bid === 'appsBtn') { /* Apps panel handled by its own click */ }
       }
     }
   }, true); // Capture phase to run before other handlers
   
+  window.ffRefreshInboxNavVisibility = ffRefreshInboxNavVisibility;
+
   console.log('[Inbox] Initialized');
 }
 
@@ -3005,17 +5739,40 @@ if (document.readyState === 'loading') {
 // Background badge listener — runs regardless of which screen is visible
 // =====================
 let _bgBadgeUnsubscribe = null;
+// Latest snapshot rows cached so we can re-render the badges when the
+// user switches location without waiting for a new Firestore snapshot.
+let _bgBadgeLatestRows = [];
+let _bgBadgeIsTech = false;
 
-function startBgBadgeListener(uid, salonId) {
-  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
-  const q = query(
-    collection(db, `salons/${salonId}/inboxItems`),
-    where('forUid', '==', uid),
-    where('unreadForManagers', '==', true)
-  );
-  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
-    const openCount = snap.docs.filter(d => d.data().status === 'open').length;
-    const needsInfoCount = snap.docs.filter(d => d.data().status === 'needs_info').length;
+function _bgBadgeRecompute() {
+  try {
+    let rows = _bgBadgeLatestRows || [];
+
+    // Scope the badges to the currently active branch. Use the same rule
+    // set as the main inbox list (explicit locationId → subject staff
+    // allowedLocationIds → fall-through). Without this, a request sent in
+    // branch A would show "1" on the Open tab and on the nav Inbox icon
+    // when viewing branch B.
+    let activeLocId = null;
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+        const v = window.ffGetActiveLocationId();
+        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
+      }
+      if (!activeLocId && typeof window !== 'undefined'
+          && typeof window.__ff_active_location_id === 'string'
+          && window.__ff_active_location_id.trim()) {
+        activeLocId = window.__ff_active_location_id.trim();
+      }
+    } catch (_) {}
+    if (activeLocId) {
+      const staffLocMap = (typeof inboxGetStaffLocationMap === 'function')
+        ? inboxGetStaffLocationMap() : {};
+      rows = rows.filter((r) => inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap));
+    }
+
+    const openCount = rows.filter((r) => r.status === 'open' || r.status === 'pending').length;
+    const needsInfoCount = rows.filter((r) => r.status === 'needs_info').length;
     const total = openCount + needsInfoCount;
 
     const navBadge = document.querySelector('#inboxBtn .ff-inbox-badge');
@@ -3026,21 +5783,63 @@ function startBgBadgeListener(uid, salonId) {
 
     const needsInfoBadge = document.getElementById('inboxNeedsInfoBadge');
     if (needsInfoBadge) needsInfoBadge.textContent = needsInfoCount > 0 ? needsInfoCount : '';
+  } catch (e) {
+    console.warn('[Inbox] bg badge recompute failed', e);
+  }
+}
+
+function startBgBadgeListener(uid, salonId, roleLc) {
+  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+  const q = query(
+    collection(db, `salons/${salonId}/inboxItems`),
+    where('forUid', '==', uid),
+    where('unreadForManagers', '==', true)
+  );
+  _bgBadgeIsTech = String(roleLc || '').toLowerCase() === 'technician';
+  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
+    let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (_bgBadgeIsTech) {
+      rows = inboxTechnicianNoiseFilter(rows);
+    }
+    _bgBadgeLatestRows = rows;
+    _bgBadgeRecompute();
   }, () => {});
+}
+
+// Recompute badges when the active branch changes, even if Firestore did
+// not push a new snapshot (e.g. purely switching branches on the same set
+// of cached items).
+if (typeof document !== 'undefined' && !window.__ffInboxBadgeLocListener) {
+  window.__ffInboxBadgeLocListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    _bgBadgeRecompute();
+  });
+  document.addEventListener('ff-staff-cloud-updated', () => {
+    _bgBadgeRecompute();
+  });
 }
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+    void ffRefreshInboxNavVisibility();
     return;
   }
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (!userDoc.exists()) return;
-    const data = userDoc.data() || {};
-    const role = (data.role || '').toLowerCase();
-    if (['manager', 'admin', 'owner'].includes(role) && data.salonId) {
-      startBgBadgeListener(user.uid, data.salonId);
+    let profile = { uid: user.uid, ...userDoc.data() };
+    profile = await mergeSalonStaffIntoUserProfile(profile);
+    void ffRefreshInboxNavVisibility();
+    const roleLc = inboxNormalizeLineStaffRoleLc(profile.role || '');
+    const runBadge =
+      profile.salonId &&
+      (inboxCanManageInboxEval(profile) || roleLc === 'technician');
+    if (runBadge) {
+      startBgBadgeListener(user.uid, profile.salonId, roleLc);
+    } else if (_bgBadgeUnsubscribe) {
+      _bgBadgeUnsubscribe();
+      _bgBadgeUnsubscribe = null;
     }
   } catch (e) {
     console.warn('[Inbox] bg badge listener error', e.message);

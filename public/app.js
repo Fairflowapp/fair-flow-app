@@ -1,3 +1,50 @@
+// Static imports must be first in ES modules (avoids SyntaxError / "Unexpected end of input" in some browsers).
+import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithCredential,
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
+  OAuthProvider,
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  signInAnonymously,
+  fetchSignInMethodsForEmail
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import {
+  getFirestore,
+  initializeFirestore,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  setDoc,
+  updateDoc,
+  addDoc,
+  collection,
+  collectionGroup,
+  query,
+  where,
+  increment,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import {
+  getFunctions,
+  httpsCallable
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
+
 console.log("[CLIENT BOOT] app.js v=20260205_3 loaded");
 console.log("FF APP.JS LOADED", new Date().toISOString(), "search=", location.search);
 console.log('[BUILD MARKER] app.js loaded', new Date().toISOString());
@@ -6,8 +53,32 @@ if (!window.__ff_authedStaffId) {
   window.__ff_authedStaffId = localStorage.getItem("ff_authedStaffId_v1") || null;
 }
 
+/** Let staff-cloud retry single-doc sync when membership / users.staffId becomes available after first paint. */
+function ffNotifyAuthedStaffIdChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-authed-staff-id-changed", { bubbles: true }));
+  } catch (_) {}
+}
+
+/** Parse JSON from localStorage or other untrusted strings without throwing (avoids SyntaxError on corrupt/empty data). */
+function ffSafeParseJSON(str, fallback) {
+  try {
+    if (str == null || str === "") return fallback;
+    if (typeof str !== "string") return fallback;
+    const parsed = JSON.parse(str);
+    return parsed !== null && parsed !== undefined ? parsed : fallback;
+  } catch (_) {
+    return fallback;
+  }
+}
+
 // Migration: Move yearly done entries from old key to standard key
 (function migrateYearlyDoneStorage() {
+  function parseTaskArray(raw) {
+    if (raw == null || raw === "") return [];
+    const v = ffSafeParseJSON(raw, []);
+    return Array.isArray(v) ? v : [];
+  }
   try {
     const oldKey = 'ff_tasks_yearly_done_v1';
     const standardKey = (typeof getTabStorageKey === 'function')
@@ -18,11 +89,11 @@ if (!window.__ff_authedStaffId) {
     if (oldKey !== standardKey) {
       const oldData = localStorage.getItem(oldKey);
       const standardData = localStorage.getItem(standardKey);
-      
-      if (oldData && (!standardData || JSON.parse(standardData || '[]').length === 0)) {
+      const standardPreview = parseTaskArray(standardData);
+      if (oldData && (!standardData || standardPreview.length === 0)) {
         // Move/merge entries from old key to standard key
-        const oldList = JSON.parse(oldData);
-        const standardList = JSON.parse(standardData || '[]');
+        const oldList = parseTaskArray(oldData);
+        const standardList = parseTaskArray(standardData || '[]');
         
         // Merge: add entries from old list that don't exist in standard list
         const standardIds = new Set(standardList.map(t => String(t.taskId || t.id || '').trim()));
@@ -49,63 +120,38 @@ if (!window.__ff_authedStaffId) {
 })();
 
 // =====================
-// Global Error Logging
+// Global Error Logging (once — avoids duplicate lines if two app.js URLs load from cache)
 // =====================
-window.addEventListener("error", (e) => {
-  console.error("GLOBAL ERROR:", e.message, e.error);
-  console.error("Error stack:", e.error?.stack);
-});
-window.addEventListener("unhandledrejection", (e) => {
-  console.error("PROMISE REJECTION:", e.reason);
-  console.error("Rejection stack:", e.reason?.stack);
-});
-
-// =====================
-// Firebase imports
-// =====================
-import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
-import {
-  getAuth,
-  signInWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  createUserWithEmailAndPassword,
-  signOut,
-  sendPasswordResetEmail,
-  signInAnonymously
-} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import {
-  getFirestore,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  setDoc,
-  updateDoc,
-  addDoc,
-  collection,
-  collectionGroup,
-  query,
-  where,
-  serverTimestamp
-} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import {
-  getFunctions,
-  httpsCallable
-} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
+(function installFfGlobalErrorHooks() {
+  if (window.__ffAppErrorHooksInstalled) return;
+  window.__ffAppErrorHooksInstalled = true;
+  window.addEventListener("error", (e) => {
+    try {
+      const msg = e && e.message;
+      const err = e && e.error;
+      const stack = err && err.stack;
+      console.error("GLOBAL ERROR:", msg, err);
+      if (stack) console.error("Error stack:", stack);
+    } catch (_) {
+      /* avoid throwing from the error logger */
+    }
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    try {
+      const reason = e && e.reason;
+      const stack = reason && reason.stack;
+      console.error("PROMISE REJECTION:", reason);
+      if (stack) console.error("Rejection stack:", stack);
+    } catch (_) {
+      /* avoid throwing from the rejection logger */
+    }
+  });
+})();
 
 // =====================
 // Firebase config
 // =====================
-const firebaseConfig = {
+const existingFallbackConfig = {
   apiKey: "AIzaSyCoj6A2Eoa0uDrelIJxycZCL6cTw570FCI",
   authDomain: "fairflowapp-db841.firebaseapp.com",
   projectId: "fairflowapp-db841",
@@ -114,6 +160,8 @@ const firebaseConfig = {
   appId: "1:823186963319:web:2bc2d386311b2898643f72",
   measurementId: "G-S7T9WN343B"
 };
+const firebaseConfig = window.firebaseConfig || existingFallbackConfig;
+console.log("[AppFirebaseConfig]", firebaseConfig.projectId, firebaseConfig.apiKey);
 
 // =====================
 // Init
@@ -121,22 +169,197 @@ const firebaseConfig = {
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 window.__ffAuth = auth;
-window.__ffGetUid = () => auth.currentUser?.uid || null;
-export const db = getFirestore(app);
+window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
+/**
+ * Mobile WebViews break the default gRPC/WebChannel transport — long polling is
+ * more reliable. On iOS/iPadOS and inside the Capacitor native app the
+ * WKWebView channel can silently STALL: auto-detect probes the connection,
+ * wrongly decides WebChannel works, and then onSnapshot stops delivering
+ * updates while getDocFromServer hangs forever. That froze every technician's
+ * rev at a stale value so their task writes were rejected with
+ * permission-denied. Forcing long polling on those clients keeps the live
+ * listener and writes working; desktop browsers keep the lighter auto-detect.
+ */
+let db;
+try {
+  // Auto-detect long polling: reliable for login + reads across the Capacitor
+  // app and mobile Safari. NOTE: forcing long polling (experimentalForceLongPolling)
+  // was tried to fix technician write-sync, but it STALLED the connection inside
+  // the native app and froze the PIN/login flow — so we keep auto-detect here and
+  // solve the sync problem in the write path instead (see tasks-cloud writeState).
+  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+} catch (_) {
+  db = getFirestore(app);
+}
+export { db };
 window.ffDb = db;   // expose for non-module scripts (staff cloud sync)
 
+/**
+ * Salon account owner: Auth uid matches salons/{salonId}/settings/main.ownerUid.
+ * If ownerUid is not on settings/main yet, falls back to session role owner (users doc).
+ */
+function ffIsOwner() {
+  try {
+    const u = auth.currentUser;
+    if (!u || !u.uid) return false;
+    const ou =
+      typeof window !== "undefined" && typeof window.__ff_salon_owner_uid === "string"
+        ? String(window.__ff_salon_owner_uid).trim()
+        : "";
+    if (ou) return String(u.uid) === ou;
+    return String(typeof window !== "undefined" ? window.__ff_user_role || "" : "")
+      .toLowerCase() === "owner";
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Staff row is the salon owner account (uid matches settings/main.ownerUid). */
+function ffStaffRowIsSalonOwner(staff) {
+  try {
+    if (!staff || typeof staff !== "object") return false;
+    const ou =
+      typeof window !== "undefined" && typeof window.__ff_salon_owner_uid === "string"
+        ? String(window.__ff_salon_owner_uid).trim()
+        : "";
+    if (!ou) return false;
+    const sid = String(staff.uid || staff.firebaseUid || "").trim();
+    return sid !== "" && sid === ou;
+  } catch (_) {
+    return false;
+  }
+}
+
+window.ffIsOwner = ffIsOwner;
+window.ffStaffRowIsSalonOwner = ffStaffRowIsSalonOwner;
+
 // Set currentSalonId globally when user logs in (used by staff invite + staff cloud sync)
+let __ffChatBadgeEarlyGen = 0;
 onAuthStateChanged(auth, async user => {
-  if (!user) { window.currentSalonId = null; return; }
+  if (!user) {
+    window.currentSalonId = null;
+    window.__ff_waiting_for_salon_choice = false;
+    __ffChatBadgeEarlyGen++;
+    return;
+  }
+  // Pre-emptively flip the wait flag synchronously. The flag will be cleared by
+  // ffApplyActiveMembership once a single membership is auto-selected or the
+  // user picks one via Choose Salon. This stops module auth listeners from
+  // racing the awaits below and firing premature subscriptions that crash the
+  // page with "Missing or insufficient permissions" floods.
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice !== false) {
+    window.__ff_waiting_for_salon_choice = true;
+  }
   try {
     const { getDoc, doc } = await import("https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js");
-    const snap = await getDoc(doc(db, 'users', user.uid));
+    // Parallelize these two reads — previously sequential which doubled the
+    // login round-trip latency.
+    const [snap, memberships] = await Promise.all([
+      getDoc(doc(db, 'users', user.uid)),
+      ffLoadActiveMembershipsForUser(user),
+    ]);
     if (snap.exists()) {
-      window.currentSalonId = snap.data().salonId || null;
+      const data = snap.data() || {};
+      const storedSalonId = (() => {
+        try { return sessionStorage.getItem("ff_active_salon_id") || localStorage.getItem("ff_active_salon_id") || ""; } catch (_) { return ""; }
+      })();
+      const storedMembership = storedSalonId
+        ? memberships.find((m) => String(m.salonId || "") === String(storedSalonId))
+        : null;
+      if (memberships.length > 1 && !storedMembership) {
+        window.__ff_waiting_for_salon_choice = true;
+        window.currentSalonId = null;
+        console.log('[app.js] currentSalonId deferred: multiple memberships require Choose Salon');
+        __ffChatBadgeEarlyGen++;
+        // Surface Choose Salon immediately so modules don't paint placeholder UI
+        // behind it while loadUserRoleAndShowView (later in the flow) reaches the
+        // same code path. Safe because ffShowChooseSalonScreen is idempotent.
+        try { if (typeof ffShowChooseSalonScreen === 'function') ffShowChooseSalonScreen(user, data, memberships); } catch (e) { console.warn('[app.js] early Choose Salon render failed', e); }
+        return;
+      }
+      // Single (or zero) membership -> not waiting for choice anymore.
+      window.__ff_waiting_for_salon_choice = false;
+      window.currentSalonId = (storedMembership && storedMembership.salonId) || (memberships.length === 1 ? memberships[0].salonId : data.salonId) || null;
       console.log('[app.js] currentSalonId set:', window.currentSalonId);
+      currentSalonId = window.currentSalonId;
+      (async () => {
+        try {
+          const fixed = await ffEnsureSalonDocumentExists(window.currentSalonId, user, memberships);
+          if (fixed && fixed !== window.currentSalonId) {
+            window.currentSalonId = fixed;
+            currentSalonId = fixed;
+            console.log("[app.js] currentSalonId repaired to existing Firestore salon:", fixed);
+            try {
+              if (typeof window.ffStaffForceLoad === "function") await window.ffStaffForceLoad();
+            } catch (_) {}
+          }
+        } catch (e) {
+          console.warn("[app.js] currentSalonId validation failed", e);
+        }
+      })();
+      const uid = user.uid;
+      const sid = window.currentSalonId;
+      __ffChatBadgeEarlyGen++;
+      const gen = __ffChatBadgeEarlyGen;
+      if (sid && uid) {
+        import("/chat.js?v=20260505_chat_flow_desktop_mobile")
+          .then((m) => {
+            if (gen !== __ffChatBadgeEarlyGen) return;
+            if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
+            if (m.subscribeToChatToastNotifications) m.subscribeToChatToastNotifications(uid, sid);
+          })
+          .catch(() => {});
+      }
+      // Race fix: the main onAuthStateChanged listener bails out early because
+      // we synchronously set __ff_waiting_for_salon_choice = true above (so
+      // module listeners don't race) — by the time we've cleared it here, the
+      // main listener has already returned and won't re-fire. Without this
+      // explicit call, loadUserRoleAndShowView (which sets __ff_user_role and
+      // triggers ffApplyActiveMembership for the chosen membership) NEVER runs
+      // for users with a single auto-selected membership. The result we kept
+      // hitting: __ff_user_role = undefined, so currentUserProfile.role and
+      // .name in inbox/chat/tickets fell back to the legacy users/{uid}.* and
+      // requests showed the wrong "Requested by" name.
+      const selectedMembership =
+        storedMembership ||
+        (memberships.length === 1 ? memberships[0] : null);
+      if (typeof loadUserRoleAndShowView === 'function') {
+        loadUserRoleAndShowView(user, { selectedMembership, legacyUserData: data })
+          .catch((err) => console.warn('[Auth] early loadUserRoleAndShowView failed', err));
+      }
     }
   } catch(e) { console.warn('[app.js] Failed to set currentSalonId', e); }
 });
+
+// =====================
+// Apple Sign-In redirect result
+// =====================
+// Apple sign-in uses signInWithPopup (see handleAppleLogin), but we keep a
+// getRedirectResult call here as a safe fallback: if a redirect-based result is
+// ever pending, it is consumed and the onAuthStateChanged listeners drive the
+// login flow (loadUserRoleAndShowView) the same way Google/email do. Wrapped so
+// it can never break app startup.
+getRedirectResult(auth)
+  .then((result) => {
+    if (result && result.user) {
+      console.log("[Login] Apple redirect signed in:", result.user.uid);
+      try { showLoginError(""); } catch (_) {}
+    }
+  })
+  .catch((err) => {
+    console.error("[Login] Apple getRedirectResult error", err);
+    let message = "Apple sign-in failed. Please try again.";
+    if (err && err.code === "auth/network-request-failed") {
+      message = "Network error. Please check your connection and try again.";
+    } else if (err && err.code === "auth/account-exists-with-different-credential") {
+      message = "An account already exists with this email. Please use a different sign-in method.";
+    } else if (err && err.code === "auth/operation-not-allowed") {
+      message = "Apple sign-in is not enabled yet. Please try another method.";
+    } else if (err && err.code === "auth/unauthorized-domain") {
+      message = "This domain is not authorized for Apple sign-in. Please contact support.";
+    }
+    try { showLoginError(message); } catch (_) {}
+  });
 
 console.log("[CLIENT] Firebase functions SDK available:", typeof firebase !== "undefined");
 const functions = getFunctions(app, "us-central1");
@@ -432,6 +655,24 @@ function ffShowInviteFlow(inviteToken) {
   loadingEl.style.fontSize = "12px";
   loadingEl.style.display = "block";
 
+  // Visible toggle so the invitee can switch between "create new account" and
+  // "I already have one — let me sign in". Before this existed, the flow was
+  // stuck in create-mode until Firebase threw email-already-in-use, which no
+  // longer fires when Email Enumeration Protection is on — leading to duplicate
+  // Auth accounts for the same email. The toggle + pre-check in loadInvite()
+  // below prevent that.
+  const modeToggle = document.createElement("button");
+  modeToggle.type = "button";
+  modeToggle.style.background = "transparent";
+  modeToggle.style.border = "none";
+  modeToggle.style.color = "#1d4ed8";
+  modeToggle.style.fontSize = "12px";
+  modeToggle.style.cursor = "pointer";
+  modeToggle.style.padding = "4px 0";
+  modeToggle.style.textAlign = "center";
+  modeToggle.style.textDecoration = "underline";
+  modeToggle.textContent = "Already have an account? Sign in";
+
   function setLoading(isLoading, text) {
     loadingEl.textContent = text || "Finalizing your access...";
     loadingEl.style.display = isLoading ? "block" : "none";
@@ -456,14 +697,21 @@ function ffShowInviteFlow(inviteToken) {
       confirmInput.style.display = "none";
       primaryBtn.textContent = "Sign in";
       passwordInput.autocomplete = "current-password";
+      modeToggle.textContent = "New here? Create a password instead";
     } else {
       title.textContent = "Create Password";
       subtitle.textContent = "Create a password to finish your invite.";
       confirmInput.style.display = "block";
       primaryBtn.textContent = "Create password";
       passwordInput.autocomplete = "new-password";
+      modeToggle.textContent = "Already have an account? Sign in";
     }
   }
+
+  modeToggle.addEventListener("click", () => {
+    setError("");
+    setMode(mode === "signin" ? "create" : "signin");
+  });
 
   async function handlePrimaryAction() {
     const email = emailInput.value.trim();
@@ -541,10 +789,28 @@ function ffShowInviteFlow(inviteToken) {
       ffFinalizeInvite(inviteToken, credential.user);
     } catch (err) {
       console.error("[Invite] Auth error", err);
-      if (err?.code === "auth/email-already-in-use") {
+      // Firebase Auth with "Email Enumeration Protection" enabled no longer
+      // returns `auth/email-already-in-use` — it returns generic codes like
+      // `auth/invalid-credential` or `auth/email-exists`. We treat all of
+      // those as "account already exists" to prevent the user accidentally
+      // creating a second Auth account for the same email.
+      const code = err?.code || "";
+      const emailAlreadyUsedCodes = new Set([
+        "auth/email-already-in-use",
+        "auth/email-exists",
+        "auth/email-already-exists",
+        "auth/account-exists-with-different-credential",
+      ]);
+      // When EEP is on and the user tries to CREATE a password for an email
+      // that already has an account, the SDK may return auth/invalid-credential
+      // with no further context. In create mode we can safely interpret that
+      // as "account already exists" and switch to sign-in.
+      const looksLikeExisting = emailAlreadyUsedCodes.has(code) ||
+        (mode === "create" && code === "auth/invalid-credential");
+      if (looksLikeExisting) {
         setMode("signin");
         setLoading(false);
-        setError("Account already exists. Please sign in.");
+        setError("Account already exists. Please sign in with your existing password.");
         return;
       }
       setLoading(false);
@@ -560,6 +826,7 @@ function ffShowInviteFlow(inviteToken) {
   formEl.appendChild(passwordInput);
   formEl.appendChild(confirmInput);
   formEl.appendChild(primaryBtn);
+  formEl.appendChild(modeToggle);
   card.appendChild(formEl);
   card.appendChild(errorEl);
   card.appendChild(loadingEl);
@@ -584,7 +851,24 @@ function ffShowInviteFlow(inviteToken) {
       emailInput.value = inviteEmail;
       formEl.style.display = "flex";
       loadingEl.style.display = "none";
-      setMode("create");
+      // Best-effort check: does this email already have a Firebase Auth
+      // account? If yes, start in "Sign in" mode so the invitee doesn't
+      // accidentally create a duplicate account. Note: with Firebase Auth's
+      // Email Enumeration Protection enabled, this call returns an empty
+      // array regardless — which is fine: we then default to create-mode and
+      // the hardened catch block below catches the "invalid-credential" case
+      // that EEP uses to mask a duplicate email.
+      let existingMethods = [];
+      try {
+        if (inviteEmail) {
+          existingMethods = await fetchSignInMethodsForEmail(auth, inviteEmail);
+        }
+      } catch (_) { /* non-fatal: EEP or network */ }
+      if (Array.isArray(existingMethods) && existingMethods.length > 0) {
+        setMode("signin");
+      } else {
+        setMode("create");
+      }
     } catch (e) {
       console.error("[Invite] Load error", e);
       title.textContent = "Invite issue";
@@ -624,6 +908,136 @@ function ffAssertTrainingVideoFile(file) {
   }
 }
 
+const FF_INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;
+const FF_STORAGE_BLOCK_BYTES = 10 * 1024 * 1024 * 1024;
+const FF_FUNCTIONS_REGION = "us-central1";
+
+function ffStorageBlockQuantityForBytes(bytes) {
+  const billableBytes = Number(bytes || 0) - FF_INCLUDED_STORAGE_BYTES;
+  if (!Number.isFinite(billableBytes) || billableBytes <= 0) return 0;
+  return Math.ceil(billableBytes / FF_STORAGE_BLOCK_BYTES);
+}
+
+function ffFormatStorageGb(bytes) {
+  const gb = Number(bytes || 0) / (1024 * 1024 * 1024);
+  if (!Number.isFinite(gb) || gb <= 0) return "0GB";
+  return `${gb >= 10 ? Math.ceil(gb) : Math.ceil(gb * 10) / 10}GB`;
+}
+
+function ffFormatStorageSize(bytes) {
+  const n = Number(bytes || 0);
+  if (!Number.isFinite(n) || n <= 0) return "0MB";
+  if (n < 1024 * 1024 * 1024) return `${Math.ceil(n / (1024 * 1024))}MB`;
+  return ffFormatStorageGb(n);
+}
+
+async function ffGetStorageBillingState(salonId) {
+  const [usageSnap, billingSnap] = await Promise.all([
+    getDoc(doc(db, `salons/${salonId}/usage/storage`)).catch((e) => {
+      console.warn("[StorageBilling] usage read failed; assuming 0 bytes", e?.code, e?.message);
+      return null;
+    }),
+    getDoc(doc(db, `salons/${salonId}/billing/stripe`)),
+  ]);
+  const usageData = usageSnap?.exists?.() ? usageSnap.data() || {} : {};
+  const billingData = billingSnap.exists() ? billingSnap.data() || {} : {};
+  const paidBlockQuantity = Number(billingData.items?.storage?.quantity || 0);
+  const bytesUsed = Math.max(0, Number(usageData.bytesUsed || 0));
+  return {
+    bytesUsed: Number.isFinite(bytesUsed) ? bytesUsed : 0,
+    paidBlockQuantity: Number.isFinite(paidBlockQuantity) ? paidBlockQuantity : 0,
+  };
+}
+
+function ffShowPaidStorageConfirm({ currentBlocks, requiredBlocks, projectedBytes, includedBytes }) {
+  return new Promise((resolve) => {
+    document.getElementById("ffPaidStorageConfirm")?.remove();
+    const additionalBlocks = Math.max(requiredBlocks - currentBlocks, 0);
+    const overlay = document.createElement("div");
+    overlay.id = "ffPaidStorageConfirm";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483500;background:rgba(15,23,42,.42);display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;";
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-labelledby="ffPaidStorageConfirmTitle" style="width:min(480px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 24px 70px rgba(15,23,42,.28);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+        <div id="ffPaidStorageConfirmTitle" style="font-size:18px;font-weight:800;margin-bottom:10px;">Add paid storage?</div>
+        <div style="font-size:14px;line-height:1.55;color:#4b5563;margin-bottom:22px;">
+          Your base plan includes ${ffFormatStorageSize(includedBytes)} of storage for Media and Training together. Additional storage is billed in 10GB blocks. Each 10GB costs $10/month.
+          This upload will bring your salon storage to about ${ffFormatStorageGb(projectedBytes)}.
+          If you continue, ${additionalBlocks} additional storage ${additionalBlocks === 1 ? "block" : "blocks"} will be added to your subscription automatically.
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+          <button type="button" data-ff-paid-storage-cancel style="padding:10px 16px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:13px;font-weight:800;cursor:pointer;">Cancel</button>
+          <button type="button" data-ff-paid-storage-confirm style="padding:10px 16px;border-radius:999px;border:0;background:#7c3aed;color:#fff;font-size:13px;font-weight:800;cursor:pointer;">Confirm &amp; Add Storage</button>
+        </div>
+      </div>
+    `;
+    const finish = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) finish(false);
+    });
+    overlay.querySelector("[data-ff-paid-storage-cancel]")?.addEventListener("click", () => finish(false));
+    overlay.querySelector("[data-ff-paid-storage-confirm]")?.addEventListener("click", () => finish(true));
+    document.body.appendChild(overlay);
+    setTimeout(() => {
+      try { overlay.querySelector("[data-ff-paid-storage-confirm]")?.focus(); } catch (_) {}
+    }, 0);
+  });
+}
+
+async function ffSyncPaidStorageQuantityOrThrow(salonId, desiredStorageBlockQuantity) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FF_FUNCTIONS_REGION),
+    "syncStripeStorageQuantity"
+  );
+  await fn({ salonId, desiredStorageBlockQuantity });
+}
+
+async function ffCheckStorageUploadAllowance(salonId, uploadBytes) {
+  const fn = httpsCallable(
+    getFunctions(undefined, FF_FUNCTIONS_REGION),
+    "checkStorageUploadAllowance"
+  );
+  const res = await fn({ salonId, uploadBytes });
+  return res?.data || {};
+}
+
+async function ffEnsureStorageCapacityForUpload(salonId, file) {
+  const uploadBytesCount = Number(file?.size || 0);
+  if (!Number.isFinite(uploadBytesCount) || uploadBytesCount <= 0) return;
+  const allowance = await ffCheckStorageUploadAllowance(salonId, uploadBytesCount);
+  if (allowance.allowed) return;
+  if (!allowance.isOwner) {
+    throw new Error("This upload needs more storage. Please ask the salon owner to approve the storage upgrade.");
+  }
+  const confirmed = await ffShowPaidStorageConfirm({
+    currentBlocks: Number(allowance.paidBlockQuantity || 0),
+    requiredBlocks: Number(allowance.requiredStorageBlockQuantity || 0),
+    projectedBytes: Number(allowance.projectedBytes || uploadBytesCount),
+    includedBytes: Number(allowance.includedBytes || FF_INCLUDED_STORAGE_BYTES),
+  });
+  if (!confirmed) throw new Error("Storage upgrade was canceled.");
+  await ffSyncPaidStorageQuantityOrThrow(
+    salonId,
+    Number(allowance.requiredStorageBlockQuantity || 0)
+  );
+}
+
+async function ffRecordStorageUsageDelta(salonId, deltaBytes) {
+  const n = Number(deltaBytes || 0);
+  if (!Number.isFinite(n) || n === 0) return;
+  await setDoc(
+    doc(db, `salons/${salonId}/usage/storage`),
+    {
+      bytesUsed: increment(n),
+      updatedAt: serverTimestamp(),
+      source: "media",
+    },
+    { merge: true }
+  );
+}
+
 async function ffUploadSalonBrandLogo({ salonId, file }) {
   if (!salonId) throw new Error("Missing salonId");
   ffAssertImageFile(file);
@@ -660,9 +1074,13 @@ async function ffUploadTrainingImage({ salonId, trainingIdOrTempId, file }) {
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
   const path = `salons/${salonId}/training/images/${safeId}/${fileName}`;
   const fileRef = storageRef(storage, path);
+  await ffEnsureStorageCapacityForUpload(salonId, file);
   await uploadBytes(fileRef, file);
   const url = await getDownloadURL(fileRef);
-  return { url, path };
+  await ffRecordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+    console.warn("[StorageBilling] training image usage increment failed", e?.code, e?.message);
+  });
+  return { url, path, sizeBytes: Number(file?.size || 0) };
 }
 
 function ffVideoExtensionFromMime(file) {
@@ -683,9 +1101,13 @@ async function ffUploadTrainingVideo({ salonId, trainingIdOrTempId, file }) {
   const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 9)}.${ext}`;
   const path = `salons/${salonId}/training/videos/${safeId}/${fileName}`;
   const fileRef = storageRef(storage, path);
+  await ffEnsureStorageCapacityForUpload(salonId, file);
   await uploadBytes(fileRef, file);
   const url = await getDownloadURL(fileRef);
-  return { url, path };
+  await ffRecordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+    console.warn("[StorageBilling] training video usage increment failed", e?.code, e?.message);
+  });
+  return { url, path, sizeBytes: Number(file?.size || 0) };
 }
 
 async function ffSaveSalonLogoMeta({ salonId, url, path }) {
@@ -796,35 +1218,70 @@ function hideAuthScreens() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
 }
+
+/** Full-screen routes (outside #main-app-content). Hidden on logout; inline pointer-events must not stay "none" after login. */
+const FF_FULLSCREEN_MODULE_IDS = [
+  "inboxScreen",
+  "tasksScreen",
+  "ticketsScreen",
+  "servicesScreen",
+  "productsScreen",
+  "mediaScreen",
+  "chatScreen",
+  "trainingScreen",
+  "scheduleScreen",
+  "timeClockScreen",
+];
 
 function showLoginScreen() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   const mainApp = document.getElementById("main-app-content");
-  const inboxScreen = document.getElementById("inboxScreen");
-  const tasksScreen = document.getElementById("tasksScreen");
   if (loginSection) loginSection.style.display = "block";
   if (signupSection) signupSection.style.display = "none";
   if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  if (inboxScreen) inboxScreen.style.display = "none";
-  if (tasksScreen) tasksScreen.style.display = "none";
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
+
+  /* Full-screen modules live OUTSIDE #main-app-content; hiding only main-app leaves them visible. */
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = "none";
+    if (id === "chatScreen") el.classList.remove("chat-mobile-open");
+  });
+
+  try {
+    window.scrollTo(0, 0);
+  } catch (e) {
+    /* ignore */
+  }
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 }
 
 function showResetPasswordScreen() {
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
   const mainApp = document.getElementById("main-app-content");
 
   if (loginSection) loginSection.style.display = "none";
   if (signupSection) signupSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
   if (resetSection) resetSection.style.display = "block";
 
   // clear messages
@@ -832,9 +1289,146 @@ function showResetPasswordScreen() {
   const resetSuccess = document.getElementById("reset-success");
   if (resetError) resetError.textContent = "";
   if (resetSuccess) resetSuccess.textContent = "";
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+}
+
+// True only inside the Capacitor native app (iOS/Android). Defined in the head
+// of index.html; we wrap it defensively in case app.js loads first.
+function ffNativeApp() {
+  try {
+    return typeof window !== "undefined" && typeof window.ffIsNativeApp === "function" && window.ffIsNativeApp() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function ffIsBillingRequiredSalonData(salonData) {
+  if (typeof window !== "undefined" && window.location?.hostname === "fair-flow-staging.web.app") {
+    return false;
+  }
+  // Mobile app is login-only and shows no payment UI. Existing pilot businesses
+  // must keep working on the phone even if billing is unresolved — they fix
+  // billing on the web. So never raise the billing gate inside the native app.
+  if (ffNativeApp()) {
+    return false;
+  }
+  const status = String(salonData?.accountStatus || "").toLowerCase();
+  const reason = String(salonData?.accountStatusReason || "").toLowerCase();
+  return status === "locked" && reason === "billing_required";
+}
+
+function ffHideInitialBillingGate() {
+  const existing = document.getElementById("ff-initial-billing-gate");
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+  document.body.style.overflow = "";
+}
+
+async function ffStartInitialBillingCheckout(salonId, btn) {
+  let originalText = "";
+  if (btn) {
+    originalText = btn.textContent || "";
+    btn.disabled = true;
+    btn.textContent = "Opening checkout...";
+  }
+  try {
+    if (!salonId) throw new Error("No salon selected");
+    const startCheckout = httpsCallable(functions, "createStripeCheckoutSession");
+    const origin = window.location.origin;
+    const { data } = await startCheckout({
+      salonId,
+      items: [{ sku: "base", quantity: 1 }],
+      successUrl: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/?billing=cancel`,
+    });
+    if (data && data.url) {
+      window.location.href = data.url;
+      return;
+    }
+    throw new Error("No checkout URL returned by server");
+  } catch (err) {
+    console.warn("[BillingGate] checkout failed", err);
+    if (btn) {
+      btn.disabled = false;
+      if (originalText) btn.textContent = originalText;
+    }
+    const errorEl = document.getElementById("ff-initial-billing-gate-error");
+    if (errorEl) {
+      errorEl.textContent = `Could not start checkout: ${err?.message || err}`;
+      errorEl.style.display = "block";
+    }
+  }
+}
+
+function ffShowInitialBillingRequiredGate({ salonId }) {
+  ffHideInitialBillingGate();
+  hideAuthScreens();
+
+  const mainApp = document.getElementById("main-app-content");
+  if (mainApp) mainApp.style.display = "none";
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+
+  document.body.classList.remove("ff-logged-out", "ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+
+  const gate = document.createElement("div");
+  gate.id = "ff-initial-billing-gate";
+  gate.setAttribute("role", "dialog");
+  gate.setAttribute("aria-modal", "true");
+  gate.style.cssText = "position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.92);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;";
+
+  const card = document.createElement("div");
+  card.style.cssText = "width:min(440px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;";
+
+  const title = document.createElement("h2");
+  title.textContent = "Complete Billing Setup";
+  title.style.cssText = "margin:0 0 10px;font-size:24px;line-height:1.2;font-weight:800;";
+  card.appendChild(title);
+
+  const msg = document.createElement("p");
+  msg.textContent = "Add a payment method to start your 14-day trial and continue using Fair Flow.";
+  msg.style.cssText = "margin:0 0 22px;color:#4b5563;font-size:15px;line-height:1.5;";
+  card.appendChild(msg);
+
+  const checkoutBtn = document.createElement("button");
+  checkoutBtn.type = "button";
+  checkoutBtn.textContent = "Complete Billing Setup";
+  checkoutBtn.style.cssText = "width:100%;border:0;border-radius:999px;background:#7c3aed;color:#fff;font-size:16px;font-weight:700;padding:13px 18px;cursor:pointer;";
+  checkoutBtn.addEventListener("click", () => ffStartInitialBillingCheckout(salonId, checkoutBtn));
+  card.appendChild(checkoutBtn);
+
+  const logoutBtn = document.createElement("button");
+  logoutBtn.type = "button";
+  logoutBtn.textContent = "Log Out";
+  logoutBtn.style.cssText = "width:100%;margin-top:10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:14px;font-weight:700;padding:11px 18px;cursor:pointer;";
+  logoutBtn.addEventListener("click", async () => {
+    logoutBtn.disabled = true;
+    logoutBtn.textContent = "Logging out...";
+    try {
+      await signOut(auth);
+      window.location.reload();
+    } catch (err) {
+      console.warn("[BillingGate] logout failed", err);
+      logoutBtn.disabled = false;
+      logoutBtn.textContent = "Log Out";
+    }
+  });
+  card.appendChild(logoutBtn);
+
+  const errorEl = document.createElement("div");
+  errorEl.id = "ff-initial-billing-gate-error";
+  errorEl.style.cssText = "display:none;margin-top:14px;padding:10px 12px;border-radius:12px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.4;text-align:left;";
+  card.appendChild(errorEl);
+
+  gate.appendChild(card);
+  document.body.appendChild(gate);
+  document.body.style.overflow = "hidden";
 }
 
 function showMainAppForRole(role) {
+  ffHideInitialBillingGate();
   const mainApp = document.getElementById("main-app-content");
   const ownerView = document.getElementById("owner-view");
   const receptionView = document.getElementById("reception-view");
@@ -846,11 +1440,20 @@ function showMainAppForRole(role) {
     return;
   }
 
+  document.body.classList.remove("ff-logged-out");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+
   // hide auth
   hideAuthScreens();
 
   // show wrapper
   mainApp.style.display = "block";
+
+  /* Logout used to set pointer-events:none on these nodes; without reset, toolbars work but scroll/content areas stay dead. */
+  FF_FULLSCREEN_MODULE_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.pointerEvents = "";
+  });
 
   // hide all role views first
   if (ownerView) ownerView.style.display = "none";
@@ -895,6 +1498,9 @@ function switchToLogin() {
 }
 
 function switchToSignup() {
+  // Sign-up does not exist in the mobile app (login-only). Defensive no-op in
+  // case any hidden control is still reachable on native.
+  if (ffNativeApp()) return;
   const loginSection = document.getElementById("login-section");
   const signupSection = document.getElementById("signup-section");
   if (loginSection) loginSection.style.display = "none";
@@ -902,24 +1508,531 @@ function switchToSignup() {
 }
 
 // =====================
+// Complete setup (self-healing for authed users without a users/{uid} doc)
+// =====================
+function showCompleteSetupError(msg) {
+  const errEl = document.getElementById("complete-setup-error");
+  if (errEl) errEl.textContent = msg || "";
+}
+
+function ffFormatNameFromEmail(email) {
+  const local = String(email || "").split("@")[0] || "";
+  const cleaned = local
+    .replace(/[+].*$/, "")
+    .replace(/[._-]+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  return cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function ffDeriveOwnerName(user, emailFallback) {
+  const displayName = String(user?.displayName || "").trim();
+  if (displayName) return displayName;
+  const email = String(user?.email || emailFallback || "").trim();
+  return ffFormatNameFromEmail(email) || "Owner";
+}
+
+// Login-only mobile app: a signed-in account with no FairFlow business/profile
+// must NOT be offered business creation. Show an informational dead-end instead
+// (text only — no website link or payment action, per App Store / Play rules).
+function ffShowNativeNoBusinessScreen(user) {
+  try {
+    if (typeof hideAuthScreens === "function") hideAuthScreens();
+  } catch (_) {}
+
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+
+  const existing = document.getElementById("ff-native-no-business");
+  if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+
+  const overlay = document.createElement("div");
+  overlay.id = "ff-native-no-business";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.style.cssText = "position:fixed;inset:0;z-index:2147483600;background:rgba(15,23,42,.95);display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;";
+
+  const card = document.createElement("div");
+  card.style.cssText = "width:min(440px,100%);background:#fff;border-radius:22px;padding:28px;box-shadow:0 24px 80px rgba(0,0,0,.35);text-align:center;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;";
+
+  const title = document.createElement("h2");
+  title.textContent = "No business found";
+  title.style.cssText = "margin:0 0 10px;font-size:22px;line-height:1.2;font-weight:800;";
+  card.appendChild(title);
+
+  const msg = document.createElement("p");
+  msg.textContent = "This app is for existing FairFlow businesses and invited staff only. Please create your business account in the FairFlow web app.";
+  msg.style.cssText = "margin:0 0 22px;color:#4b5563;font-size:15px;line-height:1.55;";
+  card.appendChild(msg);
+
+  const signOutBtn = document.createElement("button");
+  signOutBtn.type = "button";
+  signOutBtn.textContent = "Use a different account";
+  signOutBtn.style.cssText = "width:100%;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:15px;font-weight:700;padding:12px 18px;cursor:pointer;";
+  signOutBtn.addEventListener("click", async () => {
+    signOutBtn.disabled = true;
+    signOutBtn.textContent = "Signing out...";
+    try {
+      window.__ff_completeSetupUser = null;
+      await signOut(auth);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (typeof showLoginScreen === "function") showLoginScreen();
+    } catch (e) {
+      console.warn("[NativeNoBusiness] signOut failed", e);
+      signOutBtn.disabled = false;
+      signOutBtn.textContent = "Use a different account";
+    }
+  });
+  card.appendChild(signOutBtn);
+
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+}
+
+function showCompleteSetupScreen(user) {
+  // Mobile app is login-only: there is no business creation / "Complete setup".
+  // A signed-in user with no profile gets the informational dead-end instead.
+  if (ffNativeApp()) {
+    ffShowNativeNoBusinessScreen(user);
+    return;
+  }
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "block";
+
+  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.add("ff-logged-out");
+
+  // Pre-fill what we can from the auth user
+  const emailDisplay = document.getElementById("complete-setup-email-display");
+  if (emailDisplay) {
+    emailDisplay.textContent = user?.email ? `Signed in as ${user.email}` : "";
+  }
+
+  showCompleteSetupError("");
+
+  // Store the user we're completing setup for
+  window.__ff_completeSetupUser = user || null;
+  if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
+}
+
+async function handleCompleteSetup() {
+  // Business creation is web-only. Never run it from the mobile app.
+  if (ffNativeApp()) {
+    ffShowNativeNoBusinessScreen(window.__ff_completeSetupUser || auth.currentUser);
+    return;
+  }
+  showCompleteSetupError("");
+
+  const user = window.__ff_completeSetupUser || auth.currentUser;
+  if (!user) {
+    showCompleteSetupError("Session expired. Please log in again.");
+    showLoginScreen();
+    return;
+  }
+
+  const businessNameEl = document.getElementById("complete-setup-business-name");
+  const btnEl = document.getElementById("complete-setup-button");
+
+  const businessName = businessNameEl?.value.trim();
+  const ownerName = ffDeriveOwnerName(user);
+
+  if (!businessName) {
+    showCompleteSetupError("Please enter your business name.");
+    return;
+  }
+
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.style.opacity = "0.6";
+    btnEl.textContent = "Creating your account...";
+  }
+
+  try {
+    // Double-check the users doc still doesn't exist (race condition protection)
+    const userDocRef = doc(db, "users", user.uid);
+    const existing = await getDoc(userDocRef);
+    if (existing.exists()) {
+      console.log("[CompleteSetup] users doc appeared since last check, proceeding to load view");
+      await loadUserRoleAndShowView(user);
+      return;
+    }
+
+    // Create salon (business) document
+    const generatedPin = generateDefaultAdminPin();
+    const salonsRef = collection(db, "salons");
+    const salonDocRef = await addDoc(salonsRef, {
+      name: businessName,
+      ownerUid: user.uid,
+      adminPin: generatedPin,
+      createdAt: serverTimestamp(),
+      plan: "trial",
+      status: "active",
+      accountStatus: "locked",
+      accountStatusReason: "billing_required",
+      accountStatusUpdatedAt: serverTimestamp()
+    });
+
+    console.log("[CompleteSetup] Salon doc created:", salonDocRef.id);
+
+    // Create user profile document with role "owner"
+    await setDoc(userDocRef, {
+      role: "owner",
+      salonId: salonDocRef.id,
+      name: ownerName,
+      email: user.email || "",
+      createdAt: serverTimestamp()
+    });
+
+    console.log("[CompleteSetup] User profile created:", user.uid);
+
+    // Bootstrap the owner's staff + members docs so she appears in her own
+    // Staff list with full permissions from the very first load.
+    try {
+      await ensureOwnerStaffAndMemberDocs({
+        user,
+        salonId: salonDocRef.id,
+        ownerName
+      });
+    } catch (bootstrapErr) {
+      console.warn("[CompleteSetup] Owner staff bootstrap failed:", bootstrapErr);
+    }
+
+    // Clear stored user and proceed
+    window.__ff_completeSetupUser = null;
+    if (businessNameEl) businessNameEl.value = "";
+
+    await loadUserRoleAndShowView(user);
+  } catch (err) {
+    console.error("[CompleteSetup] Failed", err);
+    showCompleteSetupError(err?.message || "Setup failed. Please try again.");
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.style.opacity = "";
+      btnEl.textContent = "Complete setup";
+    }
+  }
+}
+
+async function handleCompleteSetupSignOut() {
+  try {
+    window.__ff_completeSetupUser = null;
+    await signOut(auth);
+  } catch (e) {
+    console.warn("[CompleteSetup] signOut failed", e);
+  }
+  showLoginScreen();
+}
+
+// =====================
+// Shared: create the owner's staff + members documents.
+// Called by both the initial sign-up flow (handleOwnerSignup) and the
+// self-heal "Complete your setup" flow (handleCompleteSetup), so a fresh
+// owner always appears in their own Staff list with full permissions.
+// =====================
+function _ffOwnerDefaultPermissions() {
+  // Grant every known permission key to the owner. The owner also has a runtime
+  // bypass (ffCurrentUserSalonOwnerPermissionBypass) but setting explicit
+  // permissions keeps UI renders that read `staff.permissions` (Queue, Apps panel,
+  // Staff Members modal, etc.) consistent with the owner bypass.
+  return {
+    queue_view: true,
+    queue_manage: true,
+    queue_locked_view: false,
+    tickets_view: true,
+    tickets_manage: true,
+    tasks_view: true,
+    tasks_use: true,
+    tasks_manage: true,
+    tasks_reset: true,
+    chat_view: true,
+    chat_manage: true,
+    chat_free_text: true,
+    inbox_view: true,
+    inbox_manage: true,
+    inbox_send: true,
+    media_view: true,
+    media_manage: true,
+    inventory_view: true,
+    inventory_manage: true,
+    schedule_view: true,
+    schedule_manage: true,
+    training_view: true,
+    training_manage: true,
+    settings_view: true,
+    settings_manage: true,
+    staff_view: true,
+    staff_manage: true,
+    history_view: true,
+    history_export: true,
+    history_clear: true
+  };
+}
+
+async function ffCreateOrUpdateUserMembership({ user, salonId, staffId, role, name, email, status = "active" }) {
+  if (!user || !user.uid || !salonId || !staffId) return null;
+  const membershipRef = doc(db, "users", user.uid, "memberships", salonId);
+  const payload = {
+    salonId,
+    staffId,
+    role: role || "technician",
+    status,
+    email: email || user.email || "",
+    name: name || user.displayName || user.email || "",
+    updatedAt: serverTimestamp()
+  };
+  await setDoc(membershipRef, payload, { merge: true });
+  return membershipRef.path;
+}
+
+function ffNormalizeOwnerEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+async function ffFindExistingOwnerStaff({ user, salonId, normalizedEmail }) {
+  const emailKey = ffNormalizeOwnerEmail(normalizedEmail);
+  const uid = user && user.uid ? String(user.uid).trim() : "";
+  console.log("[OwnerMerge] checking owner profile", { salonId, email: emailKey, uid });
+  if (!salonId || (!emailKey && !uid)) return null;
+  const candidates = [];
+  const addCandidate = (staffId, staffRef, data, source) => {
+    if (!staffId || candidates.some(c => c.staffId === staffId)) return;
+    candidates.push({ staffId, staffRef, data: data || {}, source });
+  };
+
+  try {
+    if (typeof window !== "undefined" && typeof window.findExistingStaffByEmail === "function" && emailKey) {
+      const localMatch = window.findExistingStaffByEmail(emailKey, salonId);
+      const localId = localMatch && (localMatch.id || localMatch.staffId) ? String(localMatch.id || localMatch.staffId).trim() : "";
+      if (localId) {
+        const localRef = doc(db, `salons/${salonId}/staff`, localId);
+        const localSnap = await getDoc(localRef);
+        if (localSnap.exists()) {
+          addCandidate(localId, localRef, localSnap.data() || {}, "StaffMerge");
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[OwnerMerge] StaffMerge helper lookup failed", e?.code, e?.message);
+  }
+
+  try {
+    const snap = await getDocs(collection(db, `salons/${salonId}/staff`));
+    for (const d of snap.docs) {
+      const row = d.data() || {};
+      const rowEmail = ffNormalizeOwnerEmail(row.email);
+      const rowEmailLower = ffNormalizeOwnerEmail(row.emailLower);
+      const linkedIds = [
+        row.userId,
+        row.uid,
+        row.authUid,
+        row.memberId,
+        row.firebaseUid,
+        row.firebaseAuthUid
+      ].map(value => value == null ? "" : String(value).trim()).filter(Boolean);
+
+      let source = "";
+      if (emailKey && ((rowEmail && rowEmail === emailKey) || (rowEmailLower && rowEmailLower === emailKey))) {
+        source = "email";
+      }
+      if (!source && uid && linkedIds.indexOf(uid) !== -1) {
+        source = "uid";
+      }
+      if (!source && emailKey && linkedIds.some(value => ffNormalizeOwnerEmail(value) === emailKey)) {
+        source = "linkedEmail";
+      }
+      if (source) {
+        addCandidate(d.id, doc(db, `salons/${salonId}/staff`, d.id), row, source);
+      }
+    }
+  } catch (e) {
+    console.warn("[OwnerMerge] staff scan failed", e?.code, e?.message);
+  }
+
+  if (!candidates.length) return null;
+
+  const scoreCandidate = (candidate) => {
+    const row = candidate.data || {};
+    const hasUid = [row.uid, row.authUid, row.userId, row.memberId, row.firebaseUid, row.firebaseAuthUid]
+      .some(value => uid && String(value || "").trim() === uid);
+    const hasEmail = !!(ffNormalizeOwnerEmail(row.email) || ffNormalizeOwnerEmail(row.emailLower));
+    let score = 0;
+    if (hasUid) score += 100;
+    if (hasEmail) score += 10;
+    if (candidate.source === "StaffMerge") score += 1;
+    return score;
+  };
+  candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+  const winner = candidates[0];
+  winner.duplicates = candidates.slice(1);
+  console.log("[OwnerMerge] found existing staff", {
+    staffId: winner.staffId,
+    source: winner.source,
+    duplicateCount: winner.duplicates.length
+  });
+  return winner;
+}
+
+function ffBuildOwnerStaffPayload({ user, salonId, staffId, ownerName, existingStaff }) {
+  const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
+  const safeEmail = ffNormalizeOwnerEmail(user.email);
+  const emailLower = ffNormalizeOwnerEmail(safeEmail);
+  const existing = existingStaff && typeof existingStaff === "object" ? existingStaff : {};
+  return {
+    id: staffId,
+    uid: user.uid,
+    userId: existing.userId || user.uid,
+    authUid: existing.authUid || user.uid,
+    memberId: existing.memberId || user.uid,
+    salonId,
+    accountId: existing.accountId || salonId,
+    name: safeName,
+    email: safeEmail,
+    emailLower,
+    role: "owner",
+    isAdmin: true,
+    isManager: false,
+    isArchived: false,
+    invited: true,
+    inviteStatus: "accepted",
+    permissions: { ...(existing.permissions || {}), ..._ffOwnerDefaultPermissions() },
+    technicianTypes: Array.isArray(existing.technicianTypes) ? existing.technicianTypes : [],
+    allowedLocationIds: Array.isArray(existing.allowedLocationIds) ? existing.allowedLocationIds : [],
+    primaryLocationId: existing.primaryLocationId || null,
+    createdAt: existing.createdAt || Date.now(),
+    updatedAt: serverTimestamp(),
+    updatedAtMs: Date.now(),
+    _syncedAt: serverTimestamp()
+  };
+}
+
+async function ensureOwnerStaffAndMemberDocs({ user, salonId, ownerName }) {
+  if (!user || !salonId) return null;
+  const safeName = String(ownerName || user.displayName || user.email || "Owner").trim() || "Owner";
+  const safeEmail = ffNormalizeOwnerEmail(user.email);
+  const emailLower = ffNormalizeOwnerEmail(safeEmail);
+
+  const existingOwnerStaff = await ffFindExistingOwnerStaff({ user, salonId, normalizedEmail: emailLower });
+  const staffId = existingOwnerStaff?.staffId || `staff_${user.uid}`;
+  const staffRef = doc(db, `salons/${salonId}/staff`, staffId);
+  const memberRef = doc(db, `salons/${salonId}/members`, user.uid);
+  const userRef = doc(db, "users", user.uid);
+
+  const staffPayload = ffBuildOwnerStaffPayload({
+    user,
+    salonId,
+    staffId,
+    ownerName: safeName,
+    existingStaff: existingOwnerStaff?.data || null
+  });
+
+  const memberPayload = {
+    name: safeName,
+    email: safeEmail,
+    emailLower,
+    role: "owner",
+    staffId
+  };
+
+  try {
+    await setDoc(staffRef, staffPayload, { merge: true });
+    if (existingOwnerStaff) {
+      console.log("[OwnerMerge] merged owner into existing staff", { staffId });
+      const duplicates = Array.isArray(existingOwnerStaff.duplicates) ? existingOwnerStaff.duplicates : [];
+      for (const duplicate of duplicates) {
+        if (!duplicate || duplicate.staffId === staffId || !duplicate.staffRef) continue;
+        try {
+          await deleteDoc(duplicate.staffRef);
+          console.log("[OwnerMerge] removed duplicate staff", { staffId: duplicate.staffId, keptStaffId: staffId });
+        } catch (deleteErr) {
+          console.warn("[OwnerMerge] duplicate staff delete failed", duplicate.staffId, deleteErr?.code, deleteErr?.message);
+        }
+      }
+    } else {
+      console.log("[OwnerMerge] creating new owner staff", { staffId });
+    }
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] staff write failed", e?.code, e?.message);
+  }
+  try {
+    await setDoc(memberRef, memberPayload, { merge: true });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] member write failed", e?.code, e?.message);
+  }
+  try {
+    await setDoc(userRef, { staffId }, { merge: true });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] user.staffId write failed", e?.code, e?.message);
+  }
+  try {
+    await ffCreateOrUpdateUserMembership({
+      user,
+      salonId,
+      staffId,
+      role: "owner",
+      name: safeName,
+      email: safeEmail,
+      status: "active"
+    });
+  } catch (e) {
+    console.warn("[OwnerStaffBootstrap] membership write failed", e?.code, e?.message);
+  }
+
+  if (typeof window !== "undefined") {
+    window.__ff_authedStaffId = staffId;
+    try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+    ffNotifyAuthedStaffIdChanged();
+  }
+
+  return staffId;
+}
+
+// =====================
 // Owner signup flow
 // =====================
 async function handleOwnerSignup() {
+  // Owner signup + new business creation is web-only. Never run it on mobile.
+  if (ffNativeApp()) return;
   showSignupError("");
 
   const businessNameEl = document.getElementById("signup-business-name");
-  const ownerNameEl = document.getElementById("signup-owner-name");
   const emailEl = document.getElementById("signup-email");
   const passEl = document.getElementById("signup-password");
   const pass2El = document.getElementById("signup-password-confirm");
 
   const businessName = businessNameEl?.value.trim();
-  const ownerName = ownerNameEl?.value.trim();
-  const email = emailEl?.value.trim();
+  const email = ffNormalizeOwnerEmail(emailEl?.value);
   const password = passEl?.value;
   const passwordConfirm = pass2El?.value;
 
-  if (!businessName || !ownerName || !email || !password || !passwordConfirm) {
+  if (!businessName || !email || !password || !passwordConfirm) {
     showSignupError("Please fill all fields.");
     return;
   }
@@ -934,8 +2047,11 @@ async function handleOwnerSignup() {
 
   try {
     console.log("[SignUp] Creating auth user for:", email);
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = true;
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     const user = cred.user;
+    const ownerName = ffDeriveOwnerName(user, email);
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = { uid: user.uid };
 
     console.log("[SignUp] Auth user created:", user.uid);
 
@@ -948,7 +2064,10 @@ async function handleOwnerSignup() {
       adminPin: generatedPin,
       createdAt: serverTimestamp(),
       plan: "trial",
-      status: "active"
+      status: "active",
+      accountStatus: "locked",
+      accountStatusReason: "billing_required",
+      accountStatusUpdatedAt: serverTimestamp()
     });
 
     console.log("[SignUp] Salon doc created:", salonDocRef.id);
@@ -965,11 +2084,25 @@ async function handleOwnerSignup() {
 
     console.log("[SignUp] User profile created:", user.uid);
 
+    // Bootstrap the owner's staff + members docs so she appears in her own
+    // Staff list with full permissions from the very first load.
+    try {
+      await ensureOwnerStaffAndMemberDocs({
+        user,
+        salonId: salonDocRef.id,
+        ownerName
+      });
+    } catch (bootstrapErr) {
+      console.warn("[SignUp] Owner staff bootstrap failed:", bootstrapErr);
+    }
+
     // After sign up, automatically navigate to owner view
     await loadUserRoleAndShowView(user);
   } catch (err) {
     console.error("[SignUp] Failed to create owner", err);
     showSignupError(err.message || "Sign up failed.");
+  } finally {
+    if (typeof window !== "undefined") window.__ff_owner_signup_in_progress = false;
   }
 }
 
@@ -998,7 +2131,10 @@ async function handleEmailLogin() {
     // Clear any previous error
     showLoginError("");
 
-    await loadUserRoleAndShowView(user);
+    // The onAuthStateChanged listener will call loadUserRoleAndShowView once.
+    // Calling it again here used to run the same Firestore queries twice in
+    // parallel (memberships + user doc), which contributed to the freeze that
+    // triggered Chrome's "page not responding" dialog on multi-membership login.
   } catch (err) {
     console.error("[Login] Error", err);
     
@@ -1041,7 +2177,9 @@ async function handleGoogleLogin() {
     // Clear any previous error
     showLoginError("");
 
-    await loadUserRoleAndShowView(user);
+    // The onAuthStateChanged listener will call loadUserRoleAndShowView. See
+    // the matching comment in handleEmailLogin for why we removed the direct
+    // call here.
   } catch (err) {
     console.error("[Login] Google error", err);
     
@@ -1064,23 +2202,706 @@ async function handleGoogleLogin() {
 }
 
 // =====================
+// Apple login flow
+// =====================
+// Random URL-safe string used as the Apple Sign-In nonce. Apple receives the
+// SHA-256 hash of this value; Firebase needs the original (raw) value back.
+function ffGenerateAppleNonce(length) {
+  const charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._";
+  const size = length || 32;
+  const random = new Uint8Array(size);
+  (window.crypto || window.msCrypto).getRandomValues(random);
+  let result = "";
+  for (let i = 0; i < size; i++) {
+    result += charset[random[i] % charset.length];
+  }
+  return result;
+}
+
+async function handleAppleLogin() {
+  showLoginError("");
+  const provider = new OAuthProvider("apple.com");
+  provider.addScope("email");
+  provider.addScope("name");
+
+  // On the native iOS app (Capacitor) the Firebase web popup opens an external
+  // browser and never returns into the app. There we use the native Apple
+  // Sign-In sheet and exchange the identity token for a Firebase credential.
+  const cap = window.Capacitor;
+  const isNativeIOS = !!(cap
+    && typeof cap.isNativePlatform === "function"
+    && cap.isNativePlatform()
+    && typeof cap.getPlatform === "function"
+    && cap.getPlatform() === "ios");
+
+
+  try {
+    let cred;
+    if (isNativeIOS) {
+      const SignInWithApple = cap.Plugins && cap.Plugins.SignInWithApple;
+      if (!SignInWithApple || typeof SignInWithApple.authorize !== "function") {
+        throw new Error("apple-native-plugin-missing");
+      }
+      const rawNonce = ffGenerateAppleNonce(32);
+      const hashedNonce = await ffSha256Hex(rawNonce);
+      console.log("[Login] Apple native authorize starting");
+      const result = await SignInWithApple.authorize({
+        scopes: "email name",
+        nonce: hashedNonce,
+      });
+      const identityToken = result && result.response && result.response.identityToken;
+      if (!identityToken) {
+        throw new Error("apple-native-no-identity-token");
+      }
+      const credential = provider.credential({ idToken: identityToken, rawNonce });
+      cred = await signInWithCredential(auth, credential);
+    } else {
+      // Web/browser flow. Reverted from signInWithRedirect back to
+      // signInWithPopup. With redirect, getRedirectResult returned NULL after
+      // returning from Apple (the auth session did not persist across the
+      // web.app <-> firebaseapp.com domain boundary), so the user bounced back
+      // to the login screen even though the Firebase Auth user was created.
+      // Popup keeps the whole flow in one window so onAuthStateChanged fires
+      // with the user in this same session.
+      cred = await signInWithPopup(auth, provider);
+    }
+    const user = cred.user;
+    console.log("[Login] Apple signed in:", user.uid);
+
+    // Clear any previous error
+    showLoginError("");
+
+    // The onAuthStateChanged listener will call loadUserRoleAndShowView, the
+    // same way Google and email logins do. No direct navigation call here.
+  } catch (err) {
+    console.error("[Login] Apple error", err);
+
+    // Native Apple sheet cancellation (ASAuthorizationError.canceled = 1001).
+    // Treat like a user-cancelled popup: do not show a scary error.
+    const nativeCancel = err && (err.code === "1001"
+      || /\b1001\b/.test(String(err.code || ""))
+      || /cancel/i.test(String(err.message || "")));
+    if (nativeCancel) {
+      showLoginError("");
+      return;
+    }
+
+    // Map Firebase error codes to user-friendly messages for Apple login
+    let message = "Apple sign-in failed. Please try again.";
+
+    if (err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request") {
+      message = "Sign-in was cancelled. Please try again.";
+    } else if (err.code === "auth/popup-blocked") {
+      message = "Popup was blocked. Please allow popups and try again.";
+    } else if (err.code === "auth/network-request-failed") {
+      message = "Network error. Please check your connection and try again.";
+    } else if (err.code === "auth/account-exists-with-different-credential") {
+      message = "An account already exists with this email. Please use a different sign-in method.";
+    } else if (err.code === "auth/operation-not-allowed") {
+      message = "Apple sign-in is not enabled yet. Please try another method.";
+    }
+
+    // Show only our custom message, not the raw Firebase error
+    showLoginError(message);
+  }
+}
+
+/**
+ * Resolve which salons/{salonId}/staff/{staffId} belongs to this login.
+ * users.staffId is sometimes missing; or points at a row whose uid/email does not match (stale id).
+ */
+async function ffResolveStaffDocumentIdForLogin(dbConn, salonId, uid, email, staffIdFromUsers) {
+  const sid = salonId && String(salonId).trim();
+  const u = uid && String(uid).trim();
+  if (!sid || !u) {
+    return { staffId: null, staffRef: null, resolution: "missing_salon_or_uid" };
+  }
+  const emailLower = (email || "").trim().toLowerCase();
+
+  function rowLinkedUid(row) {
+    if (!row || typeof row !== "object") return "";
+    return String(row.uid || row.firebaseUid || row.firebaseAuthUid || row.authUid || "").trim();
+  }
+
+  function rowMatchesAuth(row) {
+    const linked = rowLinkedUid(row);
+    if (!linked) return true;
+    return linked === u;
+  }
+
+  const guess = staffIdFromUsers != null && String(staffIdFromUsers).trim() !== ""
+    ? String(staffIdFromUsers).trim()
+    : "";
+
+  if (guess) {
+    try {
+      const sRef = doc(dbConn, "salons", sid, "staff", guess);
+      const sSnap = await getDoc(sRef);
+      if (sSnap.exists()) {
+        const sd = sSnap.data() || {};
+        if (rowMatchesAuth(sd)) {
+          return { staffId: guess, staffRef: sRef, resolution: "users.staffId" };
+        }
+        console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId row does not match auth uid", {
+          usersStaffId: guess,
+          staffDocUid: rowLinkedUid(sd) || "(empty)",
+          authUid: u,
+        });
+      } else {
+        console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId doc missing", { usersStaffId: guess });
+      }
+    } catch (e) {
+      console.warn("[Auth] ffResolveStaffDocumentIdForLogin: users.staffId read failed", e);
+    }
+  }
+
+  try {
+    const mSnap = await getDoc(doc(dbConn, "salons", sid, "members", u));
+    if (mSnap.exists()) {
+      const midRaw = (mSnap.data() || {}).staffId;
+      const midStr = midRaw != null && String(midRaw).trim() !== "" ? String(midRaw).trim() : "";
+      if (midStr) {
+        const sRef = doc(dbConn, "salons", sid, "staff", midStr);
+        const sSnap = await getDoc(sRef);
+        if (sSnap.exists()) {
+          const sd = sSnap.data() || {};
+          if (rowMatchesAuth(sd)) {
+            return { staffId: midStr, staffRef: sRef, resolution: "members.staffId" };
+          }
+          console.warn("[Auth] ffResolveStaffDocumentIdForLogin: members.staffId row uid mismatch", {
+            membersStaffId: midStr,
+            staffDocUid: rowLinkedUid(sd) || "(empty)",
+            authUid: u,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Auth] ffResolveStaffDocumentIdForLogin: members read failed", e);
+  }
+
+  try {
+    const colSnap = await getDocs(collection(dbConn, "salons", sid, "staff"));
+    for (const d of colSnap.docs) {
+      const row = d.data() || {};
+      const fid = row.firebaseUid || row.firebaseAuthUid || row.authUid || row.uid || "";
+      if (fid && String(fid) === u) {
+        return {
+          staffId: d.id,
+          staffRef: doc(dbConn, "salons", sid, "staff", d.id),
+          resolution: "scan.staffDocUid",
+        };
+      }
+    }
+    if (emailLower) {
+      for (const d of colSnap.docs) {
+        const row = d.data() || {};
+        const em = String(row.email || "").trim().toLowerCase();
+        if (em && em === emailLower) {
+          return {
+            staffId: d.id,
+            staffRef: doc(dbConn, "salons", sid, "staff", d.id),
+            resolution: "scan.staffDocEmail",
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[Auth] ffResolveStaffDocumentIdForLogin: staff collection scan failed", e);
+  }
+
+  return { staffId: null, staffRef: null, resolution: "unresolved" };
+}
+
+/**
+ * Writes salons/.../staff/... lastActiveAt. Retries use fresh users/{uid} read (heals post-invite race).
+ */
+async function ffPingStaffLastActiveAt(user, userDocDataOptional) {
+  if (!user || !user.uid) return;
+  try {
+    let data = userDocDataOptional;
+    if (!data) {
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (!snap.exists()) return;
+      data = snap.data();
+    }
+    const salonId = data.salonId || null;
+    if (!salonId) return;
+    const staffIdFromUser =
+      data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null;
+    const emailForLogs = (user.email || data.email || "").trim() || null;
+    const resolved = await ffResolveStaffDocumentIdForLogin(
+      db,
+      salonId,
+      user.uid,
+      emailForLogs || "",
+      staffIdFromUser
+    );
+    const tag = userDocDataOptional ? "lastActiveAt" : "lastActiveAt (retry)";
+    console.log(`[Auth] ${tag}: resolve`, {
+      authUid: user.uid,
+      email: emailForLogs,
+      usersDocStaffId: staffIdFromUser,
+      resolvedStaffId: resolved.staffId,
+      resolution: resolved.resolution,
+      staffRefPath: resolved.staffRef ? resolved.staffRef.path : null,
+    });
+    if (resolved.staffId && resolved.staffRef && resolved.resolution !== "unresolved") {
+      // Only fill missing users.staffId — never replace a non-empty users.staffId with scan result
+      // (wrong row breaks Queue permissions + staff UI via ffResolveCurrentStaffRowFromFfStaffV1).
+      if (
+        (staffIdFromUser == null || String(staffIdFromUser).trim() === "") &&
+        resolved.staffId &&
+        typeof window !== "undefined"
+      ) {
+        window.__ff_authedStaffId = resolved.staffId;
+        try {
+          localStorage.setItem("ff_authedStaffId_v1", resolved.staffId);
+        } catch (e) {}
+        ffNotifyAuthedStaffIdChanged();
+        console.log(`[Auth] ${tag}: __ff_authedStaffId set (users.staffId was empty)`, {
+          resolvedStaffId: resolved.staffId,
+          resolution: resolved.resolution,
+        });
+      }
+      await updateDoc(resolved.staffRef, { lastActiveAt: serverTimestamp() });
+      console.log(`[Auth] ${tag}: updateDoc OK`, resolved.staffRef.path);
+    } else {
+      console.warn(`[Auth] ${tag}: no staff doc resolved — skip update`, {
+        authUid: user.uid,
+        email: emailForLogs,
+        salonId,
+        usersDocStaffId: staffIdFromUser,
+        resolution: resolved.resolution,
+      });
+    }
+  } catch (e) {
+    console.error("[Auth] ffPingStaffLastActiveAt FAILED", {
+      code: e?.code,
+      message: e?.message,
+      authUid: user?.uid,
+    });
+  }
+}
+
+async function ffLoadActiveMembershipsForUser(user) {
+  if (!user || !user.uid) return [];
+  try {
+    const snap = await getDocs(collection(db, "users", user.uid, "memberships"));
+    const rows = await Promise.all(snap.docs.map(async (d) => {
+      const data = d.data() || {};
+      const salonId = String(data.salonId || d.id || "").trim();
+      let salonName = String(data.salonName || "").trim();
+      if (salonId && !salonName) {
+        try {
+          const salonSnap = await getDoc(doc(db, "salons", salonId));
+          if (salonSnap.exists()) salonName = String(salonSnap.data()?.name || "").trim();
+        } catch (_) {}
+      }
+      return { id: d.id, ...data, salonId, salonName: salonName || salonId };
+    }));
+    return rows.filter((m) => {
+      const status = String(m.status || "active").trim().toLowerCase();
+      return m.salonId && status === "active";
+    });
+  } catch (err) {
+    console.warn("[Membership] Failed loading memberships; falling back to legacy users.salonId", err);
+    return [];
+  }
+}
+
+/**
+ * Firestore salon doc ids are exact strings. Staging data often has transposed
+ * casing or dropped characters vs the real salons/{id} (e.g. Gc vs GC, IV5 vs IVi5).
+ */
+function ffGenerateSalonIdTypoRepairs(seed) {
+  const s = String(seed || "").trim();
+  const out = [];
+  const add = (x) => {
+    const t = String(x || "").trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  add(s);
+  if (!s) return out;
+  if (s.includes("Gcbigo")) add(s.split("Gcbigo").join("GCbigo"));
+  if (s.includes("gcbigo")) add(s.split("gcbigo").join("GCbigo"));
+  if (s.includes("IV5vb")) add(s.split("IV5vb").join("IVi5vb"));
+  let both = s;
+  if (both.includes("Gcbigo")) both = both.split("Gcbigo").join("GCbigo");
+  if (both.includes("gcbigo")) both = both.split("gcbigo").join("GCbigo");
+  if (both.includes("IV5vb")) both = both.split("IV5vb").join("IVi5vb");
+  add(both);
+  return out;
+}
+
+/**
+ * If users.salonId or ff_active_salon_id is a typo / stale id, there is no salons/{id}
+ * document → staff store stays empty, queue permissions break, staffNotifications
+ * queries hit permission-denied. Prefer membership salonIds, with typo hygiene.
+ */
+async function ffEnsureSalonDocumentExists(candidateSalonId, user, membershipsCache = null) {
+  if (!user || !user.uid) return String(candidateSalonId || "").trim() || null;
+
+  const persistSalon = (id) => {
+    const t = String(id || "").trim();
+    if (!t) return;
+    try {
+      sessionStorage.setItem("ff_active_salon_id", t);
+      localStorage.setItem("ff_active_salon_id", t);
+    } catch (_) {}
+  };
+
+  async function firstExistingFromSeed(raw) {
+    const seeds = ffGenerateSalonIdTypoRepairs(raw);
+    let sawNetworkError = false;
+    for (let s = 0; s < seeds.length; s++) {
+      const cand = seeds[s];
+      try {
+        const salonSnap = await getDoc(doc(db, "salons", cand));
+        if (salonSnap.exists()) return { found: cand };
+      } catch (e) {
+        sawNetworkError = true;
+        console.warn("[Auth] ffEnsureSalonDocumentExists: salon read failed", { cand, code: e?.code });
+      }
+    }
+    if (sawNetworkError) return { bail: String(raw || "").trim() || null };
+    return { miss: true };
+  }
+
+  const initial = String(candidateSalonId || "").trim();
+
+  if (initial) {
+    const r0 = await firstExistingFromSeed(initial);
+    if (r0.found) {
+      if (r0.found !== initial) {
+        console.warn("[Auth] Repaired salonId to existing salons/ doc", {
+          before: initial,
+          after: r0.found,
+          authUid: user.uid,
+        });
+      }
+      persistSalon(r0.found);
+      return r0.found;
+    }
+    if (r0.bail) return r0.bail;
+  }
+
+  const memberships = Array.isArray(membershipsCache)
+    ? membershipsCache
+    : await ffLoadActiveMembershipsForUser(user);
+
+  for (let i = 0; i < memberships.length; i++) {
+    const raw = String(memberships[i].salonId || "").trim();
+    if (!raw) continue;
+    const r1 = await firstExistingFromSeed(raw);
+    if (r1.found) {
+      if (!initial || r1.found !== initial) {
+        console.warn("[Auth] Repaired salonId via membership + existence / typo check", {
+          sessionCandidate: initial || null,
+          membershipSeed: raw,
+          after: r1.found,
+          authUid: user.uid,
+        });
+      }
+      persistSalon(r1.found);
+      return r1.found;
+    }
+    if (r1.bail) return r1.bail;
+  }
+
+  if (initial) {
+    console.warn("[Auth] ffEnsureSalonDocumentExists: no valid salon — check users.salonId and memberships", {
+      candidate: initial,
+      authUid: user.uid,
+      membershipCount: memberships.length,
+    });
+  }
+  return null;
+}
+
+function ffApplyActiveMembership(membership, legacyUserData) {
+  const m = membership || {};
+  const salonId = String(m.salonId || legacyUserData?.salonId || "").trim();
+  const staffId = String(m.staffId || legacyUserData?.staffId || "").trim();
+  const role = String(m.role || legacyUserData?.role || "owner").trim();
+  currentSalonId = salonId || null;
+  if (typeof window !== "undefined") {
+    window.__ff_waiting_for_salon_choice = false;
+    window.currentSalonId = currentSalonId;
+    window.__ff_user_role = role.toLowerCase();
+    window.ff_is_admin_cached = ["owner", "admin"].includes(role.toLowerCase());
+    if (staffId) {
+      window.__ff_authedStaffId = staffId;
+      try { localStorage.setItem("ff_authedStaffId_v1", staffId); } catch (_) {}
+      ffNotifyAuthedStaffIdChanged();
+    }
+    if (salonId) {
+      try {
+        sessionStorage.setItem("ff_active_salon_id", salonId);
+        localStorage.setItem("ff_active_salon_id", salonId);
+      } catch (_) {}
+    }
+  }
+  // Restore the header that ffShowChooseSalonScreen hid. Module screens stay
+  // hidden because the regular login flow (showMainAppContent + Queue gate) will
+  // show whichever screen is appropriate next.
+  try {
+    const chooseRoot = document.getElementById("choose-salon-section");
+    if (chooseRoot) chooseRoot.style.display = "none";
+    const headers = document.querySelectorAll(".header, header.header, #appHeader");
+    headers.forEach((h) => { try { h.style.display = ""; } catch (_) {} });
+  } catch (_) {}
+  // Auth state did not change after Choose Salon, so module auth listeners did
+  // not re-fire. Manually nudge the cloud modules whose initial tryConnect was
+  // skipped by the __ff_waiting_for_salon_choice guard.
+  try {
+    if (typeof window !== "undefined") {
+      if (typeof window.queueCloudReconnect === "function") window.queueCloudReconnect();
+      if (typeof window.tasksCloudReconnect === "function") window.tasksCloudReconnect();
+      if (typeof window.settingsCloudReconnect === "function") window.settingsCloudReconnect();
+      // Chat badge / toast notifications are subscribed via the chat module's
+      // own onAuthStateChanged. When the wait guard caused that to bail early
+      // we kick it off explicitly here using the chosen salonId.
+      if (salonId && typeof user !== "undefined") {
+        try {
+          import("/chat.js?v=20260505_chat_flow_desktop_mobile")
+            .then((m) => {
+              try {
+                if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
+                if (m && typeof m.subscribeToChatToastNotifications === "function") m.subscribeToChatToastNotifications(window.ffAuth?.currentUser?.uid, salonId);
+              } catch (_) {}
+            })
+            .catch(() => {});
+        } catch (_) {}
+      }
+    }
+  } catch (e) { console.warn("[Auth] Module reconnect after Choose Salon failed", e); }
+  return { salonId, staffId, role };
+}
+
+function ffEnsureChooseSalonScreen() {
+  let root = document.getElementById("choose-salon-section");
+  if (root) return root;
+  // Inject Fair Flow brand styles for the screen the first time we render it.
+  if (!document.getElementById("ffChooseSalonStyles")) {
+    const style = document.createElement("style");
+    style.id = "ffChooseSalonStyles";
+    style.textContent = `
+      #choose-salon-section {
+        position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+        padding: 24px; z-index: 100200; overflow-y: auto;
+      }
+      #choose-salon-section .ffcs-card {
+        width: 100%; max-width: 460px; background: #fff; border-radius: 24px;
+        padding: 36px 28px 28px; box-shadow: 0 20px 60px rgba(124,58,237,0.18), 0 4px 12px rgba(0,0,0,0.04);
+        border: 1px solid rgba(124,58,237,0.08); animation: ffcsFadeIn .35s ease-out;
+      }
+      @keyframes ffcsFadeIn {
+        from { opacity: 0; transform: translateY(8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      #choose-salon-section .ffcs-logo {
+        display: flex; align-items: center; justify-content: center;
+        width: 56px; height: 56px; margin: 0 auto 18px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #9d68b9 0%, #7c3aed 100%);
+        box-shadow: 0 8px 20px rgba(124,58,237,0.35);
+      }
+      #choose-salon-section .ffcs-logo svg { width: 28px; height: 28px; color: #fff; }
+      #choose-salon-section .ffcs-title {
+        margin: 0 0 6px; font-size: 24px; font-weight: 700; text-align: center;
+        background: linear-gradient(90deg, #9d68b9, #7c3aed);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+        letter-spacing: -0.01em;
+      }
+      #choose-salon-section .ffcs-subtitle {
+        margin: 0 0 24px; text-align: center; color: #6b7280; font-size: 14px;
+      }
+      #choose-salon-section .ffcs-list { display: flex; flex-direction: column; gap: 12px; }
+      #choose-salon-section .ffcs-card-btn {
+        width: 100%; padding: 16px 18px; border: 2px solid #f1ecf6; border-radius: 14px;
+        background: #fff; cursor: pointer; text-align: left; font: inherit; color: inherit;
+        display: flex; align-items: center; gap: 14px;
+        transition: border-color .15s ease, transform .12s ease, box-shadow .15s ease, background .15s ease;
+      }
+      #choose-salon-section .ffcs-card-btn:hover {
+        border-color: #9d68b9;
+        background: #faf5ff;
+        box-shadow: 0 6px 18px rgba(124,58,237,0.18);
+        transform: translateY(-1px);
+      }
+      #choose-salon-section .ffcs-card-btn:active { transform: translateY(0); }
+      #choose-salon-section .ffcs-avatar {
+        flex-shrink: 0; width: 44px; height: 44px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        background: linear-gradient(135deg, #9d68b9 0%, #7c3aed 100%);
+        color: #fff; font-weight: 700; font-size: 17px; letter-spacing: .02em;
+      }
+      #choose-salon-section .ffcs-meta { flex: 1; min-width: 0; }
+      #choose-salon-section .ffcs-name {
+        display: block; font-size: 15px; font-weight: 700; color: #111827;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #choose-salon-section .ffcs-role {
+        display: block; margin-top: 3px; font-size: 12px; color: #6b7280;
+        text-transform: capitalize;
+      }
+      #choose-salon-section .ffcs-open {
+        flex-shrink: 0; padding: 8px 16px; border-radius: 999px;
+        background: linear-gradient(90deg, #9d68b9, #7c3aed); color: #fff;
+        font-size: 12px; font-weight: 700; letter-spacing: .02em;
+        box-shadow: 0 4px 12px rgba(124,58,237,0.25);
+      }
+      #choose-salon-section .ffcs-divider {
+        margin: 20px 0 14px; height: 1px;
+        background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
+      }
+      #choose-salon-section .ffcs-signout {
+        display: block; margin: 0 auto; border: 0; background: transparent;
+        color: #9ca3af; font-size: 13px; cursor: pointer; padding: 6px 12px;
+        border-radius: 8px; transition: color .15s ease, background .15s ease;
+      }
+      #choose-salon-section .ffcs-signout:hover { color: #7c3aed; background: #faf5ff; }
+    `;
+    document.head.appendChild(style);
+  }
+  root = document.createElement("section");
+  root.id = "choose-salon-section";
+  document.body.appendChild(root);
+  return root;
+}
+
+function ffShowChooseSalonScreen(user, userData, memberships) {
+  const root = ffEnsureChooseSalonScreen();
+  const loginSection = document.getElementById("login-section");
+  const signupSection = document.getElementById("signup-section");
+  const resetSection = document.getElementById("reset-password-section");
+  const completeSetupSection = document.getElementById("complete-setup-section");
+  const mainApp = document.getElementById("main-app-content");
+  if (loginSection) loginSection.style.display = "none";
+  if (signupSection) signupSection.style.display = "none";
+  if (resetSection) resetSection.style.display = "none";
+  if (completeSetupSection) completeSetupSection.style.display = "none";
+  if (mainApp) mainApp.style.display = "none";
+  // Hide all module screens + queue chrome so the Choose Salon screen owns the viewport
+  // and module subscription errors that fired pre-selection don't paint placeholder UI behind it.
+  const idsToHide = [
+    "owner-view","joinBar","queueViewBlocked","tasksScreen","inboxScreen","chatScreen",
+    "mediaScreen","ticketsScreen","servicesScreen","productsScreen","trainingScreen","scheduleScreen","timeClockScreen",
+    "inventoryScreen","userProfileScreen","myProfileScreen","manageQueueScreen",
+    "pointsAppScreen","dashboardScreen","queueAnalyticsScreen","ticketsAnalyticsScreen",
+    "timeAnalyticsScreen","tasksAnalyticsScreen","appsPanel","userAvatarDropdown"
+  ];
+  idsToHide.forEach((id) => { try { const el = document.getElementById(id); if (el) el.style.display = "none"; } catch (_) {} });
+  try {
+    const headers = document.querySelectorAll(".header, header.header, #appHeader");
+    headers.forEach((h) => { try { h.style.display = "none"; } catch (_) {} });
+  } catch (_) {}
+  root.style.display = "flex";
+  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+  const initialOf = (name) => {
+    const t = String(name || "").trim();
+    if (!t) return "S";
+    const ch = t.charAt(0).toUpperCase();
+    return /[A-Z0-9]/.test(ch) ? ch : "S";
+  };
+  root.innerHTML = `
+    <div class="ffcs-card">
+      <div class="ffcs-logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21V5a2 2 0 0 1 2-2h9l5 5v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <path d="M14 3v5h5"/>
+          <path d="M8 13h8M8 17h5"/>
+        </svg>
+      </div>
+      <h2 class="ffcs-title">Choose Salon</h2>
+      <p class="ffcs-subtitle">Select which business you want to open.</p>
+      <div id="chooseSalonList" class="ffcs-list"></div>
+      <div class="ffcs-divider"></div>
+      <button id="chooseSalonSignOutBtn" type="button" class="ffcs-signout">Sign out</button>
+    </div>
+  `;
+  const list = root.querySelector("#chooseSalonList");
+  memberships.forEach((m) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "ffcs-card-btn";
+    const role = String(m.role || "staff").trim();
+    const name = String(m.salonName || m.salonId || "Salon");
+    card.innerHTML = `
+      <span class="ffcs-avatar">${escapeHtml(initialOf(name))}</span>
+      <span class="ffcs-meta">
+        <span class="ffcs-name">${escapeHtml(name)}</span>
+        <span class="ffcs-role">${escapeHtml(role)}</span>
+      </span>
+      <span class="ffcs-open">Open</span>
+    `;
+    card.addEventListener("click", async () => {
+      root.style.display = "none";
+      await loadUserRoleAndShowView(user, { selectedMembership: m, legacyUserData: userData });
+    });
+    list.appendChild(card);
+  });
+  const signOutBtn = root.querySelector("#chooseSalonSignOutBtn");
+  if (signOutBtn) {
+    signOutBtn.addEventListener("click", async () => {
+      try { await signOut(auth); } catch (_) {}
+      // Hard-refresh — see comment in handleLogout. Without this, the next
+      // login would re-fire 29 module auth listeners simultaneously and freeze.
+      try { window.location.replace("/"); } catch (_) {
+        try { window.location.href = "/"; } catch (__) {}
+      }
+    });
+  }
+}
+
+// =====================
 // Load user role and show view
 // =====================
-async function loadUserRoleAndShowView(user) {
+async function loadUserRoleAndShowView(user, options = {}) {
   try {
     const userDocRef = doc(db, "users", user.uid);
-    const snap = await getDoc(userDocRef);
+    let snap = await getDoc(userDocRef);
 
     if (!snap.exists()) {
-      console.warn("[Auth] No user profile found for", user.uid);
-      alert("No user profile found. Please contact your business owner.");
-      // stay on login screen
-      showLoginScreen();
+      const signupState = typeof window !== "undefined" ? window.__ff_owner_signup_in_progress : null;
+      const signupUid = signupState && typeof signupState === "object" ? String(signupState.uid || "") : "";
+      const signupIsCurrentUser = signupState === true || !signupUid || signupUid === user.uid;
+      if (signupState && signupIsCurrentUser) {
+        for (let i = 0; i < 12 && !snap.exists(); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          snap = await getDoc(userDocRef);
+        }
+      }
+    }
+
+    if (!snap.exists()) {
+      console.warn("[Auth] No user profile found for", user.uid, "- showing Complete Setup screen");
+      // Self-heal: the Firebase Auth user exists but there's no Firestore profile
+      // (happens after Google sign-in on a fresh account, or a partial signup).
+      // Let the user finish creating their business + profile inline, no Firebase console needed.
+      showCompleteSetupScreen(user);
       return;
     }
 
     const data = snap.data();
-    const role = data.role || "owner";
+    let selectedMembership = options.selectedMembership || null;
+    let membershipsLoaded = null;
+    if (!selectedMembership) {
+      membershipsLoaded = await ffLoadActiveMembershipsForUser(user);
+      if (membershipsLoaded.length > 1) {
+        if (typeof window !== "undefined") window.__ff_waiting_for_salon_choice = true;
+        ffShowChooseSalonScreen(user, data, membershipsLoaded);
+        return;
+      } else if (membershipsLoaded.length === 1) {
+        selectedMembership = membershipsLoaded[0];
+      }
+    }
+    const activeSession = ffApplyActiveMembership(selectedMembership, data);
+    const role = activeSession.role || data.role || "owner";
     console.log("[Auth] Loaded user role:", role, "for uid:", user.uid);
 
     // Set admin cache immediately so Chat gear & Tasks Settings work without delay
@@ -1091,24 +2912,120 @@ async function loadUserRoleAndShowView(user) {
     
     try {
       localStorage.removeItem("ff_user_avatar_v1");
+      // Also nuke the photoURL / avatarURL / updatedAt keys BEFORE starting the
+      // listener. Otherwise the UI paints the previous user's photo during the
+      // brief window between "signed in" and "listener's first snapshot".
+      // The listener will immediately re-populate these from the current user's
+      // users/{uid} doc once onSnapshot fires.
+      localStorage.removeItem("ff_user_photo_url_v1");
+      localStorage.removeItem("ff_user_avatar_url_v1");
+      localStorage.removeItem("ff_user_avatar_updated_at_v1");
+      window.__ffCurrentUserAvatarMeta = null;
+      window.__ff_avatarMeta = null;
+      window.__ffAvatarDirectoryCache = null;
     } catch (e) {
       console.warn("[Auth] Error clearing legacy avatar cache:", e);
     }
 
     ffStartAvatarListener(user.uid);
 
-    // Store salonId for later use
-    currentSalonId = data.salonId || null;
-    // Update global reference
-    if (typeof window !== 'undefined') {
-      window.currentSalonId = currentSalonId;
+    // Store salonId for later use. Phase 3 uses active membership when present,
+    // otherwise falls back to legacy users/{uid}.salonId.
+    currentSalonId = activeSession.salonId || data.salonId || null;
+    if (typeof window !== 'undefined') window.currentSalonId = currentSalonId;
+
+    if (user && currentSalonId) {
+      const membershipsForRepair =
+        membershipsLoaded || (await ffLoadActiveMembershipsForUser(user));
+      const repaired = await ffEnsureSalonDocumentExists(currentSalonId, user, membershipsForRepair);
+      if (repaired) {
+        if (repaired !== currentSalonId) {
+          console.warn("[Auth] Session salonId repaired after membership check", {
+            before: currentSalonId,
+            after: repaired,
+            authUid: user.uid,
+          });
+          currentSalonId = repaired;
+          if (typeof window !== "undefined") window.currentSalonId = repaired;
+        }
+        try {
+          if (typeof window.ffStaffForceLoad === "function") await window.ffStaffForceLoad();
+        } catch (_) {}
+      } else {
+        console.error("[Auth] No Firestore salons/{id} for this account — fix users.salonId or memberships", {
+          authUid: user.uid,
+          attemptedSalonId: currentSalonId,
+        });
+      }
+    }
+
+    // One-time: persist salon owner uid on settings/main (immutable thereafter via rules).
+    if (currentSalonId && user && role === 'owner') {
+      try {
+        const mainRef = doc(db, 'salons', currentSalonId, 'settings', 'main');
+        const mainSnap = await getDoc(mainRef);
+        const existingOu =
+          mainSnap.exists() && mainSnap.data().ownerUid
+            ? String(mainSnap.data().ownerUid).trim()
+            : '';
+        if (!existingOu) {
+          await setDoc(mainRef, { ownerUid: user.uid, updatedAt: serverTimestamp() }, { merge: true });
+        }
+        if (typeof window !== 'undefined') {
+          window.__ff_salon_owner_uid = existingOu || user.uid;
+        }
+      } catch (ouErr) {
+        console.warn('[Auth] ownerUid bootstrap on settings/main failed', ouErr);
+      }
+    }
+
+    // Retroactive bootstrap + cleanup: ensure the owner has matching staff + members docs
+    // and merge/remove duplicate owner/admin staff rows on each owner login.
+    if (currentSalonId && user && role === 'owner') {
+      try {
+        await ensureOwnerStaffAndMemberDocs({
+          user,
+          salonId: currentSalonId,
+          ownerName: data.name || user.displayName || ''
+        });
+      } catch (bootErr) {
+        console.warn('[Auth] Owner staff retroactive bootstrap failed', bootErr);
+      }
     }
 
     // Set ff_authedStaffId from user doc so avatar upload works for managers/technicians (not just PIN flow)
-    const staffIdFromUser = data.staffId || null;
-    if (staffIdFromUser && typeof window !== 'undefined') {
+    const staffIdFromUser =
+      activeSession.staffId ||
+      (data.staffId != null && String(data.staffId).trim() !== "" ? String(data.staffId).trim() : null);
+    if (staffIdFromUser && typeof window !== "undefined") {
       window.__ff_authedStaffId = staffIdFromUser;
-      try { localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser); } catch (e) {}
+      try {
+        localStorage.setItem("ff_authedStaffId_v1", staffIdFromUser);
+      } catch (e) {}
+      ffNotifyAuthedStaffIdChanged();
+    }
+
+    // Staff status (UI): lastActiveAt on correct staff doc (retry after ~2.5s heals post-invite / slow users doc)
+    if (currentSalonId && user && user.uid) {
+      await ffPingStaffLastActiveAt(user, data);
+      const roleLower = (role || "").toLowerCase();
+      if (roleLower !== "owner") {
+        const uidRetry = user.uid;
+        setTimeout(() => {
+          try {
+            const u = auth.currentUser;
+            if (u && u.uid === uidRetry) {
+              ffPingStaffLastActiveAt(u, null).catch(() => {});
+            }
+          } catch (_) {}
+        }, 2500);
+      }
+    } else {
+      console.log("[Auth] lastActiveAt: skipped (missing salonId or uid)", {
+        authUid: user && user.uid,
+        currentSalonId,
+        usersDocStaffId: staffIdFromUser,
+      });
     }
 
     // If owner, load salon document and update admin PIN
@@ -1138,7 +3055,33 @@ async function loadUserRoleAndShowView(user) {
       }
     }
 
+    if (currentSalonId) {
+      try {
+        const billingGateSnap = await getDoc(doc(db, "salons", currentSalonId));
+        const billingGateData = billingGateSnap.exists() ? billingGateSnap.data() || {} : {};
+        if (ffIsBillingRequiredSalonData(billingGateData)) {
+          console.warn("[BillingGate] Blocking app access until billing setup is complete", {
+            salonId: currentSalonId,
+          });
+          ffShowInitialBillingRequiredGate({ salonId: currentSalonId });
+          return;
+        }
+      } catch (billingGateErr) {
+        console.warn("[BillingGate] Could not read salon billing status; allowing app load", billingGateErr);
+      }
+    }
+
     showMainAppForRole(role);
+
+    setTimeout(() => {
+      try {
+        if (typeof window.ffTryConsumeInboxUploadDeepLink === "function") {
+          window.ffTryConsumeInboxUploadDeepLink();
+        }
+      } catch (e) {
+        console.warn("[app] inbox upload deep link", e);
+      }
+    }, 400);
     
     // Reinitialize all buttons after view is shown
     if (role === "owner") {
@@ -1161,6 +3104,9 @@ async function loadUserRoleAndShowView(user) {
               joinBtn.style.pointerEvents = 'auto';
               joinBtn.disabled = false;
               joinBtn.removeAttribute('disabled');
+              if (typeof window.ffApplyQueueReadOnlyMode === "function") {
+                window.ffApplyQueueReadOnlyMode();
+              }
               console.log("[Auth] JOIN button reinitialized after owner view shown");
             }
           }
@@ -1185,7 +3131,7 @@ async function loadUserRoleAndShowView(user) {
     // Managers need this too: reminders are written to Inbox by whoever is signed in (rules allow isManager).
     if (["owner", "admin", "manager"].includes(rl) && currentSalonId) {
       function ffRunBirthdayChatRemindersOnce() {
-        import("./birthday-reminders.js?v=20260412_inbox_explain")
+        import("./birthday-reminders.js?v=20260413_sender_recipient")
           .then((m) => {
             if (typeof m.runBirthdayChatRemindersOnce === "function") {
               return m.runBirthdayChatRemindersOnce();
@@ -1193,6 +3139,14 @@ async function loadUserRoleAndShowView(user) {
             return undefined;
           })
           .catch((e) => console.warn("[Birthday reminders]", e));
+        import("./staff-doc-expiry-inbox.js?v=20260409_created_by_subject")
+          .then((m) => {
+            if (typeof m.runStaffDocExpiryInboxRemindersOnce === "function") {
+              return m.runStaffDocExpiryInboxRemindersOnce();
+            }
+            return undefined;
+          })
+          .catch((e) => console.warn("[Staff doc expiry Inbox]", e));
       }
       window.ffRunBirthdayChatRemindersSoon = ffRunBirthdayChatRemindersOnce;
       if (window.__ffBirthdayInterval) {
@@ -1221,6 +3175,17 @@ async function loadUserRoleAndShowView(user) {
     }
   } catch (err) {
     console.error("[Auth] Failed to load user profile:", err);
+    // If the Complete Setup modal is already on-screen (fresh Google sign-in / partial
+    // signup self-heal), don't annoy the user with a "Failed to load user profile" alert
+    // and don't kick them back to the login screen — they're mid-setup. Just log and exit.
+    const completeSetupEl = document.getElementById('complete-setup-section');
+    const isCompleteSetupVisible = !!(
+      completeSetupEl && window.getComputedStyle(completeSetupEl).display !== 'none'
+    );
+    if (isCompleteSetupVisible || window.__ff_completeSetupUser) {
+      console.warn("[Auth] profile load errored while Complete Setup is active — suppressing alert");
+      return;
+    }
     alert("Failed to load user profile.");
     showLoginScreen();
   }
@@ -1230,7 +3195,7 @@ async function loadUserRoleAndShowView(user) {
 if (typeof window !== "undefined") {
   window.ffDebugBirthdayReminders = async () => {
     try {
-      const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+      const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
       if (typeof m.ffDebugBirthdayReminders === "function") {
         return await m.ffDebugBirthdayReminders();
       }
@@ -1240,12 +3205,12 @@ if (typeof window !== "undefined") {
     }
   };
   window.ffSendTestBirthdayInbox = async () => {
-    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
     if (typeof m.sendBirthdayInboxTestPing !== "function") throw new Error("sendBirthdayInboxTestPing missing");
     return m.sendBirthdayInboxTestPing();
   };
   window.ffClearBirthdaySentFlags = async () => {
-    const m = await import("./birthday-reminders.js?v=20260412_inbox_explain");
+    const m = await import("./birthday-reminders.js?v=20260413_sender_recipient");
     if (typeof m.clearBirthdayReminderSentFlagsForSalon !== "function") {
       throw new Error("clearBirthdayReminderSentFlagsForSalon missing");
     }
@@ -1264,12 +3229,14 @@ onAuthStateChanged(auth, async (user) => {
   if (!user) {
     console.log("[Auth] No user, showing login screen");
     if (typeof window !== "undefined") {
+      window.__ff_salon_owner_uid = "";
       window.ff_is_admin_cached = null;
       if (window.__ffBirthdayInterval) {
         clearInterval(window.__ffBirthdayInterval);
         window.__ffBirthdayInterval = null;
       }
       window.ffRunBirthdayChatRemindersSoon = null;
+      window.__ffInboxUploadConsumed = false;
     }
     try {
       if (window.__ff_avatarUnsub) {
@@ -1284,13 +3251,23 @@ onAuthStateChanged(auth, async (user) => {
     return;
   }
   console.log("[Auth] User is signed in, loading role");
+  // If the early auth listener already detected multi-memberships and surfaced
+  // the Choose Salon screen, skip duplicating the same Firestore round-trips here.
+  // loadUserRoleAndShowView will run again (with selectedMembership) when the
+  // user clicks one of the salon cards.
+  if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+    console.log("[Auth] Skipping loadUserRoleAndShowView while Choose Salon is open");
+    return;
+  }
   await loadUserRoleAndShowView(user);
 });
 
 // =====================
 // Wire UI after DOM is ready
 // =====================
-window.addEventListener("DOMContentLoaded", () => {
+function ffWireUiAfterDomReady() {
+  if (window.__ffUiAfterDomReadyBound) return;
+  window.__ffUiAfterDomReadyBound = true;
   console.log("[UI] DOMContentLoaded – wiring buttons");
 
   let inviteToken = new URLSearchParams(window.location.search).get("invite");
@@ -1344,6 +3321,7 @@ window.addEventListener("DOMContentLoaded", () => {
     // Auth buttons
     const loginBtn = document.getElementById("login-button");
     const googleBtn = document.getElementById("google-login-button");
+    const appleBtn = document.getElementById("apple-login-button");
     const signupBtn = document.getElementById("signup-button");
 
     if (loginBtn) {
@@ -1396,6 +3374,15 @@ window.addEventListener("DOMContentLoaded", () => {
       console.warn("[UI] Missing element: google-login-button");
     }
 
+    if (appleBtn) {
+      appleBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleAppleLogin();
+      });
+    } else {
+      console.warn("[UI] Missing element: apple-login-button");
+    }
+
     if (signupBtn) {
       signupBtn.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1404,6 +3391,35 @@ window.addEventListener("DOMContentLoaded", () => {
     } else {
       console.warn("[UI] Missing element: signup-button");
     }
+
+    const completeSetupBtn = document.getElementById("complete-setup-button");
+    if (completeSetupBtn) {
+      completeSetupBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleCompleteSetup();
+      });
+    }
+
+    const completeSetupSignOutBtn = document.getElementById("complete-setup-signout-button");
+    if (completeSetupSignOutBtn) {
+      completeSetupSignOutBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleCompleteSetupSignOut();
+      });
+    }
+
+    // Submit on Enter inside complete-setup fields
+    ["complete-setup-business-name"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            handleCompleteSetup();
+          }
+        });
+      }
+    });
   } catch (e) {
     console.error("[UI] initAuthButtons failed", e);
   }
@@ -1445,20 +3461,22 @@ window.addEventListener("DOMContentLoaded", () => {
         }
 
         try {
-          console.log("[Forgot Password] Sending password reset email to", email);
-          await sendPasswordResetEmail(auth, email);
-          
+          console.log("[Forgot Password] Queueing branded password reset request for", email);
+          await addDoc(collection(db, "passwordResetRequests"), {
+            email: email.toLowerCase(),
+            createdAt: serverTimestamp(),
+          });
+
           if (passwordResetMessage) {
             passwordResetMessage.style.color = "green";
-            passwordResetMessage.textContent = "Password reset email sent. Please check your inbox.";
+            passwordResetMessage.textContent =
+              "If an account exists for that email, a password reset link is on its way. Please check your inbox.";
           }
         } catch (err) {
-          console.error("[Forgot Password] Failed to send reset email", err);
-          let message = "Could not send reset email. Please check the email address.";
-          
-          if (err.code === "auth/user-not-found") {
-            message = "No account found with this email address.";
-          } else if (err.code === "auth/invalid-email") {
+          console.error("[Forgot Password] Failed to queue reset request", err);
+          let message = "Could not request a reset email. Please check the email address and try again.";
+
+          if (err && (err.code === "permission-denied" || err.code === "auth/invalid-email")) {
             message = "Invalid email address.";
           }
 
@@ -1558,8 +3576,57 @@ window.addEventListener("DOMContentLoaded", () => {
           tasksScreen.style.display = 'none';
           tasksScreen.style.pointerEvents = 'none';
         }
+
+        // Clear tenant-scoped localStorage caches so data from this salon can never
+        // leak into the next account that logs in on the same browser.
+        try {
+          const tenantKeys = [
+            "ff_staff_v1",
+            "ff_users_v1",
+            "ff_queues_v1",
+            "ff_queue_settings_v1",
+            "ff_active_salon_id",
+            "ff_tasks_catalog_v1",
+            "ff_tasks_active_deleted_v1",
+            "ff_tasks_alert_windows_v1",
+            "ff_authedStaffId_v1",
+            "ff_user_avatar_v1",
+            // Avatar URL + timestamp. Missing these was causing the previous
+            // tenant's profile photo (e.g. NEO DAY SPA logo) to appear on the
+            // next owner's My Profile screen because ffGetCurrentUserAvatarMeta
+            // falls back to localStorage when no live meta is set.
+            "ff_user_photo_url_v1",
+            "ff_user_avatar_url_v1",
+            "ff_user_avatar_updated_at_v1",
+            "ff_active_location_id",
+            "ff_onboarding_completed_v1",
+          ];
+          tenantKeys.forEach((k) => {
+            try { localStorage.removeItem(k); } catch (_) {}
+          });
+          try { sessionStorage.removeItem("ff_active_salon_id"); } catch (_) {}
+          window.__ff_authedStaffId = null;
+          window.__ff_active_location_id = null;
+          // Reset in-memory avatar state so the stale photo doesn't survive
+          // until the next page refresh.
+          try { window.__ffCurrentUserAvatarMeta = null; } catch (_) {}
+          try { window.__ff_avatarMeta = null; } catch (_) {}
+          try { window.__ffAvatarDirectoryCache = null; } catch (_) {}
+        } catch (clearErr) {
+          console.warn("[Auth] Error clearing tenant caches on logout:", clearErr);
+        }
+
         await signOut(auth);
-        showLoginScreen();
+        // Hard-refresh after signOut so all 29 cloud modules unload cleanly.
+        // Keeping them attached caused subsequent logins to freeze the page —
+        // every module's onAuthStateChanged listener would fire simultaneously
+        // on the next sign-in and saturate Chrome's main thread, the same
+        // pattern that triggered "This page isn't responding" before the safe
+        // loader gating fix. A reload guarantees a clean process per session.
+        try { window.location.replace("/"); } catch (_) {
+          try { window.location.href = "/"; } catch (__) {}
+        }
+        return;
       } catch (err) {
         console.error("[Auth] Logout failed:", err);
         alert("Logout failed, please try again.");
@@ -1840,7 +3907,13 @@ window.addEventListener("DOMContentLoaded", () => {
   } catch (e) {
     console.error('[AUTO_RESET][QUEUE] Error initializing:', e);
   }
-});
+}
+
+if (document.readyState === "loading") {
+  window.addEventListener("DOMContentLoaded", ffWireUiAfterDomReady, { once: true });
+} else {
+  ffWireUiAfterDomReady();
+}
 
 // Initialize Tasks screen buttons function (can be called when Tasks screen opens)
 function initializeTasksScreenButtons() {
@@ -2057,7 +4130,7 @@ function enforceHistoryRetention() {
     const MAX_DAYS = 90;
     const MAX_ENTRIES = 10000;
 
-    const raw = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+    const raw = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
     if (!Array.isArray(raw)) return;
 
     const now = Date.now();
@@ -2077,6 +4150,20 @@ function enforceHistoryRetention() {
     }
 
     localStorage.setItem('ffv24_log', JSON.stringify(filtered));
+
+    // If retention actually removed entries, the next cloud write will carry a
+    // SHORTER history log. The server-side stale-overwrite guard blocks history
+    // from shrinking unless an explicit intent is declared, so flag this as a
+    // legitimate prune (cleared on the next tick once the write consumes it).
+    // Erring toward declaring intent avoids ever falsely blocking a real write.
+    if (filtered.length < raw.length && typeof window !== 'undefined') {
+      window.__ff_queue_cloud_write_reason = 'retention-prune';
+      setTimeout(function () {
+        if (window.__ff_queue_cloud_write_reason === 'retention-prune') {
+          window.__ff_queue_cloud_write_reason = '';
+        }
+      }, 0);
+    }
   } catch (err) {
     console.error('[HISTORY RETENTION] failed', err);
   }
@@ -2088,11 +4175,11 @@ window.enforceHistoryRetention = enforceHistoryRetention;
 // Helper function to load users from localStorage (prefer ffv24_users, else ff_users_v1)
 function ffGetUsers() {
   try {
-    const ffv24Users = JSON.parse(localStorage.getItem('ffv24_users') || '[]');
+    const ffv24Users = ffSafeParseJSON(localStorage.getItem('ffv24_users'), []);
     if (Array.isArray(ffv24Users) && ffv24Users.length > 0) {
       return ffv24Users;
     }
-    const ffUsers = JSON.parse(localStorage.getItem('ff_users_v1') || '[]');
+    const ffUsers = ffSafeParseJSON(localStorage.getItem('ff_users_v1'), []);
     return Array.isArray(ffUsers) ? ffUsers : [];
   } catch (e) {
     console.error('[ffGetUsers] Error loading users:', e);
@@ -2123,7 +4210,7 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
     if (typeof addHistoryEntry === 'function') {
       addHistoryEntry(entry.action, entry.role, entry.performedBy, entry.worker, entry.source);
       // Extend the last entry with task-specific fields
-      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       if (logArr.length > 0) {
         const lastEntry = logArr[logArr.length - 1];
         lastEntry.taskId = entry.taskId;
@@ -2137,7 +4224,7 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
       enforceHistoryRetention();
     } else {
       // Fallback: write directly to ffv24_log
-      const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
+      const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       const historyEntry = {
         date: now.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }),
         time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
@@ -2165,6 +4252,9 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
 
 // Safely move a task into the Pending list (tab-specific storage)
 function moveTaskToPending(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MOVE TO PENDING] START`, 'color:blue;font-weight:bold', { taskId, workerName });
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
     
@@ -2175,7 +4265,7 @@ function moveTaskToPending(taskId, workerName) {
         
         console.log(`[MOVE TO PENDING] Checking tab: ${tab}, activeKey: ${activeKey}, pendingKey: ${pendingKey}`);
         
-        const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+        const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
         console.log(`[MOVE TO PENDING] Active tasks count before: ${activeTasks.length}`);
         
         const taskIndex = activeTasks.findIndex(t => {
@@ -2186,7 +4276,7 @@ function moveTaskToPending(taskId, workerName) {
         if (taskIndex >= 0) {
             // Found the task in active list
             const task = activeTasks[taskIndex];
-            const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+            const pendingTasks = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
             const existingPending = pendingTasks.find(t => {
                 const tId = t.taskId || t.id;
                 return tId && String(tId) === String(taskId);
@@ -2208,8 +4298,13 @@ function moveTaskToPending(taskId, workerName) {
             });
             
             // Update task in ACTIVE: set status='pending' and assignedTo
+            const ffSelectTime = Date.now();
             task.status = 'pending';
             task.assignedTo = workerName;
+            task.assignedStaffId = String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null;
+            // Stamp the action time so cross-device merge keeps the newest action
+            // (the device that just took the task) instead of being overwritten.
+            task.updatedAt = ffSelectTime;
             
             console.log(`[MOVE TO PENDING] Updated task in ACTIVE:`, {
                 tab,
@@ -2242,8 +4337,11 @@ function moveTaskToPending(taskId, workerName) {
                     instructions: task.instructions || task.info || task.details || '',
                     status: 'pending',
                     assignedTo: workerName,
+                    assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null,
                     assignTo: task.assignTo !== undefined ? task.assignTo : 'all',
-                    technicianTypes: task.technicianTypes
+                    technicianTypes: task.technicianTypes,
+                    updatedAt: ffSelectTime,
+                    selectedAt: ffSelectTime
                 };
                 pendingTasks.push(pendingCopy);
                 localStorage.setItem(pendingKey, JSON.stringify(pendingTasks));
@@ -2308,7 +4406,7 @@ function moveTaskToPending(taskId, workerName) {
                                try {
                                    const stored = localStorage.getItem("ff_tasks_catalog_v1");
                                    if (stored) {
-                                       const parsed = JSON.parse(stored);
+                                       const parsed = ffSafeParseJSON(stored, {});
                                        return parsed[tab] || [];
                                    }
                                } catch (e) {
@@ -2331,16 +4429,20 @@ function moveTaskToPending(taskId, workerName) {
                     // Task is in initial state - move it to pending
                     // Create a runtime copy based only on catalog template fields.
                     // IMPORTANT: Do NOT mutate or persist runtime fields into catalog.
+                    const ffSelectTimeCatalog = Date.now();
                     const taskCopy = {
                         id: task.id,
                         title: task.title,
                         instructions: task.instructions || task.info || task.details || "",
                         status: "pending",
-                        assignedTo: workerName
+                        assignedTo: workerName,
+                        assignedStaffId: String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || task.assignedStaffId || "").trim() || null,
+                        updatedAt: ffSelectTimeCatalog,
+                        selectedAt: ffSelectTimeCatalog
                     };
                     
                     // Add to pending list (runtime state only)
-                    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
+                    const pendingTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_pending_v1`), []);
                     pendingTasks.push(taskCopy);
                     if (typeof writeTasksList === 'function') {
                       writeTasksList(tab, 'pending', pendingTasks);
@@ -2386,8 +4488,152 @@ function moveTaskToPending(taskId, workerName) {
 // Expose to window for use in index.html
 window.moveTaskToPending = moveTaskToPending;
 
+function getPointsAccountIdForTasks() {
+    const candidates = [
+        window.currentSalonId,
+        typeof currentSalonId !== "undefined" ? currentSalonId : null,
+        window.currentAccountId,
+        window.accountId,
+    ];
+    for (const value of candidates) {
+        if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+}
+
+function getPointsLocationIdForTasks() {
+    try {
+        if (typeof window.ffGetActiveLocationId === "function") {
+            const value = window.ffGetActiveLocationId();
+            if (typeof value === "string" && value.trim()) return value.trim();
+        }
+    } catch (_) {}
+    const fallback = typeof window.__ff_active_location_id === "string" ? window.__ff_active_location_id.trim() : "";
+    return fallback || "";
+}
+
+function getPointsStaffRowsForTasks() {
+    try {
+        const store = ffSafeParseJSON(localStorage.getItem("ff_staff_v1"), {});
+        return Array.isArray(store.staff) ? store.staff : [];
+    } catch (_) {
+        return [];
+    }
+}
+
+function findPointsStaffByNameForTasks(name) {
+    const target = String(name || "").trim().toLowerCase();
+    if (!target) return null;
+    return getPointsStaffRowsForTasks().find((staff) => {
+        const staffName = String(staff?.name || staff?.displayName || staff?.email || "").trim().toLowerCase();
+        return staffName && staffName === target && staff?.isArchived !== true;
+    }) || null;
+}
+
+function getCurrentPointsStaffForTasks() {
+    const staffId = String(window.__ff_authedStaffId || localStorage.getItem("ff_authedStaffId_v1") || "").trim();
+    if (!staffId) return null;
+    const staff = getPointsStaffRowsForTasks().find((row) => {
+        const rowId = String(row?.id || row?.staffId || "").trim();
+        return rowId && rowId === staffId;
+    });
+    return {
+        staffId,
+        staffName: String(staff?.name || staff?.displayName || window.__ff_authedStaffName || "").trim(),
+        source: "current"
+    };
+}
+
+function resolveTaskPointsStaff({ task, pendingTask, workerName, assignedEmployee }) {
+    const candidates = [task, pendingTask].filter(Boolean);
+    const idFields = ["completedByStaffId", "assignedStaffId", "selectedStaffId", "staffId"];
+    for (const sourceTask of candidates) {
+        for (const field of idFields) {
+            const staffId = String(sourceTask?.[field] || "").trim();
+            if (staffId) {
+                const staff = getPointsStaffRowsForTasks().find((row) => {
+                    const rowId = String(row?.id || row?.staffId || "").trim();
+                    return rowId && rowId === staffId;
+                });
+                const staffName = String(
+                    sourceTask.completedBy ||
+                    sourceTask.assignedTo ||
+                    sourceTask.selectedStaffName ||
+                    staff?.name ||
+                    staff?.displayName ||
+                    workerName ||
+                    ""
+                ).trim();
+                const resolved = { staffId, staffName, source: field };
+                console.log("[Points] resolved staff for task", resolved);
+                return resolved;
+            }
+        }
+    }
+
+    const nameCandidates = [
+        task?.completedBy,
+        task?.assignedTo,
+        task?.selectedStaffName,
+        pendingTask?.completedBy,
+        pendingTask?.assignedTo,
+        pendingTask?.selectedStaffName,
+        assignedEmployee,
+        workerName
+    ];
+    for (const name of nameCandidates) {
+        const staff = findPointsStaffByNameForTasks(name);
+        if (staff) {
+            const resolved = {
+                staffId: String(staff.id || staff.staffId || "").trim(),
+                staffName: String(staff.name || staff.displayName || name || "").trim(),
+                source: "name"
+            };
+            if (resolved.staffId) {
+                console.log("[Points] resolved staff for task", resolved);
+                return resolved;
+            }
+        }
+    }
+
+    const fallback = getCurrentPointsStaffForTasks();
+    if (fallback) console.log("[Points] resolved staff for task", fallback);
+    return fallback || { staffId: "", staffName: String(workerName || "").trim(), source: "none" };
+}
+
+function awardTaskCompletedPoints({ taskId, staffId, staffName }) {
+    try {
+        const accountId = getPointsAccountIdForTasks();
+        const locationId = getPointsLocationIdForTasks();
+        const resolvedStaffId = String(staffId || "").trim();
+        const sourceId = String(taskId || "").trim();
+        if (!accountId || !locationId || !resolvedStaffId || !sourceId) return;
+        if (typeof window.ffGetPointsSettings !== "function" || typeof window.ffCreatePointsEvent !== "function") return;
+        window.ffGetPointsSettings(accountId, locationId)
+            .then((settings) => {
+                const points = Number(settings && settings.taskCompleted);
+                return window.ffCreatePointsEvent({
+                    accountId,
+                    staffId: resolvedStaffId,
+                    staffName: String(staffName || "").trim(),
+                    locationId,
+                    type: "task_completed",
+                    sourceModule: "tasks",
+                    sourceId,
+                    points: Number.isFinite(points) ? points : 0,
+                });
+            })
+            .catch((err) => console.warn("[Points] task_completed failed", err));
+    } catch (err) {
+        console.warn("[Points] task_completed failed", err);
+    }
+}
+
 // Mark task as done (tab-specific storage)
 function markTaskDone(taskId, workerName) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     console.log(`%c[MARK DONE] START`, 'color:orange;font-weight:bold', { taskId, workerName });
     
     // Determine current tab
@@ -2404,7 +4650,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Using tab: ${tab}, pendingKey: ${pendingKey}, activeKey: ${activeKey}`);
     
     // 1) Remove from pending and get task data
-    const pendingTasks = JSON.parse(localStorage.getItem(pendingKey) || '[]');
+    const pendingTasks = ffSafeParseJSON(localStorage.getItem(pendingKey), []);
     const pendingBeforeLength = pendingTasks.length;
     console.log(`[MARK DONE] Pending tasks count before: ${pendingBeforeLength}`);
     
@@ -2456,7 +4702,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Normalized keyId: ${keyId}`);
     
     // 2) Update or create in ACTIVE list
-    const activeTasks = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const activeTasks = ffSafeParseJSON(localStorage.getItem(activeKey), []);
     const activeBeforeLength = activeTasks.length;
     console.log(`[MARK DONE] Active tasks count before: ${activeBeforeLength}`);
     
@@ -2467,67 +4713,13 @@ function markTaskDone(taskId, workerName) {
     });
     
     console.log(`[MARK DONE] Active task index: ${idx}, keyId: ${keyId}`);
-    
-    // For yearly tasks, store in done list with completedYear and scheduleYear
-    if (tab === 'yearly') {
-        // Use getTabStorageKey for standard storage key
-        const doneKey = (typeof getTabStorageKey === 'function') 
-            ? getTabStorageKey(tab, 'done')
-            : `ff_tasks_${tab}_done_v1`;
-        const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
-        const currentYear = new Date().getFullYear();
-        
-        // Get task data to extract scheduleYear
-        const sourceTask = idx >= 0 ? activeTasks[idx] : pendingTask;
-        
-        // Get scheduleYear from task, or try catalog lookup
-        let scheduleYear = sourceTask?.scheduleYear;
-        if (scheduleYear === undefined && typeof ffGetYearlyCatalogMap === 'function') {
-            const catalogMap = ffGetYearlyCatalogMap();
-            const catalogTask = catalogMap.get(String(keyId).trim());
-            if (catalogTask) {
-                scheduleYear = catalogTask.scheduleYear;
-            }
-        }
-        
-        // Remove existing entry for this task if present
-        const existingDoneIndex = doneList.findIndex(t => {
-            const tId = t.taskId || t.id;
-            return tId && String(tId) === String(keyId);
-        });
-        
-        const doneTask = {
-            id: keyId,
-            taskId: keyId,
-            title: sourceTask?.title || '',
-            instructions: sourceTask?.instructions || sourceTask?.info || sourceTask?.details || '',
-            status: 'done',
-            completedAt: completionTime,
-            completedBy: assignedEmployee,
-            completedYear: currentYear,
-            scheduleYear: scheduleYear
-        };
-        
-        if (existingDoneIndex >= 0) {
-            doneList[existingDoneIndex] = doneTask;
-        } else {
-            doneList.push(doneTask);
-        }
-        
-        // Save done list
-        if (typeof writeTasksList === 'function') {
-            writeTasksList(tab, 'done', doneList);
-        } else {
-            localStorage.setItem(doneKey, JSON.stringify(doneList));
-        }
-        console.log(`[MARK DONE] Saved to yearly done list: ${doneKey}, count=${doneList.length}`);
-        
-        // Debug log (behind DEBUG_MODE check)
-        if (window.DEBUG_MODE || localStorage.getItem('DEBUG_MODE') === 'true') {
-            console.log('[DEBUG] Yearly done key:', doneKey);
-            console.log('[DEBUG] Last done entry after MARK DONE:', doneTask);
-        }
-    }
+    const sourceTaskForPoints = idx >= 0 ? activeTasks[idx] : pendingTask;
+    const pointsStaff = resolveTaskPointsStaff({
+        task: sourceTaskForPoints,
+        pendingTask,
+        workerName,
+        assignedEmployee
+    });
     
     if (idx >= 0) {
         // Update existing active task
@@ -2537,6 +4729,7 @@ function markTaskDone(taskId, workerName) {
         activeTasks[idx].status = 'done';
         activeTasks[idx].completedAt = completionTime;
         activeTasks[idx].completedBy = assignedEmployee;
+        activeTasks[idx].completedByStaffId = pointsStaff.staffId || null;
         activeTasks[idx].active = true;
         activeTasks[idx].assignedTo = null;
         
@@ -2561,6 +4754,7 @@ function markTaskDone(taskId, workerName) {
             status: 'done',
             completedAt: completionTime,
             completedBy: assignedEmployee,
+            completedByStaffId: pointsStaff.staffId || null,
             assignedTo: null
         };
         activeTasks.push(newTask);
@@ -2575,6 +4769,47 @@ function markTaskDone(taskId, workerName) {
             removedFromActive: false // Task was not in active, so nothing to remove
         });
     }
+
+    // Keep a tab-specific DONE list for rendering completed tasks reliably.
+    // Active can be filtered/reset by tab rules; done preserves the completion row.
+    const doneKey = (typeof getTabStorageKey === 'function')
+        ? getTabStorageKey(tab, 'done')
+        : `ff_tasks_${tab}_done_v1`;
+    const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
+    const currentYear = new Date().getFullYear();
+    const sourceTask = (idx >= 0 ? activeTasks[idx] : pendingTask) || {};
+    let scheduleYear = sourceTask?.scheduleYear;
+    if (tab === 'yearly' && scheduleYear === undefined && typeof ffGetYearlyCatalogMap === 'function') {
+        const catalogMap = ffGetYearlyCatalogMap();
+        const catalogTask = catalogMap.get(String(keyId).trim());
+        if (catalogTask) scheduleYear = catalogTask.scheduleYear;
+    }
+    const doneTask = {
+        id: keyId,
+        taskId: keyId,
+        title: sourceTask?.title || pendingTask?.title || '',
+        instructions: sourceTask?.instructions || sourceTask?.info || sourceTask?.details || pendingTask?.instructions || '',
+        status: 'done',
+        completedAt: completionTime,
+        completedBy: assignedEmployee,
+        completedByStaffId: pointsStaff.staffId || null,
+        ...(tab === 'yearly' ? { completedYear: currentYear, scheduleYear } : {})
+    };
+    const existingDoneIndex = doneList.findIndex(t => {
+        const tId = t?.taskId || t?.id;
+        return tId && String(tId) === String(keyId);
+    });
+    if (existingDoneIndex >= 0) {
+        doneList[existingDoneIndex] = doneTask;
+    } else {
+        doneList.push(doneTask);
+    }
+    if (typeof writeTasksList === 'function') {
+        writeTasksList(tab, 'done', doneList);
+    } else {
+        localStorage.setItem(doneKey, JSON.stringify(doneList));
+    }
+    console.log(`[MARK DONE] Saved DONE list: ${doneKey}, count=${doneList.length}`);
     
     // Save updated ACTIVE list
     if (typeof writeTasksList === 'function') {
@@ -2592,7 +4827,7 @@ function markTaskDone(taskId, workerName) {
     console.log(`[MARK DONE] Saved ACTIVE list: ${activeKey}, length: ${activeTasks.length}`);
     
     // Verify completion
-    const verifyActive = JSON.parse(localStorage.getItem(activeKey) || '[]');
+    const verifyActive = ffSafeParseJSON(localStorage.getItem(activeKey), []);
     const completedCount = verifyActive.filter(t => t.status === 'done' || t.completedAt).length;
     console.log(`[MARK DONE] Active saved: ${completedCount} completed task(s) in ACTIVE list`);
     
@@ -2610,6 +4845,12 @@ function markTaskDone(taskId, workerName) {
         role: '-',
         performedBy: '-',
         extra: currentTab ? { tab: currentTab, status: 'done' } : { status: 'done' }
+    });
+
+    awardTaskCompletedPoints({
+        taskId: keyId,
+        staffId: pointsStaff.staffId,
+        staffName: pointsStaff.staffName || assignedEmployee || workerName
     });
     
     console.log(`%c[MARK DONE] COMPLETE`, 'color:green;font-weight:bold', {
@@ -2663,6 +4904,9 @@ let __pendingTaskId = null;
 let pinModalDoneTaskId = null;
 
 function openPinModal(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     __pendingTaskId = taskId;
     pinModalDoneTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2678,6 +4922,9 @@ function openPinModal(taskId) {
 }
 
 function openPinModalForDone(taskId) {
+    if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+        return;
+    }
     pinModalDoneTaskId = taskId;
     __pendingTaskId = null;
     window.__ff_pin_identify_only = false;
@@ -2747,6 +4994,7 @@ async function validatePinAndMove() {
     
     window.__ff_authedStaffId = authedStaffId;
     localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    if (authedStaffId) ffNotifyAuthedStaffIdChanged();
     
     console.log("[PIN] authed staff set", {
       authedStaffId,
@@ -2776,6 +5024,10 @@ async function validatePinAndMove() {
     }
     
     if (__pendingTaskId) {
+        if (typeof window.ffCurrentUserHasTasksUsePermission === 'function' && !window.ffCurrentUserHasTasksUsePermission()) {
+            closePinModal();
+            return;
+        }
         moveTaskToPending(__pendingTaskId, matchedName);
     }
 
@@ -2820,6 +5072,7 @@ function validatePinAndMarkDone() {
     
     window.__ff_authedStaffId = authedStaffId;
     localStorage.setItem("ff_authedStaffId_v1", authedStaffId || "");
+    if (authedStaffId) ffNotifyAuthedStaffIdChanged();
     
     console.log("[PIN] authed staff set", {
       authedStaffId,
@@ -3031,7 +5284,10 @@ async function isCurrentUserOwner() {
   try {
     const user = auth.currentUser;
     if (!user) return false;
-    
+    if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) {
+      return true;
+    }
+
     const userDocRef = doc(db, "users", user.uid);
     const snap = await getDoc(userDocRef);
     
@@ -3180,9 +5436,9 @@ function loadTasksForTab(tab) {
     console.log(`Loading tasks for tab: ${tab}`);
     
     // Load tasks from localStorage (they will be empty after reset)
-    const activeTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_active_v1`) || '[]');
-    const pendingTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_pending_v1`) || '[]');
-    const doneTasks = JSON.parse(localStorage.getItem(`ff_tasks_${tab}_done_v1`) || '[]');
+    const activeTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_active_v1`), []);
+    const pendingTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_pending_v1`), []);
+    const doneTasks = ffSafeParseJSON(localStorage.getItem(`ff_tasks_${tab}_done_v1`), []);
     
     console.log(`Loaded tasks - Active: ${activeTasks.length}, Pending: ${pendingTasks.length}, Done: ${doneTasks.length}`);
     
@@ -3206,7 +5462,7 @@ async function validateResetPin(pin) {
         } else {
             // Fallback: check against settings from localStorage
             try {
-                const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                const settings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
                 return (settings.adminCode || "").toString() === pin.toString();
             } catch (e) {
                 console.error("RESET: Error checking PIN", e);
@@ -3231,7 +5487,7 @@ async function validateResetPin(pin) {
                 isValidPin = window.isAdminCode(pin);
             } else {
                 try {
-                    const settings = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+                    const settings = ffSafeParseJSON(localStorage.getItem("ffv24_settings"), {});
                     isValidPin = (settings.adminCode || "").toString() === pin.toString();
                 } catch (e) {
                     console.error("RESET: Error checking PIN", e);
@@ -3245,6 +5501,9 @@ async function validateResetPin(pin) {
 // Perform the actual reset (called after PIN validation)
 // STATE ONLY: Clears progress/state, does NOT touch catalog or rebuild tasks
 window.doResetCurrentTab = function doResetCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Performing STATE-ONLY reset for current tab");
 
     // 1) Resolve tab from window.currentTasksTab
@@ -3369,7 +5628,7 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         try {
             const raw = localStorage.getItem("ff_tasks_catalog_v1");
             if (raw) {
-                catalogObj = JSON.parse(raw);
+                catalogObj = ffSafeParseJSON(raw, {});
             }
         } catch (e) {
             console.warn("RESET: Error parsing catalog from localStorage:", e);
@@ -3385,7 +5644,7 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         try {
             const activeRaw = localStorage.getItem(activeKey);
             if (activeRaw) {
-                activeTasks = JSON.parse(activeRaw) || [];
+                activeTasks = ffSafeParseJSON(activeRaw, []);
             }
         } catch (e) {
             console.warn("RESET: Error parsing active list:", e);
@@ -3553,11 +5812,36 @@ window.doResetCurrentTab = function doResetCurrentTab() {
         extra: currentTab ? { tab: currentTab, reset: true } : { reset: true }
     });
 
+    // 6) Stamp the reset + push to cloud EXPLICITLY.
+    // This was the root cause of "reset comes back": this function only cleaned
+    // localStorage and never wrote to Firestore, so the unchanged cloud state
+    // was re-applied a few seconds later and every task returned as completed.
+    try {
+        if (typeof window.ffTasksMarkTabReset === 'function') {
+            window.ffTasksMarkTabReset(tab);
+        } else {
+            const stamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}');
+            stamps[tab] = Date.now();
+            localStorage.setItem('ff_tasks_reset_stamps_v1', JSON.stringify(stamps));
+        }
+    } catch (e) {
+        console.warn('RESET: stamping failed', e);
+    }
+    if (typeof window.tasksCloudWrite === 'function') {
+        window.tasksCloudWrite('manual-reset');
+    } else {
+        console.error('RESET: tasksCloudWrite missing — reset NOT saved to cloud');
+        if (typeof window.showToast === 'function') window.showToast('Reset NOT saved: cloud sync module not loaded', 'error');
+    }
+
     console.log("RESET: STATE-ONLY reset complete for tab:", tab);
 };
 
 // Reset tasks for current active tab - opens modals
 function resetTasksForCurrentTab() {
+    if (typeof window.ffCurrentUserHasTasksResetPermission === 'function' && !window.ffCurrentUserHasTasksResetPermission()) {
+        return;
+    }
     console.log("RESET: Opening confirmation modal");
 
     // Get current tab
@@ -3654,16 +5938,6 @@ window.auth = auth;
 // Tasks Tab Badge Helpers
 // =====================
 
-function ffSafeParseJSON(str, fallback) {
-  try {
-    if (!str || typeof str !== 'string') return fallback;
-    const parsed = JSON.parse(str);
-    return parsed !== null && parsed !== undefined ? parsed : fallback;
-  } catch (e) {
-    return fallback;
-  }
-}
-
 function ffIsTaskCompleted(task) {
   if (!task || typeof task !== 'object') return false;
   
@@ -3695,13 +5969,7 @@ function ffIsTaskCompleted(task) {
 
 // Safe JSON parse with fallback
 function safeParse(json, fallback = null) {
-  try {
-    if (!json) return fallback;
-    return JSON.parse(json);
-  } catch (e) {
-    console.warn('[Catalog] Error parsing JSON:', e);
-    return fallback;
-  }
+  return ffSafeParseJSON(json, fallback);
 }
 
 // Get raw catalog object (could be array or object)
@@ -4007,7 +6275,7 @@ function getFilteredMyListTasksForTab(tab) {
       try {
         const stored = localStorage.getItem(activeKey);
         if (stored) {
-          activeTasks = JSON.parse(stored) || [];
+          activeTasks = ffSafeParseJSON(stored, []);
         }
       } catch (e) {
         console.warn('[Badge] Error reading active tasks:', e);
@@ -4051,6 +6319,12 @@ function getFilteredMyListTasksForTab(tab) {
         }
       }
       
+      if ((tab === 'opening' || tab === 'closing') && typeof window.ffIsOneTimeTaskVisibleToday === 'function') {
+        if (!window.ffIsOneTimeTaskVisibleToday(task, tab)) {
+          return false;
+        }
+      }
+      
       // Filter by assignTo/technicianTypes - only count tasks relevant to current user
       if (typeof window.ffIsTaskRelevantToUser === 'function' && !window.ffIsTaskRelevantToUser(task, tab)) {
         return false;
@@ -4087,7 +6361,7 @@ function ffIsAlertsActiveForTab(tab, nowDate) {
     const now = nowDate || new Date();
     
     // Load alert window settings
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabConfig = alertWindows[tab];
     
     // Handle opening/closing (time-based)
@@ -4251,35 +6525,23 @@ function ffUpdateHomeTasksBadge() {
     // Target TASKS nav badge specifically — NOT #ticketsNavBadge (first in DOM)
     const badge = document.querySelector('#tasksBtn .ff-home-tasks-badge');
     if (!badge) return;
-    
-    // Load alert window settings
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabs = ['opening', 'closing', 'weekly', 'monthly', 'yearly'];
-    const now = new Date();
-    
     let total = 0;
-    
-    tabs.forEach(tab => {
+
+    tabs.forEach((tab) => {
       const tabConfig = alertWindows[tab];
-      
-      // Only count if showOnHome is true AND alerts are active
-      if (tabConfig && tabConfig.showOnHome === true) {
-        const alertsActive = ffIsAlertsActiveForTab(tab, now);
-        if (alertsActive) {
-          const count = ffGetUncompletedCountForTab(tab);
-          total += count;
-        }
-      }
+      const showOnHome = !tabConfig || tabConfig.showOnHome !== false;
+      if (!showOnHome) return;
+      if (!ffIsAlertsActiveForTab(tab, new Date())) return;
+      total += ffGetUncompletedCountForTab(tab);
     });
-    
-    // Update badge
-    if (total > 0) {
-      badge.textContent = String(total);
-      badge.style.display = 'inline-block';
-    } else {
-      badge.textContent = '';
-      badge.style.display = 'none';
-    }
+
+    // Match index.html + CSS (.ff-home-tasks-badge:not(:empty)) — avoid inline display
+    // toggles that fight the stylesheet and cause brief hide/show flicker.
+    badge.style.display = '';
+    badge.textContent = total > 0 ? String(total) : '';
   } catch (e) {
     console.error('[Badge] Error updating home tasks badge:', e);
   }
@@ -4398,7 +6660,7 @@ function readYearlySource() {
     const activeKey = 'ff_tasks_yearly_active_v1';
     const activeRaw = localStorage.getItem(activeKey);
     if (activeRaw) {
-      const activeList = JSON.parse(activeRaw);
+      const activeList = ffSafeParseJSON(activeRaw, []);
       if (Array.isArray(activeList) && activeList.length > 0) {
         return activeList;
       }
@@ -4408,7 +6670,7 @@ function readYearlySource() {
     const pendingKey = 'ff_tasks_yearly_pending_v1';
     const pendingRaw = localStorage.getItem(pendingKey);
     if (pendingRaw) {
-      const pendingList = JSON.parse(pendingRaw);
+      const pendingList = ffSafeParseJSON(pendingRaw, []);
       if (Array.isArray(pendingList)) {
         return pendingList;
       }
@@ -4430,7 +6692,7 @@ function readYearlyDone() {
       return [];
     }
     
-    const doneList = JSON.parse(doneRaw);
+    const doneList = ffSafeParseJSON(doneRaw, []);
     if (Array.isArray(doneList)) {
       return doneList;
     }
@@ -4556,7 +6818,7 @@ function ffIsYearlyTaskActive(task, nowDate) {
       const doneKey = (typeof getTabStorageKey === 'function')
         ? getTabStorageKey('yearly', 'done')
         : 'ff_tasks_yearly_done_v1';
-      const doneList = JSON.parse(localStorage.getItem(doneKey) || '[]');
+      const doneList = ffSafeParseJSON(localStorage.getItem(doneKey), []);
       const completedForYear = doneList.some(doneTask => {
         const doneTaskId = doneTask.taskId || doneTask.id;
         if (String(doneTaskId).trim() !== String(taskId).trim()) return false;
@@ -4783,18 +7045,20 @@ function ffGetAutoResetConfig(tab) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
   
   try {
-    const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
+    const alertWindows = ffSafeParseJSON(localStorage.getItem('ff_tasks_alert_windows_v1'), {});
     const tabConfig = alertWindows[tab] || {};
     
     return {
       autoResetEnabled: tabConfig.autoResetEnabled === true,
-      autoResetTime: tabConfig.autoResetTime || '21:00'
+      autoResetTime: tabConfig.autoResetTime || '21:00',
+      autoResetForce: tabConfig.autoResetForce === true
     };
   } catch (e) {
     console.warn('[Auto-Reset] Error loading config:', e);
     return {
       autoResetEnabled: false,
-      autoResetTime: '21:00'
+      autoResetTime: '21:00',
+      autoResetForce: false
     };
   }
 }
@@ -4804,7 +7068,7 @@ function ffGetAutoResetState(tab) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
   
   try {
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     return state[tab] || {};
   } catch (e) {
     console.warn('[Auto-Reset] Error loading state:', e);
@@ -4817,7 +7081,7 @@ function ffSetAutoResetLastRun(tab, todayISO) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return;
   
   try {
-    const state = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
+    const state = ffSafeParseJSON(localStorage.getItem('ff_tasks_auto_reset_state_v1'), {});
     if (!state[tab]) {
       state[tab] = {};
     }
@@ -4866,12 +7130,12 @@ window.ffMaybeAutoResetOpening = function(nowDate) {
     }
     
     const uncompleted = ffGetUncompletedCountForTab(tab);
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       return; // Not all tasks completed
     }
     
     // All conditions met - perform reset
-    console.log('[Auto-Reset] All Opening tasks completed, performing auto-reset at', config.autoResetTime);
+    console.log('[Auto-Reset] Opening tasks reset at', config.autoResetTime, 'force=', config.autoResetForce === true);
     
     // Call reset function for opening tab (uses existing reset logic via getTabStorageKey)
     if (typeof window.resetTasksForTab === 'function') {
@@ -4928,12 +7192,12 @@ window.ffMaybeAutoResetClosing = function(nowDate) {
     }
     
     const uncompleted = ffGetUncompletedCountForTab(tab);
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       return; // Not all tasks completed
     }
     
     // All conditions met - perform reset
-    console.log('[Auto-Reset] All Closing tasks completed, performing auto-reset at', config.autoResetTime);
+    console.log('[Auto-Reset] Closing tasks reset at', config.autoResetTime, 'force=', config.autoResetForce === true);
     
     // Call reset function for closing tab (uses existing reset logic via getTabStorageKey)
     if (typeof window.resetTasksForTab === 'function') {
@@ -4959,7 +7223,7 @@ function ffHasWeeklyTasksScheduledToday(nowDate) {
     const catalogRaw = localStorage.getItem('ff_tasks_catalog_v1');
     if (!catalogRaw) return false;
     
-    const catalogObj = JSON.parse(catalogRaw);
+    const catalogObj = ffSafeParseJSON(catalogRaw, {});
     const weeklyCatalog = catalogObj.weekly || [];
     
     // Check if at least one task is scheduled for today
@@ -4995,7 +7259,7 @@ function ffHasWeeklyTasksScheduledToday(nowDate) {
 // Prevents auto-reset firing on days when no tasks appear (count=0 != "all done").
 window.ffHasTodayTasksForTab = function ffHasTodayTasksForTab(tab, now) {
   try {
-    const active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1') || '[]');
+    const active = ffSafeParseJSON(localStorage.getItem('ff_tasks_' + tab + '_active_v1'), []);
     if (active.length === 0) return false;
     return active.some(function(task) {
       if (!task || typeof task !== 'object') return false;
@@ -5050,19 +7314,19 @@ function _ffMaybeAutoResetTab(tab, nowDate) {
     }
 
     const hasTasks = window.ffHasTodayTasksForTab(tab, now);
-    if (!hasTasks) {
+    if (!hasTasks && config.autoResetForce !== true) {
       console.warn(tag, 'SKIP: no tasks scheduled/active for today');
       return;
     }
 
     const uncompleted = typeof ffGetUncompletedCountForTab === 'function'
       ? ffGetUncompletedCountForTab(tab) : -1;
-    if (uncompleted !== 0) {
+    if (uncompleted !== 0 && config.autoResetForce !== true) {
       console.warn(tag, 'SKIP: uncompleted tasks remaining =', uncompleted);
       return;
     }
 
-    console.warn(tag, 'FIRING reset — all conditions met. time=' + nowStr);
+    console.warn(tag, 'FIRING reset. time=' + nowStr + ' force=' + (config.autoResetForce === true));
     if (typeof window.resetTasksForTab === 'function') {
       window.resetTasksForTab(tab);
       ffSetAutoResetLastRun(tab, todayISO);
@@ -5081,3 +7345,8 @@ window.ffMaybeAutoResetMonthly = function(nowDate) { _ffMaybeAutoResetTab('month
 
 // Main auto-reset function for Yearly tab
 window.ffMaybeAutoResetYearly  = function(nowDate) { _ffMaybeAutoResetTab('yearly',  nowDate); };
+
+
+
+
+

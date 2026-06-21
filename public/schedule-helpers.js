@@ -278,6 +278,28 @@ function formatMinutesAsScheduleTime(totalMinutes) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+/** Same role checks as schedule coverage validation (full manager vs assistant manager). */
+function isFullManagerAssignmentForCoverage(a) {
+  if (!a) return false;
+  if (a.role === "admin") return true;
+  if (a.role === "manager") return a.managerType !== "assistant_manager";
+  return false;
+}
+
+function isAssistantManagerAssignmentForCoverage(a) {
+  return Boolean(a && a.role === "manager" && a.managerType === "assistant_manager");
+}
+
+function countAssignmentsOverlappingMinuteRange(assignments, lo, hi, predicate) {
+  return (Array.isArray(assignments) ? assignments : []).filter((a) => {
+    if (!predicate(a)) return false;
+    const aS = parseScheduleTimeToMinutes(a.startTime);
+    const aE = parseScheduleTimeToMinutes(a.endTime);
+    if (aS == null || aE == null || aE <= aS) return false;
+    return Math.min(aE, hi) > Math.max(aS, lo);
+  }).length;
+}
+
 /** Builds a shift window of durationHours starting at availability open, without exceeding close. */
 function sliceTimeWindowFromStart(startTime, endTime, durationHours) {
   const s = parseScheduleTimeToMinutes(startTime);
@@ -401,6 +423,221 @@ function normalizeBusinessHours(value) {
   return normalized;
 }
 
+function coerceOptionalNonNegCoverageInt(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v) || v < 0) return undefined;
+  return Math.min(99, Math.round(v));
+}
+
+/** One internal shift window (does not replace opening hours — refines scheduling inside the day). */
+function normalizeShiftSegmentEntry(value) {
+  const source = value && typeof value === "object" ? value : {};
+  let startTime = normalizeTimeString(source.startTime, null);
+  let endTime = normalizeTimeString(source.endTime, null);
+  const o = parseScheduleTimeToMinutes(startTime);
+  let c = parseScheduleTimeToMinutes(endTime);
+  if (o == null || c == null) return null;
+  if (c <= o) {
+    const cEvening = c + 12 * 60;
+    if (cEvening > o && cEvening < 24 * 60) {
+      endTime = formatMinutesAsScheduleTime(cEvening);
+      c = cEvening;
+    } else {
+      return null;
+    }
+  }
+  const out = { startTime, endTime };
+  const m = coerceOptionalNonNegCoverageInt(source.minManagers);
+  const f = coerceOptionalNonNegCoverageInt(source.minFrontDesk);
+  const t = coerceOptionalNonNegCoverageInt(source.minTechnicians);
+  if (m !== undefined) out.minManagers = m;
+  if (f !== undefined) out.minFrontDesk = f;
+  if (t !== undefined) out.minTechnicians = t;
+  return out;
+}
+
+function cloneDefaultDayShiftSegments() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = [];
+    return acc;
+  }, {});
+}
+
+/**
+ * Per weekday: list of { startTime, endTime } shift segments.
+ * Empty list = "not customized" — consumers fall back to business open/close as one segment.
+ */
+function normalizeDayShiftSegments(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultDayShiftSegments();
+  DAY_KEYS.forEach((dayKey) => {
+    const raw = source[dayKey];
+    const arr = Array.isArray(raw) ? raw : [];
+    const segments = [];
+    arr.forEach((item) => {
+      const seg = normalizeShiftSegmentEntry(item);
+      if (seg) segments.push(seg);
+    });
+    segments.sort((a, b) => {
+      const ma = parseScheduleTimeToMinutes(a.startTime);
+      const mb = parseScheduleTimeToMinutes(b.startTime);
+      return (ma ?? 0) - (mb ?? 0);
+    });
+    normalized[dayKey] = segments;
+  });
+  return normalized;
+}
+
+/**
+ * Effective shift segments for a weekday: custom list if set, else single segment from business hours.
+ */
+function getEffectiveShiftSegmentsForDay(dayName, businessHours, dayShiftSegmentsRaw) {
+  const bhNorm = normalizeBusinessHours(businessHours || {});
+  const bh = bhNorm[dayName] || DEFAULT_DAY_BUSINESS_HOURS;
+  const segsNorm = normalizeDayShiftSegments(dayShiftSegmentsRaw || {});
+  const custom = segsNorm[dayName] || [];
+  if (!bh.isOpen) return [];
+  if (!Array.isArray(custom) || custom.length === 0) {
+    const o = bh.openTime;
+    const c = bh.closeTime;
+    const om = parseScheduleTimeToMinutes(o);
+    const cm = parseScheduleTimeToMinutes(c);
+    if (om != null && cm != null && cm > om) {
+      return [{ startTime: o, endTime: c }];
+    }
+    return [];
+  }
+  return custom;
+}
+
+/** Per-segment minimums merged with weekday defaults (same as schedule-generator). */
+function resolvedSegmentCoverage(seg, dayCov) {
+  const d = dayCov && typeof dayCov === "object" ? dayCov : DEFAULT_DAY_COVERAGE_RULES;
+  return {
+    minManagers: Math.max(0, Math.round(Number(seg.minManagers != null ? seg.minManagers : d.minManagers) || 0)),
+    minFrontDesk: Math.max(0, Math.round(Number(seg.minFrontDesk != null ? seg.minFrontDesk : d.minFrontDesk) || 0)),
+    minTechnicians: Math.max(0, Math.round(Number(seg.minTechnicians != null ? seg.minTechnicians : d.minTechnicians) || 0)),
+  };
+}
+
+/**
+ * When a weekday has multiple custom shift segments, split the day at all segment start/end times
+ * and compute concurrent coverage required in each sub-interval.
+ * Overlapping segments: take the **maximum** per role (Mgr / Asst Mgr / Svc prov), not the sum — each row
+ * is its own minimum for that time band; where bands overlap, the highest requirement applies.
+ * Returns null if there are no custom segments (falls back to a single business-hours window).
+ */
+function buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules) {
+  if (!dayName || !Array.isArray(segs) || segs.length === 0) return null;
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayCov = cov[dayName] || DEFAULT_DAY_COVERAGE_RULES;
+  const bounds = new Set();
+  segs.forEach((seg) => {
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s != null && e != null && e > s) {
+      bounds.add(s);
+      bounds.add(e);
+    }
+  });
+  const sorted = [...bounds].filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (sorted.length < 2) return null;
+  const gaps = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const lo = sorted[i];
+    const hi = sorted[i + 1];
+    if (hi <= lo) continue;
+    const mid = lo + (hi - lo) / 2;
+    let needFull = 0;
+    let needAsst = 0;
+    let needTech = 0;
+    segs.forEach((seg) => {
+      const s = parseScheduleTimeToMinutes(seg.startTime);
+      const e = parseScheduleTimeToMinutes(seg.endTime);
+      if (s == null || e == null || e <= s) return;
+      if (mid >= s && mid < e) {
+        const req = resolvedSegmentCoverage(seg, dayCov);
+        needFull = Math.max(needFull, req.minManagers);
+        needAsst = Math.max(needAsst, req.minFrontDesk);
+        needTech = Math.max(needTech, req.minTechnicians);
+      }
+    });
+    gaps.push({ startMin: lo, endMin: hi, needFull, needAsst, needTech });
+  }
+  return gaps.length ? gaps : null;
+}
+
+function getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSegments, coverageRules) {
+  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
+  if (!rawSeg.length) return null;
+  const bhNorm = normalizeBusinessHours(businessHours || {});
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length === 0) return null;
+  return buildSegmentOverlapCoverageGapsFromSegments(dayName, segs, coverageRules);
+}
+
+/**
+ * Intersects [startTime, endTime] with the segment that yields the longest overlap.
+ * Used for availability and for clamping draft assignments to configured shift windows.
+ */
+function clipTimeWindowToBestShiftSegment(startTime, endTime, segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return null;
+  const aS = parseScheduleTimeToMinutes(startTime);
+  const aE = parseScheduleTimeToMinutes(endTime);
+  if (aS == null || aE == null || aE <= aS) return null;
+  let bestOverlap = -1;
+  let bestLo = null;
+  let bestHi = null;
+  for (const seg of segments) {
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s == null || e == null || e <= s) continue;
+    const lo = Math.max(aS, s);
+    const hi = Math.min(aE, e);
+    const overlap = hi > lo ? hi - lo : 0;
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      bestLo = lo;
+      bestHi = hi;
+    }
+  }
+  if (bestOverlap <= 0 || bestLo == null || bestHi == null) return null;
+  return {
+    startTime: formatMinutesAsScheduleTime(bestLo),
+    endTime: formatMinutesAsScheduleTime(bestHi),
+  };
+}
+
+/**
+ * When multiple shift segments exist, intersect staff availability with the **bounding hull**
+ * (earliest segment start → latest segment end) instead of picking only the single segment
+ * with the longest overlap. Otherwise everyone ends up clipped to e.g. 09:15–19:15 and no one
+ * covers a later segment that runs until 21:00.
+ */
+function clipTimeWindowToUnionOfShiftSegments(startTime, endTime, segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return null;
+  const aS = parseScheduleTimeToMinutes(startTime);
+  const aE = parseScheduleTimeToMinutes(endTime);
+  if (aS == null || aE == null || aE <= aS) return null;
+  let minS = Infinity;
+  let maxE = -Infinity;
+  for (const seg of segments) {
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s == null || e == null || e <= s) continue;
+    minS = Math.min(minS, s);
+    maxE = Math.max(maxE, e);
+  }
+  if (!Number.isFinite(minS) || maxE <= minS) return null;
+  const lo = Math.max(aS, minS);
+  const hi = Math.min(aE, maxE);
+  if (hi <= lo) return null;
+  return {
+    startTime: formatMinutesAsScheduleTime(lo),
+    endTime: formatMinutesAsScheduleTime(hi),
+  };
+}
+
 function normalizeCoverageRules(value) {
   const source = value && typeof value === "object" ? value : {};
   const normalized = cloneDefaultCoverageRules();
@@ -431,24 +668,67 @@ function isCoverageRulesAllZeros(normalizedCov) {
 }
 
 /**
+ * True when custom shift segments list has at least one non-zero coverage target
+ * (explicit on segment or inherited from day defaults once merged in UI).
+ */
+function hasSegmentListCoverageMinimums(dayName, dayShiftSegmentsRaw, normalizedCov) {
+  const norm = normalizeDayShiftSegments(dayShiftSegmentsRaw || {});
+  const custom = norm[dayName] || [];
+  if (!custom.length) return false;
+  const d = normalizedCov[dayName] || DEFAULT_DAY_COVERAGE_RULES;
+  return custom.some((s) => {
+    const m = s.minManagers != null ? Number(s.minManagers) : d.minManagers;
+    const f = s.minFrontDesk != null ? Number(s.minFrontDesk) : d.minFrontDesk;
+    const t = s.minTechnicians != null ? Number(s.minTechnicians) : d.minTechnicians;
+    return (m || 0) > 0 || (f || 0) > 0 || (t || 0) > 0;
+  });
+}
+
+/**
  * Merges global scheduleRules with per-weekday coverageRules from Settings.
  * When all coverage days are zero (default / not customized), global scheduleRules apply.
  * Once any day has a non-zero minimum, per-day values are used for every weekday (zeros mean no minimum that day).
+ * Optional `options.businessHours` + `options.dayShiftSegments`: when that day has custom segments,
+ * effective minimums use the max of per-segment requirements (for validation / summaries).
+ * Coverage field `minFrontDesk` / `minFrontDeskPerDay` counts Assistant Managers (Manager + Assistant Manager type), not the front_desk role.
  */
-function getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules) {
+function getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules, options = {}) {
   const base = normalizeScheduleRules(scheduleRules);
   const normalizedCov = normalizeCoverageRules(coverageRules);
-  if (isCoverageRulesAllZeros(normalizedCov)) {
+  const dayName = getDayNameFromDateKey(dateKey);
+  const { businessHours, dayShiftSegments } = options;
+  const segMinActive = dayName && hasSegmentListCoverageMinimums(dayName, dayShiftSegments, normalizedCov);
+  if (isCoverageRulesAllZeros(normalizedCov) && !segMinActive) {
     return base;
   }
-  const dayName = getDayNameFromDateKey(dateKey);
   if (!dayName) return base;
   const d = normalizedCov[dayName] || DEFAULT_DAY_COVERAGE_RULES;
+  let minManagersPerShift = d.minManagers;
+  let minFrontDeskPerDay = d.minFrontDesk;
+  let minTechniciansPerDay = d.minTechnicians;
+  const rawSeg = dayName && dayShiftSegments != null ? normalizeDayShiftSegments(dayShiftSegments)[dayName] : null;
+  if (businessHours && rawSeg && rawSeg.length > 0) {
+    const segs = getEffectiveShiftSegmentsForDay(dayName, businessHours, dayShiftSegments);
+    if (segs.length) {
+      minManagersPerShift = Math.max(
+        ...segs.map((s) => Number(s.minManagers != null ? s.minManagers : d.minManagers) || 0),
+        0,
+      );
+      minFrontDeskPerDay = Math.max(
+        ...segs.map((s) => Number(s.minFrontDesk != null ? s.minFrontDesk : d.minFrontDesk) || 0),
+        0,
+      );
+      minTechniciansPerDay = Math.max(
+        ...segs.map((s) => Number(s.minTechnicians != null ? s.minTechnicians : d.minTechnicians) || 0),
+        0,
+      );
+    }
+  }
   return {
     ...base,
-    minManagersPerShift: d.minManagers,
-    minFrontDeskPerDay: d.minFrontDesk,
-    minTechniciansPerDay: d.minTechnicians,
+    minManagersPerShift,
+    minFrontDeskPerDay,
+    minTechniciansPerDay,
     minTotalStaffPerDay: d.minTotalStaff,
   };
 }
@@ -461,6 +741,152 @@ function normalizeSpecialBusinessDays(value) {
     normalized[dateKey] = normalizeSpecialBusinessDayEntry(source[dateKey]);
   });
   return normalized;
+}
+
+/**
+ * Multi-location staff: a staff member can be assigned to several branches
+ * (`allowedLocationIds`) and may work DIFFERENT hours in each. The canonical
+ * shape stored on the staff document is:
+ *   {
+ *     <locationId>: {
+ *       defaultSchedule: { monday: {enabled,startTime,endTime}, ... }
+ *     }
+ *   }
+ * Only locations with an explicit override are persisted; any location
+ * without an entry here falls back to the staff's top-level `defaultSchedule`.
+ */
+function normalizeLocationScheduleAvailability(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized = {};
+  Object.keys(value).forEach((locId) => {
+    const key = typeof locId === "string" ? locId.trim() : "";
+    if (!key) return;
+    const entry = value[locId];
+    if (!entry || typeof entry !== "object") return;
+    const ds = entry.defaultSchedule;
+    if (!ds || typeof ds !== "object") return;
+    normalized[key] = {
+      defaultSchedule: normalizeDefaultSchedule(ds),
+    };
+  });
+  return normalized;
+}
+
+/**
+ * Returns the effective `defaultSchedule` for a staff row at a given location.
+ *
+ * Precedence:
+ *   1. `locationScheduleAvailability[locId].defaultSchedule` when present.
+ *   2. Multi-location staff who have already configured at least one
+ *      branch-specific schedule but NOT this branch → "not scheduled here"
+ *      (all days off). This matches the owner's mental model of
+ *      "tell me which days you work at each branch" — a branch that was
+ *      deliberately left empty is not a place the staff works.
+ *   3. Otherwise fall back to the top-level `staff.defaultSchedule`.
+ *      This preserves legacy behaviour for single-location staff and for
+ *      multi-location staff who haven't yet been migrated to the new
+ *      per-branch schedule UI.
+ */
+function getStaffDefaultScheduleForLocation(staff, locationId) {
+  const locKey = typeof locationId === "string" ? locationId.trim() : "";
+  const mapRaw = staff && staff.locationScheduleAvailability;
+  if (locKey && mapRaw && typeof mapRaw === "object") {
+    const entry = mapRaw[locKey];
+    if (entry && entry.defaultSchedule && typeof entry.defaultSchedule === "object") {
+      return normalizeDefaultSchedule(entry.defaultSchedule);
+    }
+    const allowed = Array.isArray(staff && staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+    if (allowed.length > 1 && Object.keys(mapRaw).length > 0) {
+      return cloneDefaultSchedule();
+    }
+  }
+  return normalizeDefaultSchedule(staff && staff.defaultSchedule);
+}
+
+/**
+ * Cross-branch conflict detection for a multi-location staff member.
+ * Returns a list of `{ dayKey, locationAId, locationBId, overlap: "HH:MM-HH:MM" }`
+ * when the staff is scheduled to work overlapping hours in two different
+ * branches on the same weekday. Callers can surface this as a warning when
+ * the owner edits a schedule, or block auto-build from placing conflicting
+ * shifts. Days that are Off in a branch, or where only one branch has
+ * hours, never produce a conflict.
+ */
+function detectStaffLocationScheduleConflicts(staff) {
+  const source = staff && typeof staff === "object" ? staff : {};
+  const perLoc = normalizeLocationScheduleAvailability(source.locationScheduleAvailability);
+  const allowed = Array.isArray(source.allowedLocationIds) ? source.allowedLocationIds.slice() : [];
+  if (allowed.length < 2) return [];
+  // Resolve each location's effective schedule from the explicit override.
+  // Locations without an override are treated as "not scheduled" (all days off)
+  // — matching the strict no-default model used by getStaffDefaultScheduleForLocation.
+  const emptySchedule = cloneDefaultSchedule();
+  const perLocEffective = {};
+  allowed.forEach((locId) => {
+    if (!locId) return;
+    perLocEffective[locId] = perLoc[locId]?.defaultSchedule || emptySchedule;
+  });
+  const conflicts = [];
+  DAY_KEYS.forEach((dayKey) => {
+    for (let i = 0; i < allowed.length; i += 1) {
+      for (let j = i + 1; j < allowed.length; j += 1) {
+        const a = allowed[i]; const b = allowed[j];
+        const da = perLocEffective[a]?.[dayKey]; const db = perLocEffective[b]?.[dayKey];
+        if (!da || !db || !da.enabled || !db.enabled) continue;
+        const aS = parseScheduleTimeToMinutes(da.startTime);
+        const aE = parseScheduleTimeToMinutes(da.endTime);
+        const bS = parseScheduleTimeToMinutes(db.startTime);
+        const bE = parseScheduleTimeToMinutes(db.endTime);
+        if (aS == null || aE == null || bS == null || bE == null) continue;
+        if (aE <= aS || bE <= bS) continue;
+        const lo = Math.max(aS, bS); const hi = Math.min(aE, bE);
+        if (hi > lo) {
+          conflicts.push({
+            dayKey,
+            locationAId: a,
+            locationBId: b,
+            overlap: `${formatMinutesAsScheduleTime(lo)}-${formatMinutesAsScheduleTime(hi)}`,
+          });
+        }
+      }
+    }
+  });
+  return conflicts;
+}
+
+/**
+ * Per-day multi-location availability for a staff member.
+ * Returns `[{ dayKey, locationIds: [...] }]` for every day (Mon–Sun) where
+ * the staff has `enabled === true` in 2 or more locations. This is a strict
+ * superset of `detectStaffLocationScheduleConflicts`: any day with an hour
+ * overlap is also a multi-location day, but a multi-location day alone does
+ * not imply a time conflict (e.g. Branch A 09:00–12:00 + Branch B 14:00–18:00).
+ * Used by the Default Schedule UI to surface an INFO banner even when there
+ * is no hard conflict.
+ */
+function detectStaffLocationScheduleMultiDays(staff) {
+  const source = staff && typeof staff === "object" ? staff : {};
+  const perLoc = normalizeLocationScheduleAvailability(source.locationScheduleAvailability);
+  const allowed = Array.isArray(source.allowedLocationIds) ? source.allowedLocationIds.slice() : [];
+  if (allowed.length < 2) return [];
+  const emptySchedule = cloneDefaultSchedule();
+  const perLocEffective = {};
+  allowed.forEach((locId) => {
+    if (!locId) return;
+    perLocEffective[locId] = perLoc[locId]?.defaultSchedule || emptySchedule;
+  });
+  const result = [];
+  DAY_KEYS.forEach((dayKey) => {
+    const activeLocs = [];
+    allowed.forEach((locId) => {
+      const day = perLocEffective[locId]?.[dayKey];
+      if (day && day.enabled === true) activeLocs.push(locId);
+    });
+    if (activeLocs.length >= 2) {
+      result.push({ dayKey, locationIds: activeLocs });
+    }
+  });
+  return result;
 }
 
 function normalizeStaffSchedulingData(staff) {
@@ -484,6 +910,7 @@ function normalizeStaffSchedulingData(staff) {
     employmentType: normalizeEmploymentType(source.employmentType),
     weeklyHoursTarget: normalizeWeeklyHoursTarget(source.weeklyHoursTarget),
     defaultSchedule: normalizeDefaultSchedule(source.defaultSchedule),
+    locationScheduleAvailability: normalizeLocationScheduleAvailability(source.locationScheduleAvailability),
     constraints: normalizeConstraints(source.constraints),
   };
 }
@@ -565,6 +992,7 @@ const scheduleHelpers = {
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
   cloneDefaultBusinessHours,
+  cloneDefaultDayShiftSegments,
   cloneDefaultCoverageRules,
   cloneDefaultSpecialBusinessDays,
   normalizeEmploymentType,
@@ -573,6 +1001,9 @@ const scheduleHelpers = {
   parseScheduleTimeToMinutes,
   assignmentDurationHoursFromTimes,
   formatMinutesAsScheduleTime,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
   sliceTimeWindowFromStart,
   normalizeDefaultSchedule,
   normalizeConstraints,
@@ -580,12 +1011,24 @@ const scheduleHelpers = {
   normalizeRolesHierarchy,
   normalizeScheduleRules,
   normalizeBusinessHours,
+  normalizeDayShiftSegments,
+  getEffectiveShiftSegmentsForDay,
+  resolvedSegmentCoverage,
+  getCustomSegmentOverlapCoverageGaps,
+  buildSegmentOverlapCoverageGapsFromSegments,
+  clipTimeWindowToBestShiftSegment,
+  clipTimeWindowToUnionOfShiftSegments,
+  hasSegmentListCoverageMinimums,
   normalizeCoverageRules,
   getDayNameFromDateKey,
   getEffectiveScheduleRulesForDate,
   isCoverageRulesAllZeros,
   normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
+  normalizeLocationScheduleAvailability,
+  getStaffDefaultScheduleForLocation,
+  detectStaffLocationScheduleConflicts,
+  detectStaffLocationScheduleMultiDays,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,
@@ -616,6 +1059,7 @@ export {
   cloneDefaultRolesHierarchy,
   cloneDefaultScheduleRules,
   cloneDefaultBusinessHours,
+  cloneDefaultDayShiftSegments,
   cloneDefaultCoverageRules,
   cloneDefaultSpecialBusinessDays,
   normalizeEmploymentType,
@@ -624,6 +1068,9 @@ export {
   parseScheduleTimeToMinutes,
   assignmentDurationHoursFromTimes,
   formatMinutesAsScheduleTime,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
   sliceTimeWindowFromStart,
   normalizeDefaultSchedule,
   normalizeConstraints,
@@ -631,12 +1078,24 @@ export {
   normalizeRolesHierarchy,
   normalizeScheduleRules,
   normalizeBusinessHours,
+  normalizeDayShiftSegments,
+  getEffectiveShiftSegmentsForDay,
+  resolvedSegmentCoverage,
+  getCustomSegmentOverlapCoverageGaps,
+  buildSegmentOverlapCoverageGapsFromSegments,
+  clipTimeWindowToBestShiftSegment,
+  clipTimeWindowToUnionOfShiftSegments,
+  hasSegmentListCoverageMinimums,
   normalizeCoverageRules,
   getDayNameFromDateKey,
   getEffectiveScheduleRulesForDate,
   isCoverageRulesAllZeros,
   normalizeSpecialBusinessDays,
   normalizeStaffSchedulingData,
+  normalizeLocationScheduleAvailability,
+  getStaffDefaultScheduleForLocation,
+  detectStaffLocationScheduleConflicts,
+  detectStaffLocationScheduleMultiDays,
   getStaffRoleLevel,
   canWorkAlone,
   hasRequiredManager,
