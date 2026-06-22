@@ -6818,7 +6818,7 @@ dialog footer button, .code-dialog footer button {
     </div>
   </section>
 
-  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;width:min(920px,calc(100vw - 32px));max-width:920px;margin:24px auto;padding:24px;background:#fff;border-radius:22px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
+  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;width:min(1120px,calc(100vw - 24px));max-width:1120px;min-height:calc(100vh - 32px);box-sizing:border-box;margin:16px auto;padding:22px;background:#fff;border-radius:22px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;text-align:left;">
       <div style="display:flex;align-items:center;gap:12px;">
         <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:60px;height:60px;object-fit:contain;">
@@ -6830,8 +6830,8 @@ dialog footer button, .code-dialog footer button {
       <div id="kioskDeviceStatusPill" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:999px;padding:8px 12px;color:#047857;font-size:12px;font-weight:800;">Connected</div>
     </div>
 
-    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading kiosk...</div>
-    <div id="kioskModuleTabs" style="display:flex;gap:8px;padding:6px;background:#f3f4f6;border-radius:18px;margin-bottom:16px;overflow-x:auto;"></div>
+    <div id="kioskModuleTabs" role="tablist" aria-label="Kiosk modules" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:6px;background:#f3f4f6;border-radius:18px;margin-bottom:12px;"></div>
+    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:10px 12px;color:#6b7280;font-size:12px;margin-bottom:16px;text-align:left;">Loading kiosk...</div>
 
     <div id="kioskQueuePanel" data-kiosk-panel="queue" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:16px;background:#f9fafb;margin-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
@@ -17329,6 +17329,7 @@ function ffIsKioskRoute() {
       || path === '/kiosk-v3'
       || path === '/kiosk-v4'
       || path === '/kiosk-v5'
+      || path === '/kiosk-v6'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17528,6 +17529,7 @@ function ffKioskRenderTechnicians(staffRows) {
 
 function ffKioskSetActiveModule(moduleId) {
   const target = String(moduleId || 'queue').trim() || 'queue';
+  window.ffKioskCurrentModule = target;
   document.querySelectorAll('[data-kiosk-panel]').forEach((panel) => {
     panel.style.display = panel.getAttribute('data-kiosk-panel') === target ? 'block' : 'none';
   });
@@ -17569,20 +17571,17 @@ function ffKioskRenderModules(permissions) {
     },
   ];
   tabs.innerHTML = modules.map((mod) => {
+    const detail = mod.enabled ? mod.detail : 'Not enabled';
     return `
-      <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" ${mod.enabled ? '' : 'disabled'} onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="flex:1;min-width:150px;border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:14px;padding:12px 14px;text-align:center;cursor:${mod.enabled ? 'pointer' : 'not-allowed'};opacity:${mod.enabled ? '1' : '0.45'};">
-        <span style="display:block;font-size:15px;font-weight:900;">${ffKioskEscapeHtml(mod.title)}</span>
-        <span style="display:block;font-size:10px;font-weight:700;margin-top:3px;opacity:0.85;">${ffKioskEscapeHtml(mod.detail)}</span>
+      <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" data-kiosk-tab-enabled="${mod.enabled ? 'true' : 'false'}" onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="width:100%;border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:14px;padding:14px 12px;text-align:center;cursor:pointer;">
+        <span style="display:block;font-size:16px;font-weight:900;">${ffKioskEscapeHtml(mod.title)}</span>
+        <span style="display:block;font-size:10px;font-weight:700;margin-top:3px;opacity:0.85;">${ffKioskEscapeHtml(detail)}</span>
       </button>
     `;
   }).join('');
-  modules.forEach((mod) => {
-    const panel = document.querySelector(`[data-kiosk-panel="${mod.id}"]`);
-    if (!panel) return;
-    if (!mod.enabled) panel.style.display = 'none';
-  });
-  const firstEnabled = modules.find((mod) => mod.enabled) || modules[0];
-  ffKioskSetActiveModule(firstEnabled.id);
+  const current = String(window.ffKioskCurrentModule || '').trim();
+  const active = modules.some((mod) => mod.id === current) ? current : 'queue';
+  ffKioskSetActiveModule(active);
 }
 
 function ffKioskQueueDocId(locationId) {
@@ -17628,8 +17627,13 @@ async function ffKioskLoadQueuePreview(api, salonId, locationId, permissions) {
   const availableList = document.getElementById('kioskQueueAvailableList');
   const serviceList = document.getElementById('kioskQueueServiceList');
   const canViewQueue = permissions && permissions['queue.view'] === true;
-  if (panel) panel.style.display = canViewQueue ? 'block' : 'none';
-  if (!canViewQueue || !panel) return;
+  if (!panel) return;
+  if (!canViewQueue) {
+    if (meta) meta.textContent = 'Queue is not enabled for this kiosk.';
+    ffKioskRenderQueueList(availableList, [], 'Queue is not enabled for this kiosk.');
+    ffKioskRenderQueueList(serviceList, [], 'Queue is not enabled for this kiosk.');
+    return;
+  }
   const docId = ffKioskQueueDocId(locationId);
   if (meta) meta.textContent = `Read-only kiosk preview - ${docId === 'default' ? 'default queue' : `location ${docId}`}`;
   try {
