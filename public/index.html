@@ -17114,7 +17114,7 @@ function ffIsKioskRoute() {
   try {
     const path = String(window.location && window.location.pathname || '').replace(/\/+$/, '') || '/';
     const paramsNow = new URLSearchParams(window.location.search || '');
-    return path === '/kiosk' || paramsNow.get('kiosk') === '1' || paramsNow.get('mode') === 'kiosk';
+    return path === '/kiosk' || path === '/kiosk-v2' || paramsNow.get('kiosk') === '1' || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
     return false;
   }
