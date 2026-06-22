@@ -6830,9 +6830,10 @@ dialog footer button, .code-dialog footer button {
       <div id="kioskDeviceStatusPill" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:999px;padding:8px 12px;color:#047857;font-size:12px;font-weight:800;">Connected</div>
     </div>
 
-    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading technicians...</div>
-    <div id="kioskModuleGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;text-align:left;margin-bottom:16px;"></div>
-    <div id="kioskQueuePanel" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:16px;background:#f9fafb;margin-bottom:16px;">
+    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading kiosk...</div>
+    <div id="kioskModuleTabs" style="display:flex;gap:8px;padding:6px;background:#f3f4f6;border-radius:18px;margin-bottom:16px;overflow-x:auto;"></div>
+
+    <div id="kioskQueuePanel" data-kiosk-panel="queue" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:16px;background:#f9fafb;margin-bottom:16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
         <div>
           <h2 style="margin:0;font-size:18px;color:#111827;">Queue</h2>
@@ -6851,7 +6852,18 @@ dialog footer button, .code-dialog footer button {
         </div>
       </div>
     </div>
-    <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
+
+    <div id="kioskTasksPanel" data-kiosk-panel="tasks" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:18px;background:#fff;margin-bottom:16px;">
+      <h2 style="margin:0 0 6px;font-size:18px;color:#111827;">Tasks</h2>
+      <p id="kioskTasksMeta" style="margin:0 0 12px;color:#6b7280;font-size:12px;">Task visibility is controlled in Kiosk Permissions.</p>
+      <div id="kioskTasksPlaceholder" style="border:1px dashed #d1d5db;border-radius:14px;padding:18px;background:#f9fafb;text-align:center;color:#6b7280;font-size:13px;">Tasks read-only view will be connected next.</div>
+    </div>
+
+    <div id="kioskTimeClockPanel" data-kiosk-panel="timeclock" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:18px;background:#fff;margin-bottom:16px;">
+      <h2 style="margin:0 0 6px;font-size:18px;color:#111827;">Time Clock</h2>
+      <p id="kioskTimeClockMeta" style="margin:0 0 12px;color:#6b7280;font-size:12px;">Staff will clock in/out by entering their PIN on this kiosk.</p>
+      <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
+    </div>
   </section>
 
   <!-- SIGNUP SECTION -->
@@ -17513,60 +17525,63 @@ function ffKioskRenderTechnicians(staffRows) {
   }).join('');
 }
 
+function ffKioskSetActiveModule(moduleId) {
+  const target = String(moduleId || 'queue').trim() || 'queue';
+  document.querySelectorAll('[data-kiosk-panel]').forEach((panel) => {
+    panel.style.display = panel.getAttribute('data-kiosk-panel') === target ? 'block' : 'none';
+  });
+  document.querySelectorAll('[data-kiosk-tab]').forEach((tab) => {
+    const active = tab.getAttribute('data-kiosk-tab') === target;
+    tab.style.background = active ? '#7c3aed' : '#fff';
+    tab.style.color = active ? '#fff' : '#4b5563';
+    tab.style.borderColor = active ? '#7c3aed' : '#e5e7eb';
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+window.ffKioskSetActiveModule = ffKioskSetActiveModule;
+
 function ffKioskRenderModules(permissions) {
-  const grid = document.getElementById('kioskModuleGrid');
-  if (!grid) return;
+  const tabs = document.getElementById('kioskModuleTabs');
+  if (!tabs) return;
   const perms = { ...FF_KIOSK_DEFAULT_PERMISSIONS, ...(permissions || {}) };
   const modules = [
     {
       id: 'queue',
       title: 'Queue',
-      subtitle: 'Available and In Service view',
       enabled: perms['queue.view'] === true,
-      details: [
-        perms['queue.join'] === true ? 'Join' : null,
-        perms['queue.leave'] === true ? 'Leave' : null,
-        perms['service.start'] === true ? 'Start service' : null,
-      ].filter(Boolean).join(' / ') || 'View only',
+      detail: 'Available / In Service',
     },
     {
       id: 'tasks',
       title: 'Tasks',
-      subtitle: 'Task board by allowed groups',
       enabled: perms['tasks.viewTechnicians'] === true || perms['tasks.viewManagers'] === true,
-      details: [
+      detail: [
         perms['tasks.viewTechnicians'] === true ? 'Technicians' : null,
         perms['tasks.viewManagers'] === true ? 'Managers' : null,
-        perms['tasks.complete'] === true ? 'Complete by PIN' : null,
       ].filter(Boolean).join(' / ') || 'Hidden',
     },
     {
       id: 'timeclock',
       title: 'Time Clock',
-      subtitle: 'Clock in/out and breaks by PIN',
       enabled: perms['timeclock.view'] === true,
-      details: [
-        perms['timeclock.clockIn'] === true ? 'Clock in' : null,
-        perms['timeclock.clockOut'] === true ? 'Clock out' : null,
-        (perms['timeclock.breakStart'] === true || perms['timeclock.breakEnd'] === true) ? 'Breaks' : null,
-      ].filter(Boolean).join(' / ') || 'Hidden',
+      detail: 'PIN clock in/out',
     },
   ];
-  grid.innerHTML = modules.map((mod) => {
-    const opacity = mod.enabled ? '1' : '0.48';
-    const bg = mod.enabled ? '#fff' : '#f9fafb';
-    const border = mod.enabled ? '#ddd6fe' : '#e5e7eb';
-    const pillBg = mod.enabled ? '#ede9fe' : '#f3f4f6';
-    const pillColor = mod.enabled ? '#7c3aed' : '#6b7280';
+  tabs.innerHTML = modules.map((mod) => {
     return `
-      <button type="button" data-kiosk-module="${ffKioskEscapeHtml(mod.id)}" ${mod.enabled ? '' : 'disabled'} style="border:1px solid ${border};background:${bg};border-radius:18px;padding:16px;text-align:left;cursor:${mod.enabled ? 'pointer' : 'not-allowed'};opacity:${opacity};box-shadow:0 10px 24px rgba(15,23,42,0.07);">
-        <span style="display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:${pillBg};color:${pillColor};font-size:11px;font-weight:900;padding:5px 9px;margin-bottom:12px;">${mod.enabled ? 'Enabled' : 'Hidden'}</span>
-        <span style="display:block;font-size:20px;font-weight:900;color:#111827;margin-bottom:4px;">${ffKioskEscapeHtml(mod.title)}</span>
-        <span style="display:block;font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:10px;">${ffKioskEscapeHtml(mod.subtitle)}</span>
-        <span style="display:block;font-size:11px;color:#4b5563;font-weight:700;">${ffKioskEscapeHtml(mod.details)}</span>
+      <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" ${mod.enabled ? '' : 'disabled'} onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="flex:1;min-width:150px;border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:14px;padding:12px 14px;text-align:center;cursor:${mod.enabled ? 'pointer' : 'not-allowed'};opacity:${mod.enabled ? '1' : '0.45'};">
+        <span style="display:block;font-size:15px;font-weight:900;">${ffKioskEscapeHtml(mod.title)}</span>
+        <span style="display:block;font-size:10px;font-weight:700;margin-top:3px;opacity:0.85;">${ffKioskEscapeHtml(mod.detail)}</span>
       </button>
     `;
   }).join('');
+  modules.forEach((mod) => {
+    const panel = document.querySelector(`[data-kiosk-panel="${mod.id}"]`);
+    if (!panel) return;
+    if (!mod.enabled) panel.style.display = 'none';
+  });
+  const firstEnabled = modules.find((mod) => mod.enabled) || modules[0];
+  ffKioskSetActiveModule(firstEnabled.id);
 }
 
 function ffKioskQueueDocId(locationId) {
