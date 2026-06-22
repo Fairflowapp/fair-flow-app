@@ -242,6 +242,27 @@ onAuthStateChanged(auth, async user => {
     __ffChatBadgeEarlyGen++;
     return;
   }
+  try {
+    const tokenResult = typeof user.getIdTokenResult === "function" ? await user.getIdTokenResult() : null;
+    const claims = tokenResult && tokenResult.claims ? tokenResult.claims : {};
+    if (claims && claims.isKiosk === true) {
+      window.__ff_waiting_for_salon_choice = false;
+      window.currentSalonId = String(claims.salonId || "") || null;
+      currentSalonId = window.currentSalonId;
+      console.log("[app.js] kiosk auth detected; skipping member profile bootstrap", {
+        salonId: window.currentSalonId,
+        kioskId: claims.kioskId || null,
+      });
+      return;
+    }
+    if (typeof window !== "undefined" && typeof window.ffIsKioskRoute === "function" && window.ffIsKioskRoute()) {
+      window.__ff_waiting_for_salon_choice = false;
+      console.log("[app.js] non-kiosk auth on kiosk route; pairing flow owns the screen");
+      return;
+    }
+  } catch (e) {
+    console.warn("[app.js] kiosk claims check failed", e);
+  }
   // Pre-emptively flip the wait flag synchronously. The flag will be cleared by
   // ffApplyActiveMembership once a single membership is auto-selected or the
   // user picks one via Choose Salon. This stops module auth listeners from
@@ -3247,8 +3268,33 @@ onAuthStateChanged(auth, async (user) => {
     } catch (e) {
       console.warn("[Auth] Error cleaning up avatar listener/cache:", e);
     }
+    if (typeof window !== "undefined" && typeof window.ffIsKioskRoute === "function" && window.ffIsKioskRoute()) {
+      console.log("[Auth] Kiosk route signed out; index.html pairing flow owns the screen");
+      return;
+    }
     showLoginScreen();
     return;
+  }
+  try {
+    const tokenResult = typeof user.getIdTokenResult === "function" ? await user.getIdTokenResult() : null;
+    const claims = tokenResult && tokenResult.claims ? tokenResult.claims : {};
+    if (claims && claims.isKiosk === true) {
+      console.log("[Auth] Kiosk user signed in; skipping app role bootstrap", {
+        salonId: claims.salonId || null,
+        kioskId: claims.kioskId || null,
+      });
+      if (typeof window.ffShowKioskPairedScreen === "function") {
+        window.ffShowKioskPairedScreen(claims);
+      }
+      return;
+    }
+    if (typeof window !== "undefined" && typeof window.ffIsKioskRoute === "function" && window.ffIsKioskRoute()) {
+      console.log("[Auth] Non-kiosk user on kiosk route; index.html pairing flow owns the screen");
+      if (typeof window.ffStartKioskPairing === "function") window.ffStartKioskPairing();
+      return;
+    }
+  } catch (e) {
+    console.warn("[Auth] Kiosk token check failed", e);
   }
   console.log("[Auth] User is signed in, loading role");
   // If the early auth listener already detected multi-memberships and surfaced

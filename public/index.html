@@ -6792,6 +6792,33 @@ dialog footer button, .code-dialog footer button {
     </div>
   </section>
 
+  <!-- KIOSK PAIRING SECTION (shown on /kiosk when the tablet is not paired yet) -->
+  <section id="kiosk-pairing-section" style="display:none;position:relative;z-index:2;max-width:520px;margin:40px auto;padding:32px;background:#fff;border-radius:18px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
+    <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:72px;height:72px;object-fit:contain;margin-bottom:12px;">
+    <h1 style="font-size:26px;margin:0 0 8px;color:#111827;">Pair this kiosk</h1>
+    <p id="kioskPairingIntro" style="margin:0 auto 18px;color:#6b7280;font-size:13px;line-height:1.5;max-width:360px;">Use Settings - Devices on the owner account to approve this tablet.</p>
+
+    <div id="kioskPairingCodeCard" style="border:1px solid #e9d5ff;background:#faf5ff;border-radius:16px;padding:18px;margin:18px 0;">
+      <div style="font-size:11px;font-weight:800;color:#6d28d9;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Pairing code</div>
+      <div id="kioskPairingCode" style="font-size:48px;font-weight:900;letter-spacing:0.18em;color:#111827;line-height:1;">----</div>
+      <div id="kioskPairingExpires" style="margin-top:10px;font-size:12px;color:#6b7280;">Generating code...</div>
+    </div>
+
+    <div id="kioskPairingStatus" role="status" aria-live="polite" style="min-height:20px;font-size:13px;color:#6b7280;margin-bottom:16px;">Starting pairing...</div>
+
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+      <button id="kioskPairingRefreshBtn" type="button" onclick="window.ffStartKioskPairing && window.ffStartKioskPairing({ refresh: true })" style="padding:10px 16px;border:1px solid #a78bfa;border-radius:999px;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;cursor:pointer;">Generate New Code</button>
+      <button id="kioskPairingBackToLoginBtn" type="button" onclick="window.ffExitKioskPairing && window.ffExitKioskPairing()" style="padding:10px 16px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#6b7280;font-size:13px;font-weight:700;cursor:pointer;">Back to Login</button>
+    </div>
+  </section>
+
+  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;max-width:520px;margin:40px auto;padding:32px;background:#fff;border-radius:18px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
+    <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:72px;height:72px;object-fit:contain;margin-bottom:12px;">
+    <h1 style="font-size:26px;margin:0 0 8px;color:#111827;">Kiosk connected</h1>
+    <p style="margin:0 auto 18px;color:#6b7280;font-size:13px;line-height:1.5;max-width:360px;">This tablet is paired. The technician kiosk screen will be connected in the next stage.</p>
+    <div id="kioskPairedMeta" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:12px;padding:12px;color:#047857;font-size:12px;line-height:1.5;">Signed in as kiosk.</div>
+  </section>
+
   <!-- SIGNUP SECTION -->
   <section id="signup-section" style="display:none;max-width:400px;margin:40px auto;padding:32px;background:#fff;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,0.08);">
     <h2 style="text-align:center;font-size:24px;margin-bottom:20px;">Create your Fair Flow account</h2>
@@ -9497,6 +9524,29 @@ async function initFirebaseAuth() {
         (async function ffHandleSignedInUser() {
           let hasProfile = true; // safe default: if we can't check, proceed with normal paint
           let profileData = null;
+          let tokenClaims = null;
+          try {
+            const tokenResult = user && typeof user.getIdTokenResult === 'function'
+              ? await user.getIdTokenResult()
+              : null;
+            tokenClaims = tokenResult && tokenResult.claims ? tokenResult.claims : null;
+            if (tokenClaims && tokenClaims.isKiosk === true) {
+              console.log('[AUTH] kiosk signed in:', user.uid, tokenClaims);
+              if (typeof ffShowKioskPairedScreen === 'function') {
+                ffShowKioskPairedScreen(tokenClaims);
+              }
+              return;
+            }
+            if (typeof ffIsKioskRoute === 'function' && ffIsKioskRoute()) {
+              console.log('[AUTH] non-kiosk user on kiosk route - starting kiosk pairing flow');
+              if (typeof ffStartKioskPairing === 'function') {
+                ffStartKioskPairing();
+              }
+              return;
+            }
+          } catch (claimsErr) {
+            console.warn('[AUTH] kiosk claims check failed:', claimsErr?.code, claimsErr?.message);
+          }
           try {
             const firestoreDb = window.db || window.ffDb;
             if (firestoreDb && typeof getTrainingFirestoreApi === 'function') {
@@ -9636,10 +9686,17 @@ async function initFirebaseAuth() {
         document.body.classList.add('ff-logged-out');
         if (mainContent) mainContent.style.display = 'none';
         if (authBanner) authBanner.style.display = 'none';
-        if (loginSection) loginSection.style.display = 'block';
+        if (typeof ffIsKioskRoute === 'function' && ffIsKioskRoute()) {
+          if (loginSection) loginSection.style.display = 'none';
+          if (typeof ffStartKioskPairing === 'function') {
+            ffStartKioskPairing();
+          }
+        } else if (loginSection) {
+          loginSection.style.display = 'block';
+        }
         if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
         if (typeof stopTrainingNotificationsSubscription === 'function') stopTrainingNotificationsSubscription();
-        if (typeof window.showLoginScreen === 'function') window.showLoginScreen();
+        if (!(typeof ffIsKioskRoute === 'function' && ffIsKioskRoute()) && typeof window.showLoginScreen === 'function') window.showLoginScreen();
         ffRemoveAuthSplash();
       }
     });
@@ -17041,6 +17098,214 @@ async function ffApproveKioskPairingFromSettings() {
   }
 }
 window.ffApproveKioskPairingFromSettings = ffApproveKioskPairingFromSettings;
+
+function ffIsKioskRoute() {
+  try {
+    const path = String(window.location && window.location.pathname || '').replace(/\/+$/, '') || '/';
+    const paramsNow = new URLSearchParams(window.location.search || '');
+    return path === '/kiosk' || paramsNow.get('kiosk') === '1' || paramsNow.get('mode') === 'kiosk';
+  } catch (e) {
+    return false;
+  }
+}
+window.ffIsKioskRoute = ffIsKioskRoute;
+
+function ffKioskSetStatus(message, variant) {
+  const el = document.getElementById('kioskPairingStatus');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = variant === 'error' ? '#b91c1c' : (variant === 'success' ? '#047857' : '#6b7280');
+}
+
+function ffKioskRandomBase64Url(byteLength) {
+  const bytes = new Uint8Array(byteLength || 24);
+  crypto.getRandomValues(bytes);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function ffKioskRandomCode() {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return String(bytes[0] % 10000).padStart(4, '0');
+}
+
+async function ffKioskSha256Hex(text) {
+  const data = new TextEncoder().encode(String(text || ''));
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function ffGetKioskPairingApi() {
+  const [firestoreApi, authApi] = await Promise.all([
+    import('https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js'),
+    import('https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js')
+  ]);
+  const app = window.__firebaseApp || (typeof window.__initFirebaseModular === 'function' ? window.__initFirebaseModular() : null);
+  const db =
+    window.ffDb ||
+    window.db ||
+    (typeof window.getFirestore === 'function' ? window.getFirestore(app || undefined) : null);
+  const auth =
+    window.ffAuth ||
+    (typeof window.getAuth === 'function' ? window.getAuth(app || undefined) : null);
+  if (!db || !auth) throw new Error('Firebase is not ready yet.');
+  return {
+    db,
+    auth,
+    doc: firestoreApi.doc,
+    setDoc: firestoreApi.setDoc,
+    deleteDoc: firestoreApi.deleteDoc,
+    onSnapshot: firestoreApi.onSnapshot,
+    serverTimestamp: firestoreApi.serverTimestamp,
+    Timestamp: firestoreApi.Timestamp,
+    signInWithCustomToken: authApi.signInWithCustomToken,
+  };
+}
+
+function ffStopKioskPairingListener() {
+  try {
+    if (typeof window.__ffKioskPairingUnsub === 'function') {
+      window.__ffKioskPairingUnsub();
+    }
+  } catch (e) {}
+  window.__ffKioskPairingUnsub = null;
+}
+
+function ffShowKioskPairingScreen() {
+  const loginSection = document.getElementById('login-section');
+  const signupSection = document.getElementById('signup-section');
+  const resetPasswordSection = document.getElementById('reset-password-section');
+  const completeSetupSection = document.getElementById('complete-setup-section');
+  const mainContent = document.getElementById('main-app-content');
+  const pairingSection = document.getElementById('kiosk-pairing-section');
+  const pairedSection = document.getElementById('kiosk-paired-section');
+  document.body.classList.add('ff-logged-out');
+  document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+  if (loginSection) loginSection.style.display = 'none';
+  if (signupSection) signupSection.style.display = 'none';
+  if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+  if (completeSetupSection) completeSetupSection.style.display = 'none';
+  if (mainContent) mainContent.style.display = 'none';
+  if (pairedSection) pairedSection.style.display = 'none';
+  if (pairingSection) pairingSection.style.display = 'block';
+  if (typeof ffRemoveAuthSplash === 'function') ffRemoveAuthSplash();
+}
+window.ffShowKioskPairingScreen = ffShowKioskPairingScreen;
+
+function ffShowKioskPairedScreen(claims) {
+  const loginSection = document.getElementById('login-section');
+  const signupSection = document.getElementById('signup-section');
+  const resetPasswordSection = document.getElementById('reset-password-section');
+  const completeSetupSection = document.getElementById('complete-setup-section');
+  const mainContent = document.getElementById('main-app-content');
+  const pairingSection = document.getElementById('kiosk-pairing-section');
+  const pairedSection = document.getElementById('kiosk-paired-section');
+  const meta = document.getElementById('kioskPairedMeta');
+  document.body.classList.add('ff-logged-out');
+  document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+  if (loginSection) loginSection.style.display = 'none';
+  if (signupSection) signupSection.style.display = 'none';
+  if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+  if (completeSetupSection) completeSetupSection.style.display = 'none';
+  if (mainContent) mainContent.style.display = 'none';
+  if (pairingSection) pairingSection.style.display = 'none';
+  if (pairedSection) pairedSection.style.display = 'block';
+  if (meta && claims) {
+    meta.textContent = `Signed in as kiosk ${claims.kioskId || ''} for salon ${claims.salonId || ''}.`;
+  }
+  if (typeof ffRemoveAuthSplash === 'function') ffRemoveAuthSplash();
+}
+window.ffShowKioskPairedScreen = ffShowKioskPairedScreen;
+
+async function ffStartKioskPairing(options) {
+  if (!ffIsKioskRoute()) return;
+  const codeEl = document.getElementById('kioskPairingCode');
+  const expiresEl = document.getElementById('kioskPairingExpires');
+  const refreshBtn = document.getElementById('kioskPairingRefreshBtn');
+  ffShowKioskPairingScreen();
+  ffStopKioskPairingListener();
+  if (refreshBtn) refreshBtn.disabled = true;
+  if (codeEl) codeEl.textContent = '----';
+  if (expiresEl) expiresEl.textContent = 'Generating code...';
+  ffKioskSetStatus('Creating pairing request...', 'info');
+
+  try {
+    const api = await ffGetKioskPairingApi();
+    const pairId = ffKioskRandomBase64Url(24);
+    const code = ffKioskRandomCode();
+    const deviceSecret = ffKioskRandomBase64Url(32);
+    const deviceSecretHash = await ffKioskSha256Hex(deviceSecret);
+    const expiresAtMs = Date.now() + 10 * 60 * 1000;
+    const pairRef = api.doc(api.db, 'pairingCodes', pairId);
+
+    window.__ffKioskPairingPairId = pairId;
+    try {
+      sessionStorage.setItem('ff_kiosk_pairing_pair_id_v1', pairId);
+    } catch (e) {}
+
+    await api.setDoc(pairRef, {
+      code,
+      status: 'pending',
+      deviceSecretHash,
+      createdAt: api.serverTimestamp(),
+      expiresAt: api.Timestamp.fromMillis(expiresAtMs),
+    });
+
+    if (codeEl) codeEl.textContent = code;
+    if (expiresEl) expiresEl.textContent = 'Expires in about 10 minutes';
+    ffKioskSetStatus('Waiting for owner approval in Settings - Devices...', 'info');
+
+    window.__ffKioskPairingUnsub = api.onSnapshot(pairRef, async (snap) => {
+      if (!snap.exists()) {
+        ffKioskSetStatus('Pairing request was removed. Generate a new code.', 'error');
+        return;
+      }
+      const data = snap.data() || {};
+      if (data.status === 'error') {
+        ffKioskSetStatus(data.error || 'Pairing failed. Generate a new code.', 'error');
+        return;
+      }
+      if (data.status !== 'tokenReady' || !data.token) return;
+
+      ffKioskSetStatus('Approved. Connecting kiosk...', 'success');
+      ffStopKioskPairingListener();
+      await api.signInWithCustomToken(api.auth, data.token);
+      try {
+        await api.deleteDoc(pairRef);
+      } catch (deleteErr) {
+        console.warn('[KioskPairing] delete-after-read failed', deleteErr);
+      }
+      try {
+        localStorage.setItem('ff_kiosk_paired_v1', JSON.stringify({
+          kioskId: data.kioskId || null,
+          pairedAt: new Date().toISOString(),
+        }));
+      } catch (e) {}
+    });
+  } catch (err) {
+    console.warn('[KioskPairing] failed to start', err);
+    ffKioskSetStatus('Could not create pairing code. Refresh and try again.', 'error');
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+window.ffStartKioskPairing = ffStartKioskPairing;
+
+function ffExitKioskPairing() {
+  ffStopKioskPairingListener();
+  try {
+    const url = new URL(window.location.href);
+    url.pathname = '/';
+    url.searchParams.delete('kiosk');
+    url.searchParams.delete('mode');
+    window.location.href = url.toString();
+  } catch (e) {
+    window.location.href = '/';
+  }
+}
+window.ffExitKioskPairing = ffExitKioskPairing;
 
 function ffOpenKioskDevicesModal() {
   const modal = document.getElementById('kioskDevicesModal');
