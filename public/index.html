@@ -6832,6 +6832,25 @@ dialog footer button, .code-dialog footer button {
 
     <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading technicians...</div>
     <div id="kioskModuleGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;text-align:left;margin-bottom:16px;"></div>
+    <div id="kioskQueuePanel" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:16px;background:#f9fafb;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin:0;font-size:18px;color:#111827;">Queue</h2>
+          <p id="kioskQueueMeta" style="margin:4px 0 0;color:#6b7280;font-size:12px;">Read-only kiosk preview</p>
+        </div>
+        <span style="border:1px solid #ddd6fe;background:#ede9fe;color:#7c3aed;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:900;">Read only</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+        <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;">
+          <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">Available</h3>
+          <div id="kioskQueueAvailableList" style="display:flex;flex-direction:column;gap:8px;color:#6b7280;font-size:12px;">Loading...</div>
+        </div>
+        <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;">
+          <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">In Service</h3>
+          <div id="kioskQueueServiceList" style="display:flex;flex-direction:column;gap:8px;color:#6b7280;font-size:12px;">Loading...</div>
+        </div>
+      </div>
+    </div>
     <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
   </section>
 
@@ -17550,6 +17569,68 @@ function ffKioskRenderModules(permissions) {
   }).join('');
 }
 
+function ffKioskQueueDocId(locationId) {
+  const value = String(locationId || '').trim();
+  return value || 'default';
+}
+
+function ffKioskQueueEntryName(entry) {
+  const data = entry || {};
+  return String(data.name || data.displayName || data.staffName || data.technicianName || data.workerName || 'Team Member').trim();
+}
+
+function ffKioskQueueEntrySubtext(entry) {
+  const data = entry || {};
+  return String(data.serviceName || data.clientName || data.phone || data.status || '').trim();
+}
+
+function ffKioskRenderQueueList(listEl, rows, emptyText) {
+  if (!listEl) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    listEl.innerHTML = `<div style="padding:10px;border:1px dashed #d1d5db;border-radius:10px;background:#f9fafb;text-align:center;">${ffKioskEscapeHtml(emptyText)}</div>`;
+    return;
+  }
+  listEl.innerHTML = items.map((entry, index) => {
+    const name = ffKioskQueueEntryName(entry);
+    const sub = ffKioskQueueEntrySubtext(entry);
+    return `
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:10px;">
+        <span style="width:26px;height:26px;border-radius:999px;background:#ede9fe;color:#7c3aed;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;">${index + 1}</span>
+        <span style="min-width:0;">
+          <span style="display:block;color:#111827;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(name)}</span>
+          ${sub ? `<span style="display:block;color:#6b7280;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(sub)}</span>` : ''}
+        </span>
+      </div>
+    `;
+  }).join('');
+}
+
+async function ffKioskLoadQueuePreview(api, salonId, locationId, permissions) {
+  const panel = document.getElementById('kioskQueuePanel');
+  const meta = document.getElementById('kioskQueueMeta');
+  const availableList = document.getElementById('kioskQueueAvailableList');
+  const serviceList = document.getElementById('kioskQueueServiceList');
+  const canViewQueue = permissions && permissions['queue.view'] === true;
+  if (panel) panel.style.display = canViewQueue ? 'block' : 'none';
+  if (!canViewQueue || !panel) return;
+  const docId = ffKioskQueueDocId(locationId);
+  if (meta) meta.textContent = `Read-only kiosk preview - ${docId === 'default' ? 'default queue' : `location ${docId}`}`;
+  try {
+    const snap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'queueState', docId));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    const queue = Array.isArray(data.queue) ? data.queue : [];
+    const service = Array.isArray(data.service) ? data.service : [];
+    ffKioskRenderQueueList(availableList, queue, 'No one is available right now.');
+    ffKioskRenderQueueList(serviceList, service, 'No one is in service right now.');
+  } catch (err) {
+    console.warn('[KioskQueue] load failed', err);
+    const msg = `Could not load queue: ${err && (err.code || err.message) ? (err.code || err.message) : 'unknown error'}`;
+    if (availableList) availableList.textContent = msg;
+    if (serviceList) serviceList.textContent = msg;
+  }
+}
+
 async function ffLoadKioskHome(claims) {
   const meta = document.getElementById('kioskPairedMeta');
   const status = document.getElementById('kioskHomeStatus');
@@ -17597,6 +17678,7 @@ async function ffLoadKioskHome(claims) {
       console.warn('[KioskHome] role read failed; using defaults', roleErr);
     }
     ffKioskRenderModules(rolePermissions);
+    await ffKioskLoadQueuePreview(api, salonId, locationId, rolePermissions);
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
     if (status) status.textContent = `Loaded ${staff.length} staff docs. Rendering kiosk grid...`;

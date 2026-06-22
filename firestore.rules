@@ -712,7 +712,7 @@ service cloud.firestore {
 
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
       allow write: if belongsToSalon(salonId);
     }
 
