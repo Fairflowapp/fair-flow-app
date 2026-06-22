@@ -6818,52 +6818,56 @@ dialog footer button, .code-dialog footer button {
     </div>
   </section>
 
-  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;width:min(1120px,calc(100vw - 24px));max-width:1120px;min-height:calc(100vh - 32px);box-sizing:border-box;margin:16px auto;padding:22px;background:#fff;border-radius:22px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;text-align:left;">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:60px;height:60px;object-fit:contain;">
-        <div>
-          <h1 style="font-size:26px;margin:0;color:#111827;">Fair Flow Kiosk</h1>
-          <p id="kioskPairedMeta" style="margin:4px 0 0;color:#6b7280;font-size:13px;line-height:1.4;">Signed in as kiosk.</p>
+  <section id="kiosk-paired-section" style="display:none;position:fixed;inset:0;z-index:100002;width:100vw;height:100vh;box-sizing:border-box;margin:0;padding:0;background:#f7f4fb;pointer-events:auto;text-align:left;overflow:auto;">
+    <div style="position:sticky;top:0;z-index:3;background:#5b21b6;border-bottom:1px solid rgba(0,0,0,0.12);box-shadow:0 1px 0 rgba(255,255,255,0.06) inset;">
+      <div style="display:flex;align-items:center;width:100%;box-sizing:border-box;padding:3px 25px 3px 25px;min-height:42px;gap:18px;">
+        <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+          <img src="/fairflow-logo-white.png?v=14" alt="Fair Flow App" style="width:28px;height:28px;display:block;object-fit:contain;">
         </div>
-      </div>
-      <div id="kioskDeviceStatusPill" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:999px;padding:8px 12px;color:#047857;font-size:12px;font-weight:800;">Connected</div>
-    </div>
-
-    <div id="kioskModuleTabs" role="tablist" aria-label="Kiosk modules" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:6px;background:#f3f4f6;border-radius:18px;margin-bottom:12px;"></div>
-    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:10px 12px;color:#6b7280;font-size:12px;margin-bottom:16px;text-align:left;">Loading kiosk...</div>
-
-    <div id="kioskQueuePanel" data-kiosk-panel="queue" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:16px;background:#f9fafb;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
-        <div>
-          <h2 style="margin:0;font-size:18px;color:#111827;">Queue</h2>
-          <p id="kioskQueueMeta" style="margin:4px 0 0;color:#6b7280;font-size:12px;">Read-only kiosk preview</p>
-        </div>
-        <span style="border:1px solid #ddd6fe;background:#ede9fe;color:#7c3aed;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:900;">Read only</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
-        <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;">
-          <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">Available</h3>
-          <div id="kioskQueueAvailableList" style="display:flex;flex-direction:column;gap:8px;color:#6b7280;font-size:12px;">Loading...</div>
-        </div>
-        <div style="border:1px solid #e5e7eb;border-radius:14px;background:#fff;padding:12px;">
-          <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">In Service</h3>
-          <div id="kioskQueueServiceList" style="display:flex;flex-direction:column;gap:8px;color:#6b7280;font-size:12px;">Loading...</div>
+        <div id="kioskModuleTabs" role="tablist" aria-label="Kiosk modules" style="display:flex;align-items:center;gap:22px;min-width:0;flex:1;"></div>
+        <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35);">
+          <span id="kioskPairedMeta" style="color:rgba(255,255,255,0.84);font-size:11px;font-weight:600;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+          <span style="color:#fff;font-size:12px;font-weight:800;letter-spacing:0.02em;white-space:nowrap;">Kiosk mode</span>
+          <span id="kioskDeviceStatusPill" style="border:1px solid rgba(255,255,255,0.36);background:rgba(255,255,255,0.14);border-radius:999px;padding:4px 9px;color:#fff;font-size:11px;font-weight:800;">Connected</span>
         </div>
       </div>
     </div>
 
-    <div id="kioskTasksPanel" data-kiosk-panel="tasks" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:18px;background:#fff;margin-bottom:16px;">
-      <h2 style="margin:0 0 6px;font-size:18px;color:#111827;">Tasks</h2>
-      <p id="kioskTasksMeta" style="margin:0 0 12px;color:#6b7280;font-size:12px;">Task visibility is controlled in Kiosk Permissions.</p>
-      <div id="kioskTasksPlaceholder" style="border:1px dashed #d1d5db;border-radius:14px;padding:18px;background:#f9fafb;text-align:center;color:#6b7280;font-size:13px;">Tasks read-only view will be connected next.</div>
-    </div>
+    <main style="max-width:1140px;margin:0 auto;padding:18px 24px 32px;box-sizing:border-box;">
+      <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#fff;border-radius:12px;padding:9px 12px;color:#6b7280;font-size:12px;margin-bottom:14px;text-align:left;">Loading kiosk...</div>
 
-    <div id="kioskTimeClockPanel" data-kiosk-panel="timeclock" style="display:none;text-align:left;border:1px solid #e5e7eb;border-radius:18px;padding:18px;background:#fff;margin-bottom:16px;">
-      <h2 style="margin:0 0 6px;font-size:18px;color:#111827;">Time Clock</h2>
-      <p id="kioskTimeClockMeta" style="margin:0 0 12px;color:#6b7280;font-size:12px;">Staff will clock in/out by entering their PIN on this kiosk.</p>
-      <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
-    </div>
+      <div id="kioskQueuePanel" data-kiosk-panel="queue" style="display:none;text-align:left;">
+        <div id="kioskQueueMeta" style="margin:0 0 10px;color:#6b7280;font-size:12px;">Read-only kiosk preview</div>
+        <div class="wrap" style="visibility:visible;margin:0;padding:0;max-width:none;">
+          <div class="cols">
+            <div class="col">
+              <h2>Available</h2>
+              <div class="list available-list"><ul id="kioskQueueAvailableList">Loading...</ul></div>
+            </div>
+            <div class="col">
+              <h2>In service</h2>
+              <div class="list inservice-list"><ul id="kioskQueueServiceList">Loading...</ul></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="kioskTasksPanel" data-kiosk-panel="tasks" style="display:none;text-align:left;">
+        <div class="card" style="padding:22px;border-radius:18px;background:#fff;border:1px solid #e5e7eb;">
+          <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">Tasks</h2>
+          <p id="kioskTasksMeta" style="margin:0 0 12px;color:#6b7280;font-size:13px;">Task visibility is controlled in Kiosk Permissions.</p>
+          <div id="kioskTasksPlaceholder" class="ff-queue-empty-inner" style="text-align:center;">Tasks board will be connected next.</div>
+        </div>
+      </div>
+
+      <div id="kioskTimeClockPanel" data-kiosk-panel="timeclock" style="display:none;text-align:left;">
+        <div class="card" style="padding:22px;border-radius:18px;background:#fff;border:1px solid #e5e7eb;">
+          <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">Time Clock</h2>
+          <p id="kioskTimeClockMeta" style="margin:0 0 16px;color:#6b7280;font-size:13px;">Choose a staff member, then enter their PIN to clock in/out.</p>
+          <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;text-align:left;"></div>
+        </div>
+      </div>
+    </main>
   </section>
 
   <!-- SIGNUP SECTION -->
@@ -17330,6 +17334,7 @@ function ffIsKioskRoute() {
       || path === '/kiosk-v4'
       || path === '/kiosk-v5'
       || path === '/kiosk-v6'
+      || path === '/kiosk-v7'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17530,14 +17535,18 @@ function ffKioskRenderTechnicians(staffRows) {
 function ffKioskSetActiveModule(moduleId) {
   const target = String(moduleId || 'queue').trim() || 'queue';
   window.ffKioskCurrentModule = target;
+  try {
+    document.body.classList.toggle('ff-queue-route-active', target === 'queue');
+  } catch (_) {}
   document.querySelectorAll('[data-kiosk-panel]').forEach((panel) => {
     panel.style.display = panel.getAttribute('data-kiosk-panel') === target ? 'block' : 'none';
   });
   document.querySelectorAll('[data-kiosk-tab]').forEach((tab) => {
     const active = tab.getAttribute('data-kiosk-tab') === target;
-    tab.style.background = active ? '#7c3aed' : '#fff';
-    tab.style.color = active ? '#fff' : '#4b5563';
-    tab.style.borderColor = active ? '#7c3aed' : '#e5e7eb';
+    tab.style.background = active ? '#fff' : 'transparent';
+    tab.style.color = active ? '#7c3aed' : '#ffffff';
+    tab.style.borderColor = active ? '#ffffff' : 'transparent';
+    tab.style.fontWeight = active ? '800' : '500';
     tab.setAttribute('aria-selected', active ? 'true' : 'false');
   });
 }
@@ -17573,9 +17582,9 @@ function ffKioskRenderModules(permissions) {
   tabs.innerHTML = modules.map((mod) => {
     const detail = mod.enabled ? mod.detail : 'Not enabled';
     return `
-      <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" data-kiosk-tab-enabled="${mod.enabled ? 'true' : 'false'}" onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="width:100%;border:1px solid #e5e7eb;background:#fff;color:#4b5563;border-radius:14px;padding:14px 12px;text-align:center;cursor:pointer;">
-        <span style="display:block;font-size:16px;font-weight:900;">${ffKioskEscapeHtml(mod.title)}</span>
-        <span style="display:block;font-size:10px;font-weight:700;margin-top:3px;opacity:0.85;">${ffKioskEscapeHtml(detail)}</span>
+      <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" data-kiosk-tab-enabled="${mod.enabled ? 'true' : 'false'}" onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="border:1px solid transparent;background:transparent;color:#fff;border-radius:999px;padding:5px 14px;text-align:center;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;">
+        <span style="display:block;font-size:17px;">${ffKioskEscapeHtml(mod.title)}</span>
+        <span style="display:block;font-size:10px;font-weight:700;opacity:0.75;">${ffKioskEscapeHtml(detail)}</span>
       </button>
     `;
   }).join('');
@@ -17603,20 +17612,29 @@ function ffKioskRenderQueueList(listEl, rows, emptyText) {
   if (!listEl) return;
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) {
-    listEl.innerHTML = `<div style="padding:10px;border:1px dashed #d1d5db;border-radius:10px;background:#f9fafb;text-align:center;">${ffKioskEscapeHtml(emptyText)}</div>`;
+    const isService = listEl.id === 'kioskQueueServiceList';
+    if (isService && typeof ffQueueEmptyInServiceHtml === 'function') {
+      listEl.innerHTML = `<li class="ff-queue-empty-state">${ffQueueEmptyInServiceHtml()}</li>`;
+    } else if (!isService && typeof ffQueueEmptyAvailableHtml === 'function') {
+      listEl.innerHTML = `<li class="ff-queue-empty-state">${ffQueueEmptyAvailableHtml()}</li>`;
+    } else {
+      listEl.innerHTML = `<li class="ff-queue-empty-state"><div class="ff-queue-empty-inner"><div class="ff-queue-empty-title">${ffKioskEscapeHtml(emptyText)}</div></div></li>`;
+    }
     return;
   }
   listEl.innerHTML = items.map((entry, index) => {
     const name = ffKioskQueueEntryName(entry);
-    const sub = ffKioskQueueEntrySubtext(entry);
+    const displayName = typeof ffQueueDisplayName === 'function' ? ffQueueDisplayName({ ...(entry || {}), name }) : name;
+    const color = typeof colorOf === 'function' ? colorOf({ ...(entry || {}), name }) : '#7c3aed';
+    const fontColor = typeof fontColorOf === 'function' ? fontColorOf({ ...(entry || {}), name }) : '#fff';
     return `
-      <div style="display:flex;align-items:center;gap:10px;border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:10px;">
-        <span style="width:26px;height:26px;border-radius:999px;background:#ede9fe;color:#7c3aed;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:12px;">${index + 1}</span>
-        <span style="min-width:0;">
-          <span style="display:block;color:#111827;font-size:13px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(name)}</span>
-          ${sub ? `<span style="display:block;color:#6b7280;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(sub)}</span>` : ''}
-        </span>
-      </div>
+      <li class="item" ${entry && entry.held ? 'held="true"' : ''}>
+        <div class="badge">${listEl.id === 'kioskQueueServiceList' ? '-' : index + 1}</div>
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+          <span class="name-pill" style="background:${ffKioskEscapeHtml(color)};color:${ffKioskEscapeHtml(fontColor)};font-size:15px;padding:6px 12px;flex-shrink:0;min-width:max-content;max-width:min(320px,46vw);overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(displayName)}</span>
+        </div>
+        <div class="controls"></div>
+      </li>
     `;
   }).join('');
 }
@@ -17635,12 +17653,26 @@ async function ffKioskLoadQueuePreview(api, salonId, locationId, permissions) {
     return;
   }
   const docId = ffKioskQueueDocId(locationId);
-  if (meta) meta.textContent = `Read-only kiosk preview - ${docId === 'default' ? 'default queue' : `location ${docId}`}`;
+  if (meta) meta.textContent = locationId ? `Read-only kiosk view - location ${docId}` : 'Read-only kiosk view - all locations';
   try {
-    const snap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'queueState', docId));
-    const data = snap.exists() ? (snap.data() || {}) : {};
-    const queue = Array.isArray(data.queue) ? data.queue : [];
-    const service = Array.isArray(data.service) ? data.service : [];
+    let queue = [];
+    let service = [];
+    if (locationId) {
+      const snap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'queueState', docId));
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      queue = Array.isArray(data.queue) ? data.queue : [];
+      service = Array.isArray(data.service) ? data.service : [];
+    } else {
+      const snaps = await api.getDocs(api.collection(api.db, 'salons', salonId, 'queueState'));
+      snaps.forEach((snap) => {
+        const data = snap.data() || {};
+        const sourceDocId = snap.id || 'default';
+        const qRows = Array.isArray(data.queue) ? data.queue : [];
+        const sRows = Array.isArray(data.service) ? data.service : [];
+        queue = queue.concat(qRows.map((row) => ({ ...(row || {}), locationId: row && row.locationId ? row.locationId : sourceDocId })));
+        service = service.concat(sRows.map((row) => ({ ...(row || {}), locationId: row && row.locationId ? row.locationId : sourceDocId })));
+      });
+    }
     ffKioskRenderQueueList(availableList, queue, 'No one is available right now.');
     ffKioskRenderQueueList(serviceList, service, 'No one is in service right now.');
   } catch (err) {
