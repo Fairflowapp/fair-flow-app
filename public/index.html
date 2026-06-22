@@ -6814,11 +6814,20 @@ dialog footer button, .code-dialog footer button {
     </div>
   </section>
 
-  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;max-width:520px;margin:40px auto;padding:32px;background:#fff;border-radius:18px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
-    <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:72px;height:72px;object-fit:contain;margin-bottom:12px;">
-    <h1 style="font-size:26px;margin:0 0 8px;color:#111827;">Kiosk connected</h1>
-    <p style="margin:0 auto 18px;color:#6b7280;font-size:13px;line-height:1.5;max-width:360px;">This tablet is paired. The technician kiosk screen will be connected in the next stage.</p>
-    <div id="kioskPairedMeta" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:12px;padding:12px;color:#047857;font-size:12px;line-height:1.5;">Signed in as kiosk.</div>
+  <section id="kiosk-paired-section" style="display:none;position:relative;z-index:2;width:min(920px,calc(100vw - 32px));max-width:920px;margin:24px auto;padding:24px;background:#fff;border-radius:22px;box-shadow:0 16px 40px rgba(15,23,42,0.14);pointer-events:auto;text-align:center;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;text-align:left;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow" style="width:60px;height:60px;object-fit:contain;">
+        <div>
+          <h1 style="font-size:26px;margin:0;color:#111827;">Fair Flow Kiosk</h1>
+          <p id="kioskPairedMeta" style="margin:4px 0 0;color:#6b7280;font-size:13px;line-height:1.4;">Signed in as kiosk.</p>
+        </div>
+      </div>
+      <div id="kioskDeviceStatusPill" style="border:1px solid #d1fae5;background:#ecfdf5;border-radius:999px;padding:8px 12px;color:#047857;font-size:12px;font-weight:800;">Connected</div>
+    </div>
+
+    <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading technicians...</div>
+    <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
   </section>
 
   <!-- SIGNUP SECTION -->
@@ -17157,6 +17166,9 @@ async function ffGetKioskPairingApi() {
     db,
     auth,
     doc: firestoreApi.doc,
+    collection: firestoreApi.collection,
+    getDoc: firestoreApi.getDoc,
+    getDocs: firestoreApi.getDocs,
     setDoc: firestoreApi.setDoc,
     deleteDoc: firestoreApi.deleteDoc,
     onSnapshot: firestoreApi.onSnapshot,
@@ -17215,11 +17227,130 @@ function ffShowKioskPairedScreen(claims) {
   if (pairingSection) pairingSection.style.display = 'none';
   if (pairedSection) pairedSection.style.display = 'block';
   if (meta && claims) {
-    meta.textContent = `Signed in as kiosk ${claims.kioskId || ''} for salon ${claims.salonId || ''}.`;
+    meta.textContent = 'Loading kiosk device...';
   }
   if (typeof ffRemoveAuthSplash === 'function') ffRemoveAuthSplash();
+  if (claims && claims.isKiosk === true) {
+    ffLoadKioskHome(claims);
+  }
 }
 window.ffShowKioskPairedScreen = ffShowKioskPairedScreen;
+
+function ffKioskEscapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function ffKioskStaffName(staff) {
+  const data = staff || {};
+  const firstLast = [data.firstName, data.lastName].map((v) => String(v || '').trim()).filter(Boolean).join(' ');
+  return String(data.name || data.displayName || firstLast || 'Team Member').trim();
+}
+
+function ffKioskStaffInitial(name) {
+  const trimmed = String(name || '').trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
+}
+
+function ffKioskIsVisibleTechnician(staff) {
+  const data = staff || {};
+  const role = String(data.role || '').toLowerCase().replace(/\s+/g, '_');
+  const status = String(data.status || '').toLowerCase();
+  if (data.isArchived === true || data.archived === true || data.active === false || data.isActive === false) return false;
+  if (status === 'archived' || status === 'inactive' || status === 'disabled') return false;
+  if (data.isAdmin === true || data.isManager === true) return false;
+  if (['owner', 'admin', 'manager', 'front_desk', 'assistant_manager'].includes(role)) return false;
+  return true;
+}
+
+function ffKioskRenderTechnicians(staffRows) {
+  const grid = document.getElementById('kioskTechGrid');
+  const status = document.getElementById('kioskHomeStatus');
+  if (!grid) return;
+  const rows = (Array.isArray(staffRows) ? staffRows : [])
+    .filter(ffKioskIsVisibleTechnician)
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  if (!rows.length) {
+    grid.innerHTML = '';
+    if (status) {
+      status.textContent = 'No active technicians found for this salon yet.';
+      status.style.color = '#6b7280';
+      status.style.background = '#f9fafb';
+      status.style.borderColor = '#e5e7eb';
+    }
+    return;
+  }
+  if (status) {
+    status.textContent = 'Choose a technician. PIN and actions are coming in the next step.';
+    status.style.color = '#047857';
+    status.style.background = '#ecfdf5';
+    status.style.borderColor = '#d1fae5';
+  }
+  grid.innerHTML = rows.map((staff) => {
+    const name = ffKioskStaffName(staff);
+    const photo = staff.avatarUrl || staff.photoURL || staff.photoUrl || staff.imageUrl || '';
+    const type = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length
+      ? staff.technicianTypes.filter(Boolean).join(', ')
+      : 'Service provider';
+    const avatar = photo
+      ? `<img src="${ffKioskEscapeHtml(photo)}" alt="" style="width:54px;height:54px;border-radius:999px;object-fit:cover;background:#ede9fe;">`
+      : `<div style="width:54px;height:54px;border-radius:999px;background:#ede9fe;color:#7c3aed;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;">${ffKioskEscapeHtml(ffKioskStaffInitial(name))}</div>`;
+    return `
+      <button type="button" data-kiosk-staff-id="${ffKioskEscapeHtml(staff.id || '')}" style="border:1px solid #e5e7eb;background:#fff;border-radius:18px;padding:14px;text-align:left;display:flex;align-items:center;gap:12px;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,0.06);">
+        ${avatar}
+        <span style="min-width:0;">
+          <span style="display:block;color:#111827;font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(name)}</span>
+          <span style="display:block;color:#6b7280;font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ffKioskEscapeHtml(type)}</span>
+        </span>
+      </button>
+    `;
+  }).join('');
+}
+
+async function ffLoadKioskHome(claims) {
+  const meta = document.getElementById('kioskPairedMeta');
+  const status = document.getElementById('kioskHomeStatus');
+  const safeClaims = claims || {};
+  const salonId = String(safeClaims.salonId || '').trim();
+  const kioskId = String(safeClaims.kioskId || '').trim();
+  if (!salonId || !kioskId) {
+    if (status) {
+      status.textContent = 'Kiosk token is missing salon or device information.';
+      status.style.color = '#b91c1c';
+    }
+    return;
+  }
+
+  try {
+    const api = await ffGetKioskPairingApi();
+    const kioskSnap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'kiosks', kioskId));
+    const kiosk = kioskSnap.exists() ? (kioskSnap.data() || {}) : {};
+    const name = String(kiosk.name || 'Kiosk').trim();
+    const locationId = kiosk.locationId ? String(kiosk.locationId).trim() : '';
+    if (meta) {
+      meta.textContent = locationId
+        ? `${name} - Location ${locationId}`
+        : `${name} - All locations`;
+    }
+    if (status) status.textContent = 'Loading technicians...';
+    const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
+    const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    ffKioskRenderTechnicians(staff);
+  } catch (err) {
+    console.warn('[KioskHome] failed to load', err);
+    if (status) {
+      status.textContent = `Could not load kiosk home: ${err && (err.code || err.message) ? (err.code || err.message) : 'unknown error'}`;
+      status.style.color = '#b91c1c';
+      status.style.background = '#fef2f2';
+      status.style.borderColor = '#fecaca';
+    }
+  }
+}
+window.ffLoadKioskHome = ffLoadKioskHome;
 
 async function ffStartKioskPairing(options) {
   if (!ffIsKioskRoute()) return;
