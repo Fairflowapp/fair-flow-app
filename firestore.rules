@@ -717,7 +717,12 @@ service cloud.firestore {
     }
 
     match /salons/{salonId}/tasksState/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+
+    match /salons/{salonId}/timeEntries/{entryId} {
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
       allow write: if belongsToSalon(salonId);
     }
 

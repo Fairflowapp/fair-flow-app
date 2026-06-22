@@ -6822,7 +6822,9 @@ dialog footer button, .code-dialog footer button {
     <div style="position:sticky;top:0;z-index:3;background:#5b21b6;border-bottom:1px solid rgba(0,0,0,0.12);box-shadow:0 1px 0 rgba(255,255,255,0.06) inset;">
       <div style="display:flex;align-items:center;width:100%;box-sizing:border-box;padding:3px 25px 3px 25px;min-height:42px;gap:18px;">
         <div style="display:flex;align-items:center;gap:8px;flex:0 0 auto;">
-          <img src="/fairflow-logo-white.png?v=14" alt="Fair Flow App" style="width:28px;height:28px;display:block;object-fit:contain;">
+          <span style="width:30px;height:30px;border-radius:9px;background:#fff;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 0 rgba(255,255,255,0.08);">
+            <img src="/fairflow-logo-transparent.png?v=1" alt="Fair Flow App" style="width:24px;height:24px;display:block;object-fit:contain;">
+          </span>
         </div>
         <div id="kioskModuleTabs" role="tablist" aria-label="Kiosk modules" style="display:flex;align-items:center;gap:22px;min-width:0;flex:1;"></div>
         <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35);">
@@ -6854,17 +6856,30 @@ dialog footer button, .code-dialog footer button {
 
       <div id="kioskTasksPanel" data-kiosk-panel="tasks" style="display:none;text-align:left;">
         <div class="card" style="padding:22px;border-radius:18px;background:#fff;border:1px solid #e5e7eb;">
-          <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">Tasks</h2>
-          <p id="kioskTasksMeta" style="margin:0 0 12px;color:#6b7280;font-size:13px;">Task visibility is controlled in Kiosk Permissions.</p>
-          <div id="kioskTasksPlaceholder" class="ff-queue-empty-inner" style="text-align:center;">Tasks board will be connected next.</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+            <h2 style="margin:0;font-size:20px;color:#111827;">Tasks</h2>
+            <span id="kioskTasksMeta" style="color:#6b7280;font-size:12px;font-weight:700;">Loading...</span>
+          </div>
+          <div id="kioskTasksBoard" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;"></div>
         </div>
       </div>
 
       <div id="kioskTimeClockPanel" data-kiosk-panel="timeclock" style="display:none;text-align:left;">
         <div class="card" style="padding:22px;border-radius:18px;background:#fff;border:1px solid #e5e7eb;">
-          <h2 style="margin:0 0 6px;font-size:20px;color:#111827;">Time Clock</h2>
-          <p id="kioskTimeClockMeta" style="margin:0 0 16px;color:#6b7280;font-size:13px;">Choose a staff member, then enter their PIN to clock in/out.</p>
-          <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;text-align:left;"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;">
+            <h2 style="margin:0;font-size:20px;color:#111827;">Time Clock</h2>
+            <span id="kioskTimeClockMeta" style="color:#6b7280;font-size:12px;font-weight:700;">Loading...</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+            <div style="border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb;padding:14px;">
+              <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">Clocked in</h3>
+              <div id="kioskTimeClockOpenList" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+            <div style="border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb;padding:14px;">
+              <h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">Today</h3>
+              <div id="kioskTimeClockRecentList" style="display:flex;flex-direction:column;gap:8px;"></div>
+            </div>
+          </div>
         </div>
       </div>
     </main>
@@ -17336,6 +17351,7 @@ function ffIsKioskRoute() {
       || path === '/kiosk-v6'
       || path === '/kiosk-v7'
       || path === '/kiosk-v8'
+      || path === '/kiosk-v9'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17632,6 +17648,148 @@ function ffKioskRenderQueueList(listEl, rows, emptyText) {
   }).join('');
 }
 
+function ffKioskTimestampMs(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  if (typeof value === 'number') return value;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ffKioskFormatTime(value) {
+  const ms = ffKioskTimestampMs(value);
+  if (!ms) return '';
+  try {
+    return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch (_) {
+    return '';
+  }
+}
+
+function ffKioskBuildStaffMap(staffRows) {
+  const map = new Map();
+  (Array.isArray(staffRows) ? staffRows : []).forEach((staff) => {
+    const id = String(staff && (staff.id || staff.staffId) || '').trim();
+    if (!id) return;
+    map.set(id, ffKioskStaffName(staff));
+  });
+  return map;
+}
+
+function ffKioskStaffNameForId(staffMap, staffId, fallback) {
+  const id = String(staffId || '').trim();
+  return (id && staffMap && staffMap.get(id)) || String(fallback || 'Team Member').trim();
+}
+
+function ffKioskRenderSimpleRows(container, rows, emptyText, renderRow) {
+  if (!container) return;
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) {
+    container.innerHTML = `<div class="ff-queue-empty-inner" style="padding:18px;text-align:center;"><div class="ff-queue-empty-title">${ffKioskEscapeHtml(emptyText)}</div></div>`;
+    return;
+  }
+  container.innerHTML = list.map(renderRow).join('');
+}
+
+async function ffKioskLoadTasksPreview(api, salonId, locationId, permissions) {
+  const board = document.getElementById('kioskTasksBoard');
+  const meta = document.getElementById('kioskTasksMeta');
+  const canViewTasks = permissions && (permissions['tasks.viewTechnicians'] === true || permissions['tasks.viewManagers'] === true);
+  if (!board) return;
+  if (!canViewTasks) {
+    if (meta) meta.textContent = 'Not enabled';
+    board.innerHTML = '<div class="ff-queue-empty-inner" style="grid-column:1/-1;text-align:center;">Tasks are not enabled for this kiosk.</div>';
+    return;
+  }
+  try {
+    let states = [];
+    if (locationId) {
+      const snap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'tasksState', ffKioskQueueDocId(locationId)));
+      states = [snap.exists() ? (snap.data() || {}) : {}];
+    } else {
+      const snaps = await api.getDocs(api.collection(api.db, 'salons', salonId, 'tasksState'));
+      snaps.forEach((snap) => states.push(snap.data() || {}));
+    }
+    const tabs = [
+      ['opening', 'Opening'],
+      ['closing', 'Closing'],
+      ['weekly', 'Weekly'],
+      ['monthly', 'Monthly'],
+      ['yearly', 'Yearly'],
+    ];
+    let total = 0;
+    board.innerHTML = tabs.map(([key, label]) => {
+      const rows = [];
+      states.forEach((state) => {
+        const tab = state && state[key] ? state[key] : {};
+        rows.push(...(Array.isArray(tab.active) ? tab.active : []));
+        rows.push(...(Array.isArray(tab.pending) ? tab.pending : []));
+      });
+      total += rows.length;
+      const body = rows.length
+        ? rows.slice(0, 8).map((task) => {
+            const title = String(task.title || task.name || task.taskName || 'Task').trim();
+            const status = String(task.status || (task.assignedTo ? `Assigned to ${task.assignedTo}` : '') || '').trim();
+            return `<div style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:10px;"><div style="font-size:13px;font-weight:800;color:#111827;">${ffKioskEscapeHtml(title)}</div>${status ? `<div style="font-size:11px;color:#6b7280;margin-top:3px;">${ffKioskEscapeHtml(status)}</div>` : ''}</div>`;
+          }).join('')
+        : '<div class="ff-queue-empty-inner" style="padding:14px;text-align:center;"><div class="ff-queue-empty-title">No tasks</div></div>';
+      return `<section style="border:1px solid #e5e7eb;border-radius:14px;background:#f9fafb;padding:12px;"><h3 style="margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:0.4px;color:#6b7280;">${ffKioskEscapeHtml(label)}</h3><div style="display:flex;flex-direction:column;gap:8px;">${body}</div></section>`;
+    }).join('');
+    if (meta) meta.textContent = `${total} active / pending`;
+  } catch (err) {
+    console.warn('[KioskTasks] load failed', err);
+    if (meta) meta.textContent = 'Could not load';
+    board.innerHTML = `<div class="ff-queue-empty-inner" style="grid-column:1/-1;text-align:center;color:#b91c1c;">Could not load tasks: ${ffKioskEscapeHtml(err && (err.code || err.message) ? (err.code || err.message) : 'unknown error')}</div>`;
+  }
+}
+
+async function ffKioskLoadTimeClockPreview(api, salonId, locationId, permissions, staffRows) {
+  const openList = document.getElementById('kioskTimeClockOpenList');
+  const recentList = document.getElementById('kioskTimeClockRecentList');
+  const meta = document.getElementById('kioskTimeClockMeta');
+  const canViewTimeClock = permissions && permissions['timeclock.view'] === true;
+  if (!openList || !recentList) return;
+  if (!canViewTimeClock) {
+    if (meta) meta.textContent = 'Not enabled';
+    ffKioskRenderSimpleRows(openList, [], 'Time Clock is not enabled for this kiosk.', () => '');
+    ffKioskRenderSimpleRows(recentList, [], 'Time Clock is not enabled for this kiosk.', () => '');
+    return;
+  }
+  try {
+    const staffMap = ffKioskBuildStaffMap(staffRows);
+    const snap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'timeEntries'));
+    const rows = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (locationId && String(data.locationId || '') !== String(locationId)) return;
+      rows.push({ id: docSnap.id, ...data });
+    });
+    rows.sort((a, b) => ffKioskTimestampMs(b.clockInAt) - ffKioskTimestampMs(a.clockInAt));
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const openRows = rows.filter((row) => String(row.status || '') === 'open');
+    const todayRows = rows.filter((row) => ffKioskTimestampMs(row.clockInAt) >= startOfToday).slice(0, 12);
+    const render = (row) => {
+      const name = ffKioskStaffNameForId(staffMap, row.staffId, row.staffName || row.name);
+      const inTime = ffKioskFormatTime(row.clockInAt);
+      const outTime = ffKioskFormatTime(row.clockOutAt);
+      const status = String(row.status || '').trim();
+      const sub = status === 'open' ? `Clocked in ${inTime || ''}` : `${inTime || '-'} - ${outTime || '-'}`;
+      return `<div style="border:1px solid #e5e7eb;border-radius:12px;background:#fff;padding:10px;"><div style="font-size:13px;font-weight:800;color:#111827;">${ffKioskEscapeHtml(name)}</div><div style="font-size:11px;color:#6b7280;margin-top:3px;">${ffKioskEscapeHtml(sub)}</div></div>`;
+    };
+    ffKioskRenderSimpleRows(openList, openRows, 'No one is clocked in right now.', render);
+    ffKioskRenderSimpleRows(recentList, todayRows, 'No time clock entries today.', render);
+    if (meta) meta.textContent = `${openRows.length} clocked in`;
+  } catch (err) {
+    console.warn('[KioskTimeClock] load failed', err);
+    if (meta) meta.textContent = 'Could not load';
+    const msg = `Could not load time clock: ${err && (err.code || err.message) ? (err.code || err.message) : 'unknown error'}`;
+    ffKioskRenderSimpleRows(openList, [], msg, () => '');
+    ffKioskRenderSimpleRows(recentList, [], msg, () => '');
+  }
+}
+
 async function ffKioskLoadQueuePreview(api, salonId, locationId, permissions) {
   const panel = document.getElementById('kioskQueuePanel');
   const meta = document.getElementById('kioskQueueMeta');
@@ -17726,14 +17884,17 @@ async function ffLoadKioskHome(claims) {
       console.warn('[KioskHome] role read failed; using defaults', roleErr);
     }
     ffKioskRenderModules(rolePermissions);
-    await ffKioskLoadQueuePreview(api, salonId, locationId, rolePermissions);
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    await Promise.all([
+      ffKioskLoadQueuePreview(api, salonId, locationId, rolePermissions),
+      ffKioskLoadTasksPreview(api, salonId, locationId, rolePermissions),
+      ffKioskLoadTimeClockPreview(api, salonId, locationId, rolePermissions, staff),
+    ]);
     if (status) {
       status.textContent = '';
       status.style.display = 'none';
     }
-    ffKioskRenderTechnicians(staff);
   } catch (err) {
     console.warn('[KioskHome] failed to load', err);
     if (status) {
