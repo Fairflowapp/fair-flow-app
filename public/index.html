@@ -7772,6 +7772,7 @@ dialog footer button, .code-dialog footer button {
           <button class="user-profile-menu-item" data-section="shared-setup" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Shared Setup</button>
           <button class="user-profile-menu-item" data-section="schedule" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Schedule</button>
           <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock</button>
+          <button class="user-profile-menu-item" data-section="devices" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Devices</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Billing</button>
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
@@ -8702,6 +8703,19 @@ dialog footer button, .code-dialog footer button {
           </div>
         </div>
 
+        <!-- Kiosk Devices Card (Owner / Admin only) -->
+        <div id="userProfileCardDevices" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Devices</h3>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Pair and manage shared kiosk tablets for this salon.</p>
+          <div style="padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#faf5ff;">
+            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Kiosk devices</div>
+            <div style="font-size:11px;color:#6b7280;line-height:1.45;margin-bottom:12px;">Enter a tablet pairing code, name the device, and choose the location where it will live.</div>
+            <button type="button" onclick="window.ffOpenKioskDevicesModal && window.ffOpenKioskDevicesModal()" style="padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
+              Manage Kiosk Devices
+            </button>
+          </div>
+        </div>
+
         <!-- Billing Card -->
         <div id="userProfileCardBilling" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <!-- Billing Overview -->
@@ -9148,16 +9162,6 @@ dialog footer button, .code-dialog footer button {
 
           <button id="ffBillingPortalBtn" type="button" style="display:none;padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
             Manage subscription
-          </button>
-        </div>
-
-        <!-- Kiosk Devices (Stage 3c-1: UI shell only; Firestore wiring follows later) -->
-        <div id="kioskDevicesSettingsSection" style="margin-top:24px;">
-          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Devices</h4>
-          <div class="row small" style="margin-bottom:12px;">Pair and manage shared kiosk tablets for this salon.</div>
-          <button id="openKioskDevicesBtn" type="button" onclick="window.ffOpenKioskDevicesModal && window.ffOpenKioskDevicesModal()"
-            style="padding:8px 16px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:13px;font-weight:600;">
-            Manage Kiosk Devices
           </button>
         </div>
 
@@ -11678,6 +11682,7 @@ if (typeof document !== 'undefined') {
     if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
     if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
     if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
+    if (typeof window.ffSyncUserProfileDevicesMenuVisibility === 'function') window.ffSyncUserProfileDevicesMenuVisibility();
     if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
     if (typeof window.ffApplyHistoryActionButtonsVisibility === 'function') window.ffApplyHistoryActionButtonsVisibility();
     if (typeof ffRefreshTasksPermissionControls === 'function') ffRefreshTasksPermissionControls();
@@ -22864,6 +22869,9 @@ function goToUserProfile(section) {
   }
   if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') {
     window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileDevicesMenuVisibility === 'function') {
+    window.ffSyncUserProfileDevicesMenuVisibility();
   }
   if (typeof window.ffSyncUserProfileSalonLocationMenuVisibility === 'function') {
     window.ffSyncUserProfileSalonLocationMenuVisibility();
@@ -40582,6 +40590,7 @@ function initializeAppsPanel() {
           if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
           if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
           if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
+          if (typeof window.ffSyncUserProfileDevicesMenuVisibility === 'function') window.ffSyncUserProfileDevicesMenuVisibility();
           if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
           if (typeof window.updateMediaScreenTabsForRole === 'function') window.updateMediaScreenTabsForRole();
           if (typeof window.refreshMediaWorksList === 'function') window.refreshMediaWorksList();
@@ -48841,6 +48850,18 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfileTimeClockSettingsMenuVisibility = ffSyncUserProfileTimeClockSettingsMenuVisibility;
   ffSyncUserProfileTimeClockSettingsMenuVisibility();
 
+  function ffSyncUserProfileDevicesMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="devices"]');
+      if (!btn) return;
+      btn.style.display = ffIsCurrentUserOwnerOrAdminForSettings() ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileDevicesMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileDevicesMenuVisibility = ffSyncUserProfileDevicesMenuVisibility;
+  ffSyncUserProfileDevicesMenuVisibility();
+
   // Salon Location (shared geofence) now lives as a subsection inside the
   // Preferences card, so there is no dedicated menu button to toggle. This
   // stub is kept for backward compatibility with any call-sites that still
@@ -51495,6 +51516,9 @@ function initializeUserProfileMenu() {
     if (section === 'time-clock-settings' && !ffIsCurrentUserOwnerOrAdminForSettings()) {
       section = 'password';
     }
+    if (section === 'devices' && !ffIsCurrentUserOwnerOrAdminForSettings()) {
+      section = 'password';
+    }
     // Update menu item active states (purple tint via .user-profile-menu-item--active; see CSS)
     menuItems.forEach(item => {
       if (item.dataset.section === section) {
@@ -51518,7 +51542,8 @@ function initializeUserProfileMenu() {
       'billing': 'userProfileCardBilling',
       'locations': 'userProfileCardLocations',
       'shared-setup': 'userProfileCardSharedSetup',
-      'time-clock-settings': 'userProfileCardTimeClockSettings'
+      'time-clock-settings': 'userProfileCardTimeClockSettings',
+      'devices': 'userProfileCardDevices'
     };
     
     const cardId = sectionToCardId[section] || `userProfileCard${section.charAt(0).toUpperCase() + section.slice(1)}`;
