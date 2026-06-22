@@ -17362,8 +17362,43 @@ async function ffLoadKioskHome(claims) {
 }
 window.ffLoadKioskHome = ffLoadKioskHome;
 
+async function ffResumeKioskSessionIfReady() {
+  if (!ffIsKioskRoute()) return false;
+  try {
+    const api = await ffGetKioskPairingApi();
+    const user = api.auth && api.auth.currentUser ? api.auth.currentUser : null;
+    if (!user || typeof user.getIdTokenResult !== 'function') return false;
+    const tokenResult = await user.getIdTokenResult(true);
+    const claims = tokenResult && tokenResult.claims ? tokenResult.claims : {};
+    if (claims && claims.isKiosk === true) {
+      ffShowKioskPairedScreen(claims);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[KioskHome] resume failed', err);
+  }
+  return false;
+}
+window.ffResumeKioskSessionIfReady = ffResumeKioskSessionIfReady;
+
+function ffScheduleKioskSessionResume() {
+  if (!ffIsKioskRoute()) return;
+  [0, 500, 1500, 3000].forEach((delay) => {
+    setTimeout(() => {
+      try {
+        ffResumeKioskSessionIfReady();
+      } catch (e) {
+        console.warn('[KioskHome] scheduled resume failed', e);
+      }
+    }, delay);
+  });
+}
+window.ffScheduleKioskSessionResume = ffScheduleKioskSessionResume;
+ffScheduleKioskSessionResume();
+
 async function ffStartKioskPairing(options) {
   if (!ffIsKioskRoute()) return;
+  if (await ffResumeKioskSessionIfReady()) return;
   const codeEl = document.getElementById('kioskPairingCode');
   const expiresEl = document.getElementById('kioskPairingExpires');
   const refreshBtn = document.getElementById('kioskPairingRefreshBtn');
