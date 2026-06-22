@@ -6826,7 +6826,7 @@ dialog footer button, .code-dialog footer button {
         </div>
         <div id="kioskModuleTabs" role="tablist" aria-label="Kiosk modules" style="display:flex;align-items:center;gap:22px;min-width:0;flex:1;"></div>
         <div style="display:flex;align-items:center;gap:10px;flex:0 0 auto;margin-left:auto;padding-left:14px;border-left:1px solid rgba(255,255,255,0.35);">
-          <span id="kioskPairedMeta" style="color:rgba(255,255,255,0.84);font-size:11px;font-weight:600;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+          <span id="kioskPairedMeta" style="display:none;"></span>
           <span style="color:#fff;font-size:12px;font-weight:800;letter-spacing:0.02em;white-space:nowrap;">Kiosk mode</span>
           <span id="kioskDeviceStatusPill" style="border:1px solid rgba(255,255,255,0.36);background:rgba(255,255,255,0.14);border-radius:999px;padding:4px 9px;color:#fff;font-size:11px;font-weight:800;">Connected</span>
         </div>
@@ -6834,10 +6834,10 @@ dialog footer button, .code-dialog footer button {
     </div>
 
     <main style="max-width:1140px;margin:0 auto;padding:18px 24px 32px;box-sizing:border-box;">
-      <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#fff;border-radius:12px;padding:9px 12px;color:#6b7280;font-size:12px;margin-bottom:14px;text-align:left;">Loading kiosk...</div>
+      <div id="kioskHomeStatus" role="status" aria-live="polite" style="display:none;border:1px solid #e5e7eb;background:#fff;border-radius:12px;padding:9px 12px;color:#6b7280;font-size:12px;margin-bottom:14px;text-align:left;">Loading kiosk...</div>
 
       <div id="kioskQueuePanel" data-kiosk-panel="queue" style="display:none;text-align:left;">
-        <div id="kioskQueueMeta" style="margin:0 0 10px;color:#6b7280;font-size:12px;">Read-only kiosk preview</div>
+        <div id="kioskQueueMeta" style="display:none;margin:0 0 10px;color:#6b7280;font-size:12px;">Read-only kiosk preview</div>
         <div class="wrap" style="visibility:visible;margin:0;padding:0;max-width:none;">
           <div class="cols">
             <div class="col">
@@ -17335,6 +17335,7 @@ function ffIsKioskRoute() {
       || path === '/kiosk-v5'
       || path === '/kiosk-v6'
       || path === '/kiosk-v7'
+      || path === '/kiosk-v8'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17539,7 +17540,7 @@ function ffKioskSetActiveModule(moduleId) {
     document.body.classList.toggle('ff-queue-route-active', target === 'queue');
   } catch (_) {}
   document.querySelectorAll('[data-kiosk-panel]').forEach((panel) => {
-    panel.style.display = panel.getAttribute('data-kiosk-panel') === target ? 'block' : 'none';
+    panel.style.setProperty('display', panel.getAttribute('data-kiosk-panel') === target ? 'block' : 'none', 'important');
   });
   document.querySelectorAll('[data-kiosk-tab]').forEach((tab) => {
     const active = tab.getAttribute('data-kiosk-tab') === target;
@@ -17561,30 +17562,22 @@ function ffKioskRenderModules(permissions) {
       id: 'queue',
       title: 'Queue',
       enabled: perms['queue.view'] === true,
-      detail: 'Available / In Service',
     },
     {
       id: 'tasks',
       title: 'Tasks',
       enabled: perms['tasks.viewTechnicians'] === true || perms['tasks.viewManagers'] === true,
-      detail: [
-        perms['tasks.viewTechnicians'] === true ? 'Technicians' : null,
-        perms['tasks.viewManagers'] === true ? 'Managers' : null,
-      ].filter(Boolean).join(' / ') || 'Hidden',
     },
     {
       id: 'timeclock',
       title: 'Time Clock',
       enabled: perms['timeclock.view'] === true,
-      detail: 'PIN clock in/out',
     },
   ];
   tabs.innerHTML = modules.map((mod) => {
-    const detail = mod.enabled ? mod.detail : 'Not enabled';
     return `
       <button type="button" role="tab" aria-selected="false" data-kiosk-tab="${ffKioskEscapeHtml(mod.id)}" data-kiosk-tab-enabled="${mod.enabled ? 'true' : 'false'}" onclick="window.ffKioskSetActiveModule && window.ffKioskSetActiveModule('${ffKioskEscapeHtml(mod.id)}')" style="border:1px solid transparent;background:transparent;color:#fff;border-radius:999px;padding:5px 14px;text-align:center;cursor:pointer;font-size:17px;line-height:1.25;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;">
         <span style="display:block;font-size:17px;">${ffKioskEscapeHtml(mod.title)}</span>
-        <span style="display:block;font-size:10px;font-weight:700;opacity:0.75;">${ffKioskEscapeHtml(detail)}</span>
       </button>
     `;
   }).join('');
@@ -17691,6 +17684,7 @@ async function ffLoadKioskHome(claims) {
   const kioskId = String(safeClaims.kioskId || '').trim();
   if (status) {
     status.textContent = `Loading kiosk home... salon=${salonId || '-'} kiosk=${kioskId || '-'}`;
+    status.style.display = 'none';
     status.style.color = '#6b7280';
     status.style.background = '#f9fafb';
     status.style.borderColor = '#e5e7eb';
@@ -17698,6 +17692,7 @@ async function ffLoadKioskHome(claims) {
   if (!salonId || !kioskId) {
     if (status) {
       status.textContent = 'Kiosk token is missing salon or device information.';
+      status.style.display = 'block';
       status.style.color = '#b91c1c';
     }
     return;
@@ -17716,10 +17711,11 @@ async function ffLoadKioskHome(claims) {
       console.warn('[KioskHome] kiosk doc read failed; continuing with claims', kioskErr);
       name = `Kiosk ${kioskId.slice(0, 6)}`;
     }
-    if (meta) {
-      meta.textContent = locationId ? `${name} - Location ${locationId}` : `${name} - All locations`;
+    if (meta) meta.textContent = '';
+    if (status) {
+      status.textContent = '';
+      status.style.display = 'none';
     }
-    if (status) status.textContent = 'Loading technicians from Firestore...';
     let rolePermissions = FF_KIOSK_DEFAULT_PERMISSIONS;
     try {
       const roleId = String(safeClaims.roleId || FF_KIOSK_ROLE_ID).trim() || FF_KIOSK_ROLE_ID;
@@ -17733,12 +17729,16 @@ async function ffLoadKioskHome(claims) {
     await ffKioskLoadQueuePreview(api, salonId, locationId, rolePermissions);
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-    if (status) status.textContent = `Loaded ${staff.length} staff docs. Rendering kiosk grid...`;
+    if (status) {
+      status.textContent = '';
+      status.style.display = 'none';
+    }
     ffKioskRenderTechnicians(staff);
   } catch (err) {
     console.warn('[KioskHome] failed to load', err);
     if (status) {
       status.textContent = `Could not load kiosk home: ${err && (err.code || err.message) ? (err.code || err.message) : 'unknown error'}`;
+      status.style.display = 'block';
       status.style.color = '#b91c1c';
       status.style.background = '#fef2f2';
       status.style.borderColor = '#fecaca';
