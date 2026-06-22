@@ -9405,7 +9405,9 @@ console.log('[BUILD MARKER] app.js logic loaded at', new Date().toISOString());
 
 const hostname = window.location.hostname || "";
 const params = new URLSearchParams(window.location.search);
-const FF_ENV = params.get("env") === "staging" || hostname.includes("fair-flow-staging.web.app")
+const FF_ENV = params.get("env") === "staging"
+  || hostname.includes("fair-flow-staging.web.app")
+  || hostname.includes("fair-flow-staging.firebaseapp.com")
   ? "staging"
   : "production";
 
@@ -23789,7 +23791,10 @@ function ffMyProfileConfirmDeleteAccount() {
 }
 
 async function ffMyProfileCancelBillingForAccountDeletionIfNeeded() {
-  if (typeof window !== 'undefined' && window.location?.hostname === 'fair-flow-staging.web.app') {
+  if (typeof window !== 'undefined' && (
+    window.location?.hostname === 'fair-flow-staging.web.app'
+    || window.location?.hostname === 'fair-flow-staging.firebaseapp.com'
+  )) {
     return { skipped: true, reason: 'staging_billing_bypass' };
   }
 
