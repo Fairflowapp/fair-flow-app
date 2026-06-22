@@ -17410,7 +17410,24 @@ async function ffStartKioskPairing(options) {
 
       ffKioskSetStatus('Approved. Connecting kiosk...', 'success');
       ffStopKioskPairingListener();
-      await api.signInWithCustomToken(api.auth, data.token);
+      let cred = null;
+      try {
+        cred = await api.signInWithCustomToken(api.auth, data.token);
+        const user = cred && cred.user ? cred.user : api.auth.currentUser;
+        const tokenResult = user && typeof user.getIdTokenResult === 'function'
+          ? await user.getIdTokenResult(true)
+          : null;
+        const claims = tokenResult && tokenResult.claims ? tokenResult.claims : {};
+        if (claims && claims.isKiosk === true && typeof ffShowKioskPairedScreen === 'function') {
+          ffShowKioskPairedScreen(claims);
+        } else {
+          ffKioskSetStatus('Connected, but kiosk claims were not available yet. Refresh this page.', 'error');
+        }
+      } catch (signInErr) {
+        console.warn('[KioskPairing] custom token sign-in failed', signInErr);
+        ffKioskSetStatus(`Approved, but sign-in failed: ${signInErr && (signInErr.code || signInErr.message) ? (signInErr.code || signInErr.message) : 'unknown error'}`, 'error');
+        return;
+      }
       try {
         await api.deleteDoc(pairRef);
       } catch (deleteErr) {
