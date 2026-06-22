@@ -17123,6 +17123,7 @@ function ffIsKioskRoute() {
     return path === '/kiosk'
       || path === '/kiosk-v2'
       || path === '/kiosk-v3'
+      || path === '/kiosk-v4'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17272,7 +17273,6 @@ function ffKioskIsVisibleTechnician(staff) {
   const status = String(data.status || '').toLowerCase();
   if (data.isArchived === true || data.archived === true || data.active === false || data.isActive === false) return false;
   if (status === 'archived' || status === 'inactive' || status === 'disabled') return false;
-  if (data.isAdmin === true || data.isManager === true) return false;
   if (['owner', 'admin', 'manager', 'front_desk', 'assistant_manager'].includes(role)) return false;
   return true;
 }
@@ -17287,7 +17287,7 @@ function ffKioskRenderTechnicians(staffRows) {
   if (!rows.length) {
     grid.innerHTML = '';
     if (status) {
-      status.textContent = 'No active technicians found for this salon yet.';
+      status.textContent = `No visible technicians found. Staff docs loaded: ${(Array.isArray(staffRows) ? staffRows : []).length}.`;
       status.style.color = '#6b7280';
       status.style.background = '#f9fafb';
       status.style.borderColor = '#e5e7eb';
@@ -17327,6 +17327,12 @@ async function ffLoadKioskHome(claims) {
   const safeClaims = claims || {};
   const salonId = String(safeClaims.salonId || '').trim();
   const kioskId = String(safeClaims.kioskId || '').trim();
+  if (status) {
+    status.textContent = `Loading kiosk home... salon=${salonId || '-'} kiosk=${kioskId || '-'}`;
+    status.style.color = '#6b7280';
+    status.style.background = '#f9fafb';
+    status.style.borderColor = '#e5e7eb';
+  }
   if (!salonId || !kioskId) {
     if (status) {
       status.textContent = 'Kiosk token is missing salon or device information.';
@@ -17337,18 +17343,24 @@ async function ffLoadKioskHome(claims) {
 
   try {
     const api = await ffGetKioskPairingApi();
-    const kioskSnap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'kiosks', kioskId));
-    const kiosk = kioskSnap.exists() ? (kioskSnap.data() || {}) : {};
-    const name = String(kiosk.name || 'Kiosk').trim();
-    const locationId = kiosk.locationId ? String(kiosk.locationId).trim() : '';
-    if (meta) {
-      meta.textContent = locationId
-        ? `${name} - Location ${locationId}`
-        : `${name} - All locations`;
+    let name = 'Kiosk';
+    let locationId = '';
+    try {
+      const kioskSnap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'kiosks', kioskId));
+      const kiosk = kioskSnap.exists() ? (kioskSnap.data() || {}) : {};
+      name = String(kiosk.name || 'Kiosk').trim();
+      locationId = kiosk.locationId ? String(kiosk.locationId).trim() : '';
+    } catch (kioskErr) {
+      console.warn('[KioskHome] kiosk doc read failed; continuing with claims', kioskErr);
+      name = `Kiosk ${kioskId.slice(0, 6)}`;
     }
-    if (status) status.textContent = 'Loading technicians...';
+    if (meta) {
+      meta.textContent = locationId ? `${name} - Location ${locationId}` : `${name} - All locations`;
+    }
+    if (status) status.textContent = 'Loading technicians from Firestore...';
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    if (status) status.textContent = `Loaded ${staff.length} staff docs. Rendering kiosk grid...`;
     ffKioskRenderTechnicians(staff);
   } catch (err) {
     console.warn('[KioskHome] failed to load', err);
