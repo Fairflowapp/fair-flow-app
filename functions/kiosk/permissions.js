@@ -24,6 +24,7 @@
 // loudly at import time rather than silently granting/denying.
 const CAPABILITIES = Object.freeze({
   // Queue / floor
+  QUEUE_VIEW: "queue.view",
   QUEUE_JOIN: "queue.join",
   QUEUE_LEAVE: "queue.leave",
   QUEUE_PAUSE: "queue.pause", // temporary "be right back" / break from queue
@@ -31,6 +32,7 @@ const CAPABILITIES = Object.freeze({
   SERVICE_END: "service.end",
 
   // Time clock
+  TIMECLOCK_VIEW: "timeclock.view",
   TIMECLOCK_CLOCK_IN: "timeclock.clockIn",
   TIMECLOCK_CLOCK_OUT: "timeclock.clockOut",
   TIMECLOCK_BREAK_START: "timeclock.breakStart",
@@ -43,6 +45,8 @@ const CAPABILITIES = Object.freeze({
   INVENTORY_CREATE_ORDER: "inventory.createOrder",
 
   // Other modules
+  TASKS_VIEW_TECHNICIANS: "tasks.viewTechnicians",
+  TASKS_VIEW_MANAGERS: "tasks.viewManagers",
   TASKS_COMPLETE: "tasks.complete",
   SCHEDULE_VIEW_OWN: "schedule.viewOwn",
   REQUESTS_CREATE: "requests.create",
@@ -67,6 +71,7 @@ const TECHNICIAN_KIOSK_ROLE = Object.freeze({
   // makes intent unambiguous for Stage 4 Security Rules enforcement.
   permissions: Object.freeze({
     // Queue / floor — daily personal floor actions
+    [CAPABILITIES.QUEUE_VIEW]: true,
     [CAPABILITIES.QUEUE_JOIN]: true,
     [CAPABILITIES.QUEUE_LEAVE]: true,
     [CAPABILITIES.QUEUE_PAUSE]: true,
@@ -74,6 +79,7 @@ const TECHNICIAN_KIOSK_ROLE = Object.freeze({
     [CAPABILITIES.SERVICE_END]: true,
 
     // Time clock — clock in/out + breaks
+    [CAPABILITIES.TIMECLOCK_VIEW]: true,
     [CAPABILITIES.TIMECLOCK_CLOCK_IN]: true,
     [CAPABILITIES.TIMECLOCK_CLOCK_OUT]: true,
     [CAPABILITIES.TIMECLOCK_BREAK_START]: true,
@@ -86,6 +92,8 @@ const TECHNICIAN_KIOSK_ROLE = Object.freeze({
     [CAPABILITIES.INVENTORY_CREATE_ORDER]: false,
 
     // Other modules
+    [CAPABILITIES.TASKS_VIEW_TECHNICIANS]: true,
+    [CAPABILITIES.TASKS_VIEW_MANAGERS]: false,
     [CAPABILITIES.TASKS_COMPLETE]: true,
     [CAPABILITIES.SCHEDULE_VIEW_OWN]: false,
     [CAPABILITIES.REQUESTS_CREATE]: false,

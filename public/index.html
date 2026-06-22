@@ -6831,6 +6831,7 @@ dialog footer button, .code-dialog footer button {
     </div>
 
     <div id="kioskHomeStatus" role="status" aria-live="polite" style="border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:12px;color:#6b7280;font-size:13px;margin-bottom:16px;">Loading technicians...</div>
+    <div id="kioskModuleGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;text-align:left;margin-bottom:16px;"></div>
     <div id="kioskTechGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;text-align:left;"></div>
   </section>
 
@@ -9277,6 +9278,18 @@ dialog footer button, .code-dialog footer button {
             <button type="button" id="kioskDevicesRefreshBtn" onclick="window.ffRenderKioskDevicesModal && window.ffRenderKioskDevicesModal()" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#6b7280;font-size:11px;font-weight:700;cursor:pointer;">Refresh</button>
           </div>
           <div id="kioskDevicesList" style="border:1px dashed #d1d5db;border-radius:10px;padding:18px;text-align:center;font-size:12px;color:#6b7280;background:#f9fafb;">No kiosk devices connected yet.</div>
+        </section>
+
+        <section style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#fff;">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+            <div>
+              <h4 style="margin:0;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Kiosk Permissions</h4>
+              <div style="font-size:12px;color:#6b7280;line-height:1.4;margin-top:4px;">Choose which kiosk modules are visible and what the shared tablet can do.</div>
+            </div>
+            <button type="button" id="kioskPermissionsSaveBtn" onclick="window.ffSaveKioskPermissionsFromSettings && window.ffSaveKioskPermissionsFromSettings()" style="padding:7px 12px;border:1px solid #7c3aed;border-radius:999px;background:#7c3aed;color:#fff;font-size:11px;font-weight:800;cursor:pointer;">Save Permissions</button>
+          </div>
+          <div id="kioskPermissionsStatus" role="status" aria-live="polite" style="min-height:16px;margin-bottom:10px;font-size:11px;color:#6b7280;">Loading kiosk permissions...</div>
+          <div id="kioskPermissionsList" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;"></div>
         </section>
       </div>
     </div>
@@ -16960,6 +16973,64 @@ function ffGetKioskDeviceLocationOptions() {
   return [];
 }
 
+const FF_KIOSK_ROLE_ID = 'technician-kiosk';
+const FF_KIOSK_PERMISSION_GROUPS = [
+  {
+    title: 'Queue',
+    description: 'Show queue status and allow floor actions from the shared tablet.',
+    keys: [
+      ['queue.view', 'Show Queue module'],
+      ['queue.join', 'Join queue'],
+      ['queue.leave', 'Leave queue'],
+      ['queue.pause', 'Pause / break from queue'],
+      ['service.start', 'Start service'],
+      ['service.end', 'End service'],
+    ],
+  },
+  {
+    title: 'Tasks',
+    description: 'Control which task groups are visible on the kiosk.',
+    keys: [
+      ['tasks.viewTechnicians', 'Show technician tasks'],
+      ['tasks.viewManagers', 'Show manager tasks'],
+      ['tasks.complete', 'Complete tasks after PIN'],
+    ],
+  },
+  {
+    title: 'Time Clock',
+    description: 'Allow staff to clock in/out and start/end breaks by PIN.',
+    keys: [
+      ['timeclock.view', 'Show Time Clock module'],
+      ['timeclock.clockIn', 'Clock in'],
+      ['timeclock.clockOut', 'Clock out'],
+      ['timeclock.breakStart', 'Start break'],
+      ['timeclock.breakEnd', 'End break'],
+    ],
+  },
+];
+const FF_KIOSK_DEFAULT_PERMISSIONS = Object.freeze({
+  'queue.view': true,
+  'queue.join': true,
+  'queue.leave': true,
+  'queue.pause': true,
+  'service.start': true,
+  'service.end': true,
+  'tasks.viewTechnicians': true,
+  'tasks.viewManagers': false,
+  'tasks.complete': true,
+  'timeclock.view': true,
+  'timeclock.clockIn': true,
+  'timeclock.clockOut': true,
+  'timeclock.breakStart': true,
+  'timeclock.breakEnd': true,
+  'inventory.addItem': true,
+  'inventory.adjustStock': false,
+  'inventory.editPrice': false,
+  'inventory.createOrder': false,
+  'schedule.viewOwn': false,
+  'requests.create': false,
+});
+
 function ffRenderKioskDevicesModal() {
   const select = document.getElementById('kioskDeviceLocationSelect');
   const list = document.getElementById('kioskDevicesList');
@@ -16993,8 +17064,106 @@ function ffRenderKioskDevicesModal() {
   if (status) {
     status.textContent = 'UI shell only - no pairing writes happen yet.';
   }
+  if (typeof ffLoadKioskPermissionsForSettings === 'function') {
+    ffLoadKioskPermissionsForSettings();
+  }
 }
 window.ffRenderKioskDevicesModal = ffRenderKioskDevicesModal;
+
+function ffSetKioskPermissionsStatus(message, variant) {
+  const status = document.getElementById('kioskPermissionsStatus');
+  if (!status) return;
+  status.textContent = message || '';
+  status.style.color = variant === 'error' ? '#b91c1c' : (variant === 'success' ? '#047857' : '#6b7280');
+}
+
+function ffRenderKioskPermissionsEditor(permissions) {
+  const box = document.getElementById('kioskPermissionsList');
+  if (!box) return;
+  const perms = { ...FF_KIOSK_DEFAULT_PERMISSIONS, ...(permissions || {}) };
+  box.innerHTML = FF_KIOSK_PERMISSION_GROUPS.map((group) => {
+    const rows = group.keys.map(([key, label]) => {
+      const checked = perms[key] === true ? 'checked' : '';
+      return `
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #f3f4f6;font-size:12px;color:#374151;">
+          <span>${ffKioskEscapeHtml(label)}</span>
+          <input type="checkbox" data-kiosk-permission-key="${ffKioskEscapeHtml(key)}" ${checked} style="width:18px;height:18px;accent-color:#7c3aed;">
+        </label>
+      `;
+    }).join('');
+    return `
+      <div style="border:1px solid #e5e7eb;border-radius:12px;padding:12px;background:#f9fafb;">
+        <div style="font-size:13px;font-weight:900;color:#111827;margin-bottom:3px;">${ffKioskEscapeHtml(group.title)}</div>
+        <div style="font-size:11px;color:#6b7280;line-height:1.35;margin-bottom:8px;">${ffKioskEscapeHtml(group.description)}</div>
+        ${rows}
+      </div>
+    `;
+  }).join('');
+}
+
+async function ffLoadKioskPermissionsForSettings() {
+  const salonId = String((typeof window !== 'undefined' && window.currentSalonId) || '').trim();
+  if (!salonId) {
+    ffSetKioskPermissionsStatus('Salon context is still loading.', 'info');
+    ffRenderKioskPermissionsEditor(FF_KIOSK_DEFAULT_PERMISSIONS);
+    return;
+  }
+  try {
+    const api = await ffGetKioskFirestoreApi();
+    const ref = api.doc(api.db, 'salons', salonId, 'roles', FF_KIOSK_ROLE_ID);
+    const snap = await api.getDoc(ref);
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    ffRenderKioskPermissionsEditor(data.permissions || FF_KIOSK_DEFAULT_PERMISSIONS);
+    ffSetKioskPermissionsStatus(snap.exists() ? 'Loaded kiosk permissions.' : 'Using default kiosk permissions.', 'success');
+  } catch (err) {
+    console.warn('[KioskPermissions] load failed', err);
+    ffRenderKioskPermissionsEditor(FF_KIOSK_DEFAULT_PERMISSIONS);
+    ffSetKioskPermissionsStatus('Could not load kiosk permissions.', 'error');
+  }
+}
+window.ffLoadKioskPermissionsForSettings = ffLoadKioskPermissionsForSettings;
+
+async function ffSaveKioskPermissionsFromSettings() {
+  const salonId = String((typeof window !== 'undefined' && window.currentSalonId) || '').trim();
+  const btn = document.getElementById('kioskPermissionsSaveBtn');
+  if (!salonId) {
+    ffSetKioskPermissionsStatus('Salon context is still loading. Try again in a moment.', 'error');
+    return;
+  }
+  const permissions = { ...FF_KIOSK_DEFAULT_PERMISSIONS };
+  document.querySelectorAll('[data-kiosk-permission-key]').forEach((input) => {
+    const key = String(input.getAttribute('data-kiosk-permission-key') || '').trim();
+    if (!key) return;
+    permissions[key] = input.checked === true;
+  });
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      btn.style.opacity = '0.75';
+    }
+    ffSetKioskPermissionsStatus('Saving kiosk permissions...', 'info');
+    const api = await ffGetKioskFirestoreApi();
+    const ref = api.doc(api.db, 'salons', salonId, 'roles', FF_KIOSK_ROLE_ID);
+    await api.setDoc(ref, {
+      name: 'Technician Kiosk',
+      isSystem: true,
+      permissions,
+      updatedAt: api.serverTimestamp(),
+    }, { merge: true });
+    ffSetKioskPermissionsStatus('Kiosk permissions saved.', 'success');
+  } catch (err) {
+    console.warn('[KioskPermissions] save failed', err);
+    ffSetKioskPermissionsStatus('Could not save kiosk permissions. Make sure you are owner/admin.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save Permissions';
+      btn.style.opacity = '1';
+    }
+  }
+}
+window.ffSaveKioskPermissionsFromSettings = ffSaveKioskPermissionsFromSettings;
 
 function ffSetKioskDevicesStatus(message, variant) {
   const status = document.getElementById('kioskDevicesFormStatus');
@@ -17018,6 +17187,10 @@ async function ffGetKioskFirestoreApi() {
   if (!db) throw new Error('Firestore is not ready yet.');
   return {
     db,
+    doc: api.doc,
+    getDoc: api.getDoc,
+    setDoc: api.setDoc,
+    serverTimestamp: api.serverTimestamp,
     collection: api.collection,
     query: api.query,
     where: api.where,
@@ -17321,6 +17494,62 @@ function ffKioskRenderTechnicians(staffRows) {
   }).join('');
 }
 
+function ffKioskRenderModules(permissions) {
+  const grid = document.getElementById('kioskModuleGrid');
+  if (!grid) return;
+  const perms = { ...FF_KIOSK_DEFAULT_PERMISSIONS, ...(permissions || {}) };
+  const modules = [
+    {
+      id: 'queue',
+      title: 'Queue',
+      subtitle: 'Available and In Service view',
+      enabled: perms['queue.view'] === true,
+      details: [
+        perms['queue.join'] === true ? 'Join' : null,
+        perms['queue.leave'] === true ? 'Leave' : null,
+        perms['service.start'] === true ? 'Start service' : null,
+      ].filter(Boolean).join(' / ') || 'View only',
+    },
+    {
+      id: 'tasks',
+      title: 'Tasks',
+      subtitle: 'Task board by allowed groups',
+      enabled: perms['tasks.viewTechnicians'] === true || perms['tasks.viewManagers'] === true,
+      details: [
+        perms['tasks.viewTechnicians'] === true ? 'Technicians' : null,
+        perms['tasks.viewManagers'] === true ? 'Managers' : null,
+        perms['tasks.complete'] === true ? 'Complete by PIN' : null,
+      ].filter(Boolean).join(' / ') || 'Hidden',
+    },
+    {
+      id: 'timeclock',
+      title: 'Time Clock',
+      subtitle: 'Clock in/out and breaks by PIN',
+      enabled: perms['timeclock.view'] === true,
+      details: [
+        perms['timeclock.clockIn'] === true ? 'Clock in' : null,
+        perms['timeclock.clockOut'] === true ? 'Clock out' : null,
+        (perms['timeclock.breakStart'] === true || perms['timeclock.breakEnd'] === true) ? 'Breaks' : null,
+      ].filter(Boolean).join(' / ') || 'Hidden',
+    },
+  ];
+  grid.innerHTML = modules.map((mod) => {
+    const opacity = mod.enabled ? '1' : '0.48';
+    const bg = mod.enabled ? '#fff' : '#f9fafb';
+    const border = mod.enabled ? '#ddd6fe' : '#e5e7eb';
+    const pillBg = mod.enabled ? '#ede9fe' : '#f3f4f6';
+    const pillColor = mod.enabled ? '#7c3aed' : '#6b7280';
+    return `
+      <button type="button" data-kiosk-module="${ffKioskEscapeHtml(mod.id)}" ${mod.enabled ? '' : 'disabled'} style="border:1px solid ${border};background:${bg};border-radius:18px;padding:16px;text-align:left;cursor:${mod.enabled ? 'pointer' : 'not-allowed'};opacity:${opacity};box-shadow:0 10px 24px rgba(15,23,42,0.07);">
+        <span style="display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:${pillBg};color:${pillColor};font-size:11px;font-weight:900;padding:5px 9px;margin-bottom:12px;">${mod.enabled ? 'Enabled' : 'Hidden'}</span>
+        <span style="display:block;font-size:20px;font-weight:900;color:#111827;margin-bottom:4px;">${ffKioskEscapeHtml(mod.title)}</span>
+        <span style="display:block;font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:10px;">${ffKioskEscapeHtml(mod.subtitle)}</span>
+        <span style="display:block;font-size:11px;color:#4b5563;font-weight:700;">${ffKioskEscapeHtml(mod.details)}</span>
+      </button>
+    `;
+  }).join('');
+}
+
 async function ffLoadKioskHome(claims) {
   const meta = document.getElementById('kioskPairedMeta');
   const status = document.getElementById('kioskHomeStatus');
@@ -17358,6 +17587,16 @@ async function ffLoadKioskHome(claims) {
       meta.textContent = locationId ? `${name} - Location ${locationId}` : `${name} - All locations`;
     }
     if (status) status.textContent = 'Loading technicians from Firestore...';
+    let rolePermissions = FF_KIOSK_DEFAULT_PERMISSIONS;
+    try {
+      const roleId = String(safeClaims.roleId || FF_KIOSK_ROLE_ID).trim() || FF_KIOSK_ROLE_ID;
+      const roleSnap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'roles', roleId));
+      const role = roleSnap.exists() ? (roleSnap.data() || {}) : {};
+      rolePermissions = { ...FF_KIOSK_DEFAULT_PERMISSIONS, ...(role.permissions || {}) };
+    } catch (roleErr) {
+      console.warn('[KioskHome] role read failed; using defaults', roleErr);
+    }
+    ffKioskRenderModules(rolePermissions);
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
     if (status) status.textContent = `Loaded ${staff.length} staff docs. Rendering kiosk grid...`;

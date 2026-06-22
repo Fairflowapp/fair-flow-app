@@ -233,6 +233,14 @@ service cloud.firestore {
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
+    // Kiosk role configuration. Owners/admins manage permissions; paired kiosk
+    // devices read their assigned role to decide which modules to show.
+    match /salons/{salonId}/roles/{roleId} {
+      allow read: if isAdminOrOwner(salonId)
+        || (isKioskForSalon(salonId) && request.auth.token.roleId == roleId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
     match /settings/{docId} {
       allow read: if request.auth != null;
       allow write: if false;
