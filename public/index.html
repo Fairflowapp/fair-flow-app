@@ -417,6 +417,26 @@ body.ff-logged-out #kiosk-paired-section {
   overflow-y: auto;
 }
 
+body.ff-kiosk-pairing-active #main-app-content,
+body.ff-kiosk-pairing-active #authBanner,
+body.ff-kiosk-pairing-active #tasksScreen,
+body.ff-kiosk-pairing-active #ticketsScreen,
+body.ff-kiosk-pairing-active #floorScreen,
+body.ff-kiosk-pairing-active #chatScreen,
+body.ff-kiosk-pairing-active #mediaScreen,
+body.ff-kiosk-pairing-active #inventoryScreen,
+body.ff-kiosk-pairing-active #inboxScreen,
+body.ff-kiosk-pairing-active #trainingScreen,
+body.ff-kiosk-pairing-active #scheduleScreen,
+body.ff-kiosk-pairing-active #timeClockScreen,
+body.ff-kiosk-pairing-active #dashboardScreen {
+  display: none !important;
+}
+
+body.ff-kiosk-pairing-active #kiosk-pairing-section {
+  display: block !important;
+}
+
 /* Sticky header with left-aligned brand + toolbar */
 
 .header{position:sticky;top:0;z-index:100003;background:#5b21b6;
@@ -6657,6 +6677,121 @@ dialog footer button, .code-dialog footer button {
       padding: 6px 10px !important;
     }
   }
+
+  /* Kiosk mode uses the real Fair Flow app shell, then locks navigation down to
+     the shared-workstation modules. */
+  body.ff-kiosk-mode .toolbar-nav-main .btn-pill {
+    display: none !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main #queueBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #tasksBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #timeClockBtn {
+    display: inline-flex !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main #queueBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #tasksBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #timeClockBtn {
+    color: rgba(255,255,255,0.84) !important;
+    background: transparent !important;
+    border-color: transparent !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main #queueBtn .nav-icon svg,
+  body.ff-kiosk-mode .toolbar-nav-main #tasksBtn .nav-icon svg,
+  body.ff-kiosk-mode .toolbar-nav-main #timeClockBtn .nav-icon svg {
+    stroke: currentColor !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main #queueBtn.active,
+  body.ff-kiosk-mode .toolbar-nav-main #tasksBtn.active,
+  body.ff-kiosk-mode .toolbar-nav-main #timeClockBtn.active {
+    color: #ffffff !important;
+    background: rgba(255, 255, 255, 0.14) !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    box-shadow: none !important;
+  }
+  body.ff-kiosk-mode,
+  body.ff-kiosk-mode * {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main {
+    z-index: 100360 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-main #queueBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #tasksBtn,
+  body.ff-kiosk-mode .toolbar-nav-main #timeClockBtn {
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+    min-height: 46px !important;
+    padding: 10px 16px !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
+  body.ff-kiosk-mode .toolbar-nav-right #appsBtn,
+  body.ff-kiosk-mode .toolbar-nav-right .header-toolbar-divider,
+  body.ff-kiosk-mode .toolbar-nav-right .user-avatar-wrapper,
+  body.ff-kiosk-mode .toolbar-nav-right #headerCustomerSupportBtn,
+  body.ff-kiosk-mode #appsPanel,
+  body.ff-kiosk-mode #userAvatarDropdown {
+    display: none !important;
+  }
+  body.ff-kiosk-mode .ff-kiosk-shell-badge {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(255,255,255,0.24);
+    border-radius: 999px;
+    color: #ffffff;
+    background: rgba(255,255,255,0.12);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+  body.ff-kiosk-mode .header #brandLogo,
+  body.ff-kiosk-mode .brandbox .logo {
+    background: transparent;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    filter: brightness(0) invert(1) grayscale(1) contrast(2) drop-shadow(0 1px 2px rgba(0,0,0,0.16)) !important;
+    -webkit-filter: brightness(0) invert(1) grayscale(1) contrast(2) drop-shadow(0 1px 2px rgba(0,0,0,0.16)) !important;
+    object-fit: contain !important;
+  }
+  body.ff-kiosk-mode #manageQueueScreen,
+  body.ff-kiosk-mode #userProfileScreen,
+  body.ff-kiosk-mode #myProfileScreen,
+  body.ff-kiosk-mode #ticketsScreen,
+  body.ff-kiosk-mode #floorScreen,
+  body.ff-kiosk-mode #chatScreen,
+  body.ff-kiosk-mode #mediaScreen,
+  body.ff-kiosk-mode #inventoryScreen,
+  body.ff-kiosk-mode #inboxScreen,
+  body.ff-kiosk-mode #trainingScreen,
+  body.ff-kiosk-mode #scheduleScreen,
+  body.ff-kiosk-mode #dashboardScreen,
+  body.ff-kiosk-mode #queueAnalyticsScreen,
+  body.ff-kiosk-mode #ticketsAnalyticsScreen,
+  body.ff-kiosk-mode #timeAnalyticsScreen,
+  body.ff-kiosk-mode #tasksAnalyticsScreen,
+  body.ff-kiosk-mode #historyScreen,
+  body.ff-kiosk-mode .owner-tools,
+  body.ff-kiosk-mode .admin-only,
+  body.ff-kiosk-mode [data-admin-only="true"],
+  body.ff-kiosk-mode [data-owner-only="true"],
+  body.ff-kiosk-mode #btnTasksSettings,
+  body.ff-kiosk-mode #btnTasksReset,
+  body.ff-kiosk-mode #manageQueueBtn,
+  body.ff-kiosk-mode #queueManageBtn,
+  body.ff-kiosk-mode #queueSettingsBtn,
+  body.ff-kiosk-mode .ff-tc-manage-link,
+  body.ff-kiosk-mode [data-time-clock-manage],
+  body.ff-kiosk-mode [data-app="settings"],
+  body.ff-kiosk-mode [data-app="history"] {
+    display: none !important;
+  }
   </style>
 </head>
 
@@ -8800,6 +8935,15 @@ dialog footer button, .code-dialog footer button {
         <div id="userProfileCardDevices" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Devices</h3>
           <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Pair and manage shared kiosk tablets for this salon.</p>
+          <div style="padding:14px;border:1px solid #ddd6fe;border-radius:12px;background:#faf5ff;margin-bottom:12px;">
+            <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Kiosk URL</div>
+            <div style="font-size:11px;color:#6b7280;line-height:1.45;margin-bottom:10px;">Open this link on the iPad to pair or resume a shared kiosk for this salon.</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input id="kioskUrlDisplayInput" type="text" readonly value="/kiosk" style="flex:1;min-width:220px;height:34px;padding:0 10px;border:1px solid #d8b4fe;border-radius:8px;background:#fff;color:#374151;font-size:12px;">
+              <button type="button" onclick="window.ffCopyKioskUrl && window.ffCopyKioskUrl()" style="padding:8px 12px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:700;">Copy URL</button>
+              <button type="button" onclick="window.ffOpenKioskUrl && window.ffOpenKioskUrl()" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;font-size:12px;font-weight:700;">Open</button>
+            </div>
+          </div>
           <div style="padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#faf5ff;">
             <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Kiosk devices</div>
             <div style="font-size:11px;color:#6b7280;line-height:1.45;margin-bottom:12px;">Enter a tablet pairing code, name the device, and choose the location where it will live.</div>
@@ -9301,6 +9445,16 @@ dialog footer button, .code-dialog footer button {
       </div>
 
       <div style="padding:20px 24px;overflow:auto;display:flex;flex-direction:column;gap:18px;">
+        <section style="border:1px solid #ddd6fe;border-radius:12px;padding:16px;background:#faf5ff;">
+          <h4 style="margin:0 0 4px;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Kiosk URL</h4>
+          <div style="font-size:12px;color:#6b7280;line-height:1.45;margin-bottom:12px;">Use this link on the iPad. It is the same for this Fair Flow app; pairing decides which salon and location the tablet belongs to.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input id="kioskDevicesUrlInput" type="text" readonly value="/kiosk" style="flex:1;min-width:240px;height:36px;padding:0 10px;border:1px solid #d8b4fe;border-radius:8px;background:#fff;color:#374151;font-size:12px;">
+            <button type="button" onclick="window.ffCopyKioskUrl && window.ffCopyKioskUrl()" style="padding:8px 12px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:800;">Copy URL</button>
+            <button type="button" onclick="window.ffOpenKioskUrl && window.ffOpenKioskUrl()" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;font-size:12px;font-weight:800;">Open</button>
+          </div>
+        </section>
+
         <section style="border:1px solid #e5e7eb;border-radius:12px;padding:16px;background:#f9fafb;">
           <h4 style="margin:0 0 4px;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Pair a Kiosk</h4>
           <div style="font-size:12px;color:#6b7280;line-height:1.4;margin-bottom:14px;">Enter the 4-digit code shown on the tablet. Firestore approval will be wired in the next 3c step.</div>
@@ -9319,6 +9473,40 @@ dialog footer button, .code-dialog footer button {
           <div id="kioskDevicesFormStatus" role="status" aria-live="polite" style="min-height:16px;margin-top:12px;font-size:11px;color:#6b7280;">UI shell only - no pairing writes happen yet.</div>
           <div style="display:flex;justify-content:flex-end;margin-top:14px;">
             <button type="button" id="kioskApprovePairingBtn" onclick="window.ffApproveKioskPairingFromSettings && window.ffApproveKioskPairingFromSettings()" style="padding:8px 14px;border:1px solid #7c3aed;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Approve Pairing</button>
+          </div>
+        </section>
+
+        <section style="border:1px solid #ddd6fe;border-radius:12px;padding:16px;background:#faf5ff;">
+          <h4 style="margin:0 0 6px;font-size:13px;font-weight:800;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Lock the iPad in Kiosk Mode</h4>
+          <div style="font-size:12px;color:#6b7280;line-height:1.55;margin-bottom:12px;">Use iPad Guided Access so staff cannot leave the kiosk, open the browser URL bar, or zoom the page.</div>
+          <div style="display:grid;gap:12px;">
+            <div style="border:1px solid #e9d5ff;border-radius:10px;background:#fff;padding:12px;">
+              <div style="font-size:12px;font-weight:800;color:#6d28d9;margin-bottom:6px;">1. Add Fair Flow Kiosk to the Home Screen</div>
+              <ol style="margin:0;padding-left:18px;font-size:12px;color:#374151;line-height:1.55;">
+                <li>Open the kiosk URL in Safari on the iPad.</li>
+                <li>Tap the Share button.</li>
+                <li>Choose <strong>Add to Home Screen</strong>.</li>
+                <li>Open the kiosk from the new Home Screen icon. This hides the Safari URL bar.</li>
+              </ol>
+            </div>
+            <div style="border:1px solid #e9d5ff;border-radius:10px;background:#fff;padding:12px;">
+              <div style="font-size:12px;font-weight:800;color:#6d28d9;margin-bottom:6px;">2. Turn on Guided Access</div>
+              <ol style="margin:0;padding-left:18px;font-size:12px;color:#374151;line-height:1.55;">
+                <li>Go to iPad <strong>Settings</strong> → <strong>Accessibility</strong> → <strong>Guided Access</strong>.</li>
+                <li>Turn on <strong>Guided Access</strong>.</li>
+                <li>Open <strong>Passcode Settings</strong> and set a passcode only managers know.</li>
+              </ol>
+            </div>
+            <div style="border:1px solid #e9d5ff;border-radius:10px;background:#fff;padding:12px;">
+              <div style="font-size:12px;font-weight:800;color:#6d28d9;margin-bottom:6px;">3. Start the locked kiosk session</div>
+              <ol style="margin:0;padding-left:18px;font-size:12px;color:#374151;line-height:1.55;">
+                <li>Open the Fair Flow Kiosk Home Screen icon.</li>
+                <li>Triple-click the side button or Home button.</li>
+                <li>Choose <strong>Guided Access</strong>, then tap <strong>Options</strong>.</li>
+                <li>Keep <strong>Touch</strong> on. Turn off options you do not need, such as Motion or Keyboards.</li>
+                <li>Tap <strong>Start</strong>. Triple-click again and enter the passcode to exit.</li>
+              </ol>
+            </div>
           </div>
         </section>
 
@@ -9602,6 +9790,45 @@ async function initFirebaseAuth() {
         // downstream Queue/permissions read would spuriously alert "Failed to load user profile".
         // We check Firestore synchronously-ish (await) before painting anything.
         (async function ffHandleSignedInUser() {
+          if (typeof ffIsKioskRoute === 'function' && ffIsKioskRoute()) {
+            try {
+              const tokenResult = user && typeof user.getIdTokenResult === 'function'
+                ? await user.getIdTokenResult()
+                : null;
+              const routeClaims = tokenResult && tokenResult.claims ? tokenResult.claims : null;
+              if (routeClaims && routeClaims.isKiosk === true) {
+                console.log('[AUTH] kiosk signed in:', user.uid, routeClaims);
+                if (typeof ffShowKioskPairedScreen === 'function') {
+                  ffShowKioskPairedScreen(routeClaims);
+                }
+                return;
+              }
+            } catch (routeClaimsErr) {
+              console.warn('[AUTH] kiosk route claims check failed:', routeClaimsErr?.code, routeClaimsErr?.message);
+            }
+            console.log('[AUTH] non-kiosk user on kiosk route - signing out before pairing');
+            try {
+              document.body.classList.remove('ff-kiosk-mode', 'ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+              document.body.classList.add('ff-logged-out');
+              if (mainContent) mainContent.style.display = 'none';
+              if (authBanner) authBanner.style.display = 'none';
+              if (loginSection) loginSection.style.display = 'none';
+              if (signupSection) signupSection.style.display = 'none';
+              if (resetPasswordSection) resetPasswordSection.style.display = 'none';
+            } catch (_) {}
+            try {
+              const authFns = window.__firebaseAuthFunctions || {};
+              if (authFns.signOut && ffAuth) {
+                await authFns.signOut(ffAuth);
+              }
+            } catch (signOutErr) {
+              console.warn('[AUTH] kiosk route sign-out failed:', signOutErr?.code, signOutErr?.message);
+            }
+            if (typeof ffStartKioskPairing === 'function') {
+              ffStartKioskPairing({ force: true });
+            }
+            return;
+          }
           let hasProfile = true; // safe default: if we can't check, proceed with normal paint
           let profileData = null;
           let tokenClaims = null;
@@ -9692,7 +9919,7 @@ async function initFirebaseAuth() {
           if (loginSection) loginSection.style.display = 'none';
           if (signupSection) signupSection.style.display = 'none';
           if (resetPasswordSection) resetPasswordSection.style.display = 'none';
-          document.body.classList.remove('ff-logged-out');
+          document.body.classList.remove('ff-kiosk-mode', 'ff-logged-out');
           if (mainContent) mainContent.style.display = 'block';
           if (authBanner) authBanner.style.display = 'none';
           if (archivedBlockScreen) archivedBlockScreen.style.display = 'none';
@@ -9762,7 +9989,7 @@ async function initFirebaseAuth() {
         try {
           window.__ffQueueGateGen = (Number(window.__ffQueueGateGen) || 0) + 1;
         } catch (eQ) {}
-        document.body.classList.remove('ff-auth-resolving', 'ff-ui-ready', 'ff-queue-ui-visible');
+        document.body.classList.remove('ff-kiosk-mode', 'ff-auth-resolving', 'ff-ui-ready', 'ff-queue-ui-visible');
         document.body.classList.add('ff-logged-out');
         if (mainContent) mainContent.style.display = 'none';
         if (authBanner) authBanner.style.display = 'none';
@@ -11802,7 +12029,9 @@ function renderBrand(){
     salonName.innerHTML = displayName ? ("<strong>"+escapeHtml(displayName)+"</strong>") : "";
   }
   if (brandLogo) {
-    brandLogo.src = "fairflow-logo-white.png?v=14";
+    brandLogo.src = (typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode())
+      ? "fairflow-logo-transparent.png?v=kiosk-white"
+      : "fairflow-logo-white.png?v=14";
     brandLogo.style.visibility="visible";
   }
   if (typeof renderHeaderUserIdentity === 'function') renderHeaderUserIdentity();
@@ -12160,6 +12389,15 @@ function ffCurrentUserSalonOwnerPermissionBypass() {
   }
 }
 
+function ffIsKioskAppMode() {
+  try {
+    return typeof document !== 'undefined' && document.body && document.body.classList.contains('ff-kiosk-mode');
+  } catch (e) {
+    return false;
+  }
+}
+window.ffIsKioskAppMode = ffIsKioskAppMode;
+
 /**
  * Whether permission checks should treat "no resolved staff row" as loading vs real deny.
  * - staff_loading: signed in, staff cache not hydrated yet (staff-cloud has not finished first sync).
@@ -12205,10 +12443,12 @@ function ffStaffPermissionLoadState() {
 window.ffStaffPermissionLoadState = ffStaffPermissionLoadState;
 
 function ffCurrentUserHasQueueViewPermission() {
+  if (ffIsKioskAppMode()) return true;
   if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasQueueViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 window.ffCurrentUserHasQueueLockedViewPermission = function ffCurrentUserHasQueueLockedViewPermission() {
+  if (ffIsKioskAppMode()) return false;
   // Salon owner: never treat as "locked read-only" queue (bypass must not return true here).
   if (ffCurrentUserSalonOwnerPermissionBypass()) return false;
   return ffStaffHasQueueLockedViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
@@ -12411,6 +12651,7 @@ function ffCurrentUserIsQueueJoinOnlyPartialAccess() {
 
 /** Show Queue tab / Apps queue tile / open queue screen: full queue_view OR join-only partial OR locked read-only view. */
 function ffCurrentUserHasQueueScreenAccess() {
+  if (ffIsKioskAppMode()) return true;
   if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return (
     ffCurrentUserHasQueueViewPermission() ||
@@ -12521,6 +12762,7 @@ function ffStaffHasTasksViewPermission(staff) {
 }
 
 function ffCurrentUserHasTasksViewPermission() {
+  if (ffIsKioskAppMode()) return true;
   if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
   return ffStaffHasTasksViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
@@ -12536,6 +12778,7 @@ function ffStaffHasTasksUsePermission(staff) {
   return false;
 }
 function ffCurrentUserHasTasksUsePermission() {
+  if (ffIsKioskAppMode()) return true;
   if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
   return ffStaffHasTasksUsePermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
@@ -12886,6 +13129,12 @@ function ffUpdateMainNavTabVisibility() {
     setNavElVisible(document.getElementById('tasksBtn'), false);
     setNavElVisible(document.getElementById('inboxBtn'), false);
     ffUpdateAppsPanelPermissionVisibility();
+    return;
+  }
+  if (typeof ffIsKioskAppMode === 'function' && ffIsKioskAppMode()) {
+    navIds.forEach(function (id) {
+      setNavElVisible(document.getElementById(id), id === 'queueBtn' || id === 'tasksBtn' || id === 'timeClockBtn');
+    });
     return;
   }
   const staff = typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function' ? ffResolveCurrentStaffRowFromFfStaffV1() : null;
@@ -14178,6 +14427,9 @@ function canViewQueueRowActionControls(row) {
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
     return false;
   }
+  if (typeof ffIsKioskAppMode === 'function' && ffIsKioskAppMode()) {
+    return true;
+  }
   if (typeof ffCurrentUserIsQueueSharedStationJoin === 'function' && ffCurrentUserIsQueueSharedStationJoin()) {
     return true;
   }
@@ -14885,7 +15137,31 @@ function renderQueue(){
 
     const hold=btn(q.held?"RELEASE":"HOLD","hold-btn");
 
-    start.onclick=() =>guardStart(q.name, qi, ()=>startSpecific(qi));
+    const startAction = (event) => {
+      try {
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      } catch (_) {}
+      if (start.__ffQueueStartBusy) return;
+      start.__ffQueueStartBusy = true;
+      Promise.resolve(guardStart(q.name, qi, () => startSpecific(qi))).finally(() => {
+        setTimeout(() => {
+          start.__ffQueueStartBusy = false;
+        }, 350);
+      });
+    };
+    start.addEventListener('pointerdown', startAction, { passive: false });
+    start.addEventListener('touchstart', function (event) {
+      if (window.PointerEvent) return;
+      startAction(event);
+    }, { passive: false });
+    start.addEventListener('click', function (event) {
+      if (!window.PointerEvent) return;
+      event.preventDefault();
+      event.stopPropagation();
+    });
 
     hold.onclick=() =>{ window.__ff_holdTargetName = q.name; window.__ff_holdWasHeld = !!q.held; guardHold(()=>toggleHold(qi)); };
 
@@ -16852,19 +17128,36 @@ async function guardStart(workerName, idx, fn){
   }
 
   const authenticatedStaff = authResult.staff;
+  const targetEntry = Array.isArray(queue) && Number.isInteger(idx) ? (queue[idx] || null) : null;
+  const targetStaffId = String((targetEntry && targetEntry.staffId) || '').trim();
+  const targetName = String((targetEntry && targetEntry.name) || workerName || '').trim();
+  const authStaffId = String(authenticatedStaff.id || authenticatedStaff.staffId || '').trim();
+  const authStaffName = String(authenticatedStaff.name || '').trim();
+  const normalizeName = (value) => String(value || '').trim().toLowerCase();
 
-  // Find target technician by name
+  // Find target technician by stable id first, then by visible row name.
   let targetStaff = null;
   try {
     const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
     const staffList = Array.isArray(store.staff) ? store.staff : [];
-    targetStaff = staffList.find(s => s.name === workerName && s.isArchived !== true);
+    targetStaff = staffList.find((s) => {
+      if (!s || s.isArchived === true) return false;
+      const rowId = String(s.id || s.staffId || '').trim();
+      if (targetStaffId && rowId && rowId === targetStaffId) return true;
+      return normalizeName(s.name) === normalizeName(targetName);
+    }) || null;
   } catch (e) {
     console.error('[guardStart] Error finding target staff:', e);
   }
 
   // Check authorization: allow if PIN matches target technician OR Admin/Manager
-  const isTargetTechnician = targetStaff && authenticatedStaff.id === targetStaff.id;
+  const targetResolvedId = String((targetStaff && (targetStaff.id || targetStaff.staffId)) || targetStaffId || '').trim();
+  const targetResolvedName = String((targetStaff && targetStaff.name) || targetName || '').trim();
+  const isTargetTechnician =
+    !!(
+      (authStaffId && targetResolvedId && authStaffId === targetResolvedId) ||
+      (authStaffName && targetResolvedName && normalizeName(authStaffName) === normalizeName(targetResolvedName))
+    );
   const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
 
   if (!isTargetTechnician && !isAdminOrManager) {
@@ -17001,6 +17294,7 @@ async function openSettingsSecure(){
 
 
   settingsDlg.showModal();
+  if (typeof ffSyncKioskUrlDisplays === 'function') ffSyncKioskUrlDisplays();
 
 }
 
@@ -17081,7 +17375,56 @@ const FF_KIOSK_DEFAULT_PERMISSIONS = Object.freeze({
   'requests.create': false,
 });
 
+function ffGetKioskUrl() {
+  try {
+    const origin = window.location && window.location.origin ? window.location.origin : '';
+    return origin ? `${origin}/kiosk` : '/kiosk';
+  } catch (_) {
+    return '/kiosk';
+  }
+}
+
+function ffSyncKioskUrlDisplays() {
+  const url = ffGetKioskUrl();
+  ['kioskUrlDisplayInput', 'kioskDevicesUrlInput'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = url;
+  });
+}
+window.ffSyncKioskUrlDisplays = ffSyncKioskUrlDisplays;
+
+async function ffCopyKioskUrl() {
+  const url = ffGetKioskUrl();
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const input = document.getElementById('kioskDevicesUrlInput') || document.getElementById('kioskUrlDisplayInput');
+      if (input) {
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+      }
+    }
+    if (typeof showToast === 'function') showToast('Kiosk URL copied.', 'success');
+  } catch (_) {
+    if (typeof showToast === 'function') showToast('Copy failed. Select the URL and copy manually.', 'error');
+  }
+}
+window.ffCopyKioskUrl = ffCopyKioskUrl;
+
+function ffOpenKioskUrl() {
+  const url = ffGetKioskUrl();
+  try {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (_) {
+    window.location.href = url;
+  }
+}
+window.ffOpenKioskUrl = ffOpenKioskUrl;
+
 function ffRenderKioskDevicesModal() {
+  ffSyncKioskUrlDisplays();
   const select = document.getElementById('kioskDeviceLocationSelect');
   const list = document.getElementById('kioskDevicesList');
   const status = document.getElementById('kioskDevicesFormStatus');
@@ -17352,6 +17695,21 @@ function ffIsKioskRoute() {
       || path === '/kiosk-v7'
       || path === '/kiosk-v8'
       || path === '/kiosk-v9'
+      || path === '/kiosk-v10'
+      || path === '/kiosk-v11'
+      || path === '/kiosk-v12'
+      || path === '/kiosk-v13'
+      || path === '/kiosk-v14'
+      || path === '/kiosk-v15'
+      || path === '/kiosk-v16'
+      || path === '/kiosk-v17'
+      || path === '/kiosk-v18'
+      || path === '/kiosk-v19'
+      || path === '/kiosk-v20'
+      || path === '/kiosk-v21'
+      || path === '/kiosk-v22'
+      || path === '/kiosk-v23'
+      || path === '/kiosk-v24'
       || paramsNow.get('kiosk') === '1'
       || paramsNow.get('mode') === 'kiosk';
   } catch (e) {
@@ -17434,8 +17792,8 @@ function ffShowKioskPairingScreen() {
   const mainContent = document.getElementById('main-app-content');
   const pairingSection = document.getElementById('kiosk-pairing-section');
   const pairedSection = document.getElementById('kiosk-paired-section');
-  document.body.classList.add('ff-logged-out');
-  document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+  document.body.classList.add('ff-logged-out', 'ff-kiosk-pairing-active');
+  document.body.classList.remove('ff-kiosk-mode', 'ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
   if (loginSection) loginSection.style.display = 'none';
   if (signupSection) signupSection.style.display = 'none';
   if (resetPasswordSection) resetPasswordSection.style.display = 'none';
@@ -17447,6 +17805,218 @@ function ffShowKioskPairingScreen() {
 }
 window.ffShowKioskPairingScreen = ffShowKioskPairingScreen;
 
+function ffEnsureKioskTimeClockNavButton() {
+  const nav = document.querySelector('.toolbar-nav-main');
+  if (!nav || document.getElementById('timeClockBtn')) return;
+  const tasksBtn = document.getElementById('tasksBtn');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'timeClockBtn';
+  btn.className = 'btn-pill nav-item core-nav';
+  btn.setAttribute('aria-label', 'Time Clock');
+  btn.innerHTML = '<span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></span>Time Clock';
+  if (tasksBtn && tasksBtn.parentNode === nav) {
+    tasksBtn.insertAdjacentElement('afterend', btn);
+  } else {
+    nav.appendChild(btn);
+  }
+}
+
+function ffEnsureKioskShellBadge() {
+  const right = document.querySelector('.toolbar-nav-right');
+  if (!right || document.getElementById('ffKioskShellBadge')) return;
+  const badge = document.createElement('span');
+  badge.id = 'ffKioskShellBadge';
+  badge.className = 'ff-kiosk-shell-badge';
+  badge.textContent = 'Kiosk mode';
+  right.appendChild(badge);
+}
+
+function ffApplyKioskTouchLock() {
+  try {
+    let vp = document.querySelector('meta[name="viewport"]');
+    if (!vp) {
+      vp = document.createElement('meta');
+      vp.setAttribute('name', 'viewport');
+      document.head.appendChild(vp);
+    }
+    vp.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+  } catch (_) {}
+  if (window.__ffKioskTouchLockInstalled) return;
+  window.__ffKioskTouchLockInstalled = true;
+  const preventKioskZoom = function (e) {
+    try {
+      if (!(document.body && document.body.classList.contains('ff-kiosk-mode'))) return;
+      e.preventDefault();
+      e.stopPropagation();
+    } catch (_) {}
+  };
+  document.addEventListener('dblclick', preventKioskZoom, { capture: true, passive: false });
+  document.addEventListener('gesturestart', preventKioskZoom, { capture: true, passive: false });
+  document.addEventListener('gesturechange', preventKioskZoom, { capture: true, passive: false });
+}
+
+function ffInstallKioskNavHandlers() {
+  if (window.__ffKioskNavHandlersInstalled) return;
+  window.__ffKioskNavHandlersInstalled = true;
+  const active = function (id) {
+    ['queueBtn', 'tasksBtn', 'timeClockBtn'].forEach(function (btnId) {
+      const el = document.getElementById(btnId);
+      if (el) el.classList.toggle('active', btnId === id);
+    });
+  };
+  const route = function (target) {
+    if (!target || !(document.body && document.body.classList.contains('ff-kiosk-mode'))) return false;
+    const btn = target.closest && target.closest('#queueBtn,#tasksBtn,#timeClockBtn');
+    if (!btn) return false;
+    if (btn.__ffKioskNavBusy) return true;
+    btn.__ffKioskNavBusy = true;
+    setTimeout(function () { btn.__ffKioskNavBusy = false; }, 350);
+    active(btn.id);
+    if (btn.id === 'queueBtn' && typeof window.goToQueue === 'function') window.goToQueue();
+    else if (btn.id === 'tasksBtn' && typeof window.openTasks === 'function') window.openTasks();
+    else if (btn.id === 'timeClockBtn' && typeof window.goToTimeClock === 'function') window.goToTimeClock();
+    else return false;
+    return true;
+  };
+  document.addEventListener('pointerdown', function (e) {
+    if (!route(e.target)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, { capture: true, passive: false });
+  document.addEventListener('touchstart', function (e) {
+    if (window.PointerEvent) return;
+    if (!route(e.target)) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, { capture: true, passive: false });
+  document.addEventListener('click', function (e) {
+    const target = e.target;
+    if (!target || !(document.body && document.body.classList.contains('ff-kiosk-mode'))) return;
+    const btn = target.closest && target.closest('#queueBtn,#tasksBtn,#timeClockBtn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, { capture: true, passive: false });
+}
+
+function ffApplyKioskScopedStorage(claims) {
+  const salonId = String((claims && claims.salonId) || '').trim();
+  const kioskId = String((claims && claims.kioskId) || '').trim();
+  const scopeKey = [salonId, kioskId].filter(Boolean).join(':');
+  let previousScope = '';
+  try {
+    previousScope = localStorage.getItem('ff_kiosk_scope_v1') || '';
+  } catch (_) {}
+  if (!scopeKey || previousScope === scopeKey) return;
+  try {
+    ['ffv24_queue', 'ffv24_service', 'ffv24_log', 'ff_queues_v1', 'ff_active_location_id'].forEach(function (key) {
+      localStorage.removeItem(key);
+    });
+    localStorage.setItem('ff_kiosk_scope_v1', scopeKey);
+  } catch (_) {}
+  try {
+    window.__ff_active_location_id = '';
+    if (Array.isArray(window.queue)) window.queue.length = 0;
+    if (Array.isArray(window.service)) window.service.length = 0;
+    if (Array.isArray(window.log)) window.log.length = 0;
+  } catch (_) {}
+  console.log('[Kiosk] scoped cache cleared', { salonId, kioskId, previousScope });
+}
+
+async function ffLoadKioskDeviceScope(claims) {
+  const salonId = String((claims && claims.salonId) || '').trim();
+  const kioskId = String((claims && claims.kioskId) || '').trim();
+  if (!salonId || !kioskId) return;
+  try {
+    const api = await ffGetKioskFirestoreApi();
+    try {
+      const roleId = String((claims && claims.roleId) || FF_KIOSK_ROLE_ID).trim() || FF_KIOSK_ROLE_ID;
+      const roleSnap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'roles', roleId));
+      const role = roleSnap.exists() ? (roleSnap.data() || {}) : {};
+      window.__ff_kiosk_role_permissions = { ...FF_KIOSK_DEFAULT_PERMISSIONS, ...(role.permissions || {}) };
+      if (typeof ffSyncKioskTasksAudienceFilter === 'function') ffSyncKioskTasksAudienceFilter();
+    } catch (roleErr) {
+      console.warn('[Kiosk] role permission load failed', roleErr);
+      window.__ff_kiosk_role_permissions = { ...FF_KIOSK_DEFAULT_PERMISSIONS };
+    }
+    const snap = await api.getDoc(api.doc(api.db, 'salons', salonId, 'kiosks', kioskId));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    const locationId = String(data.locationId || '').trim();
+    const name = String(data.name || data.kioskName || 'Kiosk').trim();
+    window.__ff_kiosk_device = { id: kioskId, salonId, locationId, name };
+    try {
+      if (locationId) {
+        window.__ff_active_location_id = locationId;
+        localStorage.setItem('ff_active_location_id', locationId);
+      } else {
+        window.__ff_active_location_id = '';
+        localStorage.removeItem('ff_active_location_id');
+      }
+    } catch (_) {}
+    const roleEl = document.getElementById('headerUserRole');
+    if (roleEl) {
+      roleEl.textContent = locationId ? `Shared workstation - ${locationId}` : 'Shared workstation';
+    }
+    if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
+      document.dispatchEvent(new CustomEvent('ff-active-location-changed', {
+        detail: { reason: 'kiosk-device-scope', locationId, salonId, kioskId }
+      }));
+    }
+    if (typeof window.queueCloudReconnect === 'function') window.queueCloudReconnect();
+    setTimeout(function () {
+      if (typeof window.queueCloudRefresh === 'function') window.queueCloudRefresh();
+    }, 250);
+    console.log('[Kiosk] device scope loaded', { salonId, kioskId, locationId, name });
+  } catch (err) {
+    console.warn('[Kiosk] device scope load failed', err);
+  }
+}
+
+function ffEnterKioskAppShell(claims) {
+  const salonId = String((claims && claims.salonId) || '').trim();
+  const kioskId = String((claims && claims.kioskId) || '').trim();
+  ffApplyKioskScopedStorage(claims);
+  if (salonId) {
+    window.currentSalonId = salonId;
+    window.currentAccountId = salonId;
+    window.accountId = salonId;
+  }
+  window.__ff_kiosk_claims = claims || null;
+  window.__ff_kiosk_id = kioskId || window.__ff_kiosk_id || '';
+  window.__ff_waiting_for_salon_choice = false;
+  window.__ff_user_role = 'kiosk';
+  if (window.ff_is_admin_cached !== true) window.ff_is_admin_cached = false;
+
+  ffEnsureKioskTimeClockNavButton();
+  ffEnsureKioskShellBadge();
+  ffApplyKioskTouchLock();
+  ffInstallKioskNavHandlers();
+
+  const logo = document.getElementById('brandLogo');
+  if (logo) logo.setAttribute('src', 'fairflow-logo-transparent.png?v=kiosk-app-shell');
+  const nameEl = document.getElementById('headerUserDisplayName');
+  if (nameEl) nameEl.textContent = 'Kiosk';
+  const roleEl = document.getElementById('headerUserRole');
+  if (roleEl) {
+    roleEl.textContent = 'Shared workstation';
+    roleEl.style.display = 'block';
+  }
+  try {
+    if (typeof window.ffStaffForceLoad === 'function') {
+      setTimeout(function () { window.ffStaffForceLoad().catch(function () {}); }, 300);
+    }
+  } catch (_) {}
+  ffLoadKioskDeviceScope(claims);
+  setTimeout(function () {
+    if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+    if (typeof window.goToQueue === 'function') window.goToQueue();
+    if (typeof window.ffMarkUiReady === 'function') window.ffMarkUiReady();
+    if (typeof window.ffMaybeQueueUiReadyAfterAuth === 'function') window.ffMaybeQueueUiReadyAfterAuth();
+  }, 0);
+}
+window.ffEnterKioskAppShell = ffEnterKioskAppShell;
+
 function ffShowKioskPairedScreen(claims) {
   const loginSection = document.getElementById('login-section');
   const signupSection = document.getElementById('signup-section');
@@ -17456,21 +18026,21 @@ function ffShowKioskPairedScreen(claims) {
   const pairingSection = document.getElementById('kiosk-pairing-section');
   const pairedSection = document.getElementById('kiosk-paired-section');
   const meta = document.getElementById('kioskPairedMeta');
-  document.body.classList.add('ff-logged-out');
-  document.body.classList.remove('ff-queue-ui-visible', 'ff-ui-ready', 'ff-auth-resolving');
+  document.body.classList.remove('ff-logged-out', 'ff-auth-resolving', 'ff-kiosk-pairing-active');
+  document.body.classList.add('ff-kiosk-mode', 'ff-ui-ready');
   if (loginSection) loginSection.style.display = 'none';
   if (signupSection) signupSection.style.display = 'none';
   if (resetPasswordSection) resetPasswordSection.style.display = 'none';
   if (completeSetupSection) completeSetupSection.style.display = 'none';
-  if (mainContent) mainContent.style.display = 'none';
+  if (mainContent) mainContent.style.display = 'block';
   if (pairingSection) pairingSection.style.display = 'none';
-  if (pairedSection) pairedSection.style.display = 'block';
+  if (pairedSection) pairedSection.style.display = 'none';
   if (meta && claims) {
     meta.textContent = 'Loading kiosk device...';
   }
   if (typeof ffRemoveAuthSplash === 'function') ffRemoveAuthSplash();
   if (claims && claims.isKiosk === true) {
-    ffLoadKioskHome(claims);
+    ffEnterKioskAppShell(claims);
   }
 }
 window.ffShowKioskPairedScreen = ffShowKioskPairedScreen;
@@ -17883,6 +18453,8 @@ async function ffLoadKioskHome(claims) {
     } catch (roleErr) {
       console.warn('[KioskHome] role read failed; using defaults', roleErr);
     }
+    window.__ff_kiosk_role_permissions = rolePermissions;
+    if (typeof ffSyncKioskTasksAudienceFilter === 'function') ffSyncKioskTasksAudienceFilter();
     ffKioskRenderModules(rolePermissions);
     const staffSnap = await api.getDocs(api.collection(api.db, 'salons', salonId, 'staff'));
     const staff = staffSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
@@ -17944,7 +18516,12 @@ ffScheduleKioskSessionResume();
 
 async function ffStartKioskPairing(options) {
   if (!ffIsKioskRoute()) return;
-  if (await ffResumeKioskSessionIfReady()) return;
+  if (window.__ffKioskPairingStartBusy) return;
+  window.__ffKioskPairingStartBusy = true;
+  if (await ffResumeKioskSessionIfReady()) {
+    window.__ffKioskPairingStartBusy = false;
+    return;
+  }
   const codeEl = document.getElementById('kioskPairingCode');
   const expiresEl = document.getElementById('kioskPairingExpires');
   const refreshBtn = document.getElementById('kioskPairingRefreshBtn');
@@ -18029,6 +18606,7 @@ async function ffStartKioskPairing(options) {
     console.warn('[KioskPairing] failed to start', err);
     ffKioskSetStatus('Could not create pairing code. Refresh and try again.', 'error');
   } finally {
+    window.__ffKioskPairingStartBusy = false;
     if (refreshBtn) refreshBtn.disabled = false;
   }
 }
@@ -31063,6 +31641,7 @@ function openTasks() {
     // Show Tasks screen
     tasksScreen.style.display = 'flex';
     tasksScreen.style.pointerEvents = 'auto';
+    if (typeof window.ffSyncKioskTasksAudienceFilter === 'function') window.ffSyncKioskTasksAudienceFilter();
     
     // Initialize storage for all tabs
     ['opening', 'closing', 'weekly', 'monthly', 'yearly'].forEach(ensureTaskStorageInitialized);
@@ -31338,6 +31917,59 @@ function setTasksTab(tabName) {
     console.error('[Tasks] Error setting tab:', e);
   }
 }
+
+function ffInstallKioskTasksTouchHandlers() {
+  if (document.__ffKioskTasksTouchHandlersInstalled) return;
+  document.__ffKioskTasksTouchHandlersInstalled = true;
+  const routeTasksTab = function (target, event) {
+    try {
+      if (!(document.body && document.body.classList.contains('ff-kiosk-mode'))) return false;
+      const audienceBtn = target && target.closest ? target.closest('#tasksScreen [data-kiosk-tasks-audience]') : null;
+      if (audienceBtn) {
+        if (audienceBtn.__ffTasksAudienceBusy) return true;
+        audienceBtn.__ffTasksAudienceBusy = true;
+        setTimeout(function () { audienceBtn.__ffTasksAudienceBusy = false; }, 300);
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        const audience = String(audienceBtn.getAttribute('data-kiosk-tasks-audience') || '').trim();
+        if (audience && typeof window.ffSetKioskTasksAudience === 'function') window.ffSetKioskTasksAudience(audience);
+        return true;
+      }
+      const tabBtn = target && target.closest ? target.closest('#tasksScreen .tasks-tab[data-tab]') : null;
+      if (!tabBtn) return false;
+      if (tabBtn.__ffTasksTabBusy) return true;
+      tabBtn.__ffTasksTabBusy = true;
+      setTimeout(function () { tabBtn.__ffTasksTabBusy = false; }, 300);
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const tab = String(tabBtn.getAttribute('data-tab') || '').trim();
+      if (tab && typeof window.setTasksTab === 'function') window.setTasksTab(tab);
+      return true;
+    } catch (err) {
+      console.warn('[Tasks] kiosk touch tab handler failed', err);
+      return false;
+    }
+  };
+  document.addEventListener('pointerdown', function (event) {
+    routeTasksTab(event.target, event);
+  }, { capture: true, passive: false });
+  document.addEventListener('touchstart', function (event) {
+    if (window.PointerEvent) return;
+    routeTasksTab(event.target, event);
+  }, { capture: true, passive: false });
+  document.addEventListener('click', function (event) {
+    if (!(document.body && document.body.classList.contains('ff-kiosk-mode'))) return;
+    const btn = event.target && event.target.closest ? event.target.closest('#tasksScreen .tasks-tab[data-tab],#tasksScreen [data-kiosk-tasks-audience]') : null;
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, { capture: true, passive: false });
+}
+ffInstallKioskTasksTouchHandlers();
 
 // Tasks Settings Modal Functions
 let isTasksSettingsOpen = false;
@@ -33271,6 +33903,79 @@ function saveTabTasks(tab, status, tasks) {
   }
 }
 
+function ffGetKioskTaskPermissions() {
+  const perms = {
+    ...FF_KIOSK_DEFAULT_PERMISSIONS,
+    ...((window.__ff_kiosk_claims && window.__ff_kiosk_claims.permissions) || {}),
+    ...(window.__ff_kiosk_role_permissions || {})
+  };
+  return perms;
+}
+
+function ffKioskCanViewTaskAudience(audience) {
+  const perms = ffGetKioskTaskPermissions();
+  if (audience === 'managers') return perms['tasks.viewManagers'] === true;
+  return perms['tasks.viewTechnicians'] === true;
+}
+
+function ffGetKioskTasksAudience() {
+  const current = String(window.__ff_kiosk_tasks_audience || sessionStorage.getItem('ff_kiosk_tasks_audience_v1') || '').trim();
+  if (current && ffKioskCanViewTaskAudience(current)) return current;
+  if (ffKioskCanViewTaskAudience('technicians')) return 'technicians';
+  if (ffKioskCanViewTaskAudience('managers')) return 'managers';
+  return 'technicians';
+}
+
+function ffSyncKioskTasksAudienceFilter() {
+  const wrap = document.getElementById('kioskTasksAudienceFilterWrap');
+  if (!wrap) return;
+  const isKiosk = typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode();
+  const canTech = ffKioskCanViewTaskAudience('technicians');
+  const canManagers = ffKioskCanViewTaskAudience('managers');
+  const shouldShow = isKiosk && canTech && canManagers;
+  wrap.style.display = shouldShow ? 'inline-flex' : 'none';
+  const active = ffGetKioskTasksAudience();
+  wrap.querySelectorAll('[data-kiosk-tasks-audience]').forEach((btn) => {
+    const value = btn.getAttribute('data-kiosk-tasks-audience');
+    const selected = value === active;
+    btn.style.background = selected ? '#7c3aed' : 'transparent';
+    btn.style.color = selected ? '#fff' : '#6b7280';
+  });
+}
+
+function ffSetKioskTasksAudience(audience) {
+  const value = String(audience || '').trim();
+  if (!ffKioskCanViewTaskAudience(value)) return;
+  window.__ff_kiosk_tasks_audience = value;
+  try { sessionStorage.setItem('ff_kiosk_tasks_audience_v1', value); } catch (_) {}
+  ffSyncKioskTasksAudienceFilter();
+  if (typeof window.renderTasksList === 'function') {
+    window.renderTasksList(window.currentTasksTab || 'opening', { force: true });
+  }
+}
+window.ffSetKioskTasksAudience = ffSetKioskTasksAudience;
+window.ffSyncKioskTasksAudienceFilter = ffSyncKioskTasksAudienceFilter;
+
+function ffTaskAudienceMatchesKioskTaskFilter(task, tab) {
+  try {
+    if (!(typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode())) return true;
+    const mainTab = String(tab || window.currentTasksTab || 'opening').toLowerCase();
+    const taskId = String((task && (task.taskId || task.id)) || '').trim();
+    const catalog = window.ff_tasks_catalog_v1 || {};
+    const catalogTabTasks = Array.isArray(catalog[mainTab]) ? catalog[mainTab] : [];
+    const catalogTask = taskId ? catalogTabTasks.find((t) => String(t.taskId || t.id || '').trim() === taskId) : null;
+    const assignTo = String((catalogTask && catalogTask.assignTo) || (task && task.assignTo) || 'all').trim();
+    if (assignTo === 'all' || assignTo === '') return true;
+    const audience = ffGetKioskTasksAudience();
+    if (assignTo === 'manager') return audience === 'managers';
+    if (assignTo === 'technicians') return audience === 'technicians';
+    return true;
+  } catch (_) {
+    return true;
+  }
+}
+window.ffTaskAudienceMatchesKioskTaskFilter = ffTaskAudienceMatchesKioskTaskFilter;
+
 // Shared function to render tasks list (used by both modal and main screen)
 function renderTasksList(tab, opts) {
   try {
@@ -33352,6 +34057,7 @@ function renderTasksList(tab, opts) {
       // Ensure admin filter visibility when rendering (handles timing when admin status resolves late)
       const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
       const filterEl = document.getElementById('tasksAdminFilter');
+      if (typeof window.ffSyncKioskTasksAudienceFilter === 'function') window.ffSyncKioskTasksAudienceFilter();
       if (filterEl) {
         if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) {
           if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = 'inline-flex';
@@ -33461,6 +34167,15 @@ function renderTasksList(tab, opts) {
         
         // If assignTo is 'all', show to everyone
         if (assignTo === 'all') return true;
+
+        // Kiosk mode is a shared station: use the kiosk Tasks audience filter
+        // instead of the last PIN-identified staff member.
+        if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function' && !window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab)) {
+          return false;
+        }
+        if (typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode()) {
+          return true;
+        }
         
         const debugTasks = localStorage.getItem('DEBUG_TASKS') === 'true';
         
@@ -33604,6 +34319,10 @@ function renderTasksList(tab, opts) {
         // Default: show task
         return true;
       }
+
+      if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function') {
+        doneToday = doneToday.filter((task) => window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab));
+      }
       
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
@@ -33680,7 +34399,8 @@ function renderTasksList(tab, opts) {
       if (needsIdentify) {
         const hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
         const isAdmin = window.ff_is_admin_cached === true;
-        if (!hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') {
+        const isKioskMode = typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode();
+        if (!isKioskMode && !hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') {
           mainListContainer.innerHTML = '<div style="padding:24px;text-align:center;"><p style="margin:0 0 16px;color:#6b7280;font-size:14px;">Enter your PIN to see your tasks</p><button type="button" onclick="window.openTasksIdentifyModal()" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">Enter PIN</button></div>';
         } else {
           mainListContainer.innerHTML = ffTasksEmptyMyListHtml();
@@ -33760,7 +34480,8 @@ function renderTasksList(tab, opts) {
         
         const hasStaffId = !!(window.__ff_authedStaffId || (typeof localStorage !== 'undefined' && localStorage.getItem('ff_authedStaffId_v1')));
         const isAdmin = window.ff_is_admin_cached === true;
-        const identifyBanner = (!hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') 
+        const isKioskMode = typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode();
+        const identifyBanner = (!isKioskMode && !hasStaffId && !isAdmin && typeof window.openTasksIdentifyModal === 'function') 
           ? '<div style="padding:12px 16px;margin-bottom:12px;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;text-align:center;"><p style="margin:0 0 10px;color:#92400e;font-size:13px;">Enter your PIN to see your tasks</p><button type="button" onclick="window.openTasksIdentifyModal()" style="padding:8px 16px;background:#7c3aed;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">Enter PIN</button></div>' 
           : '';
         
@@ -33867,11 +34588,18 @@ function renderTasksList(tab, opts) {
           `;
         }).join('');
         
-        // Attach click handlers for SELECT buttons (only for available tasks)
+        // Attach fast touch handlers for SELECT buttons (only for available tasks)
         mainListContainer.querySelectorAll('.task-select-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+          const runSelect = (e) => {
+            try {
+              if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            } catch (_) {}
+            if (btn.__ffTasksSelectBusy) return;
+            btn.__ffTasksSelectBusy = true;
+            setTimeout(() => { btn.__ffTasksSelectBusy = false; }, 350);
             if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
               return;
             }
@@ -33886,6 +34614,15 @@ function renderTasksList(tab, opts) {
                 window.openPinModal(taskId);
               }
             }
+          };
+          btn.addEventListener('pointerdown', runSelect, { passive: false });
+          btn.addEventListener('touchstart', function (e) {
+            if (window.PointerEvent) return;
+            runSelect(e);
+          }, { passive: false });
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
           });
         });
         
@@ -33936,6 +34673,9 @@ function renderTasksList(tab, opts) {
           if (!task || typeof task !== 'object') return false;
           return window.ffIsYearlyTaskActive(task, new Date());
         });
+      }
+      if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function') {
+        pendingTasks = pendingTasks.filter((task) => window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab));
       }
       
       if (pendingTasks.length === 0) {
@@ -34053,9 +34793,16 @@ function renderTasksList(tab, opts) {
         });
 
         document.querySelectorAll(".task-done-btn").forEach(btn => {
-          btn.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+          const runDone = (e) => {
+            try {
+              if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            } catch (_) {}
+            if (btn.__ffTasksDoneBusy) return;
+            btn.__ffTasksDoneBusy = true;
+            setTimeout(() => { btn.__ffTasksDoneBusy = false; }, 350);
             if (typeof ffCurrentUserHasTasksUsePermission === 'function' && !ffCurrentUserHasTasksUsePermission()) {
               return;
             }
@@ -34065,6 +34812,15 @@ function renderTasksList(tab, opts) {
             } else {
               console.error("openPinModalForDone not found on window");
             }
+          };
+          btn.addEventListener('pointerdown', runDone, { passive: false });
+          btn.addEventListener('touchstart', function (e) {
+            if (window.PointerEvent) return;
+            runDone(e);
+          }, { passive: false });
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
           });
         });
       }
@@ -50220,6 +50976,11 @@ function initializeUserProfileMenu() {
     const st = window.__ffTCState;
     if (st && st.selectedLocationId) return String(st.selectedLocationId);
     try {
+      const claims = window.__ff_kiosk_claims || {};
+      const claimLoc = String(claims.locationId || claims.locId || '').trim();
+      if (claimLoc) return claimLoc;
+    } catch (_) {}
+    try {
       if (typeof window.ffGetActiveLocationId === 'function') {
         const v = window.ffGetActiveLocationId();
         if (v) return String(v);
@@ -50228,6 +50989,26 @@ function initializeUserProfileMenu() {
     try {
       const all = typeof window.ffGetActiveLocations === 'function' ? window.ffGetActiveLocations() : [];
       if (all && all.length && all[0] && all[0].id) return String(all[0].id);
+    } catch (_) {}
+    return '';
+  }
+
+  function _ffTCResolveLocationId(preferred) {
+    const first = String(preferred || '').trim();
+    if (first) return first;
+    const def = String(_ffTCDefaultLocationId() || '').trim();
+    if (def) return def;
+    try {
+      const locs = _ffTCActiveLocations();
+      if (locs.length === 1 && locs[0] && locs[0].id) return String(locs[0].id);
+      if (locs.length > 0 && locs[0] && locs[0].id) return String(locs[0].id);
+    } catch (_) {}
+    try {
+      const raw = typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+      if (raw) return raw;
+    } catch (_) {}
+    try {
+      if (typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode()) return 'default';
     } catch (_) {}
     return '';
   }
@@ -50351,6 +51132,20 @@ function initializeUserProfileMenu() {
   }
   window.ffInitTimeClockUI = ffInitTimeClockUI;
 
+  if (!window.__ffTCLocationsRefreshBound) {
+    window.__ffTCLocationsRefreshBound = true;
+    document.addEventListener('ff-locations-updated', function () {
+      try {
+        const screen = document.getElementById('timeClockScreen');
+        if (!screen || screen.style.display === 'none') return;
+        if (!window.__ffTCState || window.__ffTCState.view !== 'clock') return;
+        const loc = _ffTCResolveLocationId(window.__ffTCState.selectedLocationId);
+        if (loc) window.__ffTCState.selectedLocationId = loc;
+        ffInitTimeClockUI();
+      } catch (_) {}
+    });
+  }
+
   // Layout helper - widens the content area for the Manage view since the
   // table needs much more horizontal room than the PIN card.
   function _ffTCSetWideLayout(wide) {
@@ -50378,10 +51173,11 @@ function initializeUserProfileMenu() {
     const locs = _ffTCActiveLocations();
     const defLoc = _ffTCDefaultLocationId();
     const showManage = _ffTCCurrentUserCanManage();
+    const hasMultipleLocations = locs.length > 1;
 
     const keyBtn = (label, val, kind) => `
       <button type="button" class="tc-key" data-key="${_ffTCEscape(val)}" data-kind="${kind || 'num'}"
-        style="height:46px;border-radius:12px;border:1px solid ${kind === 'enter' ? '#4c1d95' : '#e5e7eb'};background:${kind === 'enter' ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${kind === 'enter' ? '#fff' : '#111827'};font-size:${kind === 'num' ? '18px' : '13px'};font-weight:${kind === 'num' ? '600' : '700'};letter-spacing:${kind === 'enter' ? '0.04em' : '0'};cursor:pointer;transition:all 0.1s ease;box-shadow:${kind === 'enter' ? '0 4px 12px rgba(123,63,228,0.35)' : '0 1px 2px rgba(0,0,0,0.04)'};user-select:none;">${label}</button>
+        style="height:58px;border-radius:14px;border:1px solid ${kind === 'enter' ? '#4c1d95' : '#e5e7eb'};background:${kind === 'enter' ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${kind === 'enter' ? '#fff' : '#111827'};font-size:${kind === 'num' ? '22px' : '14px'};font-weight:${kind === 'num' ? '700' : '800'};letter-spacing:${kind === 'enter' ? '0.04em' : '0'};cursor:pointer;transition:all 0.1s ease;box-shadow:${kind === 'enter' ? '0 4px 12px rgba(123,63,228,0.35)' : '0 1px 2px rgba(0,0,0,0.04)'};user-select:none;-webkit-user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">${label}</button>
     `;
 
     container.innerHTML = `
@@ -50394,7 +51190,8 @@ function initializeUserProfileMenu() {
 
         <!-- Card -->
         <div style="background:#fff;border:1px solid rgba(229,231,235,0.9);border-radius:20px;box-shadow:0 10px 32px -12px rgba(123,63,228,0.15), 0 2px 6px rgba(0,0,0,0.04);padding:16px 18px 14px;width:100%;max-width:420px;box-sizing:border-box;position:relative;">
-          <!-- Location picker (unified: works for 1-to-many locations) -->
+          <!-- Location picker: only shown when there is a real choice. -->
+          <div id="tcKioskLocationWrap" style="${hasMultipleLocations ? '' : 'display:none;'}">
           <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px;">Location</div>
           <div style="position:relative;margin-bottom:14px;">
             <button id="tcKioskLocBtn" type="button"
@@ -50416,13 +51213,14 @@ function initializeUserProfileMenu() {
               <div id="tcKioskLocList" style="max-height:240px;overflow-y:auto;padding:4px;"></div>
             </div>
           </div>
+          </div>
 
           <!-- PIN dots -->
           <div style="text-align:center;margin-bottom:6px;font-size:11px;color:#9ca3af;font-weight:500;letter-spacing:0.06em;text-transform:uppercase;">Enter your PIN</div>
           <div id="tcKioskDots" style="display:flex;justify-content:center;gap:14px;margin:8px 0 12px;" aria-live="polite"></div>
 
           <!-- Keypad -->
-          <div id="tcKioskPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+          <div id="tcKioskPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
             ${keyBtn('1','1','num')}${keyBtn('2','2','num')}${keyBtn('3','3','num')}
             ${keyBtn('4','4','num')}${keyBtn('5','5','num')}${keyBtn('6','6','num')}
             ${keyBtn('7','7','num')}${keyBtn('8','8','num')}${keyBtn('9','9','num')}
@@ -50456,7 +51254,10 @@ function initializeUserProfileMenu() {
     window.__ffTCClockTick = setInterval(tick, 1000);
 
     // --- unified location picker ---------------------------------------
-    let selectedLoc = String(defLoc || (locs[0] && locs[0].id) || '');
+    let selectedLoc = _ffTCResolveLocationId(defLoc || (locs[0] && locs[0].id) || '');
+    if (selectedLoc) {
+      window.__ffTCState.selectedLocationId = selectedLoc;
+    }
     const locBtn = container.querySelector('#tcKioskLocBtn');
     const locNameEl = container.querySelector('#tcKioskLocName');
     const locPanel = container.querySelector('#tcKioskLocPanel');
@@ -50563,7 +51364,21 @@ function initializeUserProfileMenu() {
     // --- keypad handlers -----------------------------------------------
     const submit = () => {
       if (errEl) errEl.textContent = '';
-      if (!selectedLoc) { if (errEl) errEl.textContent = 'Please select a location.'; return; }
+      selectedLoc = _ffTCResolveLocationId(selectedLoc);
+      if (selectedLoc) window.__ffTCState.selectedLocationId = selectedLoc;
+      if (!selectedLoc) {
+        if (errEl) errEl.textContent = 'Location is still loading. Please try again.';
+        setTimeout(function () {
+          try {
+            selectedLoc = _ffTCResolveLocationId('');
+            if (selectedLoc) {
+              window.__ffTCState.selectedLocationId = selectedLoc;
+              if (errEl) errEl.textContent = '';
+            }
+          } catch (_) {}
+        }, 300);
+        return;
+      }
       if (pinBuf.length < MIN_DOTS) { if (errEl) errEl.textContent = 'PIN must be at least 4 digits.'; return; }
       _ffTCHandlePinSubmit(pinBuf, selectedLoc).catch((e) => {
         console.warn('[Time Clock] PIN submit failed', e);
@@ -50584,10 +51399,35 @@ function initializeUserProfileMenu() {
 
     container.querySelectorAll('.tc-key').forEach((btn) => {
       const kind = btn.getAttribute('data-kind');
+      const key = btn.getAttribute('data-key');
+      const pressKey = (e) => {
+        try {
+          if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        } catch (_) {}
+        btn.__ffTCLastPointerPress = Date.now();
+        btn.style.transform = 'scale(0.96)';
+        setTimeout(() => { try { btn.style.transform = 'scale(1)'; } catch (_) {} }, 90);
+        press(key);
+      };
+      btn.addEventListener('pointerdown', pressKey, { passive: false });
+      btn.addEventListener('touchstart', function (e) {
+        if (window.PointerEvent) return;
+        pressKey(e);
+      }, { passive: false });
       btn.addEventListener('mousedown', () => { btn.style.transform = 'scale(0.96)'; });
       btn.addEventListener('mouseup', () => { btn.style.transform = 'scale(1)'; });
       btn.addEventListener('mouseleave', () => { btn.style.transform = 'scale(1)'; });
-      btn.addEventListener('click', () => press(btn.getAttribute('data-key')));
+      btn.addEventListener('click', (e) => {
+        if (Date.now() - (btn.__ffTCLastPointerPress || 0) < 450) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        press(key);
+      });
     });
 
     // Keyboard support (desktop). Bypass when the user is typing inside an
@@ -50779,8 +51619,8 @@ function initializeUserProfileMenu() {
 
           <div id="tcConfirmMsg" style="min-height:18px;font-size:12px;color:#6b7280;margin:14px 0 0;"></div>
 
-          <button id="tcConfirmAction" type="button" style="margin-top:16px;width:100%;padding:14px 0;background:${primaryGrad};color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:700;letter-spacing:0.02em;cursor:pointer;box-shadow:${primaryShadow};transition:transform 0.1s ease, opacity 0.15s ease;">${primaryLabel}</button>
-          <button id="tcConfirmCancel" type="button" style="margin-top:10px;width:100%;padding:11px 0;background:transparent;color:#6b7280;border:none;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer;">Cancel</button>
+          <button id="tcConfirmAction" type="button" style="margin-top:16px;width:100%;min-height:58px;padding:16px 0;background:${primaryGrad};color:#fff;border:none;border-radius:16px;font-size:17px;font-weight:800;letter-spacing:0.02em;cursor:pointer;box-shadow:${primaryShadow};transition:transform 0.1s ease, opacity 0.15s ease;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;">${primaryLabel}</button>
+          <button id="tcConfirmCancel" type="button" style="margin-top:10px;width:100%;min-height:48px;padding:12px 0;background:transparent;color:#6b7280;border:none;border-radius:12px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;">Cancel</button>
         </div>
       </div>
     `;
@@ -50789,15 +51629,38 @@ function initializeUserProfileMenu() {
     const actionBtn = container.querySelector('#tcConfirmAction');
     const msg = container.querySelector('#tcConfirmMsg');
 
-    if (cancelBtn) cancelBtn.addEventListener('click', () => {
+    const cancelConfirm = (e) => {
+      try {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } catch (_) {}
       window.__ffTCState.confirmStaff = null;
       window.__ffTCState.confirmOpenEntry = null;
       window.__ffTCState.view = 'clock';
       ffInitTimeClockUI();
-    });
+    };
 
-    if (actionBtn) actionBtn.addEventListener('click', async () => {
+    if (cancelBtn) {
+      cancelBtn.addEventListener('pointerdown', cancelConfirm, { passive: false });
+      cancelBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
+
+    const runConfirmAction = async (e) => {
+      try {
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      } catch (_) {}
+      if (actionBtn.__ffTCConfirmBusy) return;
+      actionBtn.__ffTCConfirmBusy = true;
       actionBtn.disabled = true;
+      actionBtn.style.transform = 'scale(0.98)';
       actionBtn.style.opacity = '0.6';
       if (msg) { msg.style.color = '#6b7280'; msg.textContent = isOut ? 'Clocking out-' : 'Clocking in-'; }
       try {
@@ -50818,10 +51681,24 @@ function initializeUserProfileMenu() {
       } catch (e) {
         console.warn('[Time Clock] confirm action failed', e);
         if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Error: ' + (e && e.message ? e.message : String(e)); }
+        actionBtn.__ffTCConfirmBusy = false;
         actionBtn.disabled = false;
+        actionBtn.style.transform = 'scale(1)';
         actionBtn.style.opacity = '1';
       }
-    });
+    };
+
+    if (actionBtn) {
+      actionBtn.addEventListener('pointerdown', runConfirmAction, { passive: false });
+      actionBtn.addEventListener('touchstart', function (e) {
+        if (window.PointerEvent) return;
+        runConfirmAction(e);
+      }, { passive: false });
+      actionBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    }
   }
 
   // ----------------- Manage view: period range + settings cache ------------
@@ -61792,6 +62669,10 @@ function hookSettingsGuard_DISABLED(){
         <button type="button" class="tasks-tab" data-tab="yearly" onclick="console.log('TAB CLICKED:', 'yearly'); setTasksTab('yearly')">Yearly<span class="ff-tab-badge" data-ff-badge="yearly"></span></button>
       </div>
       <div class="tasks-tabs-right">
+        <div id="kioskTasksAudienceFilterWrap" style="display:none;align-items:center;gap:8px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;padding:4px;">
+          <button type="button" data-kiosk-tasks-audience="technicians" onclick="window.ffSetKioskTasksAudience && window.ffSetKioskTasksAudience('technicians')" style="border:none;border-radius:999px;background:#7c3aed;color:#fff;padding:6px 10px;font-size:11px;font-weight:800;cursor:pointer;">Technicians</button>
+          <button type="button" data-kiosk-tasks-audience="managers" onclick="window.ffSetKioskTasksAudience && window.ffSetKioskTasksAudience('managers')" style="border:none;border-radius:999px;background:transparent;color:#6b7280;padding:6px 10px;font-size:11px;font-weight:800;cursor:pointer;">Managers</button>
+        </div>
         <div id="tasksStaffTypeFilterWrap" class="tasks-staff-type-filter-wrap" style="display:none;">
           <span class="tasks-staff-type-label">STAFF TYPE</span>
           <select id="tasksAdminFilter" title="Filter by staff type" aria-label="Staff type filter">

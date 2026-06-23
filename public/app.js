@@ -3093,6 +3093,24 @@ async function loadUserRoleAndShowView(user, options = {}) {
     }
 
     showMainAppForRole(role);
+    [0, 600, 1800].forEach((delay) => {
+      setTimeout(() => {
+        try {
+          if (typeof window !== "undefined" && typeof window.ffIsKioskRoute === "function" && window.ffIsKioskRoute()) return;
+          if (window.__ff_waiting_for_salon_choice === true) return;
+          const hasActiveNonQueue =
+            typeof window.ffHasActiveNonQueueScreen === "function" && window.ffHasActiveNonQueueScreen();
+          if (hasActiveNonQueue) return;
+          if (typeof window.goToQueue === "function") {
+            window.goToQueue();
+          } else if (typeof window.ffMarkUiReady === "function") {
+            window.ffMarkUiReady();
+          }
+        } catch (queueRestoreErr) {
+          console.warn("[Auth] Queue restore after role load failed", queueRestoreErr);
+        }
+      }, delay);
+    });
 
     setTimeout(() => {
       try {

@@ -43,6 +43,7 @@ let _applyState = null;
 let _getState = null;
 let _onRefresh = null;
 let _writeTimeout = null;
+let _subscriptionSeq = 0;
 
 // Last revision we observed from the active branch's tasksState doc. Tasks no
 // longer uses a server-side rev compare-and-swap because stale iOS WebView
@@ -57,6 +58,36 @@ let _lastCloudRev = 0;
 let _lastServerData = null;
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
+
+function currentWindowSalonId() {
+  if (typeof window === "undefined") return "";
+  try {
+    return String(window.currentSalonId || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function kioskClaimSalonId() {
+  if (typeof window === "undefined") return "";
+  try {
+    const claims = window.__ff_kiosk_claims || null;
+    return String((claims && claims.salonId) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq) {
+  if (expectedSeq !== _subscriptionSeq) return false;
+  if (String(_salonId || "") !== String(expectedSalonId || "")) return false;
+  if (tasksStateDocIdFor(_locationId) !== String(expectedDocId || "")) return false;
+  const activeSalon = currentWindowSalonId();
+  if (activeSalon && activeSalon !== String(expectedSalonId || "")) return false;
+  const kioskSalon = kioskClaimSalonId();
+  if (kioskSalon && kioskSalon !== String(expectedSalonId || "")) return false;
+  return true;
+}
 
 async function getSalonId() {
   const user = auth.currentUser;
@@ -354,11 +385,17 @@ function emptyCloudState() {
 let _hasSubscribedOnce = false;
 
 function subscribe(salonId, locationId) {
-  const isLocationSwitch = _hasSubscribedOnce;
+  const nextDocId = tasksStateDocIdFor(locationId);
+  const salonChanged = _salonId !== null && _salonId !== salonId;
+  const locationChanged = _hasSubscribedOnce && tasksStateDocIdFor(_locationId) !== nextDocId;
+  const scopeChanged = salonChanged || locationChanged;
+  if (_salonId === salonId && tasksStateDocIdFor(_locationId) === nextDocId && _unsubscribe) return;
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
+  _salonId = salonId;
+  _locationId = locationId;
   _firstSnapshot = true;
   _lastCloudRev = 0;
   _lastServerData = null;
@@ -368,7 +405,7 @@ function subscribe(salonId, locationId) {
   // new snapshot arrives so the previous branch's tasks don't flash on
   // screen. On the initial subscribe we keep localStorage intact so the
   // UI paints instantly from cache while Firestore catches up.
-  if (isLocationSwitch) {
+  if (scopeChanged) {
     flushLocalTasksState();
     // Reset the "just wrote locally" cooldown so the incoming apply (empty
     // + then the new branch's snapshot) is NOT suppressed as an echo.
@@ -389,7 +426,21 @@ function subscribe(salonId, locationId) {
 
   const ref = tasksStateRef(salonId, locationId);
   const logTag = locationId ? `loc=${locationId}` : "default";
+  const subscriptionSeq = ++_subscriptionSeq;
+  const expectedSalonId = salonId;
+  const expectedDocId = nextDocId;
   _unsubscribe = onSnapshot(ref, async (snap) => {
+    if (!tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, subscriptionSeq)) {
+      console.warn("[TasksCloud] ignored stale snapshot", {
+        expectedSalonId,
+        currentSalonId: _salonId,
+        expectedDocId,
+        currentDocId: tasksStateDocIdFor(_locationId),
+        subscriptionSeq,
+        activeSeq: _subscriptionSeq
+      });
+      return;
+    }
     if (!_applyState) return;
     if (
       typeof window !== "undefined" &&
@@ -440,7 +491,10 @@ function subscribe(salonId, locationId) {
     } finally {
       if (typeof window !== "undefined") window.__ffTasksApplyingRemote = false;
     }
-  }, (err) => console.error("[TasksCloud] subscribe error", logTag, err));
+  }, (err) => {
+    if (!tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, subscriptionSeq)) return;
+    console.error("[TasksCloud] subscribe error", logTag, err);
+  });
 }
 
 function buildFirestoreState(state) {
@@ -642,6 +696,19 @@ function writeState(reason) {
     if (isManualReset) toast("Reset NOT saved: no cloud connection (salon not linked)", "error");
     return Promise.resolve();
   }
+  if (!tasksCloudScopeStillCurrent(_salonId, tasksStateDocIdFor(_locationId), _subscriptionSeq)) {
+    const activeSalon = currentWindowSalonId();
+    const kioskSalon = kioskClaimSalonId();
+    console.warn("[TasksCloud] blocked write for stale scope", {
+      salonId: _salonId,
+      activeSalon,
+      kioskSalon,
+      activeLocationId: _locationId || null,
+      tasksStateDocId: tasksStateDocIdFor(_locationId)
+    });
+    if (isManualReset) toast("Reset NOT saved: stale salon scope", "error");
+    return Promise.resolve();
+  }
   let state = null;
   try {
     state = _getState();
@@ -764,18 +831,18 @@ export function initTasksCloud(opts) {
       if (_unsubscribe) { _unsubscribe(); _unsubscribe = null; }
       _salonId = null;
       _locationId = null;
+      _subscriptionSeq++;
       return;
     }
     getSalonId().then((sid) => {
       const loc = readActiveLocationId();
       if (sid && (sid !== _salonId || loc !== _locationId)) {
-        _salonId = sid;
-        _locationId = loc;
         subscribe(sid, loc);
         console.log("[TasksCloud] Subscribed to salon", sid, "location", loc || "(default)");
       } else if (!sid) {
         _salonId = null;
         _locationId = null;
+        _subscriptionSeq++;
         if (_unsubscribe) {
           _unsubscribe();
           _unsubscribe = null;
@@ -798,7 +865,6 @@ export function initTasksCloud(opts) {
       const loc = readActiveLocationId();
       if (!_salonId) return;
       if (loc === _locationId) return;
-      _locationId = loc;
       subscribe(_salonId, loc);
       console.log("[TasksCloud] Re-subscribed after location switch →", loc || "(default)");
     });
@@ -814,9 +880,12 @@ export function tasksCloudReconnect() {
   getSalonId().then((sid) => {
     const loc = readActiveLocationId();
     if (sid === _salonId && loc === _locationId) return;
-    _salonId = sid;
-    _locationId = loc;
     if (sid) subscribe(sid, loc);
+    else {
+      _salonId = null;
+      _locationId = null;
+      _subscriptionSeq++;
+    }
   });
 }
 
@@ -825,8 +894,21 @@ export function tasksCloudRefresh() {
   if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) return Promise.resolve();
   if (!_salonId || !_applyState) return Promise.resolve();
   if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return Promise.resolve();
+  const expectedSalonId = _salonId;
+  const expectedDocId = tasksStateDocIdFor(_locationId);
+  const expectedSeq = _subscriptionSeq;
+  if (!tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq)) return Promise.resolve();
   const ref = tasksStateRef(_salonId, _locationId);
   return getDocFromServer(ref).then(async (snap) => {
+    if (!tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq)) {
+      console.warn("[TasksCloud] ignored stale refresh", {
+        expectedSalonId,
+        currentSalonId: _salonId,
+        expectedDocId,
+        currentDocId: tasksStateDocIdFor(_locationId)
+      });
+      return;
+    }
     if (snap.exists()) {
       if (typeof window !== "undefined" && window.__ffTasksLastLocalWrite != null && (Date.now() - window.__ffTasksLastLocalWrite) < 12000) return;
       const data = snap.data();

@@ -241,6 +241,11 @@ service cloud.firestore {
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
+    match /salons/{salonId}/locations/{locationId} {
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+
     match /settings/{docId} {
       allow read: if request.auth != null;
       allow write: if false;
@@ -713,17 +718,17 @@ service cloud.firestore {
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
     match /salons/{salonId}/tasksState/{docId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
     match /salons/{salonId}/timeEntries/{entryId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
     // ===== TRAINING (root collections; each doc has salonId) =====

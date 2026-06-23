@@ -24,6 +24,7 @@ let _unsubscribe = null;
 let _applyState = null;
 let _getState = null;
 let _onLogChange = null;
+let _subscriptionSeq = 0;
 // History length of the last AUTHORITATIVE (server-confirmed) cloud snapshot for
 // the active branch. Used by the stale-overwrite guard in writeState: if our
 // local history is shorter than this, another device advanced the queue and we
@@ -72,6 +73,36 @@ function logQueueWrite(label, extra = {}) {
       rev: _lastCloudRev,
     }, extra));
   } catch (_) {}
+}
+
+function currentWindowSalonId() {
+  if (typeof window === "undefined") return "";
+  try {
+    return String(window.currentSalonId || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function kioskClaimSalonId() {
+  if (typeof window === "undefined") return "";
+  try {
+    const claims = window.__ff_kiosk_claims || null;
+    return String((claims && claims.salonId) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+function queueCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq) {
+  if (expectedSeq !== _subscriptionSeq) return false;
+  if (String(_salonId || "") !== String(expectedSalonId || "")) return false;
+  if (String(_subscribedDocId || "") !== String(expectedDocId || "")) return false;
+  const activeSalon = currentWindowSalonId();
+  if (activeSalon && activeSalon !== String(expectedSalonId || "")) return false;
+  const kioskSalon = kioskClaimSalonId();
+  if (kioskSalon && kioskSalon !== String(expectedSalonId || "")) return false;
+  return true;
 }
 
 function ffCloneArray(a) {
@@ -338,30 +369,35 @@ function subscribe(salonId, locationId, opts = {}) {
   if (_salonId === salonId && _subscribedDocId === nextDocId && _unsubscribe) {
     return;
   }
+  const salonChanged = _salonId !== null && _salonId !== salonId;
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
   }
   _firstSnapshot = true;
   const locationDocChanged = _subscribedDocId !== null && _subscribedDocId !== nextDocId;
+  const scopeChanged = salonChanged || locationDocChanged;
   // Switching to a different branch — require a fresh server snapshot before we
   // trust an empty queue again.
-  if (locationDocChanged && typeof window !== "undefined") {
+  if (scopeChanged && typeof window !== "undefined") {
     window.__ff_queueCloudServerConfirmed = false;
   }
   const preserveRecentLocalWrite =
+    !salonChanged &&
     opts.reason !== "manual" &&
     hasRecentLocalQueueWrite() &&
     queueStateHasData(_getState ? _getState() : null);
   // Clear in-memory queue/service/log only when switching to a DIFFERENT branch
   // doc. Re-subscribing to the same branch (staff/location recompute on boot)
   // must not wipe the locally cached queue — that caused empty flashes on phone.
-  if (locationDocChanged && !preserveRecentLocalWrite && typeof _applyState === "function") {
-    try { _applyState([], [], [], null, { force: true, reason: "queue-cloud-resubscribe" }); } catch (_) {}
+  if (scopeChanged && !preserveRecentLocalWrite && typeof _applyState === "function") {
+    try { _applyState([], [], [], null, { force: true, reason: salonChanged ? "queue-cloud-salon-switch" : "queue-cloud-resubscribe" }); } catch (_) {}
     if (typeof _onLogChange === "function") {
       try { _onLogChange(); } catch (_) {}
     }
   }
+  _salonId = salonId;
+  _locationId = locationId;
   _subscribedDocId = nextDocId;
   // Clear ff_queues_v1 (Queue Auto Reset + GeoFence settings) on a real
   // location switch so the previous branch's settings don't leak into the new
@@ -385,14 +421,29 @@ function subscribe(salonId, locationId, opts = {}) {
   }
   const ref = queueStateRef(salonId, locationId);
   const logTag = locationId ? `loc=${locationId}` : "default";
+  const subscriptionSeq = ++_subscriptionSeq;
+  const expectedSalonId = salonId;
+  const expectedDocId = nextDocId;
   console.log("[QueueCloud] subscribe", {
     salonId,
     activeLocationId: locationId || null,
     queueStateDocId: queueStateDocIdFor(locationId),
     reason: opts.reason || "unknown",
     rev: _lastCloudRev,
+    subscriptionSeq,
   });
   _unsubscribe = onSnapshot(ref, (snap) => {
+    if (!queueCloudScopeStillCurrent(expectedSalonId, expectedDocId, subscriptionSeq)) {
+      console.warn("[QueueCloud] ignored stale snapshot", {
+        expectedSalonId,
+        currentSalonId: _salonId,
+        expectedDocId,
+        currentDocId: _subscribedDocId,
+        subscriptionSeq,
+        activeSeq: _subscriptionSeq,
+      });
+      return;
+    }
     if (!_applyState) return;
     const localState = _getState ? _getState() : null;
     // We only treat localStorage as a seed for the "default" (no-location)
@@ -560,11 +611,26 @@ function subscribe(salonId, locationId, opts = {}) {
         document.dispatchEvent(new CustomEvent('ff-queue-settings-changed', { detail: { reason: 'snapshot-applied', locationId: locationId || null } }));
       } catch (_) {}
     }
-  }, (err) => console.error("[QueueCloud] subscribe error", logTag, err));
+  }, (err) => {
+    if (!queueCloudScopeStillCurrent(expectedSalonId, expectedDocId, subscriptionSeq)) return;
+    console.error("[QueueCloud] subscribe error", logTag, err);
+  });
 }
 
 function writeState() {
   if (!_salonId || !_getState) return Promise.resolve();
+  if (!queueCloudScopeStillCurrent(_salonId, queueStateDocIdFor(_locationId), _subscriptionSeq)) {
+    const activeSalon = currentWindowSalonId();
+    const kioskSalon = kioskClaimSalonId();
+    console.warn("[QueueCloud] blocked write for stale scope", {
+      salonId: _salonId,
+      activeSalon,
+      kioskSalon,
+      activeLocationId: _locationId || null,
+      queueStateDocId: queueStateDocIdFor(_locationId),
+    });
+    return Promise.resolve(queueWriteResult(false, "stale-scope", { activeSalon, kioskSalon }));
+  }
   const state = _getState();
   if (!state) return Promise.resolve();
   const ref = queueStateRef(_salonId, _locationId);
@@ -901,13 +967,13 @@ export function initQueueCloud(opts) {
     getSalonId().then((sid) => {
       const loc = readActiveLocationId();
       if (sid && (sid !== _salonId || loc !== _locationId)) {
-        _salonId = sid;
-        _locationId = loc;
         subscribe(sid, loc, { reason: "connect" });
         console.log("[QueueCloud] Subscribed to salon", sid, "location", loc || "(default)");
       } else if (!sid) {
         _salonId = null;
         _locationId = null;
+        _subscribedDocId = null;
+        _subscriptionSeq++;
         if (_unsubscribe) {
           _unsubscribe();
           _unsubscribe = null;
@@ -927,7 +993,6 @@ export function initQueueCloud(opts) {
       const loc = readActiveLocationId();
       if (!_salonId) return;
       if (loc === _locationId) return;
-      _locationId = loc;
       const reason = event?.detail?.reason || "location-changed";
       subscribe(_salonId, loc, { reason });
       console.log("[QueueCloud] Re-subscribed after location switch →", loc || "(default)");
@@ -1000,9 +1065,13 @@ export function queueCloudReconnect() {
   getSalonId().then((sid) => {
     const loc = readActiveLocationId();
     if (sid === _salonId && loc === _locationId) return;
-    _salonId = sid;
-    _locationId = loc;
     if (sid) subscribe(sid, loc, { reason: "reconnect" });
+    else {
+      _salonId = null;
+      _locationId = null;
+      _subscribedDocId = null;
+      _subscriptionSeq++;
+    }
   });
 }
 
@@ -1011,8 +1080,23 @@ export function queueCloudRefresh() {
   if (!_salonId || !_applyState) return Promise.resolve();
   // Respect cooldown from local writes
   if (typeof window !== "undefined" && (Date.now() - (window.__ff_lastSaveTime || 0)) < 6000) return Promise.resolve();
+  const expectedSalonId = _salonId;
+  const expectedDocId = queueStateDocIdFor(_locationId);
+  const expectedSeq = _subscriptionSeq;
+  if (!queueCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq)) {
+    return Promise.resolve(queueWriteResult(false, "stale-refresh-scope"));
+  }
   const ref = queueStateRef(_salonId, _locationId);
   return getDocFromServer(ref).then((snap) => {
+    if (!queueCloudScopeStillCurrent(expectedSalonId, expectedDocId, expectedSeq)) {
+      console.warn("[QueueCloud] ignored stale refresh", {
+        expectedSalonId,
+        currentSalonId: _salonId,
+        expectedDocId,
+        currentDocId: _subscribedDocId,
+      });
+      return;
+    }
     if (snap.exists()) {
       const data = snap.data();
       const queue = Array.isArray(data.queue) ? data.queue : [];
