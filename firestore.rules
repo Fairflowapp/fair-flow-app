@@ -731,6 +731,34 @@ service cloud.firestore {
       allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
+    // Staff presence / call feature (live heartbeat + call signaling).
+    // Read by salon members for queue presence dots; written by the staff's
+    // own app, by managers calling a technician, and by the kiosk.
+    match /salons/{salonId}/staffPresence/{staffId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+      allow write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // Inventory module (categories tree, stock subcategories, orders, drafts).
+    // Operational salon data — readable/writable by salon members (UI gates
+    // structural edits to managers). Mirrors queueState/tasksState model.
+    match /salons/{salonId}/inventoryCategories/{catId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+      match /inventorySubcategories/{subId} {
+        allow read: if belongsToSalon(salonId);
+        allow write: if belongsToSalon(salonId);
+      }
+    }
+    match /salons/{salonId}/inventoryOrders/{orderId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+    match /salons/{salonId}/inventoryDrafts/{draftId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+
     // ===== TRAINING (root collections; each doc has salonId) =====
     match /trainingItems/{itemId} {
       allow read: if userExists()

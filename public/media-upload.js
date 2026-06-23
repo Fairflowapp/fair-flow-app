@@ -29,7 +29,7 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260618_multi_image_upload_internal_fallback";
+} from "./media-cloud.js?v=20260623_mediafix";
 
 let currentUserProfile = null;
 let userWorks = [];
