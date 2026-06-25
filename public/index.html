@@ -31350,7 +31350,19 @@ function cleanupOrphanTasks() {
     });
     
     console.log(`[CLEANUP] Found ${validTaskIds.size} valid taskIds in catalog`);
-    
+
+    // SAFETY GUARD: an empty catalog almost always means the task catalog has
+    // not finished loading yet (or the shared catalog read failed) — NOT that
+    // every active/pending/done task is a genuine orphan. Without this guard,
+    // applyState → cleanupOrphanTasks wipes the entire runtime list whenever the
+    // catalog is momentarily empty, which is exactly the "tasks vanish /
+    // No tasks yet" outage (tasks were intact in Firestore but cleared locally).
+    // When there is nothing valid to validate against, remove nothing.
+    if (validTaskIds.size === 0) {
+      console.warn('[CLEANUP] Skipped — catalog empty/not loaded; not removing any tasks');
+      return;
+    }
+
     // Clean up active/pending lists for all tabs
     let totalRemoved = 0;
     
@@ -38876,7 +38888,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260524_schedule_push_notify')
+              import('/schedule-ui.js?v=20260625_build_scope_warn')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -39487,7 +39499,12 @@ function initializeAppsPanel() {
       rowsContainer.addEventListener('change', function (ev) {
         const tgt = ev && ev.target;
         const isTimeChange = tgt && tgt.tagName === 'INPUT' && tgt.getAttribute('type') === 'time';
-        if (isTimeChange) {
+        // Composite time-picker <select>s: capture immediately (the picker's
+        // own handler has already updated the hidden HH:MM value), but defer
+        // the heavy section re-render to blur so picking hour/min/AM-PM in a
+        // row doesn't flash/reset the grid mid-edit.
+        const isTimePickerSelect = tgt && tgt.tagName === 'SELECT' && tgt.closest && tgt.closest('[data-ff-time-picker]');
+        if (isTimeChange || isTimePickerSelect) {
           _ffStaffSchedCaptureCurrentTabRows();
           if (!tgt.__ffSchedBlurBound) {
             tgt.__ffSchedBlurBound = true;
@@ -39562,6 +39579,78 @@ function initializeAppsPanel() {
     return nextSchedule;
   }
 
+  // ── Staff default-schedule time picker ───────────────────────────────
+  // Native <input type="time"> renders 12h/24h purely from the browser/OS
+  // locale, so it ignores the app's Time Format preference (the editor showed
+  // 24h while the saved/read-only view showed 12h). To honor the preference
+  // deterministically everywhere, we render a composite hour/min(/AM-PM)
+  // <select> picker and keep a hidden "HH:MM" (24h) input as the canonical
+  // value holder, so getScheduleRowsValue() and all save logic stay unchanged.
+  function _ffSchedTimeParts(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm == null ? '' : hhmm).trim());
+    if (!m) return { h: null, min: null };
+    return {
+      h: Math.max(0, Math.min(23, parseInt(m[1], 10))),
+      min: Math.max(0, Math.min(59, parseInt(m[2], 10)))
+    };
+  }
+  function _ffSchedMinuteOptions(curMin) {
+    const mins = [];
+    for (let m = 0; m < 60; m += 5) mins.push(m);
+    if (curMin != null && !mins.includes(curMin)) { mins.push(curMin); mins.sort(function (a, b) { return a - b; }); }
+    return mins;
+  }
+  function buildStaffSchedTimePicker(field, hhmm) {
+    const prefers24h = (typeof window.ffGetDisplayTimeFormat === 'function'
+      ? window.ffGetDisplayTimeFormat() : '12h') === '24h';
+    const parts = _ffSchedTimeParts(hhmm);
+    const hasVal = parts.h != null;
+    const selStyle = 'height:30px;border:1px solid #d1d5db;border-radius:8px;padding:0 4px;box-sizing:border-box;background:#fff;font-size:11px;font-family:inherit;color:#111827;cursor:pointer;outline:none;';
+    const hidden = `<input type="hidden" data-field="${field}" value="${hasVal ? `${String(parts.h).padStart(2, '0')}:${String(parts.min).padStart(2, '0')}` : ''}">`;
+    const minOpts = _ffSchedMinuteOptions(hasVal ? parts.min : null)
+      .map(function (m) { return `<option value="${m}" ${hasVal && parts.min === m ? 'selected' : ''}>${String(m).padStart(2, '0')}</option>`; })
+      .join('');
+    if (prefers24h) {
+      const hourOpts = Array.from({ length: 24 }, function (_, i) { return i; })
+        .map(function (h) { return `<option value="${h}" ${hasVal && parts.h === h ? 'selected' : ''}>${String(h).padStart(2, '0')}</option>`; })
+        .join('');
+      return `<span data-ff-time-picker="${field}" data-prefers24h="1" style="display:inline-flex;align-items:center;gap:3px;min-width:0;">${hidden}<select data-ff-role="hour" style="${selStyle}">${hourOpts}</select><span style="color:#9ca3af;font-weight:700;">:</span><select data-ff-role="min" style="${selStyle}">${minOpts}</select></span>`;
+    }
+    let h12 = hasVal ? (parts.h % 12) : null;
+    if (hasVal && h12 === 0) h12 = 12;
+    const ampm = hasVal ? (parts.h >= 12 ? 'PM' : 'AM') : 'AM';
+    const hourOpts = Array.from({ length: 12 }, function (_, i) { return i + 1; })
+      .map(function (h) { return `<option value="${h}" ${hasVal && h12 === h ? 'selected' : ''}>${h}</option>`; })
+      .join('');
+    const ampmOpts = `<option value="AM" ${ampm === 'AM' ? 'selected' : ''}>AM</option><option value="PM" ${ampm === 'PM' ? 'selected' : ''}>PM</option>`;
+    return `<span data-ff-time-picker="${field}" data-prefers24h="0" style="display:inline-flex;align-items:center;gap:3px;min-width:0;">${hidden}<select data-ff-role="hour" style="${selStyle}">${hourOpts}</select><span style="color:#9ca3af;font-weight:700;">:</span><select data-ff-role="min" style="${selStyle}">${minOpts}</select><select data-ff-role="ampm" style="${selStyle}">${ampmOpts}</select></span>`;
+  }
+  function bindStaffSchedTimePickers(container) {
+    if (!container) return;
+    container.querySelectorAll('[data-ff-time-picker]').forEach(function (pick) {
+      const hidden = pick.querySelector('input[type="hidden"][data-field]');
+      const prefers24h = pick.getAttribute('data-prefers24h') === '1';
+      const recompute = function () {
+        const hourSel = pick.querySelector('[data-ff-role="hour"]');
+        const minSel = pick.querySelector('[data-ff-role="min"]');
+        const min = parseInt(minSel && minSel.value, 10);
+        let h;
+        if (prefers24h) {
+          h = parseInt(hourSel && hourSel.value, 10);
+        } else {
+          const ampmSel = pick.querySelector('[data-ff-role="ampm"]');
+          let h12 = parseInt(hourSel && hourSel.value, 10) % 12;
+          h = (ampmSel && ampmSel.value === 'PM') ? h12 + 12 : h12;
+        }
+        if (!Number.isFinite(h) || !Number.isFinite(min)) return;
+        if (hidden) hidden.value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+      };
+      pick.querySelectorAll('select').forEach(function (sel) {
+        sel.addEventListener('change', recompute);
+      });
+    });
+  }
+
   function renderScheduleRows(containerId, scheduleValue, readOnly) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -39575,7 +39664,7 @@ function initializeAppsPanel() {
           <div data-schedule-day="${option.value}" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;box-sizing:border-box;">
             <div style="font-size:11px;font-weight:600;color:#111827;flex:0 0 40px;">${option.label}</div>
             <div style="font-size:10px;font-weight:600;color:${entry.enabled ? '#166534' : '#6b7280'};flex:0 0 auto;">${entry.enabled ? 'Enabled' : 'Off'}</div>
-            <div style="font-size:11px;color:#111827;flex:0 1 auto;min-width:0;">${entry.enabled ? `${entry.startTime || '-'} - ${entry.endTime || '-'}` : 'Not scheduled'}</div>
+            <div style="font-size:11px;color:#111827;flex:0 1 auto;min-width:0;">${entry.enabled ? `${(entry.startTime && window.ffFormatDisplayTime) ? window.ffFormatDisplayTime(entry.startTime, { fallback: entry.startTime }) : (entry.startTime || '-')} - ${(entry.endTime && window.ffFormatDisplayTime) ? window.ffFormatDisplayTime(entry.endTime, { fallback: entry.endTime }) : (entry.endTime || '-')}` : 'Not scheduled'}</div>
           </div>
         `;
       }
@@ -39590,10 +39679,10 @@ function initializeAppsPanel() {
             <input type="checkbox" data-field="enabled" ${entry.enabled ? 'checked' : ''}>
             <span class="staff-permission-toggle-slider"></span>
           </label>
-          <div data-ff-sched-times style="display:${entry.enabled ? 'flex' : 'none'};align-items:center;gap:6px;flex:1 1 auto;min-width:0;">
-            <input type="time" data-field="startTime" value="${entry.startTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+          <div data-ff-sched-times style="display:${entry.enabled ? 'flex' : 'none'};align-items:center;flex-wrap:wrap;gap:6px;flex:1 1 auto;min-width:0;">
+            ${buildStaffSchedTimePicker('startTime', entry.startTime)}
             <span style="font-size:10px;color:#9ca3af;">-</span>
-            <input type="time" data-field="endTime" value="${entry.endTime || ''}" style="width:100%;max-width:160px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;font-family:inherit;outline:none;box-sizing:border-box;">
+            ${buildStaffSchedTimePicker('endTime', entry.endTime)}
           </div>
           <div data-ff-sched-offlabel style="display:${entry.enabled ? 'none' : 'inline-block'};font-size:10px;color:#9ca3af;">Off</div>
         </div>
@@ -39602,6 +39691,7 @@ function initializeAppsPanel() {
     // Bind toggles: flipping them should show/hide the time inputs
     // without re-rendering the whole grid (preserves focus + typed values).
     if (!readOnly) {
+      bindStaffSchedTimePickers(container);
       container.querySelectorAll('[data-schedule-day]').forEach(function (row) {
         const toggle = row.querySelector('[data-field="enabled"]');
         const times = row.querySelector('[data-ff-sched-times]');
@@ -43981,6 +44071,52 @@ function initializeAppsPanel() {
       const _ffStaffSchedForSave = _ffStaffSchedCollectForSave(oldStaff);
       const nextDefaultSchedule = _ffStaffSchedForSave.defaultSchedule;
       const nextLocationScheduleAvailability = _ffStaffSchedForSave.locationScheduleAvailability;
+
+      // Guard: an enabled day must have an end time AFTER its start time.
+      // A reversed range (e.g. 09:30 -> 06:00, i.e. 6 AM) makes the staff
+      // "unavailable" and silently drops them from auto-build, so block the
+      // save with a clear message instead of saving invalid hours.
+      const _ffSchedRangeError = (function () {
+        const toMin = function (t) {
+          const m = /^(\d{1,2}):(\d{2})$/.exec(String(t == null ? '' : t).trim());
+          if (!m) return null;
+          return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        };
+        const dayLabels = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' };
+        const fmt = function (t) {
+          return (t && window.ffFormatDisplayTime) ? window.ffFormatDisplayTime(t, { fallback: t }) : (t || '--');
+        };
+        const checkSched = function (sched, locLabel) {
+          if (!sched || typeof sched !== 'object') return null;
+          for (const dk of Object.keys(dayLabels)) {
+            const d = sched[dk];
+            if (!d || d.enabled !== true) continue;
+            const s = toMin(d.startTime);
+            const e = toMin(d.endTime);
+            if (s == null || e == null || e <= s) {
+              return dayLabels[dk] + (locLabel ? ' (' + locLabel + ')' : '') +
+                ': end time must be after start time (currently ' + fmt(d.startTime) + ' - ' + fmt(d.endTime) + ').';
+            }
+          }
+          return null;
+        };
+        let err = checkSched(nextDefaultSchedule, '');
+        if (!err && nextLocationScheduleAvailability && typeof nextLocationScheduleAvailability === 'object') {
+          for (const locId of Object.keys(nextLocationScheduleAvailability)) {
+            const entry = nextLocationScheduleAvailability[locId];
+            err = checkSched(entry && entry.defaultSchedule, locId);
+            if (err) break;
+          }
+        }
+        return err;
+      })();
+      if (_ffSchedRangeError) {
+        const _msg = _ffSchedRangeError + '\n\nTip: 6 PM is 18:00, not 06:00.';
+        (typeof window.ffStyledAlert === 'function')
+          ? window.ffStyledAlert(_msg, 'Schedule time error')
+          : alert('Schedule time error\n\n' + _msg);
+        return;
+      }
       const nextConstraints = window.ffScheduleHelpers?.normalizeConstraints
         ? window.ffScheduleHelpers.normalizeConstraints({
             cannotWorkAlone: oldStaff.constraints?.cannotWorkAlone,
@@ -64316,11 +64452,11 @@ function hookSettingsGuard_DISABLED(){
         { src: "/tickets.js?v=20260619_frontdesk_edit_services_showall", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260501_points_awards", type: "module", delay: 1650 },
-        { src: "/schedule-helpers.js?v=20260501_points", type: "module", delay: 1800 },
+        { src: "/schedule-helpers.js?v=20260625_loc_fallback", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260524_schedule_push_notify", type: "module", delay: 2300 },
+        { src: "/schedule-ui.js?v=20260625_build_scope_warn", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260503_owner_onboarding_once_pin", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
@@ -66922,6 +67058,7 @@ function hookSettingsGuard_DISABLED(){
         <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
         <span id="schedulePublishToggleLabel">Visible to staff</span>
       </button>
+      <button type="button" id="scheduleSaveDraftBtn" title="Save this week's draft to the cloud (survives refresh and syncs to your other devices). Not shown to staff until you Publish." style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border:1px solid #6d28d9;border-radius:999px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Save</button>
       <button type="button" id="scheduleNotifyChangesBtn" title="After editing shifts, notify only staff whose rows changed" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #fcd34d;border-radius:999px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Notify staff of changes</button>
       <button type="button" id="scheduleDiscardSavedDraftBtn" title="Replace this week-s saved draft (on this device and in the cloud) with a new auto-generated schedule from your coverage rules." style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#64748b;font-size:11px;font-weight:600;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Build schedule</button>
       </div>

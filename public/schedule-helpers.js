@@ -787,20 +787,35 @@ function normalizeLocationScheduleAvailability(value) {
  *      multi-location staff who haven't yet been migrated to the new
  *      per-branch schedule UI.
  */
+/** True when a normalized default-schedule map has at least one working day. */
+function scheduleHasEnabledDay(sched) {
+  if (!sched || typeof sched !== "object") return false;
+  return DAY_KEYS.some((dayKey) => sched[dayKey] && sched[dayKey].enabled === true);
+}
+
 function getStaffDefaultScheduleForLocation(staff, locationId) {
   const locKey = typeof locationId === "string" ? locationId.trim() : "";
+  const globalSchedule = normalizeDefaultSchedule(staff && staff.defaultSchedule);
   const mapRaw = staff && staff.locationScheduleAvailability;
   if (locKey && mapRaw && typeof mapRaw === "object") {
     const entry = mapRaw[locKey];
     if (entry && entry.defaultSchedule && typeof entry.defaultSchedule === "object") {
-      return normalizeDefaultSchedule(entry.defaultSchedule);
+      const perLoc = normalizeDefaultSchedule(entry.defaultSchedule);
+      // Use the branch-specific schedule when it actually has working days.
+      // If it's entirely empty (e.g. an auto-created placeholder with no days),
+      // fall back to the staff's global default so Build doesn't leave them
+      // all Off at a branch they're assigned to.
+      if (scheduleHasEnabledDay(perLoc)) return perLoc;
+      return globalSchedule;
     }
-    const allowed = Array.isArray(staff && staff.allowedLocationIds) ? staff.allowedLocationIds : [];
-    if (allowed.length > 1 && Object.keys(mapRaw).length > 0) {
-      return cloneDefaultSchedule();
-    }
+    // No branch-specific schedule for this location: fall back to the staff's
+    // global default schedule. (Previously this returned an all-Off schedule
+    // for multi-location staff, which surprised owners who never set a
+    // per-branch schedule. Explicit per-branch overrides above still win, and
+    // cross-location overlaps are surfaced by the conflict warnings.)
+    return globalSchedule;
   }
-  return normalizeDefaultSchedule(staff && staff.defaultSchedule);
+  return globalSchedule;
 }
 
 /**

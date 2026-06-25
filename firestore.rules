@@ -584,7 +584,13 @@ service cloud.firestore {
         && request.resource.data.weekStart is string
         && request.resource.data.staffId is string
         && request.resource.data.pingAt is timestamp
-        && pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && pingId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 
@@ -598,7 +604,13 @@ service cloud.firestore {
         && request.resource.data.staffId is string
         && request.resource.data.staffId == userStaffId()
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow update: if belongsToSalon(salonId)
         && userStaffId() != ''
         && resource.data.staffId == userStaffId()
@@ -606,7 +618,13 @@ service cloud.firestore {
         && request.resource.data.weekStart == resource.data.weekStart
         && request.resource.data.staffId == resource.data.staffId
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 
@@ -757,6 +775,154 @@ service cloud.firestore {
     match /salons/{salonId}/inventoryDrafts/{draftId} {
       allow read: if belongsToSalon(salonId);
       allow write: if belongsToSalon(salonId);
+    }
+
+    // ===== FLOOR MODULE =====
+    // Floor request setup (categories, regular requests, flows + nested
+    // steps/options) and live floor orders. Operational salon data: staff send
+    // floor orders, managers manage the setup, and everyone in the salon reads.
+    // Without these rules every Floor onSnapshot subscription is denied
+    // (permission-denied) and the Floor screen shows up empty. Mirrors the
+    // staffPresence access model (members + staff + kiosk).
+    match /salons/{salonId}/floorCategories/{categoryId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+    match /salons/{salonId}/floorRegularRequests/{requestId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+    match /salons/{salonId}/floorFlows/{flowId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+      match /steps/{stepId} {
+        allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+        match /options/{optionId} {
+          allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+        }
+      }
+    }
+    match /salons/{salonId}/floorOrders/{orderId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // ===== ACCOUNT-LEVEL SHARED SETUP (multi-location ticket service catalog) =====
+    // accountId currently resolves to the salonId for this app, so reuse the same
+    // salon membership helpers while keeping these paths account-scoped. Without
+    // these rules the Tickets "Service Catalog" read is denied (permission-denied)
+    // and the screen shows "Service Catalog is still loading".
+    match /accounts/{accountId}/shared/serviceCatalog {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{serviceId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/serviceCategories {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{categoryId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/serviceOverrides/{serviceId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
+    // Shared TASK templates (Tasks module). Without this the Tasks screen is empty.
+    match /accounts/{accountId}/shared/taskTemplates {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{taskId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    // Shared CHAT templates + flows (Chat module).
+    match /accounts/{accountId}/shared/chatTemplates {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{templateId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/chatFlows {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{flowId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    // Shared INVENTORY catalog (Inventory module): categories → subcategories → items.
+    match /accounts/{accountId}/shared/inventoryCatalog {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /categories/{categoryId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+
+        match /subcategories/{subId} {
+          allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+          allow create, update, delete: if isManager(accountId);
+
+          match /items/{itemId} {
+            allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+            allow create, update, delete: if isManager(accountId);
+          }
+        }
+      }
+    }
+
+    // Per-location inventory stock state.
+    match /accounts/{accountId}/locations/{locationId}/inventoryState/{subId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
+    // Points settings (account-level and per-location).
+    match /accounts/{accountId}/settings/{settingId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+    }
+
+    // Points ledger + per-staff summaries (Points engine writes these as staff act).
+    match /accounts/{accountId}/pointsEvents/{eventId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow update: if isManager(accountId);
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow delete: if false;
     }
 
     // ===== TRAINING (root collections; each doc has salonId) =====

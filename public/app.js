@@ -182,12 +182,38 @@ window.__ffGetUid = () => (auth.currentUser && auth.currentUser.uid) || null;
  */
 let db;
 try {
-  // Auto-detect long polling: reliable for login + reads across the Capacitor
-  // app and mobile Safari. NOTE: forcing long polling (experimentalForceLongPolling)
-  // was tried to fix technician write-sync, but it STALLED the connection inside
-  // the native app and froze the PIN/login flow — so we keep auto-detect here and
-  // solve the sync problem in the write path instead (see tasks-cloud writeState).
-  db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  // Transport selection is split by platform on purpose:
+  //
+  // • Capacitor NATIVE app (iOS/Android): keep experimentalAutoDetectLongPolling.
+  //   Forcing long polling here STALLED the connection inside the WKWebView and
+  //   froze the PIN/login flow, so the native shell must stay on auto-detect.
+  //
+  // • Desktop / mobile BROWSERS: force long polling. Auto-detect mis-probes the
+  //   WebChannel/streaming transport, wrongly decides it works, and then
+  //   onSnapshot SILENTLY STOPS delivering live updates while one-shot
+  //   getDocFromServer / setDoc keep working. Symptom: the queue freezes on a
+  //   stale cached snapshot across many devices even though writes succeed
+  //   (exactly the multi-device "queue not syncing" outage). Forcing long
+  //   polling keeps the live listener alive in the browser.
+  let isNativeApp = false;
+  try {
+    const C = (typeof window !== "undefined") ? window.Capacitor : null;
+    isNativeApp = !!(C && (typeof C.isNativePlatform === "function"
+      ? C.isNativePlatform()
+      : C.isNativePlatform === true));
+  } catch (_) {}
+  //
+  // useFetchStreams:false (browser only): Safari (incl. v26 / macOS 25) has a
+  // known firebase-js-sdk bug where the Listen/Write channel uses the Fetch
+  // Streams transport and the request is blocked with
+  // "Fetch API cannot load … due to access control checks". The live
+  // onSnapshot listener then never delivers (screen looks empty / out of sync)
+  // while one-shot getDocFromServer still works. Forcing the older XHR-based
+  // WebChannel transport (useFetchStreams:false) fixes Safari without side
+  // effects. Refs: firebase-js-sdk #9789, #8903.
+  db = isNativeApp
+    ? initializeFirestore(app, { experimentalAutoDetectLongPolling: true })
+    : initializeFirestore(app, { experimentalForceLongPolling: true, useFetchStreams: false });
 } catch (_) {
   db = getFirestore(app);
 }

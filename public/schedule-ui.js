@@ -116,6 +116,8 @@ let scheduleDnDConfirmPending = null;
 /** After user confirms placing a shift that conflicts with approved late_start / early_leave */
 let scheduleApprovedTimeConflictContinue = null;
 let scheduleSaveSkipApprovedTimeConflictOnce = false;
+/** Promise resolver for the cross-location (double-booking) confirm modal. */
+let scheduleCrossLocationConflictResolver = null;
 
 /** Toast for schedule messages — works even when `window.showToast` is not defined (common in this app shell). */
 function ffScheduleAppToast(message, duration = 5000) {
@@ -634,6 +636,12 @@ function ensureScheduleShiftEditModal() {
   backdrop.innerHTML = `
     <div role="dialog" aria-modal="true" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:400px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);">
       <div id="scheduleShiftEditTitle" style="font-size:16px;font-weight:700;color:#111827;margin-bottom:6px;">Edit shift</div>
+      <div id="scheduleShiftEditLocation" style="display:none;align-items:center;gap:6px;margin-bottom:10px;font-size:12px;font-weight:600;color:#5b21b6;">
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;background:#ede9fe;border:1px solid #c4b5fd;line-height:1.3;">
+          <span style="width:6px;height:6px;border-radius:50%;background:#7c3aed;flex-shrink:0;"></span>
+          <span id="scheduleShiftEditLocationName">This branch</span>
+        </span>
+      </div>
       <div id="scheduleShiftEditHint" style="display:none;font-size:11px;color:#6b7280;margin-bottom:10px;line-height:1.4;">Preview only — not saved to staff profiles. Marked OFF for this week is remembered in this browser until you remove it or switch weeks.</div>
       <div style="display:flex;flex-direction:column;gap:12px;">
         <label style="font-size:12px;color:#6b7280;">Start
@@ -942,30 +950,20 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
     typeof window !== "undefined" &&
     typeof window.ffGetDisplayTimeFormat === "function" &&
     window.ffGetDisplayTimeFormat() === "24h";
-  [startEl, endEl].forEach((el) => {
-    if (!el) return;
-    if (prefers24h) {
-      el.type = "text";
-      el.inputMode = "numeric";
-      el.maxLength = 5;
-      el.pattern = "\\d{1,2}:\\d{2}";
-      el.placeholder = "HH:mm";
-    } else {
-      el.type = "time";
-      el.removeAttribute("inputmode");
-      el.removeAttribute("maxlength");
-      el.removeAttribute("pattern");
-      el.removeAttribute("placeholder");
-    }
-  });
+  [startEl, endEl].forEach((el) => applyScheduleTimeFieldDisplay(el, prefers24h));
   if (startEl) {
-    startEl.value = toInput(
-      isNewShift ? startTime || defStart : startTime || defStart,
-      defStart,
+    setScheduleTimeFieldValue(
+      startEl,
+      toInput(isNewShift ? startTime || defStart : startTime || defStart, defStart),
+      prefers24h,
     );
   }
   if (endEl) {
-    endEl.value = toInput(isNewShift ? endTime || defEnd : endTime || defEnd, defEnd);
+    setScheduleTimeFieldValue(
+      endEl,
+      toInput(isNewShift ? endTime || defEnd : endTime || defEnd, defEnd),
+      prefers24h,
+    );
   }
   let existingAssign = null;
   if (!isNewShift && schedulePreviewState.draft) {
@@ -978,35 +976,38 @@ function openScheduleShiftEdit({ staffKey, dateKey, startTime, endTime, staffNam
   const lunchCb = document.getElementById("scheduleShiftEditLunchEnabled");
   const lunchSt = document.getElementById("scheduleShiftEditLunchStart");
   const lunchEn = document.getElementById("scheduleShiftEditLunchEnd");
-  [lunchSt, lunchEn].forEach((el) => {
-    if (!el) return;
-    if (prefers24h) {
-      el.type = "text";
-      el.inputMode = "numeric";
-      el.maxLength = 5;
-      el.pattern = "\\d{1,2}:\\d{2}";
-      el.placeholder = "HH:mm";
-    } else {
-      el.type = "time";
-      el.removeAttribute("inputmode");
-      el.removeAttribute("maxlength");
-      el.removeAttribute("pattern");
-      el.removeAttribute("placeholder");
-    }
-  });
+  [lunchSt, lunchEn].forEach((el) => applyScheduleTimeFieldDisplay(el, prefers24h));
   if (lunchCb) {
     lunchCb.checked = Boolean(existingAssign?.lunchBreakEnabled);
     lunchCb.disabled = !canManual;
   }
   if (lunchSt) {
-    lunchSt.value = toInput(existingAssign?.lunchStartTime || "", "");
+    setScheduleTimeFieldValue(lunchSt, toInput(existingAssign?.lunchStartTime || "", ""), prefers24h);
     lunchSt.disabled = !canManual;
+    setScheduleTimeCompositeDisabled(lunchSt, !canManual);
   }
   if (lunchEn) {
-    lunchEn.value = toInput(existingAssign?.lunchEndTime || "", "");
+    setScheduleTimeFieldValue(lunchEn, toInput(existingAssign?.lunchEndTime || "", ""), prefers24h);
     lunchEn.disabled = !canManual;
+    setScheduleTimeCompositeDisabled(lunchEn, !canManual);
   }
   syncScheduleShiftEditLunchRowVisibility();
+  // Show which branch this shift belongs to (read-only). Only meaningful when
+  // the salon has more than one active location — otherwise it's redundant.
+  const locRow = document.getElementById("scheduleShiftEditLocation");
+  if (locRow) {
+    const activeLocs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const locName = _ffActiveLocationNameForIcs();
+    if (activeLocs.length > 1 && locName) {
+      const nameEl = document.getElementById("scheduleShiftEditLocationName");
+      if (nameEl) nameEl.textContent = locName;
+      locRow.style.display = "flex";
+    } else {
+      locRow.style.display = "none";
+    }
+  }
   backdrop.style.display = "flex";
 }
 
@@ -1025,6 +1026,155 @@ function hhmmFromTimeInput(v) {
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+// ── 12-hour shift-time picker ────────────────────────────────────────────
+// Native <input type="time"> renders 12h/24h purely by the browser/OS locale,
+// so it ignores the app's Time Format preference (a 12h-preference user on a
+// 24h OS still sees 24h). To honor the preference deterministically across all
+// browsers, when the preference is 12h we hide the raw input (keeping it as the
+// canonical "HH:MM" 24h value holder so NO read/validation code changes) and
+// drive it from a composite hour(1-12) / minute / AM-PM picker.
+
+const SCHEDULE_TIME_COMPOSITE_CLASS = "ff-sched-time-12h";
+
+function buildScheduleMinuteOptions(selectEl, currentMin) {
+  if (!selectEl) return;
+  const mins = [];
+  for (let m = 0; m < 60; m += 5) mins.push(m);
+  const cur = Number.isFinite(currentMin) ? currentMin : null;
+  if (cur != null && !mins.includes(cur)) {
+    mins.push(cur);
+    mins.sort((a, b) => a - b);
+  }
+  selectEl.innerHTML = mins
+    .map((m) => `<option value="${m}">${String(m).padStart(2, "0")}</option>`)
+    .join("");
+}
+
+function getOrCreateScheduleTimeComposite(inputEl) {
+  if (!inputEl) return null;
+  const next = inputEl.nextElementSibling;
+  if (next && next.classList && next.classList.contains(SCHEDULE_TIME_COMPOSITE_CLASS)) {
+    return next;
+  }
+  const wrap = document.createElement("span");
+  wrap.className = SCHEDULE_TIME_COMPOSITE_CLASS;
+  wrap.style.cssText =
+    "display:flex;gap:6px;align-items:center;margin-top:4px;";
+  const selStyle =
+    "height:40px;border:1px solid #e5e7eb;border-radius:8px;padding:0 8px;box-sizing:border-box;background:#fff;font-size:14px;color:#111827;cursor:pointer;";
+  const hourSel = document.createElement("select");
+  hourSel.setAttribute("data-ff-role", "hour");
+  hourSel.style.cssText = selStyle + "flex:1;min-width:60px;";
+  hourSel.innerHTML = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((h) => `<option value="${h}">${h}</option>`)
+    .join("");
+  const colon = document.createElement("span");
+  colon.textContent = ":";
+  colon.style.cssText = "color:#6b7280;font-weight:700;";
+  const minSel = document.createElement("select");
+  minSel.setAttribute("data-ff-role", "min");
+  minSel.style.cssText = selStyle + "flex:1;min-width:60px;";
+  buildScheduleMinuteOptions(minSel, 0);
+  const ampmSel = document.createElement("select");
+  ampmSel.setAttribute("data-ff-role", "ampm");
+  ampmSel.style.cssText = selStyle + "flex:1;min-width:64px;";
+  ampmSel.innerHTML = `<option value="AM">AM</option><option value="PM">PM</option>`;
+  wrap.appendChild(hourSel);
+  wrap.appendChild(colon);
+  wrap.appendChild(minSel);
+  wrap.appendChild(ampmSel);
+  const onChange = () => syncScheduleHiddenFromComposite(inputEl);
+  hourSel.addEventListener("change", onChange);
+  minSel.addEventListener("change", onChange);
+  ampmSel.addEventListener("change", onChange);
+  inputEl.insertAdjacentElement("afterend", wrap);
+  return wrap;
+}
+
+function syncScheduleCompositeFromHHMM(inputEl, hhmm) {
+  const wrap = getOrCreateScheduleTimeComposite(inputEl);
+  if (!wrap) return;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || "").trim());
+  let h24 = 9;
+  let min = 0;
+  if (m) {
+    h24 = Math.max(0, Math.min(23, Number(m[1])));
+    min = Math.max(0, Math.min(59, Number(m[2])));
+  }
+  const ampm = h24 >= 12 ? "PM" : "AM";
+  let h12 = h24 % 12;
+  if (h12 === 0) h12 = 12;
+  const hourSel = wrap.querySelector('[data-ff-role="hour"]');
+  const minSel = wrap.querySelector('[data-ff-role="min"]');
+  const ampmSel = wrap.querySelector('[data-ff-role="ampm"]');
+  if (minSel) buildScheduleMinuteOptions(minSel, min);
+  if (hourSel) hourSel.value = String(h12);
+  if (minSel) minSel.value = String(min);
+  if (ampmSel) ampmSel.value = ampm;
+}
+
+function syncScheduleHiddenFromComposite(inputEl) {
+  if (!inputEl) return;
+  const wrap = inputEl.nextElementSibling;
+  if (!wrap || !wrap.classList || !wrap.classList.contains(SCHEDULE_TIME_COMPOSITE_CLASS)) return;
+  const hourSel = wrap.querySelector('[data-ff-role="hour"]');
+  const minSel = wrap.querySelector('[data-ff-role="min"]');
+  const ampmSel = wrap.querySelector('[data-ff-role="ampm"]');
+  let h12 = Number(hourSel?.value);
+  const min = Number(minSel?.value);
+  const ampm = ampmSel?.value === "PM" ? "PM" : "AM";
+  if (!Number.isFinite(h12) || !Number.isFinite(min)) return;
+  h12 = h12 % 12;
+  const h24 = ampm === "PM" ? h12 + 12 : h12;
+  inputEl.value = `${String(h24).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+}
+
+function setScheduleTimeCompositeDisabled(inputEl, disabled) {
+  const wrap = inputEl?.nextElementSibling;
+  if (!wrap || !wrap.classList || !wrap.classList.contains(SCHEDULE_TIME_COMPOSITE_CLASS)) return;
+  wrap.querySelectorAll("select").forEach((sel) => {
+    sel.disabled = Boolean(disabled);
+    sel.style.opacity = disabled ? "0.6" : "";
+    sel.style.cursor = disabled ? "not-allowed" : "pointer";
+  });
+}
+
+/**
+ * Configures a shift-time field for the current Time Format preference.
+ * 24h → plain text "HH:mm" input (existing behavior). 12h → raw input becomes
+ * a hidden canonical value holder driven by an AM/PM composite picker.
+ */
+function applyScheduleTimeFieldDisplay(inputEl, prefers24h) {
+  if (!inputEl) return;
+  if (prefers24h) {
+    const wrap = inputEl.nextElementSibling;
+    if (wrap && wrap.classList && wrap.classList.contains(SCHEDULE_TIME_COMPOSITE_CLASS)) {
+      wrap.style.display = "none";
+    }
+    inputEl.style.display = "";
+    inputEl.type = "text";
+    inputEl.inputMode = "numeric";
+    inputEl.maxLength = 5;
+    inputEl.pattern = "\\d{1,2}:\\d{2}";
+    inputEl.placeholder = "HH:mm";
+  } else {
+    inputEl.type = "hidden";
+    inputEl.removeAttribute("inputmode");
+    inputEl.removeAttribute("maxlength");
+    inputEl.removeAttribute("pattern");
+    inputEl.removeAttribute("placeholder");
+    const wrap = getOrCreateScheduleTimeComposite(inputEl);
+    if (wrap) wrap.style.display = "flex";
+  }
+}
+
+/** Sets a shift-time field's value ("HH:MM" 24h) and mirrors it to the picker. */
+function setScheduleTimeFieldValue(inputEl, hhmm, prefers24h) {
+  if (!inputEl) return;
+  inputEl.value = String(hhmm || "");
+  if (!prefers24h) syncScheduleCompositeFromHHMM(inputEl, hhmm);
 }
 
 function scheduleUserCanManualEditLegacy() {
@@ -1072,7 +1222,7 @@ function buildManualDraftAssignment(staff, start, end) {
   };
 }
 
-function saveScheduleShiftEdit() {
+async function saveScheduleShiftEdit() {
   if (!scheduleShiftEditPayload || !schedulePreviewState.draft) return;
   const start = hhmmFromTimeInput(document.getElementById("scheduleShiftEditStart")?.value);
   const end = hhmmFromTimeInput(document.getElementById("scheduleShiftEditEnd")?.value);
@@ -1112,6 +1262,19 @@ function saveScheduleShiftEdit() {
       });
       return;
     }
+  }
+
+  // Cross-location double-booking guard: a person can't physically work two
+  // branches at overlapping hours on the same day. Manual add/edit previously
+  // bypassed this entirely (only the auto-builder checked it), so the same
+  // staff could be hand-placed in two branches for the same hours with no
+  // warning. We surface a confirm here. Fail-open by design: if the other
+  // branch's data can't be read, getCrossLocationConflictForShift returns null
+  // and the save proceeds exactly as before — never blocks on a read error.
+  const crossLocConflict = await getCrossLocationConflictForShift(staff, dateKey, start, end);
+  if (crossLocConflict) {
+    const proceed = await confirmScheduleCrossLocationConflict(crossLocConflict.message);
+    if (!proceed) return;
   }
 
   let draft = cloneScheduleDraft(schedulePreviewState.draft);
@@ -1577,6 +1740,82 @@ function isAuthedUserMultiLocationForWeek() {
   return !!(map && typeof map.size === "number" && map.size > 0);
 }
 
+/**
+ * Management/Team view variant of loadMyShiftsFromOtherLocationsForWeek: pulls
+ * EVERY staff member's shifts from every OTHER active location for the week so
+ * the management board can show, in each cell, a branch tag for staff who work
+ * more than one location — without the manager switching location tabs.
+ *
+ * Returns Map<staffKey, Map<dateKey, Array<{ locationId, locationName,
+ * startTime, endTime, lunchBreakEnabled, lunchBreakStart, lunchBreakEnd }>>>.
+ * Each shift is registered under BOTH the staffId and uid so the renderer can
+ * find it by either identity. Read-only; same priority order (override >
+ * last-build cache > cloud snapshot) and same fail-open behavior as the others.
+ */
+async function loadAllStaffShiftsFromOtherLocationsForWeek(weekRange) {
+  const empty = new Map();
+  try {
+    if (!weekRange?.startDate) return empty;
+    const activeLoc = _ffSchedActiveLocId();
+    const allLocs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    const others = allLocs.filter((l) => l && l.id && String(l.id) !== String(activeLoc));
+    if (others.length === 0) return empty;
+
+    const perLoc = await Promise.all(others.map(async (loc) => {
+      const override = loadOtherLocationLocalDraftDays(loc.id, weekRange);
+      if (Array.isArray(override) && override.length > 0) return { loc, days: override };
+      const lastBuild = loadOtherLocationLastBuildCache(loc.id, weekRange);
+      if (Array.isArray(lastBuild) && lastBuild.length > 0) return { loc, days: lastBuild };
+      const cloud = await loadOtherLocationWeekDraftDays(loc.id, weekRange.startDate);
+      return { loc, days: Array.isArray(cloud) ? cloud : null };
+    }));
+
+    const out = new Map();
+    const addShift = (key, dk, shift) => {
+      if (!key || !dk) return;
+      if (!out.has(key)) out.set(key, new Map());
+      const byDate = out.get(key);
+      if (!byDate.has(dk)) byDate.set(dk, []);
+      byDate.get(dk).push(shift);
+    };
+    perLoc.forEach(({ loc, days }) => {
+      if (!Array.isArray(days)) return;
+      days.forEach((day) => {
+        const dk = String(day?.date || "").trim();
+        if (!dk) return;
+        const assignments = Array.isArray(day?.assignments) ? day.assignments : [];
+        assignments.forEach((a) => {
+          if (!a || !a.startTime || !a.endTime) return;
+          const sid = String(a.staffId || "").trim();
+          const uid = String(a.uid || "").trim();
+          const shift = {
+            locationId: loc.id,
+            locationName: loc.name || "",
+            startTime: a.startTime,
+            endTime: a.endTime,
+            lunchBreakEnabled: !!a.lunchBreakEnabled,
+            lunchBreakStart: a.lunchBreakStart,
+            lunchBreakEnd: a.lunchBreakEnd,
+          };
+          if (sid) addShift(sid, dk, shift);
+          if (uid && uid !== sid) addShift(uid, dk, shift);
+        });
+      });
+    });
+    out.forEach((byDate) => {
+      byDate.forEach((arr) => {
+        arr.sort((x, y) => String(x.startTime || "").localeCompare(String(y.startTime || "")));
+      });
+    });
+    return out;
+  } catch (e) {
+    console.warn("[ScheduleUI] loadAllStaffShiftsFromOtherLocationsForWeek failed", e);
+    return empty;
+  }
+}
+
 function teardownSchedulePublishListener() {
   if (schedulePublishUnsub) {
     try {
@@ -1686,11 +1925,15 @@ function updateSchedulePublishToggleUi() {
   const label = document.getElementById("schedulePublishToggleLabel");
   const notifyBtn = document.getElementById("scheduleNotifyChangesBtn");
   const discardBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
+  const saveBtn = document.getElementById("scheduleSaveDraftBtn");
   const canEdit = scheduleUserCanManualEdit();
   const buildUi = !canEdit || schedulePreviewMode === "build";
   const weekRange = getWeekRange(schedulePreviewWeekStart);
   const published = schedulePublishedMap[weekRange.startDate] === true;
 
+  if (saveBtn) {
+    saveBtn.style.display = canEdit && buildUi ? "inline-flex" : "none";
+  }
   if (notifyBtn) {
     notifyBtn.style.display = canEdit && published && buildUi ? "inline-flex" : "none";
   }
@@ -2127,6 +2370,77 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
 }
 
 /**
+ * Explicit "Save" — writes the current week draft to the CLOUD snapshot
+ * (`weekDraftSnapshots[weekStart]`) without publishing it to staff. This makes
+ * edits survive a page refresh reliably (loaded from Firestore, not only the
+ * device's localStorage) and syncs the draft to the manager's other devices.
+ * Staff still can't see the week until it is Published.
+ */
+async function saveScheduleWeekDraftToCloud() {
+  if (!scheduleUserCanManualEdit()) return;
+  const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
+  if (!salonId) {
+    ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  const weekRange = getWeekRange(schedulePreviewWeekStart);
+  const weekStart = weekRange.startDate;
+  const draft = schedulePreviewState.draft;
+  const staffList = schedulePreviewState.staffList;
+  if (!weekStart || !draft || !Array.isArray(staffList)) {
+    ffScheduleAppToast("Schedule is still loading.", 3000);
+    return;
+  }
+  const btn = document.getElementById("scheduleSaveDraftBtn");
+  const prevLabel = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = "0.7";
+    btn.style.cursor = "default";
+    btn.textContent = "Saving…";
+  }
+  try {
+    // Keep this device's local override in sync with what we push to cloud.
+    persistScheduleDraftOverrideFromState();
+    const ref = getSchedulePublishDocRef();
+    if (!ref) throw new Error("No schedule document reference.");
+    const standByByDate =
+      schedulePreviewState?.standByByDate && typeof schedulePreviewState.standByByDate === "object"
+        ? cloneStandByByDateMap(schedulePreviewState.standByByDate)
+        : {};
+    // Write ONLY the draft snapshot — intentionally NOT the staffShiftFingerprints,
+    // so the "Notify staff of changes" baseline (set at the last Publish) is
+    // preserved and still detects edits made after publishing.
+    await setDoc(
+      ref,
+      {
+        locationId: _ffSchedActiveLocId() || null,
+        weekDraftSnapshots: {
+          [weekStart]: {
+            savedAt: serverTimestamp(),
+            days: serializeDraftDaysForStorage(draft),
+            standByByDate,
+          },
+        },
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    ffScheduleAppToast("Saved. This draft will survive refresh and sync to your other devices.", 4500);
+  } catch (e) {
+    console.error("[ScheduleUI] save week draft to cloud", e);
+    ffScheduleAppToast(e?.message || "Could not save the draft. Check connection or Firestore rules.", 5000);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.opacity = "1";
+      btn.style.cursor = "pointer";
+      btn.textContent = prevLabel || "Save";
+    }
+  }
+}
+
+/**
  * Stand-by was only persisted to localStorage until "Notify staff"; VIEW users read Firestore, so they always saw "Not set".
  * After saving stand-by in the modal, merge `standByByDate` into the published week snapshot so everyone sees it without a separate notify.
  */
@@ -2414,6 +2728,23 @@ async function discardSavedScheduleWeekDraftAndReload() {
   const weekStart = weekRange.startDate;
   if (!weekStart) return;
   const el = ensureScheduleRebuildConfirmModal();
+  const weekLabel = formatWeekLabel(weekRange);
+  const locName = _ffActiveLocationNameForIcs() || "this branch";
+  const published = schedulePublishedMap[weekStart] === true;
+  const titleEl = document.getElementById("scheduleRebuildConfirmTitle");
+  const bodyEl = document.getElementById("scheduleRebuildConfirmBody");
+  if (titleEl) titleEl.textContent = `Rebuild only ${weekLabel}?`;
+  if (bodyEl) {
+    const scopeLine =
+      `This affects <strong>only this week</strong> (${escapeScheduleHtml(weekLabel)}) at <strong>${escapeScheduleHtml(locName)}</strong>. ` +
+      `No other week and no other branch is touched.`;
+    const lossLine = published
+      ? `<br/><br/><span style="color:#b91c1c;font-weight:700;">Warning: this week is already published.</span> ` +
+        `Rebuilding will replace the schedule your staff currently see with a fresh auto-generated one. ` +
+        `You'll need to review and Save / re-publish.`
+      : `<br/><br/>Your saved edits for this week will be replaced by a new schedule generated from your coverage rules.`;
+    bodyEl.innerHTML = scopeLine + lossLine;
+  }
   el.style.display = "flex";
 }
 
@@ -2761,6 +3092,124 @@ function confirmScheduleApprovedTimeConflictModal() {
       console.error("[ScheduleUI] approved time conflict confirm", e);
     }
   }
+}
+
+/**
+ * Returns the conflicting cross-location busy window for a staff member on a
+ * given date if the proposed [start,end] shift overlaps a shift they already
+ * have at ANOTHER active location for the same day; otherwise null. Reuses the
+ * exact same busy data the auto-builder uses (loadCrossLocationBusyForWeek),
+ * keyed by every identity variant so it matches regardless of staffId/uid.
+ * Fail-open: any error (e.g. the other branch's draft can't be read) returns
+ * null so a manual save is never blocked by a transient read failure.
+ */
+async function getCrossLocationConflictForShift(staff, dateKey, startHHMM, endHHMM) {
+  try {
+    if (!staff || !dateKey) return null;
+    const startMin = parseScheduleTimeToMinutes(startHHMM);
+    const endMin = parseScheduleTimeToMinutes(endHHMM);
+    if (startMin == null || endMin == null || endMin <= startMin) return null;
+    const weekRange = getWeekRange(schedulePreviewWeekStart);
+    const busy = await loadCrossLocationBusyForWeek(weekRange);
+    if (!busy) return null;
+
+    const candidateKeys = [];
+    const pushKey = (k) => {
+      const s = String(k || "").trim();
+      if (s && !candidateKeys.includes(s)) candidateKeys.push(s);
+    };
+    pushKey(getScheduleStaffKey(staff));
+    pushKey(staff.staffId);
+    pushKey(staff.uid);
+    pushKey(staff.userUid);
+    pushKey(staff.id);
+
+    let hit = null;
+    for (const key of candidateKeys) {
+      const list = busy[key] && busy[key][dateKey];
+      if (!Array.isArray(list)) continue;
+      for (const w of list) {
+        const ws = Number(w.startMin);
+        const we = Number(w.endMin);
+        if (!Number.isFinite(ws) || !Number.isFinite(we) || we <= ws) continue;
+        if (Math.min(endMin, we) > Math.max(startMin, ws)) {
+          hit = { startMin: ws, endMin: we };
+          break;
+        }
+      }
+      if (hit) break;
+    }
+    if (!hit) return null;
+
+    const toHHMM = (m) =>
+      `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const range = formatScheduleTimeRangeDisplay(toHHMM(hit.startMin), toHHMM(hit.endMin), {
+      compact: true,
+    });
+    const name = String(staff.name || "").trim() || "This person";
+    const message =
+      `${name} is already scheduled at another location on this day (${range}). ` +
+      `The same person can't work two branches at the same time. Save this shift anyway?`;
+    return { ...hit, message };
+  } catch (e) {
+    console.warn("[ScheduleUI] cross-location conflict check failed", e);
+    return null;
+  }
+}
+
+function ensureScheduleCrossLocationConflictModal() {
+  if (document.getElementById("scheduleCrossLocationConflictBackdrop")) {
+    return document.getElementById("scheduleCrossLocationConflictBackdrop");
+  }
+  const backdrop = document.createElement("div");
+  backdrop.id = "scheduleCrossLocationConflictBackdrop";
+  backdrop.style.cssText =
+    "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4150;align-items:center;justify-content:center;padding:20px;";
+  backdrop.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="scheduleCrossLocationConflictTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:460px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
+      <div id="scheduleCrossLocationConflictTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Already booked at another location</div>
+      <p id="scheduleCrossLocationConflictBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;"></p>
+      <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
+        <button type="button" id="scheduleCrossLocationConflictCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
+        <button type="button" id="scheduleCrossLocationConflictOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Save anyway</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop) closeScheduleCrossLocationConflictModal(false);
+  });
+  document
+    .getElementById("scheduleCrossLocationConflictCancel")
+    ?.addEventListener("click", () => closeScheduleCrossLocationConflictModal(false));
+  document
+    .getElementById("scheduleCrossLocationConflictOk")
+    ?.addEventListener("click", () => closeScheduleCrossLocationConflictModal(true));
+  return backdrop;
+}
+
+function closeScheduleCrossLocationConflictModal(result) {
+  const el = document.getElementById("scheduleCrossLocationConflictBackdrop");
+  if (el) el.style.display = "none";
+  const resolve = scheduleCrossLocationConflictResolver;
+  scheduleCrossLocationConflictResolver = null;
+  if (typeof resolve === "function") resolve(result === true);
+}
+
+/** Opens the cross-location confirm modal; resolves true to proceed, false to cancel. */
+function confirmScheduleCrossLocationConflict(message) {
+  return new Promise((resolve) => {
+    // If a previous prompt is somehow still pending, resolve it as cancelled
+    // so we never leave a dangling promise.
+    if (typeof scheduleCrossLocationConflictResolver === "function") {
+      try { scheduleCrossLocationConflictResolver(false); } catch (_) {}
+    }
+    const el = ensureScheduleCrossLocationConflictModal();
+    const body = document.getElementById("scheduleCrossLocationConflictBody");
+    if (body) body.textContent = message;
+    scheduleCrossLocationConflictResolver = resolve;
+    el.style.display = "flex";
+  });
 }
 
 function getStaffByScheduleKey(staffList, scheduleKey) {
@@ -3170,6 +3619,78 @@ function getScheduleRoleLabel(staff) {
   if (role === "manager") return staff?.managerType === "assistant_manager" ? "Assistant Manager" : "Manager";
   if (role === "front_desk") return "Front Desk";
   return "Service Provider";
+}
+
+/** Custom technician-type id -> display name (from salons/{salonId}/technicianTypes). */
+let scheduleTechTypeNameById = {};
+let scheduleTechTypesListenerBound = false;
+let scheduleTechTypesLoaded = false;
+
+function rebuildScheduleTechTypeMap(types) {
+  const map = {};
+  (Array.isArray(types) ? types : []).forEach((t) => {
+    if (t && typeof t === "object" && t.id != null) {
+      const nm = String(t.name || "").trim();
+      if (nm) map[String(t.id)] = nm;
+    }
+  });
+  scheduleTechTypeNameById = map;
+}
+
+/**
+ * Loads the salon's technician-types catalog once (id -> name) and keeps it
+ * fresh via the shared `ff-technician-types-updated` event. Used so the staff
+ * rows show readable type names instead of raw document ids.
+ */
+async function ensureScheduleTechTypeMap() {
+  if (!scheduleTechTypesListenerBound && typeof document !== "undefined") {
+    scheduleTechTypesListenerBound = true;
+    document.addEventListener("ff-technician-types-updated", (e) => {
+      rebuildScheduleTechTypeMap(e?.detail);
+      scheduleTechTypesLoaded = true;
+      if (schedulePreviewState?.draft) {
+        try {
+          renderScheduleBoard(
+            schedulePreviewState.draft,
+            schedulePreviewState.validation,
+            schedulePreviewState.staffList,
+          );
+        } catch (_) { /* ignore */ }
+      }
+    });
+  }
+  if (scheduleTechTypesLoaded) return;
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetTechnicianTypes === "function") {
+      const types = await window.ffGetTechnicianTypes({ all: true });
+      rebuildScheduleTechTypeMap(types);
+      scheduleTechTypesLoaded = true;
+    }
+  } catch (_) { /* ignore */ }
+}
+
+/**
+ * Resolves a staff member's technicianTypes into a readable, comma-separated
+ * label: custom-type ids -> their catalog name; built-in snake_case slugs ->
+ * Title Case; unresolved raw ids are hidden (so no document id leaks to the UI).
+ */
+function formatScheduleTechnicianTypes(staff) {
+  const list = Array.isArray(staff?.technicianTypes) ? staff.technicianTypes : [];
+  if (!list.length) return null;
+  const labels = list
+    .map((t) => String(t == null ? "" : t).trim())
+    .filter((key) => key && key !== "all_technicians")
+    .map((key) => {
+      if (scheduleTechTypeNameById[key]) return scheduleTechTypeNameById[key];
+      // Built-in slug: snake_case / spaced / all-lowercase word(s) -> Title Case.
+      if (/[_\s]/.test(key) || /^[a-z]+$/.test(key)) {
+        return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      }
+      // Unresolved raw document id (mixed case / digits) -> hide it.
+      return null;
+    })
+    .filter(Boolean);
+  return labels.length ? labels.join(", ") : null;
 }
 
 function renderScheduleViewTabs() {
@@ -4548,16 +5069,16 @@ function renderScheduleBoard(draft, validation, staffList) {
   const unifiedMapForBoard = (schedulePreviewState.myShiftsFromOtherLocs instanceof Map)
     ? schedulePreviewState.myShiftsFromOtherLocs
     : new Map();
+  // Management/Team view: per-staff other-location shifts (display-only branch
+  // tags for multi-location staff). Only used when the user can build/manage.
+  const allStaffOtherLocMap = (canBuild && schedulePreviewState.allStaffOtherLocShifts instanceof Map)
+    ? schedulePreviewState.allStaffOtherLocShifts
+    : new Map();
 
   const rowHtml = filteredStaff.map((staff) => {
     const staffKey = getScheduleStaffKey(staff);
     const roleLabel = getScheduleRoleLabel(staff);
-    const techTypes = Array.isArray(staff.technicianTypes) && staff.technicianTypes.length > 0
-      ? staff.technicianTypes
-          .filter(t => t !== 'all_technicians')
-          .map(t => String(t).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()))
-          .join(', ')
-      : null;
+    const techTypes = formatScheduleTechnicianTypes(staff);
     const allowCellEdit = canBuild;
     const isMyRowUnified = Boolean(
       isOwnShiftsContext &&
@@ -4565,9 +5086,27 @@ function renderScheduleBoard(draft, validation, staffList) {
       staffKey === myAuthedSid &&
       unifiedMapForBoard.size > 0,
     );
+    // Resolve this staff member's other-location shifts for the management view
+    // by any identity variant (staffKey / staffId / uid / id).
+    let mgmtOtherLocByDate = null;
+    if (canBuild && allStaffOtherLocMap.size > 0) {
+      const lookupKeys = [staffKey, staff.staffId, staff.uid, staff.userUid, staff.id]
+        .map((k) => String(k || "").trim())
+        .filter(Boolean);
+      for (const k of lookupKeys) {
+        if (allStaffOtherLocMap.has(k)) {
+          mgmtOtherLocByDate = allStaffOtherLocMap.get(k);
+          break;
+        }
+      }
+    }
+    const isMgmtRowUnified = Boolean(canBuild && mgmtOtherLocByDate && mgmtOtherLocByDate.size > 0);
+    const useUnifiedLayout = isMyRowUnified || isMgmtRowUnified;
     const cells = draftDays.map((day) => {
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
-      const otherLocShifts = isMyRowUnified ? (unifiedMapForBoard.get(day.date) || []) : [];
+      const otherLocShifts = isMyRowUnified
+        ? (unifiedMapForBoard.get(day.date) || [])
+        : (isMgmtRowUnified ? (mgmtOtherLocByDate.get(day.date) || []) : []);
       const hasOtherLocShifts = otherLocShifts.length > 0;
       const manualOff = Boolean(!assignment && dayHasManualOff(day, staffKey));
       const inboxApprovedOff = Boolean(
@@ -4662,16 +5201,61 @@ function renderScheduleBoard(draft, validation, staffList) {
       // Unified multi-location layout for the authed user's own row. Keeps
       // the active-location block editable as usual and renders each
       // other-location shift as a compact read-only sub-block beneath it.
-      if (isMyRowUnified && (assignment || hasOtherLocShifts)) {
+      if (useUnifiedLayout && (assignment || hasOtherLocShifts)) {
         const activeName = activeLocName || "This branch";
+        const totalUnifiedBlocks = (assignment ? 1 : 0) + otherLocShifts.length;
+        // Location name shown INSIDE the cell as a compact colored line (no pill
+        // chip) so a single shift fills the cell like a normal one — no gap.
+        const locLine = (name, color) =>
+          `<div style="font-size:9px;font-weight:800;letter-spacing:0.02em;line-height:1.2;margin-bottom:2px;color:${color};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${escapeScheduleHtml(name)}</div>`;
+        const lunchOtherHtml = (s) =>
+          s.lunchBreakEnabled
+            ? `<div style="font-size:9px;font-weight:600;color:#92400e;margin-top:3px;line-height:1.25;max-width:100%;">${escapeScheduleHtml(formatLunchBreakCellSubtitle({
+                lunchBreakEnabled: true,
+                lunchBreakStart: s.lunchBreakStart,
+                lunchBreakEnd: s.lunchBreakEnd,
+              }))}</div>`
+            : "";
+
+        // Common case — exactly ONE shift in the cell. Render it to FILL the
+        // cell exactly like a normal cell: colored by branch, location name
+        // inside, edit/add control absolute inside (no extra gap/whitespace).
+        if (totalUnifiedBlocks === 1 && assignment) {
+          return `
+            <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.25;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
+              ${editBtn}
+              ${locLine(activeName, "#7c3aed")}
+              <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
+                <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</div>
+                ${lunchSubline}
+                ${approvedMismatchBlock}
+              </div>
+            </div>
+          `;
+        }
+        if (totalUnifiedBlocks === 1 && !assignment) {
+          const s = otherLocShifts[0];
+          const labelName = s.locationName || "Other branch";
+          const addCornerBtn =
+            !manualOff && businessStatus?.isOpen !== false && canManual
+              ? `<button type="button" data-schedule-manual-add="true" data-approved-inbox="${inboxApprovedOff ? "1" : "0"}" data-staff-id="${escapeScheduleAttr(staffKey)}" data-date="${escapeScheduleAttr(day.date)}" data-staff-name="${safeStaffName}" title="Add shift in ${escapeScheduleAttr(activeName)}" aria-label="Add shift in active branch" style="position:absolute;top:3px;right:3px;min-width:20px;height:20px;padding:0 6px;border:1px dashed #c4b5fd;background:#faf5ff;color:#7c3aed;border-radius:999px;font-size:13px;font-weight:800;line-height:1;cursor:pointer;z-index:2;">+</button>`
+              : "";
+          return `
+            <div style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.25;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;" title="From ${escapeScheduleAttr(labelName)} — edit in that branch's schedule">
+              ${addCornerBtn}
+              ${locLine(labelName, "#2563eb")}
+              <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(s.startTime, s.endTime, { fallback: "--:-- - --:--" }))}</div>
+              ${lunchOtherHtml(s)}
+            </div>
+          `;
+        }
+
+        // 2+ shifts the same day → stack compactly (tight gap, blocks fill).
         const activeBlock = assignment
           ? `
-            <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:5px 6px;border-radius:8px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
+            <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:5px 6px;border-radius:8px;min-height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
               ${editBtn}
-              <div style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:999px;background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;font-size:9px;font-weight:700;letter-spacing:0.02em;max-width:100%;line-height:1.25;">
-                <span style="width:5px;height:5px;border-radius:50%;background:#7c3aed;flex-shrink:0;"></span>
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(activeName)}</span>
-              </div>
+              ${locLine(activeName, "#7c3aed")}
               <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
                 <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</div>
                 ${lunchSubline}
@@ -4683,27 +5267,17 @@ function renderScheduleBoard(draft, validation, staffList) {
 
         const otherBlocks = otherLocShifts.map((s) => {
           const labelName = s.locationName || "Other branch";
-          const lunchOther = s.lunchBreakEnabled
-            ? `<div style="font-size:9px;font-weight:600;color:#92400e;margin-top:3px;line-height:1.25;max-width:100%;">${escapeScheduleHtml(formatLunchBreakCellSubtitle({
-                lunchBreakEnabled: true,
-                lunchBreakStart: s.lunchBreakStart,
-                lunchBreakEnd: s.lunchBreakEnd,
-              }))}</div>`
-            : "";
           return `
-            <div style="padding:5px 6px;border-radius:8px;min-height:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#eff6ff;border:1px dashed #93c5fd;color:#1d4ed8;" title="From ${escapeScheduleAttr(labelName)} — edit in that branch's schedule">
-              <div style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:999px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;font-size:9px;font-weight:700;letter-spacing:0.02em;max-width:100%;line-height:1.25;">
-                <span style="width:5px;height:5px;border-radius:50%;background:#2563eb;flex-shrink:0;"></span>
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeScheduleHtml(labelName)}</span>
-              </div>
+            <div style="padding:5px 6px;border-radius:8px;min-height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8;" title="From ${escapeScheduleAttr(labelName)} — edit in that branch's schedule">
+              ${locLine(labelName, "#2563eb")}
               <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(s.startTime, s.endTime, { fallback: "--:-- - --:--" }))}</div>
-              ${lunchOther}
+              ${lunchOtherHtml(s)}
             </div>
           `;
         }).join("");
 
         return `
-          <div style="padding:4px;display:flex;flex-direction:column;gap:4px;min-height:50px;">
+          <div style="padding:0;display:flex;flex-direction:column;gap:3px;min-height:50px;">
             ${activeBlock}
             ${otherBlocks}
           </div>
@@ -4782,6 +5356,25 @@ function renderScheduleBoard(draft, validation, staffList) {
     const staffName = escapeScheduleHtml(staff.name || "Unknown Staff");
     const roleSafe = escapeScheduleHtml(roleLabel);
     const safeStaffName = escapeScheduleAttr(staff.name || "");
+    // Resolve this staff member's other-location shifts so mobile cards show a
+    // branch tag per day for multi-location staff (My-shifts view = own row;
+    // management view = any row). Mirrors the desktop unified-layout logic.
+    let mobileOtherLocByDate = null;
+    if (isOwnShiftsContext && myAuthedSid && staffKey === myAuthedSid && unifiedMapForBoard.size > 0) {
+      mobileOtherLocByDate = unifiedMapForBoard;
+    } else if (canBuild && allStaffOtherLocMap.size > 0) {
+      const lookupKeys = [staffKey, staff.staffId, staff.uid, staff.userUid, staff.id]
+        .map((k) => String(k || "").trim())
+        .filter(Boolean);
+      for (const k of lookupKeys) {
+        if (allStaffOtherLocMap.has(k)) {
+          mobileOtherLocByDate = allStaffOtherLocMap.get(k);
+          break;
+        }
+      }
+    }
+    const staffIsMultiLoc = Boolean(mobileOtherLocByDate && mobileOtherLocByDate.size > 0);
+    const activeLocNameMobile = activeLocName || "This branch";
     const dayCards = draftDays.map((day) => {
       const dayLabel = formatBoardDayLabel(day.date);
       const assignment = assignmentLookup.get(`${staffKey}::${day.date}`) || null;
@@ -4817,6 +5410,19 @@ function renderScheduleBoard(draft, validation, staffList) {
             : inboxApprovedOff
               ? `<span style="color:#0f766e;font-weight:800;">Approved off</span>`
               : `<span style="color:#9ca3af;font-weight:800;">Off</span>`;
+      // Multi-location: show which branch the active shift is at, and list any
+      // shifts the person has at other branches that day (display only).
+      const dayOtherShifts = mobileOtherLocByDate ? (mobileOtherLocByDate.get(day.date) || []) : [];
+      const activeBranchTagMobile = (staffIsMultiLoc && assignment && !dayIsClosed)
+        ? `<div style="margin-top:5px;display:flex;justify-content:flex-end;"><span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;font-size:10px;font-weight:800;line-height:1.25;"><span style="width:5px;height:5px;border-radius:50%;background:#7c3aed;"></span>${escapeScheduleHtml(activeLocNameMobile)}</span></div>`
+        : "";
+      const otherShiftsMobileHtml = dayOtherShifts.length
+        ? `<div style="margin-top:6px;display:flex;flex-direction:column;gap:5px;">${dayOtherShifts.map((s) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;background:#eff6ff;border:1px dashed #93c5fd;">
+              <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:800;color:#1d4ed8;line-height:1.25;"><span style="width:5px;height:5px;border-radius:50%;background:#2563eb;"></span>${escapeScheduleHtml(s.locationName || "Other branch")}</span>
+              <span style="font-size:12px;font-weight:900;color:#1d4ed8;">${escapeScheduleHtml(formatScheduleTimeRangeDisplay(s.startTime, s.endTime, { fallback: "--:-- - --:--" }))}</span>
+            </div>`).join("")}</div>`
+        : "";
       return `
         <div style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:7px 9px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -4829,7 +5435,9 @@ function renderScheduleBoard(draft, validation, staffList) {
               ${editBtn || manualAddBtn}
             </div>
           </div>
+          ${activeBranchTagMobile}
           ${noteHtml}
+          ${otherShiftsMobileHtml}
         </div>
       `;
     }).join("");
@@ -4964,6 +5572,7 @@ async function refreshSchedulePreview(options = {}) {
       loadScheduleStaffList(),
       loadApprovedScheduleRequests(),
     ]);
+    await ensureScheduleTechTypeMap();
 
     const rules = (window.settings && typeof window.settings.scheduleRules === "object")
       ? window.settings.scheduleRules
@@ -5082,6 +5691,13 @@ async function refreshSchedulePreview(options = {}) {
     // to switch active locations to see their full week.
     const myShiftsFromOtherLocs = await loadMyShiftsFromOtherLocationsForWeek(weekRange);
 
+    // Stage 2 "unified management view": for managers/owners building the
+    // schedule, pull EVERY staff member's other-location shifts so each cell
+    // can show a branch tag for multi-location staff (display only).
+    const allStaffOtherLocShifts = canEdit
+      ? await loadAllStaffShiftsFromOtherLocationsForWeek(weekRange)
+      : new Map();
+
     schedulePreviewState = {
       draft: draftWithBusinessRules,
       validation,
@@ -5092,6 +5708,7 @@ async function refreshSchedulePreview(options = {}) {
       businessHours,
       standByByDate,
       myShiftsFromOtherLocs,
+      allStaffOtherLocShifts,
     };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
@@ -5136,6 +5753,7 @@ async function refreshSchedulePreview(options = {}) {
       businessHours: undefined,
       standByByDate: {},
       myShiftsFromOtherLocs: new Map(),
+      allStaffOtherLocShifts: new Map(),
     };
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = schedulePreviewState;
@@ -5346,6 +5964,14 @@ function bindScheduleUi() {
     schedulePublishToggleBtn.__ffSchedulePublishBound = true;
     schedulePublishToggleBtn.addEventListener("click", () => {
       toggleScheduleWeekPublished();
+    });
+  }
+
+  const scheduleSaveDraftBtn = document.getElementById("scheduleSaveDraftBtn");
+  if (scheduleSaveDraftBtn && !scheduleSaveDraftBtn.__ffScheduleSaveDraftBound) {
+    scheduleSaveDraftBtn.__ffScheduleSaveDraftBound = true;
+    scheduleSaveDraftBtn.addEventListener("click", () => {
+      saveScheduleWeekDraftToCloud();
     });
   }
 
