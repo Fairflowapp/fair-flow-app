@@ -1,0 +1,1625 @@
+/**
+ * Dashboard (Overview) — Fair Flow
+ *
+ * Single-screen overview for the business: Queue, Tickets, Time Clock, Tasks
+ * plus Insights/Alerts. Read-only; safe to add without touching existing
+ * modules.
+ *
+ * Design notes
+ * ------------
+ * - Self-contained: injects its own #dashboardScreen DOM and styles.
+ * - Reads live data via globals when available, otherwise falls back to 0
+ *   or "—" placeholders. Existing modules are not modified.
+ * - Hides itself on capture-phase clicks of other main-nav buttons (same
+ *   pattern tickets.js uses) so we never have to change goToQueue / etc.
+ * - Re-renders on `ff-active-location-changed` so KPIs follow the active
+ *   branch.
+ *
+ * Logging prefix: [Dashboard]
+ */
+
+const LOG = "[Dashboard]";
+const LOC_LOG = "[Dashboard LocationScope]";
+const SCREEN_ID = "dashboardScreen";
+const NAV_BTN_ID = "dashboardBtn";
+
+// Capture-phase auto-hide on these other main-nav buttons. Mirrors the
+// pattern in tickets.js so we don't have to modify their goTo* functions.
+const OTHER_NAV_IDS = [
+  "queueBtn",
+  "ticketsBtn",
+  "tasksBtn",
+  "chatBtn",
+  "inboxBtn",
+  "mediaBtn",
+  "inventoryNavBtn",
+  "scheduleBtn",
+  "trainingBtn",
+];
+
+let _injected = false;
+let _refreshTimer = null;
+let _dashboardRangeMode = (() => {
+  try { return localStorage.getItem("ff_dashboard_range_mode_v1") || "thisWeek"; } catch (_) { return "thisWeek"; }
+})();
+let _dashboardCustomStart = (() => {
+  try { return localStorage.getItem("ff_dashboard_custom_start_v1") || ""; } catch (_) { return ""; }
+})();
+let _dashboardCustomEnd = (() => {
+  try { return localStorage.getItem("ff_dashboard_custom_end_v1") || ""; } catch (_) { return ""; }
+})();
+
+// ---------- DOM injection ----------
+
+function injectStyles() {
+  if (document.getElementById("ffDashboardStyles")) return;
+  const style = document.createElement("style");
+  style.id = "ffDashboardStyles";
+  style.textContent = `
+    #${SCREEN_ID} {
+      display: none;
+      position: fixed;
+      top: var(--header-h, 60px);
+      left: 0; right: 0; bottom: 0;
+      background: #f5f6fa;
+      z-index: 9850;
+      flex-direction: column;
+      overflow: auto;
+      pointer-events: auto;
+    }
+    #${SCREEN_ID} .dash-wrap {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 2px 28px 48px 28px;
+      width: 100%;
+    }
+    #${SCREEN_ID} .dash-h1 {
+      display: inline-block;
+      vertical-align: middle;
+      margin: 0 8px 6px 0;
+      font-size: 16px;
+      font-weight: 700;
+      color: #111827;
+      letter-spacing: -0.01em;
+    }
+    #${SCREEN_ID} .dash-sub {
+      display: none;
+    }
+    #${SCREEN_ID} .dash-location {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      vertical-align: middle;
+      margin: 0 0 6px 0;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      color: #6b7280;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    #${SCREEN_ID} .dash-head-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 2px;
+    }
+    #${SCREEN_ID} .dash-title-group {
+      min-width: 0;
+    }
+    #${SCREEN_ID} .dash-range-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      flex-wrap: nowrap;
+      margin-left: auto;
+      margin-top: 6px;
+    }
+    #${SCREEN_ID} .dash-range-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    #${SCREEN_ID} .dash-range-select,
+    #${SCREEN_ID} .dash-range-date {
+      height: 32px;
+      border: 1px solid #e5e7eb;
+      border-radius: 999px;
+      background: #fff;
+      color: #374151;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 0 10px;
+      outline: none;
+    }
+    #${SCREEN_ID} .dash-range-date {
+      border-radius: 10px;
+      width: 132px;
+    }
+    #${SCREEN_ID} .dash-range-custom {
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+    #${SCREEN_ID} .dash-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      margin: 12px 2px 7px 2px;
+    }
+    #${SCREEN_ID} .dash-kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+    }
+    #${SCREEN_ID} .dash-kpi {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 11px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    #${SCREEN_ID} .dash-kpi-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .dash-kpi-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: #111827;
+      line-height: 1.1;
+    }
+    #${SCREEN_ID} .dash-kpi-foot {
+      font-size: 12px;
+      color: #6b7280;
+    }
+    #${SCREEN_ID} .dash-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    #${SCREEN_ID} .dash-card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 16px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    #${SCREEN_ID} .dash-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #${SCREEN_ID} .dash-card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #111827;
+      margin: 0;
+    }
+    #${SCREEN_ID} .dash-card-icon {
+      width: 32px; height: 32px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, rgba(157, 104, 185, 0.12), rgba(255, 149, 128, 0.12));
+      color: #9d68b9;
+    }
+    #${SCREEN_ID} .dash-card-icon svg {
+      width: 16px; height: 16px;
+    }
+    #${SCREEN_ID} .dash-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    #${SCREEN_ID} .dash-stat {
+      background: #f9fafb;
+      border: 1px solid #eef0f3;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    #${SCREEN_ID} .dash-stat-label {
+      font-size: 11px;
+      color: #6b7280;
+      font-weight: 500;
+    }
+    #${SCREEN_ID} .dash-stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111827;
+      margin-top: 2px;
+    }
+    #${SCREEN_ID} .dash-meta {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+    #${SCREEN_ID} .dash-meta b {
+      color: #374151;
+      font-weight: 600;
+    }
+    #${SCREEN_ID} .dash-link {
+      align-self: flex-start;
+      background: none;
+      border: 0;
+      color: #9d68b9;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    #${SCREEN_ID} .dash-link:hover {
+      text-decoration: underline;
+    }
+    #${SCREEN_ID} .dash-insights-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    #${SCREEN_ID} .dash-insight {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-radius: 10px;
+      color: #9a3412;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    #${SCREEN_ID} .dash-insight.is-info {
+      background: #eff6ff;
+      border-color: #bfdbfe;
+      color: #1e40af;
+    }
+    #${SCREEN_ID} .dash-insight.is-good {
+      background: #ecfdf5;
+      border-color: #a7f3d0;
+      color: #065f46;
+    }
+    #${SCREEN_ID} .dash-insight-ico {
+      flex-shrink: 0;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 900px) {
+      #${SCREEN_ID} .dash-wrap { padding: 16px 14px 32px 14px; }
+      #${SCREEN_ID} .dash-h1,
+      #${SCREEN_ID} .dash-location { margin-left: 0; }
+      #${SCREEN_ID} .dash-range-controls { justify-content: flex-start; width: 100%; }
+      #${SCREEN_ID} .dash-grid { grid-template-columns: 1fr; }
+      #${SCREEN_ID} .dash-stats { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      /* Match the global mobile header behavior used by every other module:
+         the purple top bar must respect the device safe-area-inset-top (iOS
+         status bar) and use the same z-index as the rest of the app so it
+         sits below the time/battery row, not over it. */
+      body.ff-dashboard-open .header {
+        position: fixed !important;
+        top: constant(safe-area-inset-top) !important;
+        top: env(safe-area-inset-top, 0px) !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 100450 !important;
+      }
+      #${SCREEN_ID} {
+        top: var(--header-h, 60px) !important;
+        bottom: calc(70px + env(safe-area-inset-bottom, 0px)) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+        z-index: 9850;
+      }
+      #${SCREEN_ID} .dash-wrap {
+        padding: 14px 18px calc(118px + env(safe-area-inset-bottom, 0px)) 18px;
+        box-sizing: border-box;
+      }
+      #${SCREEN_ID} .dash-head-row {
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      #${SCREEN_ID} .dash-range-controls {
+        align-items: stretch;
+        gap: 8px;
+      }
+      #${SCREEN_ID} .dash-range-label {
+        width: 100%;
+      }
+      #${SCREEN_ID} .dash-range-select {
+        width: 100%;
+        min-height: 38px;
+        border-radius: 12px;
+      }
+      #${SCREEN_ID} .dash-range-custom {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+      #${SCREEN_ID} .dash-range-date {
+        flex: 1 1 135px;
+        min-width: 0;
+      }
+      #${SCREEN_ID} .dash-kpis {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      #${SCREEN_ID} .dash-kpi {
+        padding: 10px 11px;
+        border-radius: 13px;
+      }
+      #${SCREEN_ID} .dash-kpi-value {
+        font-size: 22px;
+      }
+      #${SCREEN_ID} .dash-card {
+        padding: 13px 14px;
+        border-radius: 15px;
+      }
+      #${SCREEN_ID} .dash-insight {
+        padding: 12px 12px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function buildScreen() {
+  if (document.getElementById(SCREEN_ID)) return document.getElementById(SCREEN_ID);
+  const root = document.createElement("div");
+  root.id = SCREEN_ID;
+  root.innerHTML = `
+    <div class="dash-wrap" id="ffDashWrap">
+      <div class="dash-head-row">
+        <div class="dash-title-group">
+          <h1 class="dash-h1">Dashboard</h1>
+          <p class="dash-sub" id="ffDashSubtitle">Overview of your business activity</p>
+          <div class="dash-location" id="ffDashLocationLabel">—</div>
+        </div>
+        <div class="dash-range-controls" aria-label="Dashboard date range">
+          <span class="dash-range-label">Date range</span>
+          <select id="ffDashRangeSelect" class="dash-range-select">
+            <option value="today">Today</option>
+            <option value="thisWeek">This week</option>
+            <option value="thisMonth">This month</option>
+            <option value="last7">Last 7 days</option>
+            <option value="custom">Custom date</option>
+          </select>
+          <span id="ffDashCustomRange" class="dash-range-custom">
+            <input id="ffDashCustomStart" class="dash-range-date" type="date" aria-label="Custom start date">
+            <span style="font-size:12px;color:#9ca3af;">to</span>
+            <input id="ffDashCustomEnd" class="dash-range-date" type="date" aria-label="Custom end date">
+          </span>
+        </div>
+      </div>
+
+      <div class="dash-section-title" id="ffDashGlanceTitle">At a glance</div>
+      <div class="dash-kpis" id="ffDashKpis"></div>
+
+      <div class="dash-section-title">Modules</div>
+      <div class="dash-grid" id="ffDashGrid"></div>
+
+      <div class="dash-section-title">Insights</div>
+      <div class="dash-card">
+        <div class="dash-card-header">
+          <h3 class="dash-card-title">Insights &amp; alerts</h3>
+          <span class="dash-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/><circle cx="12" cy="12" r="4"/></svg>
+          </span>
+        </div>
+        <ul class="dash-insights-list" id="ffDashInsights"></ul>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  return root;
+}
+
+// ---------- Data helpers (best-effort, never throw) ----------
+
+function safeArr(v) {
+  return Array.isArray(v) ? v : [];
+}
+
+function getDashboardLocationScope() {
+  let id = "";
+  try {
+    if (typeof window.ffGetActiveLocationId === "function") id = String(window.ffGetActiveLocationId() || "").trim();
+  } catch (_) {}
+  if (!id) {
+    try { id = String(window.__ff_active_location_id || window.activeLocationId || window.currentLocationId || "").trim(); } catch (_) {}
+  }
+  let name = "";
+  try {
+    const lists = [
+      typeof window.ffGetActiveLocations === "function" ? window.ffGetActiveLocations() : null,
+      typeof window.ffGetLocations === "function" ? window.ffGetLocations() : null,
+      window.ffLocationsState?.locations,
+    ];
+    for (const list of lists) {
+      const match = (Array.isArray(list) ? list : []).find((loc) => String(loc?.id || loc?.locationId || "").trim() === id);
+      if (match) {
+        name = String(match.name || match.label || match.title || id).trim();
+        break;
+      }
+    }
+  } catch (_) {}
+  return {
+    id,
+    name: name || id || "",
+    label: id ? `${name || id}` : "Select location",
+    hasLocation: !!id,
+  };
+}
+
+function recordMatchesDashboardLocation(record, scope) {
+  if (!scope?.hasLocation) return false;
+  const loc = String(record?.locationId || record?.locId || record?.branchId || "").trim();
+  return !!loc && loc === scope.id;
+}
+
+function logDashboardScope(source, scope, before, after, skippedNoLocation) {
+  console.log(LOC_LOG, source, {
+    activeLocationId: scope?.id || "",
+    recordsBeforeFilter: before,
+    recordsAfterFilter: after,
+    skippedRecordsWithoutLocationId: skippedNoLocation,
+  });
+}
+
+function todayStartMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function endOfTodayMs() {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+
+function weekStartMs() {
+  const d = new Date();
+  const day = d.getDay(); // 0 = Sunday
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - day);
+  return d.getTime();
+}
+
+function monthStartMs() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(1);
+  return d.getTime();
+}
+
+function parseLocalDateStartMs(value) {
+  const s = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00`);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parseLocalDateEndMs(value) {
+  const s = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T23:59:59.999`);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function getDashboardDateRange() {
+  const now = Date.now();
+  const today = todayStartMs();
+  const mode = ["today", "thisWeek", "thisMonth", "last7", "custom"].includes(_dashboardRangeMode)
+    ? _dashboardRangeMode
+    : "thisWeek";
+  if (mode === "today") {
+    return { mode, startMs: today, endMs: endOfTodayMs(), label: "Today", shortLabel: "Today" };
+  }
+  if (mode === "thisMonth") {
+    return { mode, startMs: monthStartMs(), endMs: now, label: "This month", shortLabel: "This month" };
+  }
+  if (mode === "last7") {
+    return { mode, startMs: now - (7 * 24 * 60 * 60 * 1000), endMs: now, label: "Last 7 days", shortLabel: "Last 7 days" };
+  }
+  if (mode === "custom") {
+    const start = parseLocalDateStartMs(_dashboardCustomStart);
+    const end = parseLocalDateEndMs(_dashboardCustomEnd);
+    if (start != null && end != null && end >= start) {
+      return {
+        mode,
+        startMs: start,
+        endMs: end,
+        label: `${_dashboardCustomStart} to ${_dashboardCustomEnd}`,
+        shortLabel: "Custom date",
+      };
+    }
+  }
+  return { mode: "thisWeek", startMs: weekStartMs(), endMs: now, label: "This week", shortLabel: "This week" };
+}
+
+function inDashboardRange(ms, range) {
+  return Number.isFinite(ms) && ms >= range.startMs && ms <= range.endMs;
+}
+
+function eventMillis(v) {
+  return toMillis(v);
+}
+
+function fmtNumber(n) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  if (typeof n !== "number") return String(n);
+  if (Math.abs(n) >= 1000) return n.toLocaleString();
+  return String(n);
+}
+
+function fmtMinutes(min) {
+  if (!Number.isFinite(min) || min <= 0) return "—";
+  if (min < 60) return `${Math.round(min)} min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function fmtHourRange(hour24) {
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return "—";
+  const next = (hour24 + 1) % 24;
+  const label = (h) => {
+    if (h === 0) return "12 AM";
+    if (h === 12) return "12 PM";
+    return h < 12 ? `${h} AM` : `${h - 12} PM`;
+  };
+  return `${label(hour24).replace(/ AM| PM/, "")}–${label(next)}`;
+}
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function fmtCurrency(v) {
+  if (!Number.isFinite(v)) return "—";
+  try {
+    return v.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  } catch (_) {
+    return `$${Math.round(v).toLocaleString()}`;
+  }
+}
+
+// Best-effort tickets snapshot. Tickets module keeps its data internal,
+// so we look for any of the common globals it (or future code) might
+// expose. Falls back gracefully.
+async function readTicketsSnapshot(range) {
+  const out = { rangeCount: 0, todayCount: 0, weekCount: 0, totalCount: 0, totalAmount: 0, hasData: false };
+  const scope = getDashboardLocationScope();
+  let list = [];
+  if (Array.isArray(window.currentTickets)) list = window.currentTickets;
+  else if (Array.isArray(window.allTickets)) list = window.allTickets;
+  else if (Array.isArray(window.ticketsCache)) list = window.ticketsCache;
+  if (!list.length && typeof window.ffGetCurrentTickets === "function") {
+    try {
+      const visibleTickets = window.ffGetCurrentTickets();
+      if (Array.isArray(visibleTickets)) list = visibleTickets;
+    } catch (err) {
+      console.warn(LOG, "ffGetCurrentTickets failed", err);
+    }
+  }
+  if (!list.length && typeof window.ffLoadTicketsForAnalytics === "function") {
+    try {
+      const loadedTickets = await window.ffLoadTicketsForAnalytics();
+      if (Array.isArray(loadedTickets)) list = loadedTickets;
+    } catch (err) {
+      console.warn(LOG, "ffLoadTicketsForAnalytics failed", err);
+    }
+  }
+  if (!list.length) return out;
+  const before = list.length;
+  let skippedNoLocation = 0;
+  list = list.filter((ticket) => {
+    const loc = String(ticket?.locationId || "").trim();
+    if (!loc) {
+      skippedNoLocation += 1;
+      return false;
+    }
+    return scope.hasLocation && loc === scope.id;
+  });
+  logDashboardScope("tickets", scope, before, list.length, skippedNoLocation);
+  if (!scope.hasLocation || !list.length) return out;
+
+  out.hasData = true;
+  out.totalCount = list.length;
+  const todayMs = todayStartMs();
+  const weekMs = weekStartMs();
+  list.forEach((t) => {
+    const created = t && (t.createdAtMs || t.createdAt || t.created || t.timestamp);
+    let ms = null;
+    if (typeof created === "number") ms = created;
+    else if (created && typeof created.toMillis === "function") {
+      try { ms = created.toMillis(); } catch (_) {}
+    } else if (created && typeof created.seconds === "number") {
+      ms = created.seconds * 1000;
+    } else if (typeof created === "string") {
+      const p = Date.parse(created);
+      if (!Number.isNaN(p)) ms = p;
+    }
+    if (ms != null) {
+      if (ms >= todayMs) out.todayCount += 1;
+      if (ms >= weekMs) out.weekCount += 1;
+      if (!range || inDashboardRange(ms, range)) {
+        out.rangeCount += 1;
+        const amt = Number(t && (t.totalAmount ?? t.total ?? t.amount));
+        if (Number.isFinite(amt)) out.totalAmount += amt;
+      }
+    }
+  });
+  out.totalCount = out.rangeCount;
+  return out;
+}
+
+// ---------- Queue metrics (from window.log / ffv24_log) ----------
+//
+// Source: queue-cloud.js syncs salons/{salonId}/queueState/{locationId}.log into
+// `window.log` (and localStorage `ffv24_log`). Entries are an array of strings
+// in chronological-DESC order, each in the form
+//   "MM/DD/YYYY, h:mm:ss AM <ACTION>"
+// where <ACTION> is one of (case sensitive on the verb keywords):
+//   join: <name>
+//   START -> IN SERVICE: <name>
+//   FINISH -> Back to end: <name>
+//   HOLD: <name> | RELEASE: <name>
+//   MOVE UP: <name> | MOVE DOWN: <name>
+// Newer object-shaped entries (points corrections, etc.) carry their own ts /
+// action / source fields and are skipped unless source === 'queue'.
+const QM_LOG_PREFIX = "[Dashboard QueueMetrics]";
+
+function _qmReadRawLog() {
+  try {
+    if (Array.isArray(window.log) && window.log.length) return window.log;
+  } catch (_) {}
+  try {
+    const raw = localStorage.getItem("ffv24_log");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Parse a single log entry (string or object) into { ts, action, worker } or null.
+function _qmParseEntry(entry) {
+  if (entry == null) return null;
+  if (typeof entry === "object") {
+    const source = String(entry.source || "queue").toLowerCase();
+    if (source !== "queue") return null;
+    const ts = Number(entry.ts || entry.timestamp);
+    if (!Number.isFinite(ts)) return null;
+    const action = String(entry.action || entry.actionText || "").trim();
+    const worker = String(entry.worker || entry.assignedTo || "").trim();
+    const typedAction = entry.type === "queue_check_out" ? `${action} queue_check_out` : action;
+    const locationId = String(entry.locationId || entry.locId || "").trim();
+    return { ts, action: typedAction, worker, locationId };
+  }
+  if (typeof entry !== "string") return null;
+  // Match "MM/DD/YYYY, h:mm:ss AM/PM <rest>"
+  const m = entry.match(/^(\d{1,2}\/\d{1,2}\/\d{4}),\s*([\d:]+\s*[AP]M)\s*(.*)$/);
+  if (!m) return null;
+  const [, dateStr, timeStr, rest] = m;
+  const ts = Date.parse(`${dateStr} ${timeStr}`);
+  if (!Number.isFinite(ts)) return null;
+  const action = (rest || "").trim();
+  const worker = _qmExtractWorker(action);
+  return { ts, action, worker, locationId: "" };
+}
+
+function _qmExtractWorker(action) {
+  if (!action) return "";
+  let mm = action.match(/IN SERVICE:\s*(.+)$/i); if (mm) return mm[1].trim();
+  mm = action.match(/Back to end:\s*(.+)$/i);    if (mm) return mm[1].trim();
+  mm = action.match(/^join:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^(JOIN|START|FINISH)\s+(?![•·>-])(.+)$/i); if (mm) return mm[2].trim();
+  mm = action.match(/^HOLD:\s*(.+)$/i);          if (mm) return mm[1].trim();
+  mm = action.match(/^RELEASE:\s*(.+)$/i);       if (mm) return mm[1].trim();
+  mm = action.match(/^MOVE (?:UP|DOWN):\s*(.+)$/i); if (mm) return mm[1].trim();
+  const idx = action.lastIndexOf(":");
+  return idx > -1 ? action.slice(idx + 1).trim() : "";
+}
+
+function _qmActionKind(action) {
+  if (!action) return null;
+  if (/^JOIN\b|^join:/i.test(action)) return "join";
+  if (/^START\b|IN SERVICE:/i.test(action)) return "start";
+  if (/^FINISH\b|Back to end:/i.test(action)) return "finish";
+  if (/Remove from queue|Leave queue|queue_check_out/i.test(action)) return "checkout";
+  if (/^HOLD:/i.test(action)) return "hold";
+  if (/^RELEASE:/i.test(action)) return "release";
+  if (/^MOVE (?:UP|DOWN):/i.test(action)) return "move";
+  return null;
+}
+
+// Compute queue metrics for [fromMs, nowMs]. Returns nulls when no data.
+function computeQueueMetrics(fromMs, endMs = Date.now()) {
+  const scope = getDashboardLocationScope();
+  const result = {
+    avgWaitMin: null,
+    longestWaitMin: null,
+    busiestDay: null,
+    peakHour: null,
+    waitCount: 0,
+    activityCount: 0,
+    sourceFound: false,
+  };
+  let raw;
+  try {
+    raw = _qmReadRawLog();
+  } catch (e) {
+    console.warn(QM_LOG_PREFIX, "error reading log", e);
+    return result;
+  }
+  if (!Array.isArray(raw) || !raw.length) {
+    console.log(QM_LOG_PREFIX, "no historical queue data source found");
+    return result;
+  }
+  result.sourceFound = true;
+  console.log(QM_LOG_PREFIX, "source detected", { entries: raw.length });
+
+  // Parse + chronological order. Legacy forced-log entries used unshift()
+  // (newest-first), while newer queue/history entries use push()
+  // (oldest-first). Sort by timestamp so join → START pairs resolve
+  // correctly regardless of write path.
+  const parsed = [];
+  let skippedNoLocation = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    const p = _qmParseEntry(raw[i]);
+    if (!p || p.ts < fromMs || p.ts > endMs) continue;
+    if (!p.locationId) {
+      skippedNoLocation += 1;
+      continue;
+    }
+    if (scope.hasLocation && p.locationId === scope.id) parsed.push(p);
+  }
+  logDashboardScope("queue-events", scope, raw.length, parsed.length, skippedNoLocation);
+  parsed.sort((a, b) => a.ts - b.ts);
+  if (!parsed.length) {
+    console.log(QM_LOG_PREFIX, "no events in range");
+    return result;
+  }
+
+  const dayCounts = new Map();
+  const hourCounts = new Map();
+  const staffStates = new Map();
+  const seenEvents = new Set();
+  const waits = [];
+
+  function closeIdle(state, ts) {
+    if (!state || !Number.isFinite(state.idleStart) || ts <= state.idleStart) {
+      if (state) state.idleStart = null;
+      return;
+    }
+    state.waitMinutes += (ts - state.idleStart) / 60000;
+    state.idleStart = null;
+  }
+
+  function recordCompletedWait(state) {
+    if (!state || !Number.isFinite(state.waitMinutes) || state.waitMinutes <= 0) return;
+    waits.push(state.waitMinutes);
+    state.waitMinutes = 0;
+    state.joinedAt = null;
+  }
+
+  function createAvailableState(ts) {
+    return {
+      joinedAt: ts,
+      idleStart: ts,
+      waitMinutes: 0,
+      inService: false,
+      onHold: false,
+    };
+  }
+
+  parsed.forEach((ev) => {
+    const kind = _qmActionKind(ev.action);
+    if (!kind) return;
+    const w = (ev.worker || "").toLowerCase();
+    const dedupeKey = `${kind}|${w || ev.action.toLowerCase()}|${Math.round(ev.ts / 5000)}`;
+    if (seenEvents.has(dedupeKey)) return;
+    seenEvents.add(dedupeKey);
+    result.activityCount += 1;
+    const d = new Date(ev.ts);
+    const dayKey = d.getDay();
+    const hourKey = d.getHours();
+    dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
+    hourCounts.set(hourKey, (hourCounts.get(hourKey) || 0) + 1);
+    if (kind === "join" && w) {
+      const existing = staffStates.get(w);
+      if (existing) closeIdle(existing, ev.ts);
+      staffStates.set(w, createAvailableState(ev.ts));
+    } else if (kind === "start" && w) {
+      let state = staffStates.get(w);
+      if (!state) {
+        state = {
+          joinedAt: null,
+          idleStart: null,
+          waitMinutes: 0,
+          inService: false,
+          onHold: false,
+        };
+        staffStates.set(w, state);
+      }
+      closeIdle(state, ev.ts);
+      recordCompletedWait(state);
+      state.inService = true;
+      state.onHold = false;
+    } else if (kind === "finish" && w) {
+      let state = staffStates.get(w);
+      if (state) {
+        state.inService = false;
+        state.onHold = false;
+        state.joinedAt = ev.ts;
+        state.idleStart = ev.ts;
+      } else {
+        staffStates.set(w, createAvailableState(ev.ts));
+      }
+    } else if (kind === "hold" && w) {
+      const state = staffStates.get(w);
+      if (state && !state.onHold) {
+        closeIdle(state, ev.ts);
+        state.onHold = true;
+      }
+    } else if (kind === "release" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        state.onHold = false;
+        if (!state.inService) state.idleStart = ev.ts;
+      }
+    } else if (kind === "checkout" && w) {
+      const state = staffStates.get(w);
+      if (state) {
+        closeIdle(state, ev.ts);
+        recordCompletedWait(state);
+        staffStates.delete(w);
+      }
+    }
+  });
+
+  if (waits.length) {
+    const total = waits.reduce((a, b) => a + b, 0);
+    result.avgWaitMin = total / waits.length;
+    result.longestWaitMin = waits.reduce((a, b) => (b > a ? b : a), 0);
+    result.waitCount = waits.length;
+  }
+
+  if (dayCounts.size) {
+    let bestDay = null, bestDayCount = -1;
+    dayCounts.forEach((count, day) => {
+      if (count > bestDayCount) { bestDayCount = count; bestDay = day; }
+    });
+    if (bestDay != null) result.busiestDay = DAY_NAMES[bestDay];
+  }
+  if (hourCounts.size) {
+    let bestHour = null, bestHourCount = -1;
+    hourCounts.forEach((count, hour) => {
+      if (count > bestHourCount) { bestHourCount = count; bestHour = hour; }
+    });
+    if (bestHour != null) result.peakHour = bestHour;
+  }
+
+  console.log(QM_LOG_PREFIX, "metrics calculated", {
+    waits: waits.length,
+    avgWaitMin: result.avgWaitMin,
+    longestWaitMin: result.longestWaitMin,
+    busiestDay: result.busiestDay,
+    peakHour: result.peakHour,
+    activity: result.activityCount,
+  });
+  return result;
+}
+
+function readQueueSnapshot(range) {
+  const scope = getDashboardLocationScope();
+  const rawQ = safeArr(window.queue);
+  const rawService = safeArr(window.service);
+  let skippedNoLocation = 0;
+  const filterQueueRows = (rows) => rows.filter((row) => {
+    const loc = String(row?.locationId || row?.locId || "").trim();
+    if (!loc) {
+      // queue-cloud already subscribes to salons/{salonId}/queueState/{activeLocationId};
+      // legacy rows from that scoped document may not carry locationId.
+      return scope.hasLocation;
+    }
+    return scope.hasLocation && loc === scope.id;
+  });
+  const q = filterQueueRows(rawQ);
+  const service = filterQueueRows(rawService);
+  logDashboardScope("queue-live", scope, rawQ.length + rawService.length, q.length + service.length, skippedNoLocation);
+  const out = {
+    inQueue: q.length,
+    inService: service.length,
+    held: q.filter((x) => x && x.held).length,
+    avgWaitMin: null,
+    longestWaitMin: null,
+    busiestDay: null,
+    peakHour: null,
+  };
+  try {
+    const metrics = computeQueueMetrics(range?.startMs || weekStartMs(), range?.endMs || Date.now());
+    out.avgWaitMin = metrics.avgWaitMin;
+    out.longestWaitMin = metrics.longestWaitMin;
+    out.busiestDay = metrics.busiestDay;
+    out.peakHour = metrics.peakHour;
+  } catch (e) {
+    console.warn(QM_LOG_PREFIX, "error calculating metrics", e);
+  }
+  return out;
+}
+
+function readTasksSnapshot(range) {
+  const scope = getDashboardLocationScope();
+  const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
+  const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
+  const rows = [];
+  const pushRows = (tab, kind, list, scopedByStorage = false) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((task) => {
+      if (!task || typeof task !== "object") return;
+      rows.push({ ...task, __tab: tab, __kind: kind, __scopedByStorage: scopedByStorage });
+    });
+  };
+  const cache = window.tasksCache;
+  if (cache && typeof cache === "object") {
+    tabs.forEach((tab) => {
+      const v = cache[tab];
+      if (Array.isArray(v)) {
+        pushRows(tab, "active", v, false);
+      } else if (v && typeof v === "object") {
+        pushRows(tab, "active", Array.isArray(v.active) ? v.active : v.items, false);
+        pushRows(tab, "pending", v.pending, false);
+        pushRows(tab, "done", v.done, false);
+      }
+    });
+  }
+  // Current Tasks storage is already location-scoped by tasks-cloud.js, so rows
+  // generally do not carry locationId. Use it as the primary fallback/source.
+  try {
+    tabs.forEach((tab) => {
+      ["active", "pending", "done"].forEach((kind) => {
+        const raw = localStorage.getItem(`ff_tasks_${tab}_${kind}_v1`);
+        const list = raw ? JSON.parse(raw) : [];
+        pushRows(tab, kind, Array.isArray(list) ? list : [], true);
+      });
+    });
+  } catch (e) {
+    console.warn(LOG, "tasks localStorage read failed", e);
+  }
+  if (!rows.length) return out;
+  let before = 0;
+  let skippedNoLocation = 0;
+  let scopedCount = 0;
+  let totalDone = 0;
+  let totalOpen = 0;
+  const seen = new Map();
+  rows.forEach((task, index) => {
+    before += 1;
+    const loc = String(task.locationId || task.locId || "").trim();
+    if (!task.__scopedByStorage) {
+      if (!loc) {
+        skippedNoLocation += 1;
+        return;
+      }
+      if (!scope.hasLocation || loc !== scope.id) return;
+    }
+    const id = String(task.taskId || task.id || `${task.__tab}:${task.__kind}:${task.title || index}`).trim();
+    const key = `${task.__tab || "task"}:${id}`;
+    const status = String(task.status || task.state || "").toLowerCase();
+    const taskMs = eventMillis(
+      task.completedAt || task.doneAt || task.updatedAt || task.createdAt || task.createdAtMs || task.ts || task.timestamp
+    );
+    if (taskMs && range && !inDashboardRange(taskMs, range)) return;
+    const isDone = task.__kind === "done" || status === "done" || status === "completed" || task.completed === true || !!task.completedAt || !!task.doneAt;
+    const isPending = task.__kind === "pending" || status === "pending" || !!task.assignedTo;
+    const current = seen.get(key) || { done: false, pending: false };
+    current.done = current.done || isDone;
+    current.pending = current.pending || isPending;
+    seen.set(key, current);
+  });
+  seen.forEach((task) => {
+    scopedCount += 1;
+    if (task.done) totalDone += 1;
+    else totalOpen += 1;
+  });
+  logDashboardScope("tasks", scope, before, scopedCount, skippedNoLocation);
+  if (!scopedCount) return out;
+  out.hasData = true;
+  out.opened = scopedCount;
+  out.completed = totalDone;
+  out.openCount = totalOpen;
+  out.completionRate = scopedCount > 0 ? Math.round((totalDone / scopedCount) * 100) : 0;
+  return out;
+}
+
+async function readTimeClockSnapshot(range) {
+  const out = { totalHours: 0, overtimeHours: 0, topStaffName: null, hasData: false };
+  const scope = getDashboardLocationScope();
+  if (!scope.hasLocation) {
+    logDashboardScope("time-clock", scope, 0, 0, 0);
+    return out;
+  }
+  if (typeof window.ffListTimeEntriesForSalon !== "function") return out;
+  try {
+    const fromDate = new Date(range?.startMs || weekStartMs());
+    const entries = await window.ffListTimeEntriesForSalon({
+      from: fromDate,
+      locationId: scope.id,
+      statuses: ["open", "closed"],
+      maxResults: 500,
+    });
+    if (!Array.isArray(entries) || !entries.length) return out;
+    const skippedNoLocation = entries.filter((entry) => !String(entry?.locationId || "").trim()).length;
+    const scopedEntries = entries.filter((entry) => recordMatchesDashboardLocation(entry, scope));
+    logDashboardScope("time-clock", scope, entries.length, scopedEntries.length, skippedNoLocation);
+    if (!scopedEntries.length) return out;
+    out.hasData = true;
+    const byStaff = new Map();
+    scopedEntries.forEach((e) => {
+      const inAt = e && (e.clockInAt || e.clockIn || e.startAt);
+      const outAt = e && (e.clockOutAt || e.clockOut || e.endAt);
+      const inMs = toMillis(inAt);
+      const outMs = toMillis(outAt) || (e && e.status === "open" ? Date.now() : null);
+      if (!inMs || !outMs || outMs <= inMs) return;
+      const startMs = Math.max(inMs, range?.startMs || inMs);
+      const endMs = Math.min(outMs, range?.endMs || outMs);
+      if (endMs <= startMs) return;
+      const hours = (endMs - startMs) / 3600000;
+      out.totalHours += hours;
+      const sid = String(e.staffId || e.staffMemberId || e.uid || "unknown");
+      const sname = resolveDashboardStaffName(sid, e.staffName || e.name || "");
+      byStaff.set(sid, { name: sname, hours: (byStaff.get(sid)?.hours || 0) + hours });
+    });
+    // Naive overtime: hours over 40/week per staff.
+    byStaff.forEach((v) => {
+      if (v.hours > 40) out.overtimeHours += v.hours - 40;
+    });
+    let top = null;
+    byStaff.forEach((v) => { if (!top || v.hours > top.hours) top = v; });
+    if (top && top.name) out.topStaffName = top.name;
+  } catch (e) {
+    console.warn(LOG, "time-clock snapshot failed", e);
+  }
+  return out;
+}
+
+function resolveDashboardStaffName(staffId, fallback = "") {
+  const sid = String(staffId || "").trim();
+  const direct = String(fallback || "").trim();
+  if (direct && direct !== sid) return direct;
+  const readName = (row) => {
+    const id = String(row?.id || row?.staffId || row?.uid || row?.firebaseUid || "").trim();
+    if (!sid || id !== sid) return "";
+    return String(row?.name || row?.staffName || row?.displayName || row?.email || "").trim();
+  };
+  try {
+    const store = typeof window.ffGetStaffStore === "function" ? window.ffGetStaffStore() : null;
+    const list = Array.isArray(store?.staff) ? store.staff : [];
+    for (const row of list) {
+      const name = readName(row);
+      if (name) return name;
+    }
+  } catch (err) {
+    console.warn(LOG, "staff name helper failed", err);
+  }
+  try {
+    const store = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+    const list = Array.isArray(store?.staff) ? store.staff : [];
+    for (const row of list) {
+      const name = readName(row);
+      if (name) return name;
+    }
+  } catch (_) {}
+  return sid && sid !== "unknown" ? "Unknown staff" : "—";
+}
+
+function toMillis(v) {
+  if (!v) return null;
+  if (typeof v === "number") return v;
+  if (typeof v.toMillis === "function") {
+    try { return v.toMillis(); } catch (_) { return null; }
+  }
+  if (typeof v.seconds === "number") return v.seconds * 1000;
+  if (typeof v === "string") {
+    const p = Date.parse(v);
+    return Number.isNaN(p) ? null : p;
+  }
+  return null;
+}
+
+// ---------- Render ----------
+
+function renderDashboardLocation(scope = getDashboardLocationScope()) {
+  const el = document.getElementById("ffDashLocationLabel");
+  if (el) el.textContent = scope.label;
+}
+
+function renderDashboardRangeControls(range) {
+  const select = document.getElementById("ffDashRangeSelect");
+  const custom = document.getElementById("ffDashCustomRange");
+  const start = document.getElementById("ffDashCustomStart");
+  const end = document.getElementById("ffDashCustomEnd");
+  const title = document.getElementById("ffDashGlanceTitle");
+  if (select) select.value = range.mode || _dashboardRangeMode || "thisWeek";
+  if (custom) custom.style.display = (select?.value || range.mode) === "custom" ? "inline-flex" : "none";
+  if (start) start.value = _dashboardCustomStart || "";
+  if (end) end.value = _dashboardCustomEnd || "";
+  if (title) title.textContent = `${range.shortLabel || "Selected range"} at a glance`;
+}
+
+function bindDashboardRangeControls() {
+  const select = document.getElementById("ffDashRangeSelect");
+  const start = document.getElementById("ffDashCustomStart");
+  const end = document.getElementById("ffDashCustomEnd");
+  if (select && !select.__ffDashBound) {
+    select.__ffDashBound = true;
+    select.addEventListener("change", () => {
+      _dashboardRangeMode = select.value || "thisWeek";
+      try { localStorage.setItem("ff_dashboard_range_mode_v1", _dashboardRangeMode); } catch (_) {}
+      refresh();
+    });
+  }
+  if (start && !start.__ffDashBound) {
+    start.__ffDashBound = true;
+    start.addEventListener("change", () => {
+      _dashboardCustomStart = start.value || "";
+      try { localStorage.setItem("ff_dashboard_custom_start_v1", _dashboardCustomStart); } catch (_) {}
+      refresh();
+    });
+  }
+  if (end && !end.__ffDashBound) {
+    end.__ffDashBound = true;
+    end.addEventListener("change", () => {
+      _dashboardCustomEnd = end.value || "";
+      try { localStorage.setItem("ff_dashboard_custom_end_v1", _dashboardCustomEnd); } catch (_) {}
+      refresh();
+    });
+  }
+}
+
+function renderKpis(snap, range) {
+  const root = document.getElementById("ffDashKpis");
+  if (!root) return;
+  const cards = [
+    { label: "Tickets", value: snap.tickets.hasData ? fmtNumber(snap.tickets.rangeCount) : "0", foot: range.label },
+    { label: "Revenue", value: snap.tickets.hasData && snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount) : "—", foot: range.label },
+    { label: "Avg wait time", value: fmtMinutes(snap.queue.avgWaitMin), foot: range.label },
+    { label: "Hours worked", value: snap.time.hasData ? `${snap.time.totalHours.toFixed(1)}h` : "0h", foot: range.label },
+    { label: "Overtime", value: snap.time.hasData ? `${snap.time.overtimeHours.toFixed(1)}h` : "0h", foot: range.label },
+    { label: "Tasks completed", value: fmtNumber(snap.tasks.completed), foot: range.label },
+  ];
+  root.innerHTML = cards.map((c) => `
+    <div class="dash-kpi">
+      <div class="dash-kpi-label">${escapeHtml(c.label)}</div>
+      <div class="dash-kpi-value">${escapeHtml(c.value)}</div>
+      <div class="dash-kpi-foot">${escapeHtml(c.foot)}</div>
+    </div>
+  `).join("");
+}
+
+function renderModuleCards(snap, range) {
+  const root = document.getElementById("ffDashGrid");
+  if (!root) return;
+
+  const queueCard = `
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3 class="dash-card-title">Queue Flow</h3>
+        <span class="dash-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </span>
+      </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
+      <div class="dash-stats">
+        <div class="dash-stat"><div class="dash-stat-label">Average wait time</div><div class="dash-stat-value">${escapeHtml(fmtMinutes(snap.queue.avgWaitMin))}</div></div>
+        <div class="dash-stat"><div class="dash-stat-label">Longest wait time</div><div class="dash-stat-value">${escapeHtml(fmtMinutes(snap.queue.longestWaitMin))}</div></div>
+      </div>
+      <div class="dash-meta">
+        <div>Busiest day in range: <b>${escapeHtml(snap.queue.busiestDay || "—")}</b></div>
+        <div>Peak hour in range: <b>${escapeHtml(snap.queue.peakHour == null ? "—" : fmtHourRange(snap.queue.peakHour))}</b></div>
+      </div>
+      <button type="button" class="dash-link" data-dash-action="queue-analytics">View Queue Analytics →</button>
+    </div>
+  `;
+
+  const ticketsCard = `
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3 class="dash-card-title">Tickets</h3>
+        <span class="dash-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </span>
+      </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
+      <div class="dash-stats">
+        <div class="dash-stat"><div class="dash-stat-label">Total tickets</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tickets.totalCount))}</div></div>
+        <div class="dash-stat"><div class="dash-stat-label">Total amount</div><div class="dash-stat-value">${escapeHtml(snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount) : "—")}</div></div>
+      </div>
+      <div class="dash-meta">
+        Average ticket: <b>${escapeHtml(snap.tickets.totalCount && snap.tickets.totalAmount ? fmtCurrency(snap.tickets.totalAmount / snap.tickets.totalCount) : "—")}</b>
+      </div>
+      <button type="button" class="dash-link" data-dash-action="tickets-analytics">View Tickets Analytics →</button>
+    </div>
+  `;
+
+  const timeCard = `
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3 class="dash-card-title">Time Clock</h3>
+        <span class="dash-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </span>
+      </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
+      <div class="dash-stats">
+        <div class="dash-stat"><div class="dash-stat-label">Total hours</div><div class="dash-stat-value">${snap.time.hasData ? `${snap.time.totalHours.toFixed(1)}h` : "0h"}</div></div>
+        <div class="dash-stat"><div class="dash-stat-label">Overtime</div><div class="dash-stat-value">${snap.time.hasData ? `${snap.time.overtimeHours.toFixed(1)}h` : "0h"}</div></div>
+      </div>
+      <div class="dash-meta">
+        Most hours by: <b>${escapeHtml(snap.time.topStaffName || "—")}</b>
+      </div>
+      <button type="button" class="dash-link" data-dash-action="time-analytics">View Time Analytics →</button>
+    </div>
+  `;
+
+  const tasksCard = `
+    <div class="dash-card">
+      <div class="dash-card-header">
+        <h3 class="dash-card-title">Tasks</h3>
+        <span class="dash-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+      </div>
+      <div class="dash-meta">Showing: <b>${escapeHtml(range.label)}</b></div>
+      <div class="dash-stats">
+        <div class="dash-stat"><div class="dash-stat-label">Tasks opened</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tasks.opened))}</div></div>
+        <div class="dash-stat"><div class="dash-stat-label">Completed</div><div class="dash-stat-value">${escapeHtml(fmtNumber(snap.tasks.completed))}</div></div>
+      </div>
+      <div class="dash-meta">
+        Completion rate: <b>${snap.tasks.completionRate == null ? "—" : `${snap.tasks.completionRate}%`}</b>
+        &nbsp;·&nbsp; Open tasks: <b>${escapeHtml(fmtNumber(snap.tasks.openCount))}</b>
+      </div>
+      <button type="button" class="dash-link" data-dash-action="tasks-analytics">View Tasks Analytics →</button>
+    </div>
+  `;
+
+  root.innerHTML = queueCard + ticketsCard + timeCard + tasksCard;
+
+  const ANALYTICS_LABELS = {
+    "queue-analytics": "Queue Analytics",
+    "tickets-analytics": "Tickets Analytics",
+    "time-analytics": "Time Analytics",
+    "tasks-analytics": "Tasks Analytics",
+  };
+  const ANALYTICS_ROUTES = {
+    "queue-analytics": "goToQueueAnalytics",
+    "tickets-analytics": "goToTicketsAnalytics",
+    "time-analytics": "goToTimeAnalytics",
+    "tasks-analytics": "goToTasksAnalytics",
+  };
+  const ANALYTICS_MODULES = {
+    "queue-analytics": { src: "/queue-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToQueueAnalytics" },
+    "tickets-analytics": { src: "/tickets-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTicketsAnalytics" },
+    "time-analytics": { src: "/time-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTimeAnalytics" },
+    "tasks-analytics": { src: "/tasks-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTasksAnalytics" },
+  };
+  root.querySelectorAll("[data-dash-action]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const action = btn.getAttribute("data-dash-action");
+      const label = ANALYTICS_LABELS[action] || "Analytics";
+      console.log(LOG, "analytics link clicked", action);
+      const routeFn = ANALYTICS_ROUTES[action];
+      if (routeFn && typeof window[routeFn] === "function") {
+        try {
+          window[routeFn]();
+          return;
+        } catch (err) {
+          console.warn(LOG, "route navigation failed", routeFn, err);
+        }
+      }
+      const moduleMeta = ANALYTICS_MODULES[action];
+      if (moduleMeta?.src) {
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = `Loading ${label}...`;
+        try {
+          const mod = await import(moduleMeta.src);
+          const fn = window[routeFn] || mod?.[moduleMeta.exportName];
+          if (typeof fn === "function") {
+            fn();
+            return;
+          }
+          console.warn(LOG, "analytics module loaded without route", action);
+        } catch (err) {
+          console.warn(LOG, "analytics module load failed", action, err);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = originalText;
+        }
+      }
+      try {
+        if (window.ffToast && typeof window.ffToast.info === "function") {
+          window.ffToast.info(`${label} is still loading. Please try again in a moment.`, 3500);
+        } else if (typeof window.showToast === "function") {
+          window.showToast(`${label} is still loading. Please try again in a moment.`, 3500);
+        }
+      } catch (err) {
+        console.warn(LOG, "toast failed", err);
+      }
+    });
+  });
+}
+
+function buildInsights(snap) {
+  const out = [];
+  // High wait
+  if (Number.isFinite(snap.queue.avgWaitMin) && snap.queue.avgWaitMin >= 20) {
+    out.push({ kind: "warn", icon: "⚠️", text: `High wait times detected — average is ${fmtMinutes(snap.queue.avgWaitMin)}.` });
+  }
+  // Big queue
+  if (snap.queue.inQueue >= 8) {
+    out.push({ kind: "warn", icon: "⚠️", text: `Long queue — ${snap.queue.inQueue} customers waiting right now.` });
+  }
+  // Overtime
+  if (snap.time.hasData && snap.time.overtimeHours >= 5) {
+    out.push({ kind: "warn", icon: "⚠️", text: `High overtime this week — ${snap.time.overtimeHours.toFixed(1)}h beyond 40h/staff.` });
+  }
+  // Tasks completion
+  if (snap.tasks.hasData && snap.tasks.completionRate != null && snap.tasks.completionRate < 50) {
+    out.push({ kind: "warn", icon: "⚠️", text: `Tasks completion is low — only ${snap.tasks.completionRate}% completed.` });
+  }
+  // Positive: nothing pending
+  if (!out.length) {
+    if (snap.tasks.hasData && snap.tasks.completionRate != null && snap.tasks.completionRate >= 90) {
+      out.push({ kind: "good", icon: "✅", text: `Great job — ${snap.tasks.completionRate}% of tasks are completed.` });
+    } else {
+      out.push({ kind: "info", icon: "ℹ️", text: "No alerts right now. Things look quiet." });
+    }
+  }
+  return out.slice(0, 4);
+}
+
+function renderInsights(snap) {
+  const root = document.getElementById("ffDashInsights");
+  if (!root) return;
+  const items = buildInsights(snap);
+  root.innerHTML = items.map((i) => {
+    const cls = i.kind === "good" ? "is-good" : i.kind === "info" ? "is-info" : "";
+    return `
+      <li class="dash-insight ${cls}">
+        <span class="dash-insight-ico" aria-hidden="true">${escapeHtml(i.icon)}</span>
+        <span>${escapeHtml(i.text)}</span>
+      </li>
+    `;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+async function refresh() {
+  const screen = document.getElementById(SCREEN_ID);
+  if (!screen || screen.style.display === "none") return;
+  console.log(LOG, "refresh");
+  const scope = getDashboardLocationScope();
+  const range = getDashboardDateRange();
+  console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
+  renderDashboardLocation(scope);
+  renderDashboardRangeControls(range);
+  const snap = {
+    tickets: await readTicketsSnapshot(range),
+    queue: readQueueSnapshot(range),
+    tasks: readTasksSnapshot(range),
+    time: { totalHours: 0, overtimeHours: 0, topStaffName: null, hasData: false },
+  };
+  try {
+    snap.time = await readTimeClockSnapshot(range);
+  } catch (e) {
+    console.warn(LOG, "async time refresh failed", e);
+  }
+  renderKpis(snap, range);
+  renderModuleCards(snap, range);
+  renderInsights(snap);
+}
+
+// ---------- Navigation ----------
+
+function hideOtherScreens() {
+  const ids = [
+    "tasksScreen",
+    "inboxScreen",
+    "chatScreen",
+    "mediaScreen",
+    "trainingScreen",
+    "scheduleScreen",
+    "timeClockScreen",
+    "ticketsScreen",
+    "inventoryScreen",
+    "manageQueueScreen",
+    "userProfileScreen",
+    "myProfileScreen",
+    "pointsAppScreen",
+    "owner-view",
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = "none";
+  });
+  ["#joinBar", ".joinBar", ".wrap", "#queueControls"].forEach((sel) => {
+    const el = document.querySelector(sel);
+    if (el) el.style.display = "none";
+  });
+}
+
+function bindAutoHideOnOtherNav() {
+  const screen = () => document.getElementById(SCREEN_ID);
+  OTHER_NAV_IDS.forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn || btn._ffDashHideHandler) return;
+    btn._ffDashHideHandler = () => {
+      const s = screen();
+      if (s) s.style.display = "none";
+      document.body.classList.remove("ff-dashboard-open");
+      const navBtn = document.getElementById(NAV_BTN_ID);
+      if (navBtn) navBtn.classList.remove("active");
+      if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
+      if (_refreshTimer) {
+        clearInterval(_refreshTimer);
+        _refreshTimer = null;
+      }
+    };
+    btn.addEventListener("click", btn._ffDashHideHandler, { capture: true });
+  });
+}
+
+export function goToDashboard() {
+  console.log(LOG, "goToDashboard");
+  if (typeof window.ffCurrentUserHasDashboardViewPermission === "function" && !window.ffCurrentUserHasDashboardViewPermission()) {
+    if (typeof window.showToast === "function") {
+      try { window.showToast("Dashboard access is not enabled for this staff member.", "error"); } catch (_) {}
+    }
+    return;
+  }
+  if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
+    try { window.ffCloseGlobalBlockingOverlays(); } catch (_) {}
+  }
+  if (typeof window.closeStaffMembersModal === "function") {
+    try { window.closeStaffMembersModal(); } catch (_) {}
+  }
+  ensureInjected();
+  hideOtherScreens();
+
+  // IMPORTANT: add the body class FIRST so the mobile CSS that switches the
+  // header to `position: fixed; top: env(safe-area-inset-top)` is applied
+  // before we measure. Otherwise getComputedStyle still sees the desktop
+  // default (sticky, top:0), topOffset comes out as 0, and --header-h ends
+  // up too small. That pushes the first row of content behind the purple
+  // bar on iOS.
+  document.body.classList.add("ff-dashboard-open");
+
+  const screen = document.getElementById(SCREEN_ID);
+  if (screen) {
+    screen.style.display = "flex";
+    screen.style.setProperty("pointer-events", "auto", "important");
+  }
+
+  const recomputeHeaderH = () => {
+    const headerEl = document.querySelector(".header");
+    if (!headerEl) return;
+    let topOffset = 0;
+    try {
+      const cs = getComputedStyle(headerEl);
+      if (cs && cs.position === "fixed") topOffset = parseFloat(cs.top) || 0;
+    } catch (_) {}
+    document.documentElement.style.setProperty("--header-h", `${headerEl.offsetHeight + topOffset}px`);
+  };
+  recomputeHeaderH();
+  // Re-measure after the browser has actually applied the body-class CSS
+  // (iOS Capacitor sometimes returns the pre-class computed style
+  // synchronously). Two rAFs is a well-known way to wait for a full paint.
+  requestAnimationFrame(function () {
+    recomputeHeaderH();
+    requestAnimationFrame(recomputeHeaderH);
+  });
+
+  document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
+  const btn = document.getElementById(NAV_BTN_ID);
+  if (btn) btn.classList.add("active");
+
+  refresh();
+
+  if (_refreshTimer) clearInterval(_refreshTimer);
+  _refreshTimer = setInterval(() => { refresh(); }, 30000);
+
+  if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
+}
+
+function ensureInjected() {
+  if (_injected) return;
+  injectStyles();
+  buildScreen();
+  bindDashboardRangeControls();
+  bindAutoHideOnOtherNav();
+  _injected = true;
+  console.log(LOG, "screen injected");
+}
+
+// ---------- Init ----------
+
+function init() {
+  // Make navigation function available even if the button is wired before
+  // this module finishes loading.
+  window.goToDashboard = goToDashboard;
+
+  ensureInjected();
+
+  const navBtn = document.getElementById(NAV_BTN_ID);
+  if (navBtn && !navBtn._ffDashBound) {
+    navBtn._ffDashBound = true;
+    navBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      goToDashboard();
+    });
+  }
+
+  // Re-render whenever the active branch changes.
+  if (!window.__ffDashLocationListenerBound) {
+    window.__ffDashLocationListenerBound = true;
+    document.addEventListener("ff-active-location-changed", () => {
+      console.log(LOG, "active location changed → refresh");
+      refresh();
+    });
+    document.addEventListener("ff-tickets-data-changed", () => {
+      console.log(LOG, "tickets data changed → refresh");
+      refresh();
+    });
+  }
+
+  console.log(LOG, "init complete");
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init, { once: true });
+} else {
+  init();
+}
