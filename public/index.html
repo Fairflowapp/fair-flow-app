@@ -38940,7 +38940,7 @@ function initializeAppsPanel() {
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260516_dashboard_class_first_recompute')
+              import('/dashboard.js?v=20260626_dashboard_split')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -64457,7 +64457,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260625_build_scope_warn", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260516_dashboard_class_first_recompute", type: "module", delay: 2500 },
+        { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260530_reorder_delete", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260623_mediafix", type: "module", delay: 2780 },
