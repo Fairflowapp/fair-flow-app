@@ -9,15 +9,21 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-
-let productCategories = [];
-let products = [];
-let selectedCategoryId = null;
-let selectedProductId = null;
-let activeTab = "details";
-let editorState = null;
-let productsCatalogError = "";
-let openProductCats = new Set();
+import {
+  escapeHtml,
+  moneyValue,
+  formatMoney,
+  getProductLocationOverrides,
+  getProductStaffOverrides,
+  getStaffProductId,
+  getStaffProductName,
+  getStaffDefaultProductCommission,
+  formatProductCommissionDefault,
+  ffStaffProductsGetOverrideForStaffMember,
+  ffStaffProductsDefaultsForStaffMember,
+  getProductInventory,
+} from "./products-helpers.js?v=20260626_products_split";
+import { pstate } from "./products-state.js?v=20260626_products_split";
 
 // ===== Products screen mobile drill-down (list -> product menu -> section) =====
 // Mirrors the Services screen pattern. On phones (<=640px) the two-pane desktop
@@ -75,19 +81,6 @@ if (typeof document !== "undefined" && !document.__ffProductsMobileBackDelegated
     _ffProductsMobileShowList();
   }, true);
 }
-let productsSidebarRenderedOnce = false;
-let _ffProdDragSrc = null;
-let _ffProdDragHoverEl = null;
-
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  }[ch]));
-}
 
 function getSalonId() {
   return window.currentSalonId || window.currentUserProfile?.salonId || null;
@@ -116,21 +109,8 @@ function ffProductsManageError() {
 }
 
 function categoryName(categoryId) {
-  const match = productCategories.find((cat) => String(cat.id) === String(categoryId));
+  const match = pstate.productCategories.find((cat) => String(cat.id) === String(categoryId));
   return match?.name || "Uncategorized";
-}
-
-function moneyValue(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function formatMoney(value) {
-  const n = moneyValue(value);
-  if (typeof window.ffFormatCurrency === "function") {
-    return window.ffFormatCurrency(n, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-  }
-  return "$" + n.toFixed(2);
 }
 
 // Toggle switch markup that reuses the app-wide slider style (the same one the
@@ -192,26 +172,26 @@ async function loadProductsCatalog() {
       getDocs(collection(db, `salons/${salonId}/productCategories`)),
       getDocs(collection(db, `salons/${salonId}/products`)),
     ]);
-    productCategories = catSnap.docs
+    pstate.productCategories = catSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
-    products = productSnap.docs
+    pstate.products = productSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
-    productsCatalogError = "";
-    if (editorState && editorState.mode === "product" && !productCategories.length) {
-      editorState = null;
+    pstate.productsCatalogError = "";
+    if (pstate.editorState && pstate.editorState.mode === "product" && !pstate.productCategories.length) {
+      pstate.editorState = null;
     }
   } catch (error) {
     console.warn("[Products] Unable to load catalog", error);
-    productCategories = [];
-    products = [];
-    productsCatalogError = "Products catalog is not available right now.";
+    pstate.productCategories = [];
+    pstate.products = [];
+    pstate.productsCatalogError = "Products catalog is not available right now.";
   }
 }
 
 function findCategory(catId) {
-  return productCategories.find((c) => String(c.id) === String(catId)) || null;
+  return pstate.productCategories.find((c) => String(c.id) === String(catId)) || null;
 }
 
 function getCategorySubcategories(cat) {
@@ -239,10 +219,10 @@ function genSubId() {
 // "General" group for products without a subcategory). Plus an Uncategorized
 // catch-all for products whose category was deleted.
 function groupedProductsNested() {
-  const known = new Set(productCategories.map((c) => String(c.id)));
-  const groups = productCategories.map((cat) => {
+  const known = new Set(pstate.productCategories.map((c) => String(c.id)));
+  const groups = pstate.productCategories.map((cat) => {
     const catId = String(cat.id);
-    const catProducts = products.filter((p) => String(p.categoryId || "") === catId);
+    const catProducts = pstate.products.filter((p) => String(p.categoryId || "") === catId);
     const subs = getCategorySubcategories(cat);
     const subIds = new Set(subs.map((s) => String(s.id)));
     const subgroups = subs.map((s) => ({
@@ -257,7 +237,7 @@ function groupedProductsNested() {
     }
     return { category: cat, subgroups, hasRealSubs: subs.length > 0 };
   });
-  const uncategorized = products.filter((p) => !p.categoryId || !known.has(String(p.categoryId)));
+  const uncategorized = pstate.products.filter((p) => !p.categoryId || !known.has(String(p.categoryId)));
   if (uncategorized.length) {
     groups.push({
       category: { id: "__uncategorized__", name: "Uncategorized" },
@@ -269,7 +249,7 @@ function groupedProductsNested() {
 }
 
 function renderProductSidebarRow(product, catId, subId) {
-  const selected = String(selectedProductId || "") === String(product.id);
+  const selected = String(pstate.selectedProductId || "") === String(product.id);
   const productOpacity = product.active === false ? "opacity:0.62;" : "";
   return `
     <div class="staff-sidebar-item ff-products-sidebar-product${selected ? " is-selected" : ""}" data-product-id="${escapeHtml(product.id)}" data-cat-id="${escapeHtml(catId)}" data-sub-id="${escapeHtml(subId || "")}" style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 8px;border:none;border-radius:6px;background:${selected ? "#ede9fe" : "transparent"};cursor:pointer;text-align:left;${productOpacity}">
@@ -282,8 +262,8 @@ function renderProductsSidebar() {
   const list = document.getElementById("productsCatalogList");
   if (!list) return;
   const groups = groupedProductsNested();
-  if (productsCatalogError) {
-    list.innerHTML = `<div style="padding:12px 20px;font-size:12px;color:#b45309;line-height:1.45;">${escapeHtml(productsCatalogError)}</div>`;
+  if (pstate.productsCatalogError) {
+    list.innerHTML = `<div style="padding:12px 20px;font-size:12px;color:#b45309;line-height:1.45;">${escapeHtml(pstate.productsCatalogError)}</div>`;
     return;
   }
   if (!groups.length) {
@@ -291,15 +271,15 @@ function renderProductsSidebar() {
     return;
   }
   // On first render, expand every category (matches the Services sidebar).
-  if (!productsSidebarRenderedOnce && openProductCats.size === 0 && groups.length) {
-    groups.forEach((g) => openProductCats.add(String(g.category.id)));
+  if (!pstate.productsSidebarRenderedOnce && pstate.openProductCats.size === 0 && groups.length) {
+    groups.forEach((g) => pstate.openProductCats.add(String(g.category.id)));
   }
-  productsSidebarRenderedOnce = true;
+  pstate.productsSidebarRenderedOnce = true;
 
   list.innerHTML = groups.map(({ category, subgroups, hasRealSubs }) => {
     const catId = String(category.id);
-    const catSelected = String(selectedCategoryId || "") === catId;
-    const isOpen = openProductCats.has(catId);
+    const catSelected = String(pstate.selectedCategoryId || "") === catId;
+    const isOpen = pstate.openProductCats.has(catId);
     const arrow = isOpen ? "\u25BE" : "\u25B8";
     const isUncategorized = catId === "__uncategorized__";
 
@@ -344,7 +324,7 @@ function renderProductsSidebar() {
       event.stopPropagation();
       const catId = btn.getAttribute("data-cat-id");
       if (!catId) return;
-      if (openProductCats.has(catId)) openProductCats.delete(catId); else openProductCats.add(catId);
+      if (pstate.openProductCats.has(catId)) pstate.openProductCats.delete(catId); else pstate.openProductCats.add(catId);
       renderProductsSidebar();
     });
   });
@@ -353,9 +333,9 @@ function renderProductsSidebar() {
     btn.addEventListener("click", (event) => {
       event.stopPropagation();
       closeProductsEditor();
-      selectedCategoryId = btn.getAttribute("data-product-category-id");
-      selectedProductId = null;
-      activeTab = "details";
+      pstate.selectedCategoryId = btn.getAttribute("data-product-category-id");
+      pstate.selectedProductId = null;
+      pstate.activeTab = "details";
       renderProducts();
       _ffProductsMobileShowDetail("detail");
     });
@@ -363,9 +343,9 @@ function renderProductsSidebar() {
   list.querySelectorAll(".ff-products-sidebar-product").forEach((row) => {
     row.addEventListener("click", () => {
       closeProductsEditor();
-      selectedProductId = row.getAttribute("data-product-id");
-      selectedCategoryId = null;
-      activeTab = "details";
+      pstate.selectedProductId = row.getAttribute("data-product-id");
+      pstate.selectedCategoryId = null;
+      pstate.activeTab = "details";
       renderProducts();
       _ffProductsMobileShowDetail("detail");
     });
@@ -376,7 +356,7 @@ function renderProductsSidebar() {
       event.stopPropagation();
       const catId = btn.getAttribute("data-add-product-category-id");
       const subId = btn.getAttribute("data-add-product-sub-id") || null;
-      if (catId) openProductCats.add(catId);
+      if (catId) pstate.openProductCats.add(catId);
       ffProductsAddProduct(catId, subId);
     });
   });
@@ -386,7 +366,7 @@ function renderProductsSidebar() {
       event.stopPropagation();
       const catId = btn.getAttribute("data-add-sub-category-id");
       if (catId) {
-        openProductCats.add(catId);
+        pstate.openProductCats.add(catId);
         ffProductsAddSubcategory(catId);
       }
     });
@@ -400,9 +380,9 @@ function renderProductsSidebar() {
 }
 
 function _ffProdClearDragHover() {
-  if (_ffProdDragHoverEl) {
-    _ffProdDragHoverEl.style.boxShadow = "";
-    _ffProdDragHoverEl = null;
+  if (pstate._ffProdDragHoverEl) {
+    pstate._ffProdDragHoverEl.style.boxShadow = "";
+    pstate._ffProdDragHoverEl = null;
   }
 }
 
@@ -414,14 +394,14 @@ function wireProductsSidebarDragDrop(listEl) {
     const handle = e.target.closest('.ff-products-drag-handle[draggable="true"]');
     if (!handle) return;
     const row = handle.closest(".ff-products-sidebar-product");
-    _ffProdDragSrc = {
+    pstate._ffProdDragSrc = {
       catId: handle.getAttribute("data-cat-id") || null,
       subId: handle.getAttribute("data-sub-id") || "",
       productId: handle.getAttribute("data-product-id") || null,
     };
     try {
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", _ffProdDragSrc.productId || "");
+      e.dataTransfer.setData("text/plain", pstate._ffProdDragSrc.productId || "");
     } catch (_) {}
     if (row) row.style.opacity = "0.4";
   });
@@ -430,26 +410,26 @@ function wireProductsSidebarDragDrop(listEl) {
     const row = e.target.closest(".ff-products-sidebar-product");
     if (row) row.style.opacity = "";
     _ffProdClearDragHover();
-    _ffProdDragSrc = null;
+    pstate._ffProdDragSrc = null;
   });
 
   listEl.addEventListener("dragover", (e) => {
-    if (!_ffProdDragSrc) return;
+    if (!pstate._ffProdDragSrc) return;
     const targetRow = e.target.closest(".ff-products-sidebar-product");
     if (
       !targetRow ||
-      targetRow.getAttribute("data-product-id") === _ffProdDragSrc.productId ||
-      targetRow.getAttribute("data-cat-id") !== _ffProdDragSrc.catId ||
-      (targetRow.getAttribute("data-sub-id") || "") !== _ffProdDragSrc.subId
+      targetRow.getAttribute("data-product-id") === pstate._ffProdDragSrc.productId ||
+      targetRow.getAttribute("data-cat-id") !== pstate._ffProdDragSrc.catId ||
+      (targetRow.getAttribute("data-sub-id") || "") !== pstate._ffProdDragSrc.subId
     ) {
-      if (_ffProdDragHoverEl) _ffProdClearDragHover();
+      if (pstate._ffProdDragHoverEl) _ffProdClearDragHover();
       return;
     }
     e.preventDefault();
     try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
-    if (targetRow !== _ffProdDragHoverEl) {
+    if (targetRow !== pstate._ffProdDragHoverEl) {
       _ffProdClearDragHover();
-      _ffProdDragHoverEl = targetRow;
+      pstate._ffProdDragHoverEl = targetRow;
     }
     const rect = targetRow.getBoundingClientRect();
     const placeAfter = e.clientY > rect.top + rect.height / 2;
@@ -460,11 +440,11 @@ function wireProductsSidebarDragDrop(listEl) {
   });
 
   listEl.addEventListener("drop", async (e) => {
-    if (!_ffProdDragSrc) return;
+    if (!pstate._ffProdDragSrc) return;
     const targetRow = e.target.closest(".ff-products-sidebar-product");
-    const src = _ffProdDragSrc;
+    const src = pstate._ffProdDragSrc;
     _ffProdClearDragHover();
-    _ffProdDragSrc = null;
+    pstate._ffProdDragSrc = null;
     if (
       !targetRow ||
       targetRow.getAttribute("data-product-id") === src.productId ||
@@ -495,7 +475,7 @@ async function reorderProductWithinCategory(srcId, targetProductId, categoryId, 
   if (!salonId) return;
   const catKey = String(categoryId || "");
   const subKey = String(subId || "");
-  const src = products.find((p) => String(p.id) === String(srcId));
+  const src = pstate.products.find((p) => String(p.id) === String(srcId));
   if (!src) return;
   const cat = findCategory(catKey);
   const validSubIds = cat ? new Set(getCategorySubcategories(cat).map((s) => String(s.id))) : new Set();
@@ -507,11 +487,11 @@ async function reorderProductWithinCategory(srcId, targetProductId, categoryId, 
     const pc = String(p.categoryId || "");
     const catMatch =
       catKey === "__uncategorized__"
-        ? !p.categoryId || !productCategories.some((c) => String(c.id) === pc)
+        ? !p.categoryId || !pstate.productCategories.some((c) => String(c.id) === pc)
         : pc === catKey;
     return catMatch && productSubKey(p) === subKey;
   };
-  const siblings = products
+  const siblings = pstate.products
     .filter((p) => inSameGroup(p) && String(p.id) !== String(srcId))
     .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
   const targetIdx = siblings.findIndex((p) => String(p.id) === String(targetProductId));
@@ -579,18 +559,18 @@ function showProductsConfirm({ title, message, confirmLabel = "Confirm", danger 
 }
 
 function closeProductsEditor() {
-  editorState = null;
+  pstate.editorState = null;
   removeProductsEditorModal();
 }
 
 function renderProductsEditor() {
   removeProductsEditorModal();
-  if (!editorState) return;
+  if (!pstate.editorState) return;
   const screen = document.getElementById("productsScreen");
   if (!screen) return;
-  const isProduct = editorState.mode === "product";
-  const isSubcategory = editorState.mode === "subcategory";
-  const category = productCategories.find((cat) => String(cat.id) === String(editorState.categoryId || ""));
+  const isProduct = pstate.editorState.mode === "product";
+  const isSubcategory = pstate.editorState.mode === "subcategory";
+  const category = pstate.productCategories.find((cat) => String(cat.id) === String(pstate.editorState.categoryId || ""));
   const editorSubtitle = isProduct
     ? `Create a product${category ? ` under ${category.name || "Category"}` : ""}.`
     : isSubcategory
@@ -598,10 +578,10 @@ function renderProductsEditor() {
       : "Create a product category.";
   const editorTitle = isProduct ? "Add Product" : isSubcategory ? "Add Subcategory" : "Add Category";
   const nameLabel = isProduct ? "Product Name" : isSubcategory ? "Subcategory Name" : "Category Name";
-  const categoryOptions = productCategories.map((cat) => (
-    `<option value="${escapeHtml(cat.id)}" ${String(cat.id) === String(editorState.categoryId || "") ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`
+  const categoryOptions = pstate.productCategories.map((cat) => (
+    `<option value="${escapeHtml(cat.id)}" ${String(cat.id) === String(pstate.editorState.categoryId || "") ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`
   )).join("");
-  const subcategoryOptions = subcategoryOptionsHtml(editorState.categoryId, editorState.subcategoryId);
+  const subcategoryOptions = subcategoryOptionsHtml(pstate.editorState.categoryId, pstate.editorState.subcategoryId);
   const modal = document.createElement("div");
   modal.id = "productsEditorModal";
   modal.style.cssText = "position:absolute;inset:0;background:rgba(17,24,39,.24);z-index:5;display:flex;align-items:flex-start;justify-content:center;padding-top:76px;";
@@ -672,7 +652,7 @@ function renderProductsEditor() {
           retailPrice: Number(data.get("retailPrice")),
         });
       } else if (isSubcategory) {
-        await createSubcategory(editorState.categoryId, name);
+        await createSubcategory(pstate.editorState.categoryId, name);
       } else {
         await createCategory(name);
       }
@@ -691,7 +671,7 @@ function renderProductsEditor() {
 }
 
 function renderTabButton(tab, label) {
-  const active = activeTab === tab;
+  const active = pstate.activeTab === tab;
   return `<button type="button" data-products-tab="${tab}" class="staff-nav-item ${active ? "is-active" : ""}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;background:${active ? "#ede9fe" : "transparent"};color:${active ? "#5b21b6" : "#374151"};font-weight:${active ? "700" : "500"};">${label}</button>`;
 }
 
@@ -819,13 +799,6 @@ function renderCategoryDetails(category) {
   `;
 }
 
-// ===== Locations tab =====
-function getProductLocationOverrides(product) {
-  return product && product.locationOverrides && typeof product.locationOverrides === "object"
-    ? product.locationOverrides
-    : {};
-}
-
 function renderProductLocationsTab(product) {
   const locations = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
     ? (window.ffGetActiveLocations() || [])
@@ -916,26 +889,11 @@ async function saveProductLocationOverride(productId, locationId, override) {
     [`locationOverrides.${locationId}`]: override,
     updatedAt: serverTimestamp(),
   });
-  const prod = products.find((p) => String(p.id) === String(productId));
+  const prod = pstate.products.find((p) => String(p.id) === String(productId));
   if (prod) {
     prod.locationOverrides = prod.locationOverrides && typeof prod.locationOverrides === "object" ? prod.locationOverrides : {};
     prod.locationOverrides[locationId] = override;
   }
-}
-
-// ===== Staff tab =====
-function getProductStaffOverrides(product) {
-  return product && product.staffOverrides && typeof product.staffOverrides === "object"
-    ? product.staffOverrides
-    : {};
-}
-
-function getStaffProductId(staff) {
-  return String(staff?.id || staff?.staffId || staff?.uid || staff?.firebaseUid || "").trim();
-}
-
-function getStaffProductName(staff) {
-  return String(staff?.name || staff?.displayName || staff?.fullName || staff?.email || "Staff").trim();
 }
 
 function getProductStaffRows() {
@@ -950,25 +908,6 @@ function getProductStaffRows() {
   } catch (_) {
     return [];
   }
-}
-
-// Default product commission inherits from the staff member's Earnings Rules
-// (Staff Member -> Earnings Rules -> Product Commission). Supports both the
-// new { type, value } shape and the legacy { basicPercent } shape.
-function getStaffDefaultProductCommission(staff) {
-  const rules = staff && staff.earningsRules && typeof staff.earningsRules === "object" ? staff.earningsRules : {};
-  const pc = rules.productCommission && typeof rules.productCommission === "object" ? rules.productCommission : {};
-  if (pc.enabled !== true) return null;
-  const type = pc.type === "fixed" ? "fixed" : "percentage";
-  const raw = Number(pc.value != null ? pc.value : pc.basicPercent);
-  if (!Number.isFinite(raw) || raw <= 0) return null;
-  return { type, value: raw };
-}
-
-function formatProductCommissionDefault(def) {
-  if (!def || !Number.isFinite(Number(def.value))) return "Default";
-  const v = Number(def.value);
-  return def.type === "fixed" ? `Default ${formatMoney(v)}` : `Default ${v}%`;
 }
 
 function renderProductStaffTab(product) {
@@ -1063,7 +1002,7 @@ async function saveProductStaffOverride(productId, staffId, override) {
     [`staffOverrides.${staffId}`]: override,
     updatedAt: serverTimestamp(),
   });
-  const prod = products.find((p) => String(p.id) === String(productId));
+  const prod = pstate.products.find((p) => String(p.id) === String(productId));
   if (prod) {
     prod.staffOverrides = prod.staffOverrides && typeof prod.staffOverrides === "object" ? prod.staffOverrides : {};
     prod.staffOverrides[staffId] = override;
@@ -1073,31 +1012,17 @@ async function saveProductStaffOverride(productId, staffId, override) {
 async function ffStaffProductsLoadForStaffMember() {
   await loadProductsCatalog();
   return {
-    products: products.slice(),
-    categories: productCategories.slice(),
+    products: pstate.products.slice(),
+    categories: pstate.productCategories.slice(),
   };
 }
 
 async function ffStaffProductsSaveOverrideForStaffMember(productId, staffId, override) {
   await loadProductsCatalog();
-  const product = products.find((p) => String(p.id) === String(productId));
+  const product = pstate.products.find((p) => String(p.id) === String(productId));
   if (!product) throw new Error("Product not found");
   await saveProductStaffOverride(productId, staffId, override || {});
   return product;
-}
-
-function ffStaffProductsGetOverrideForStaffMember(product, staffId) {
-  const overrides = getProductStaffOverrides(product);
-  return overrides && overrides[staffId] && typeof overrides[staffId] === "object"
-    ? overrides[staffId]
-    : {};
-}
-
-function ffStaffProductsDefaultsForStaffMember(staff, product) {
-  return {
-    price: Number(product?.retailPrice) || 0,
-    commission: getStaffDefaultProductCommission(staff),
-  };
 }
 
 if (typeof window !== "undefined") {
@@ -1107,11 +1032,6 @@ if (typeof window !== "undefined") {
   window.ffStaffProductsDefaultsForStaffMember = ffStaffProductsDefaultsForStaffMember;
   window.ffStaffProductsMoney = formatMoney;
   window.ffStaffProductsEscapeHtml = escapeHtml;
-}
-
-// ===== Inventory tab (save/load only — no automatic reordering or stock math) =====
-function getProductInventory(product) {
-  return product && product.inventory && typeof product.inventory === "object" ? product.inventory : {};
 }
 
 // The currently active branch/location id (shared with the Inventory app).
@@ -1241,7 +1161,7 @@ async function saveProductInventory(productId, inventory) {
   if (!ffCanManageProducts()) throw ffProductsManageError();
   const salonId = getSalonId();
   if (!salonId) throw new Error("No salon");
-  const prod = products.find((p) => String(p.id) === String(productId));
+  const prod = pstate.products.find((p) => String(p.id) === String(productId));
   const loc = ffProductsActiveLocId();
   if (loc) {
     // Per-branch: write to the active location override so the Inventory app and
@@ -1284,14 +1204,14 @@ function renderProductsDetail() {
   const nav = document.getElementById("productsDetailNav");
   const content = document.getElementById("productsDetailTabContent");
   if (!placeholder || !container || !header || !nav || !content) return;
-  const product = products.find((item) => String(item.id) === String(selectedProductId || ""));
-  const category = productCategories.find((cat) => String(cat.id) === String(selectedCategoryId || ""));
-  const creatingProduct = editorState && editorState.mode === "product";
-  const creatingCategory = editorState && editorState.mode === "category";
+  const product = pstate.products.find((item) => String(item.id) === String(pstate.selectedProductId || ""));
+  const category = pstate.productCategories.find((cat) => String(cat.id) === String(pstate.selectedCategoryId || ""));
+  const creatingProduct = pstate.editorState && pstate.editorState.mode === "product";
+  const creatingCategory = pstate.editorState && pstate.editorState.mode === "category";
   if (creatingProduct) {
     placeholder.style.display = "none";
     container.style.display = "block";
-    const draftCategory = productCategories.find((cat) => String(cat.id) === String(editorState.categoryId || ""));
+    const draftCategory = pstate.productCategories.find((cat) => String(cat.id) === String(pstate.editorState.categoryId || ""));
     header.innerHTML = `
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:8px 0 4px;">
         <div>
@@ -1301,7 +1221,7 @@ function renderProductsDetail() {
       </div>
     `;
     nav.innerHTML = renderTabButton("details", "Details");
-    content.innerHTML = renderNewProductForm(editorState.categoryId, editorState.subcategoryId);
+    content.innerHTML = renderNewProductForm(pstate.editorState.categoryId, pstate.editorState.subcategoryId);
     wireNewProductForm();
     setTimeout(() => content.querySelector("input[name='name']")?.focus(), 0);
     return;
@@ -1340,7 +1260,7 @@ function renderProductsDetail() {
     : renderTabButton("details", "Details");
   nav.querySelectorAll("[data-products-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      activeTab = btn.getAttribute("data-products-tab") || "details";
+      pstate.activeTab = btn.getAttribute("data-products-tab") || "details";
       renderProductsDetail();
       _ffProductsMobileShowDetail("tab");
     });
@@ -1350,13 +1270,13 @@ function renderProductsDetail() {
     wireCategoryForm(category);
     return;
   }
-  if (activeTab === "locations") {
+  if (pstate.activeTab === "locations") {
     content.innerHTML = renderProductLocationsTab(product);
     wireProductLocationsTab(content, product);
-  } else if (activeTab === "staff") {
+  } else if (pstate.activeTab === "staff") {
     content.innerHTML = renderProductStaffTab(product);
     wireProductStaffTab(content, product);
-  } else if (activeTab === "inventory") {
+  } else if (pstate.activeTab === "inventory") {
     content.innerHTML = renderProductInventoryTab(product);
     wireProductInventoryTab(content, product);
   } else {
@@ -1417,15 +1337,15 @@ async function createCategory(name) {
   if (!salonId) throw new Error("No salon selected");
   const ref = await addDoc(collection(db, `salons/${salonId}/productCategories`), {
     name: String(name || "").trim(),
-    sortOrder: productCategories.length,
+    sortOrder: pstate.productCategories.length,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  selectedCategoryId = ref.id;
-  selectedProductId = null;
-  activeTab = "details";
-  editorState = null;
-  openProductCats.add(String(ref.id));
+  pstate.selectedCategoryId = ref.id;
+  pstate.selectedProductId = null;
+  pstate.activeTab = "details";
+  pstate.editorState = null;
+  pstate.openProductCats.add(String(ref.id));
   await loadProductsCatalog();
   renderProducts();
 }
@@ -1443,8 +1363,8 @@ async function createSubcategory(categoryId, name) {
     subcategories: next,
     updatedAt: serverTimestamp(),
   }, { merge: true });
-  openProductCats.add(String(categoryId));
-  editorState = null;
+  pstate.openProductCats.add(String(categoryId));
+  pstate.editorState = null;
   await loadProductsCatalog();
   renderProducts();
 }
@@ -1454,9 +1374,9 @@ async function deleteProduct(productId) {
   const salonId = getSalonId();
   if (!salonId) throw new Error("No salon selected");
   await deleteDoc(doc(db, `salons/${salonId}/products`, String(productId)));
-  selectedProductId = null;
-  selectedCategoryId = null;
-  activeTab = "details";
+  pstate.selectedProductId = null;
+  pstate.selectedCategoryId = null;
+  pstate.activeTab = "details";
   await loadProductsCatalog();
   renderProducts();
 }
@@ -1466,10 +1386,10 @@ async function deleteCategory(categoryId) {
   const salonId = getSalonId();
   if (!salonId) throw new Error("No salon selected");
   await deleteDoc(doc(db, `salons/${salonId}/productCategories`, String(categoryId)));
-  openProductCats.delete(String(categoryId));
-  selectedCategoryId = null;
-  selectedProductId = null;
-  activeTab = "details";
+  pstate.openProductCats.delete(String(categoryId));
+  pstate.selectedCategoryId = null;
+  pstate.selectedProductId = null;
+  pstate.activeTab = "details";
   await loadProductsCatalog();
   renderProducts();
 }
@@ -1490,15 +1410,15 @@ async function createProduct(payload) {
     costPrice: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
     taxable: payload?.taxable === true,
     active: payload?.active !== false,
-    sortOrder: products.length,
+    sortOrder: pstate.products.length,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
-  selectedProductId = ref.id;
-  selectedCategoryId = null;
-  activeTab = "details";
-  editorState = null;
-  openProductCats.add(String(payload?.categoryId || "__uncategorized__"));
+  pstate.selectedProductId = ref.id;
+  pstate.selectedCategoryId = null;
+  pstate.activeTab = "details";
+  pstate.editorState = null;
+  pstate.openProductCats.add(String(payload?.categoryId || "__uncategorized__"));
   await loadProductsCatalog();
   renderProducts();
 }
@@ -1524,7 +1444,7 @@ function wireCategoryForm(category) {
   const form = document.getElementById("productsCategoryForm");
   if (!form) return;
   form.querySelector("[data-products-delete-category]")?.addEventListener("click", async () => {
-    const count = products.filter((p) => String(p.categoryId || "") === String(category.id)).length;
+    const count = pstate.products.filter((p) => String(p.categoryId || "") === String(category.id)).length;
     const message = count
       ? `${count} product${count === 1 ? "" : "s"} in this category will become Uncategorized. This cannot be undone.`
       : "This cannot be undone.";
@@ -1611,13 +1531,13 @@ function wireNewProductForm() {
   if (!form) return;
   wireSubcategoryDependentSelect(form);
   form.querySelector("[data-products-new-cancel]")?.addEventListener("click", () => {
-    const categoryId = editorState?.categoryId || null;
+    const categoryId = pstate.editorState?.categoryId || null;
     closeProductsEditor();
-    selectedCategoryId = productCategories.some((cat) => String(cat.id) === String(categoryId || ""))
+    pstate.selectedCategoryId = pstate.productCategories.some((cat) => String(cat.id) === String(categoryId || ""))
       ? categoryId
-      : (productCategories[0]?.id || null);
-    selectedProductId = null;
-    activeTab = "details";
+      : (pstate.productCategories[0]?.id || null);
+    pstate.selectedProductId = null;
+    pstate.activeTab = "details";
     renderProducts();
   });
   form.addEventListener("submit", async (event) => {
@@ -1638,28 +1558,28 @@ function wireNewProductForm() {
 
 export function ffProductsAddCategory() {
   if (!ffCanManageProducts()) { if (typeof window.showToast === "function") window.showToast("You do not have permission to manage products.", "error"); return; }
-  editorState = { mode: "category" };
+  pstate.editorState = { mode: "category" };
   renderProductsEditor();
 }
 
 export function ffProductsAddProduct(categoryId, subcategoryId) {
   if (!ffCanManageProducts()) { if (typeof window.showToast === "function") window.showToast("You do not have permission to manage products.", "error"); return; }
-  const resolvedCat = categoryId && categoryId !== "__uncategorized__" ? categoryId : (productCategories[0]?.id || null);
-  editorState = {
+  const resolvedCat = categoryId && categoryId !== "__uncategorized__" ? categoryId : (pstate.productCategories[0]?.id || null);
+  pstate.editorState = {
     mode: "product",
     categoryId: resolvedCat,
     subcategoryId: subcategoryId || null,
   };
-  selectedCategoryId = null;
-  selectedProductId = null;
-  activeTab = "details";
+  pstate.selectedCategoryId = null;
+  pstate.selectedProductId = null;
+  pstate.activeTab = "details";
   renderProducts();
 }
 
 export function ffProductsAddSubcategory(categoryId) {
   if (!ffCanManageProducts()) { if (typeof window.showToast === "function") window.showToast("You do not have permission to manage products.", "error"); return; }
   if (!categoryId || categoryId === "__uncategorized__") return;
-  editorState = { mode: "subcategory", categoryId };
+  pstate.editorState = { mode: "subcategory", categoryId };
   renderProductsEditor();
 }
 
@@ -1726,9 +1646,9 @@ export async function goToProducts() {
   screen.style.display = "block";
   screen.style.pointerEvents = "auto";
   await loadProductsCatalog();
-  if (!selectedProductId && !selectedCategoryId) {
-    selectedProductId = products[0]?.id || null;
-    selectedCategoryId = selectedProductId ? null : (productCategories[0]?.id || null);
+  if (!pstate.selectedProductId && !pstate.selectedCategoryId) {
+    pstate.selectedProductId = pstate.products[0]?.id || null;
+    pstate.selectedCategoryId = pstate.selectedProductId ? null : (pstate.productCategories[0]?.id || null);
   }
   renderProducts();
   // Mobile: always open at the top level (the products list).
