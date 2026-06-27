@@ -38854,7 +38854,7 @@ function initializeAppsPanel() {
                 console.error('[Apps Panel] Failed to open Products', err);
               });
             } else {
-              import('/products.js?v=20260603_staff_products_tab')
+              import('/products.js?v=20260626_products_split')
                 .then(function (m) {
                   if (m && typeof m.goToProducts === 'function') {
                     window.goToProducts = m.goToProducts;
@@ -41347,7 +41347,7 @@ function initializeAppsPanel() {
 
   function ffEnsureStaffProductsApi() {
     if (typeof window.ffStaffProductsLoadForStaffMember === 'function') return Promise.resolve();
-    return import('/products.js?v=20260603_staff_products_tab').then(function() {});
+    return import('/products.js?v=20260626_products_split').then(function() {});
   }
 
   function renderStaffProductsTab(staff) {
