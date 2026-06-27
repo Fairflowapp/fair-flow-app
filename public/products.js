@@ -687,7 +687,7 @@ function renderPlaceholder(title, text) {
 function renderProductDetails(product) {
   const categoryOptions = [
     '<option value="">Uncategorized</option>',
-    ...productCategories.map((cat) => `<option value="${escapeHtml(cat.id)}" ${String(product.categoryId || "") === String(cat.id) ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`),
+    ...pstate.productCategories.map((cat) => `<option value="${escapeHtml(cat.id)}" ${String(product.categoryId || "") === String(cat.id) ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`),
   ].join("");
   const field = "padding:6px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;";
   const labelCss = "display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700;color:#374151;";
@@ -737,7 +737,7 @@ function renderProductDetails(product) {
 function renderNewProductForm(categoryId, subcategoryId) {
   const categoryOptions = [
     '<option value="">Uncategorized</option>',
-    ...productCategories.map((cat) => `<option value="${escapeHtml(cat.id)}" ${String(categoryId || "") === String(cat.id) ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`),
+    ...pstate.productCategories.map((cat) => `<option value="${escapeHtml(cat.id)}" ${String(categoryId || "") === String(cat.id) ? "selected" : ""}>${escapeHtml(cat.name || "")}</option>`),
   ].join("");
   return `
     <form id="productsNewProductForm" style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;gap:10px;max-width:680px;">
