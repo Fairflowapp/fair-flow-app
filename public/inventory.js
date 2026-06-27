@@ -23,6 +23,74 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260627_inventory_split";
+import {
+  escapeHtml,
+  newRowId,
+  newGroupId,
+  newCategoryId,
+  newSubcategoryId,
+  sharedInvSort,
+  isProductsInventorySub,
+  getProductStockForInventoryRow,
+  getProductTargetStockForInventoryRow,
+  getProductCatSubsList,
+  cloneCategoryTree,
+  normalizeRowFromFirestore,
+  serializeInventoryRowForFirestore,
+  defaultInvColWidthsObj,
+  cloneInvRowForUndo,
+  parseNum,
+  parseRowIdFromInventoryItemId,
+  getItemOrderQty,
+  getItemReceivedCumulative,
+  getOrderDetailTotals,
+  computeUnifiedStatusFromItems,
+  computeReceiveStatusFromItems,
+  getEffectiveInventoryOrderStatus,
+  orderHasAppliedInventoryImpact,
+  getOrderLineReceiveVisualState,
+  escapeCsvCell,
+  getOrderItemGroupLabel,
+  getOrderDetailExportFilename,
+  getOrderReceiveSummaryCounts,
+  isItemPurchaseAppliedToInventory,
+  computeOrder,
+  getCellApprovedInfo,
+  formatOrderDisplay,
+  parseSubcategoryDocToTable,
+  buildOrderLinesFromGroupsRows,
+  sortOrderBuilderLines,
+  seedOrderBuilderSelectionIfEmpty,
+  sanitizeManualItemForDraft,
+  renderDraftsPickerRowHtml,
+  formatInventoryOrderSourceLabel,
+  getInventoryOrderDisplayName,
+  formatInventoryOrderCreatedAt,
+  formatInventoryOrderStatusDisplay,
+  getInventoryOrderStatusKey,
+  getOrderSearchHaystack,
+  formatInventoryOrderOrderedByDisplay,
+  clonePlainForFirestoreOrderPayload,
+  sanitizeReceiptStorageFileName,
+  getReceiptFileTypeEmoji,
+  ffParseDateInputStart,
+  ffParseDateInputEnd,
+  ffResolveItemEventDate,
+  invCellKey,
+  hrefForUrl,
+  renderOrderCellTd,
+  thResizeHandle,
+  renderInlineNewSub,
+  productsInventorySubId,
+  isProductsInventorySubId,
+  productCategoryIdFromProductsSub,
+  productSubcategoryIdFromProductsSub,
+  productToInvRow,
+  buildProductsInventorySubsForCat,
+  sortOrderDetailPairsOpenFirst,
+  SHARED_INV_DEFAULT_GROUP_ID,
+  INV_PRODUCTS_GENERAL_SUB,
+} from "./inventory-helpers.js?v=20260627_inventory_split";
 
 const SALON_ID_CACHE_KEY = "ff_salonId_v1";
 
@@ -131,7 +199,6 @@ let _catSaveBusy = false;
 let _invProductsList = [];
 /** catId -> [{ id, name }] of valid product subcategories (for grouping/general detection). */
 let _invProductCatSubs = new Map();
-const INV_PRODUCTS_SUB_SUFFIX = "::products::";
 
 /** Table groups for the selected subcategory (`label` in UI maps to `name` in Firestore). */
 /** @type {{ id: string, label: string }[] | null} */
@@ -142,7 +209,6 @@ let _groups = null;
  * @type {InvRow[] | null}
  */
 let _rows = null;
-const SHARED_INV_DEFAULT_GROUP_ID = "default";
 
 /** When set, that group id shows remove confirmation (not one-click delete). */
 let _groupRemoveConfirmId = null;
@@ -338,30 +404,6 @@ let _invOrderCellBreakdownModal = null;
  */
 let _invOrderBuilderAddModal = null;
 
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function newRowId() {
-  return `r-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-}
-
-function newGroupId() {
-  return `g-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function newCategoryId() {
-  return `c-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function newSubcategoryId() {
-  return `s-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
 async function getSalonId() {
   // Multi-salon: when the user has chosen a salon (single membership auto-
   // selected, or one explicitly picked from Choose Salon), that selection is
@@ -417,11 +459,6 @@ function sharedInvStateDocRef(accountId, locationId, subId) {
   return doc(db, `accounts/${accountId}/locations/${locationId}/inventoryState/${subId}`);
 }
 
-function sharedInvSort(a, b) {
-  return (Number(a.sortOrder ?? a.order) || 0) - (Number(b.sortOrder ?? b.order) || 0)
-    || String(a.name || "").localeCompare(String(b.name || ""));
-}
-
 async function tryLoadSharedInventoryCategories(accountId) {
   try {
     const catSnap = await getDocs(sharedInvCategoriesRef(accountId));
@@ -455,126 +492,8 @@ async function tryLoadSharedInventoryCategories(accountId) {
   }
 }
 
-const INV_PRODUCTS_GENERAL_SUB = "__general__";
-
-function productsInventorySubId(categoryId, productSubId) {
-  return `${String(categoryId)}${INV_PRODUCTS_SUB_SUFFIX}${String(productSubId || INV_PRODUCTS_GENERAL_SUB)}`;
-}
-
-function isProductsInventorySub(sub) {
-  return !!(sub && sub.isProductsSub);
-}
-
-function isProductsInventorySubId(subId) {
-  return typeof subId === "string" && subId.includes(INV_PRODUCTS_SUB_SUFFIX);
-}
-
-function productCategoryIdFromProductsSub(sub) {
-  if (sub && sub.productCategoryId) return String(sub.productCategoryId);
-  const id = sub && sub.id ? String(sub.id) : "";
-  const idx = id.indexOf(INV_PRODUCTS_SUB_SUFFIX);
-  return idx >= 0 ? id.slice(0, idx) : "";
-}
-
-function productSubcategoryIdFromProductsSub(sub) {
-  if (sub && sub.productSubcategoryId != null) return String(sub.productSubcategoryId);
-  const id = sub && sub.id ? String(sub.id) : "";
-  const idx = id.indexOf(INV_PRODUCTS_SUB_SUFFIX);
-  return idx >= 0 ? id.slice(idx + INV_PRODUCTS_SUB_SUFFIX.length) : INV_PRODUCTS_GENERAL_SUB;
-}
-
-function getProductStockForInventoryRow(product, activeLoc) {
-  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
-  const locO =
-    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
-      ? product.locationOverrides[activeLoc]
-      : null;
-  if (locO && Number.isFinite(Number(locO.stock))) return Number(locO.stock);
-  if (Number.isFinite(Number(inv.stock))) return Number(inv.stock);
-  return 0;
-}
-
 // Target / par level (how many the salon wants to keep). Drives the "Stock"
 // column and the Order calculation (Order = Stock - Current).
-function getProductTargetStockForInventoryRow(product, activeLoc) {
-  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
-  const locO =
-    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
-      ? product.locationOverrides[activeLoc]
-      : null;
-  if (locO && Number.isFinite(Number(locO.targetStock))) return Number(locO.targetStock);
-  if (Number.isFinite(Number(inv.targetStock))) return Number(inv.targetStock);
-  // No target set yet → fall back to on-hand so Order shows 0 (no false demand).
-  return getProductStockForInventoryRow(product, activeLoc);
-}
-
-function getProductPriceForInventoryRow(product, activeLoc) {
-  const locO =
-    activeLoc && product.locationOverrides && product.locationOverrides[activeLoc]
-      ? product.locationOverrides[activeLoc]
-      : null;
-  if (locO && Number.isFinite(Number(locO.price))) return Number(locO.price);
-  return Number.isFinite(Number(product.retailPrice)) ? Number(product.retailPrice) : 0;
-}
-
-function productToInvRow(product, activeLoc, rowNo) {
-  const onHand = getProductStockForInventoryRow(product, activeLoc);
-  const target = getProductTargetStockForInventoryRow(product, activeLoc);
-  const price = getProductPriceForInventoryRow(product, activeLoc);
-  const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
-  const supplier = String(product.vendor || inv.vendor || product.brand || "").trim();
-  return {
-    id: product.id,
-    rowNo: String(rowNo + 1),
-    code: "",
-    name: String(product.name || "").trim(),
-    supplier,
-    url: "",
-    _isProductRow: true,
-    _productId: product.id,
-    byGroup: {
-      [SHARED_INV_DEFAULT_GROUP_ID]: {
-        stock: target,
-        current: onHand,
-        price: price > 0 ? String(price) : "",
-        approved: 0,
-        approvedRequests: [],
-      },
-    },
-  };
-}
-
-function getProductCatSubsList(cat) {
-  const arr = cat && Array.isArray(cat.subcategories) ? cat.subcategories : [];
-  return arr
-    .slice()
-    .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0))
-    .map((s) => ({ id: String(s.id), name: s.name || "Subcategory" }));
-}
-
-function buildProductsInventorySubsForCat(cat, catProducts) {
-  const catId = String(cat.id);
-  const subs = getProductCatSubsList(cat);
-  const subIds = new Set(subs.map((s) => s.id));
-  const result = subs.map((s) => ({
-    id: productsInventorySubId(catId, s.id),
-    name: s.name,
-    isProductsSub: true,
-    productCategoryId: catId,
-    productSubcategoryId: s.id,
-  }));
-  const hasGeneral = catProducts.some((p) => !p.subcategoryId || !subIds.has(String(p.subcategoryId)));
-  if (hasGeneral || !subs.length) {
-    result.push({
-      id: productsInventorySubId(catId, INV_PRODUCTS_GENERAL_SUB),
-      name: subs.length ? "General" : "Products",
-      isProductsSub: true,
-      productCategoryId: catId,
-      productSubcategoryId: INV_PRODUCTS_GENERAL_SUB,
-    });
-  }
-  return { subs: result, subIds };
-}
 
 async function loadProductsForInventory(salonId) {
   _invProductsList = [];
@@ -908,19 +827,6 @@ function getCategoryTree() {
   return _categoryTree || [];
 }
 
-function cloneCategoryTree(tree) {
-  return tree.map((c) => ({
-    id: c.id,
-    name: c.name,
-    ...(c.isProductCategory ? { isProductCategory: true } : {}),
-    subcategories: (c.subcategories || []).map((s) => ({
-      id: s.id,
-      name: s.name,
-      ...(s.isProductsSub ? { isProductsSub: true, productCategoryId: s.productCategoryId } : {}),
-    })),
-  }));
-}
-
 function getLegacyCategoryTreeForManage() {
   return (_persistedCategoryTree && _persistedCategoryTree.length
     ? _persistedCategoryTree
@@ -1162,98 +1068,8 @@ function clearInventoryTableSaveTimer() {
 }
 
 /** Normalize an approvedRequests[] entry from Firestore (defensive) — keeps required fields only. */
-function normalizeApprovedRequestEntry(x) {
-  if (!x || typeof x !== "object") return null;
-  const requestId = x.requestId != null ? String(x.requestId).trim() : "";
-  if (!requestId) return null;
-  const qty = typeof x.qty === "number" ? x.qty : parseNum(x.qty);
-  if (!Number.isFinite(qty) || qty === 0) return null;
-  /** @type {Record<string, unknown>} */
-  const out = { requestId, qty };
-  if (x.at) out.at = x.at;
-  if (x.by != null) out.by = String(x.by);
-  if (x.byName != null) out.byName = String(x.byName);
-  if (x.itemName != null) out.itemName = String(x.itemName);
-  if (x.note != null) out.note = String(x.note);
-  if (x.unit != null) out.unit = String(x.unit);
-  return out;
-}
-
-function normalizeRowFromFirestore(r) {
-  const byGroup = {};
-  const raw = r && r.byGroup && typeof r.byGroup === "object" ? r.byGroup : {};
-  for (const gid of Object.keys(raw)) {
-    const cell = raw[gid];
-    if (!cell || typeof cell !== "object") continue;
-    const approvedRequestsRaw = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
-    const approvedRequests = [];
-    for (const entry of approvedRequestsRaw) {
-      const ne = normalizeApprovedRequestEntry(entry);
-      if (ne) approvedRequests.push(ne);
-    }
-    let approved =
-      typeof cell.approved === "number"
-        ? cell.approved
-        : cell.approved != null
-          ? parseNum(cell.approved)
-          : 0;
-    if (!Number.isFinite(approved)) approved = 0;
-    if (approvedRequests.length > 0) {
-      const sum = approvedRequests.reduce((acc, e) => acc + (Number(e.qty) || 0), 0);
-      if (Math.abs(sum - approved) > 0.0001) approved = sum;
-    }
-    byGroup[gid] = {
-      stock: typeof cell.stock === "number" ? cell.stock : parseNum(cell.stock),
-      current: typeof cell.current === "number" ? cell.current : parseNum(cell.current),
-      price: cell.price != null ? String(cell.price) : "",
-      approved,
-      approvedRequests,
-    };
-  }
-  return {
-    id: r.id || newRowId(),
-    rowNo: r.rowNo != null ? String(r.rowNo) : "",
-    code: r.code != null ? String(r.code) : "",
-    name: r.name != null ? String(r.name) : "",
-    supplier: r.supplier != null ? String(r.supplier) : "",
-    url: r.url != null ? String(r.url) : "",
-    byGroup,
-  };
-}
 
 /** Serialize a normalized row to Firestore `rows[]` shape (matches `buildFirestoreRowsFromUi`). */
-function serializeInventoryRowForFirestore(r) {
-  const byGroup = {};
-  for (const gid of Object.keys(r.byGroup || {})) {
-    const c = r.byGroup[gid];
-    if (!c) continue;
-    const approvedRequestsIn = Array.isArray(c.approvedRequests) ? c.approvedRequests : [];
-    const approvedRequests = [];
-    for (const entry of approvedRequestsIn) {
-      const ne = normalizeApprovedRequestEntry(entry);
-      if (ne) approvedRequests.push(ne);
-    }
-    const approved = approvedRequests.reduce((acc, e) => acc + (Number(e.qty) || 0), 0);
-    /** @type {Record<string, unknown>} */
-    const out = {
-      stock: typeof c.stock === "number" ? c.stock : parseNum(c.stock),
-      current: typeof c.current === "number" ? c.current : parseNum(c.current),
-      price: c.price != null ? String(c.price) : "",
-    };
-    if (approved > 0) out.approved = approved;
-    if (approvedRequests.length > 0) out.approvedRequests = approvedRequests;
-    byGroup[gid] = out;
-  }
-  return {
-    id: r.id,
-    rowNo: r.rowNo != null ? String(r.rowNo) : "",
-    code: r.code != null ? String(r.code) : "",
-    name: r.name != null ? String(r.name) : "",
-    supplier: r.supplier != null ? String(r.supplier) : "",
-    url: r.url != null ? String(r.url) : "",
-    byGroup,
-  };
-}
 
 function sharedInventoryStateItemsFromRows() {
   const items = {};
@@ -1564,18 +1380,6 @@ function buildFirestoreGroupsFromUi() {
   return _groups.map((g, i) => ({ id: g.id, name: g.label, order: i }));
 }
 
-function defaultInvColWidthsObj() {
-  return {
-    rowDnd: 28,
-    hash: 52,
-    code: 76,
-    name: 192,
-    supplier: 96,
-    url: 96,
-    groupSubById: {},
-  };
-}
-
 /** Build Firestore `columnWidths` map (group_<id> for each group block width). */
 function buildColumnWidthsForFirestore() {
   const w = getInvColWidths();
@@ -1699,27 +1503,6 @@ function showInventoryUndoToast(message) {
 }
 
 /** Deep clone a row for undo restore (all group cells). */
-function cloneInvRowForUndo(r) {
-  const byGroup = {};
-  for (const k of Object.keys(r.byGroup || {})) {
-    const c = r.byGroup[k];
-    if (!c) continue;
-    byGroup[k] = {
-      stock: typeof c.stock === "number" ? c.stock : parseNum(c.stock),
-      current: typeof c.current === "number" ? c.current : parseNum(c.current),
-      price: String(c.price ?? ""),
-    };
-  }
-  return {
-    id: r.id,
-    rowNo: String(r.rowNo ?? ""),
-    code: String(r.code ?? ""),
-    name: String(r.name ?? ""),
-    supplier: String(r.supplier ?? ""),
-    url: String(r.url ?? ""),
-    byGroup,
-  };
-}
 
 function handleInventoryUndoClick() {
   if (!_invUndoPayload || !_rows || !_groups) return;
@@ -1933,21 +1716,7 @@ function prepareInventoryTableStateForMount() {
   void loadInventoryTableForSub(meta.category.id, meta.sub.id, seq, key);
 }
 
-function parseNum(v) {
-  const n = Number(String(v ?? "").replace(/,/g, "").trim());
-  return Number.isFinite(n) ? n : 0;
-}
-
 /** Order line `itemId` is `subId:rowId:groupId`; older data may be a plain row id. */
-function parseRowIdFromInventoryItemId(itemId) {
-  const s = String(itemId ?? "").trim();
-  if (!s) return "";
-  const parts = s.split(":");
-  if (parts.length >= 3) {
-    return parts.slice(1, -1).join(":");
-  }
-  return s;
-}
 
 /**
  * Resolve Firestore inventory cell coordinates from a saved order line (auto, linked, or legacy).
@@ -1976,23 +1745,6 @@ function parseInventoryCellRefFromOrderLine(it) {
   }
   if (!catId) return null;
   return { catId, subId, rowId, groupId };
-}
-
-function getItemOrderQty(it) {
-  if (it == null || typeof it !== "object") return 0;
-  return typeof it.orderQty === "number" ? it.orderQty : parseNum(it.orderQty);
-}
-
-function getItemReceivedCumulative(it) {
-  if (it == null || typeof it !== "object") return 0;
-  if (it.receivedCumulative != null) return parseNum(it.receivedCumulative);
-  return 0;
-}
-
-function getOrderLinePrice(it) {
-  if (it == null || typeof it !== "object") return 0;
-  if (it.price == null || it.price === "") return 0;
-  return typeof it.price === "number" ? it.price : parseNum(it.price);
 }
 
 /**
@@ -2088,99 +1840,17 @@ async function commitOrderLineInventoryPrice(orderId, lineIdx, rawVal) {
   }
 }
 
-function getOrderDetailTotals(items) {
-  const arr = Array.isArray(items) ? items : [];
-  let orderedQty = 0;
-  let receivedQty = 0;
-  let estimatedCost = 0;
-  for (const it of arr) {
-    const oq = getItemOrderQty(it);
-    const cum = getItemReceivedCumulative(it);
-    const price = getOrderLinePrice(it);
-    orderedQty += oq;
-    receivedQty += cum;
-    estimatedCost += oq * price;
-  }
-  const r = Math.round(estimatedCost * 100) / 100;
-  return { lineCount: arr.length, orderedQty, receivedQty, estimatedCost: r };
-}
-
 /** Per-line effective progress: cumulative received + applied purchase quantity (treated as received). */
-function getItemEffectiveReceivedQty(it) {
-  const cum = getItemReceivedCumulative(it);
-  const applied = isItemPurchaseAppliedToInventory(it) ? getItemStoredQtyBought(it) : 0;
-  return Math.max(cum, applied);
-}
 
 /** Unified order progress computed from items: open (no B yet) / in_progress (some) / done (B ≥ N for all). */
-function computeUnifiedStatusFromItems(items) {
-  const arr = Array.isArray(items) ? items : [];
-  if (arr.length === 0) return "open";
-  let hasAny = false;
-  let allFull = true;
-  for (const it of arr) {
-    const oq = getItemOrderQty(it);
-    const b = getItemEffectiveReceivedQty(it);
-    if (b > 0) hasAny = true;
-    if (oq <= 0) continue;
-    if (b < oq) allFull = false;
-  }
-  if (!hasAny) return "open";
-  if (allFull) return "done";
-  return "in_progress";
-}
 
 /** Back-compat shim (legacy name). Same result as computeUnifiedStatusFromItems. */
-function computeReceiveStatusFromItems(items) {
-  return computeUnifiedStatusFromItems(items);
-}
 
 /** Auto-computed status for an order: always derived from items (unified for shopping + delivery). */
-function getEffectiveInventoryOrderStatus(o) {
-  if (!o || typeof o !== "object") return "open";
-  const items = Array.isArray(o.items) ? o.items : [];
-  return computeUnifiedStatusFromItems(items);
-}
 
 /** True if any item already applied to inventory (either via Confirm Purchase or Confirm Receive history). */
-function orderHasAppliedInventoryImpact(o) {
-  if (!o || typeof o !== "object") return false;
-  const items = Array.isArray(o.items) ? o.items : [];
-  for (const it of items) {
-    if (!it || typeof it !== "object") continue;
-    if (it.appliedToInventory === true) return true;
-    if (getItemReceivedCumulative(it) > 0) return true;
-  }
-  return false;
-}
 
 /** UI-only: per-line receive state for Order Details row styling. Treats applied purchases (draft → Confirm Purchase) as received progress too. */
-function getOrderLineReceiveVisualState(it) {
-  const oq = getItemOrderQty(it);
-  const progress = getItemEffectiveReceivedQty(it);
-  if (progress === 0) {
-    return {
-      kind: "open",
-      rowClass: "ff-inv2-od-tr--open",
-      label: "Open",
-      badgeClass: "ff-inv2-od-line-badge--open",
-    };
-  }
-  if (oq > 0 && progress >= oq) {
-    return {
-      kind: "received",
-      rowClass: "ff-inv2-od-tr--recv-full",
-      label: "Received",
-      badgeClass: "ff-inv2-od-line-badge--full",
-    };
-  }
-  return {
-    kind: "partial",
-    rowClass: "ff-inv2-od-tr--recv-partial",
-    label: "Partial",
-    badgeClass: "ff-inv2-od-line-badge--partial",
-  };
-}
 
 function orderDetailLineMatchesFilter(it) {
   if (_invOrderDetailFilter === "all") return true;
@@ -2190,23 +1860,11 @@ function orderDetailLineMatchesFilter(it) {
   return true;
 }
 
-const _invOrderDetailKindRank = { open: 0, partial: 1, received: 2 };
-
 /**
  * Receiving list: open / partial lines first, then received; stable within each band.
  * @param {{ it: unknown, idx: number }[]} filteredPairs
  * @returns {{ it: unknown, idx: number }[]}
  */
-function sortOrderDetailPairsOpenFirst(filteredPairs) {
-  return [...filteredPairs].sort((a, b) => {
-    const ka = getOrderLineReceiveVisualState(a.it).kind;
-    const kb = getOrderLineReceiveVisualState(b.it).kind;
-    const ra = _invOrderDetailKindRank[ka] ?? 99;
-    const rb = _invOrderDetailKindRank[kb] ?? 99;
-    if (ra !== rb) return ra - rb;
-    return a.idx - b.idx;
-  });
-}
 
 function getOrderDetailDisplayPairsForExport(o) {
   const items = Array.isArray(o.items) ? o.items : [];
@@ -2216,34 +1874,7 @@ function getOrderDetailDisplayPairsForExport(o) {
   return sortOrderDetailPairsOpenFirst(filteredPairs);
 }
 
-function escapeCsvCell(value) {
-  const s = String(value ?? "");
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
-}
-
 /** Group label from order line (`groupName`), trimmed — UI/export only; no schema change. */
-function getOrderItemGroupLabel(it) {
-  if (!it || it.groupName == null) return "";
-  return String(it.groupName).trim();
-}
-
-function sanitizeOrderExportFilenamePart(s) {
-  return (
-    String(s ?? "")
-      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "")
-      .replace(/\s+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "")
-      .slice(0, 80) || "order"
-  );
-}
-
-function getOrderDetailExportFilename(o) {
-  const name = sanitizeOrderExportFilenamePart(getInventoryOrderDisplayName(o));
-  const st = sanitizeOrderExportFilenamePart(formatInventoryOrderStatusDisplay(o));
-  return `${name}_${st}.csv`;
-}
 
 function buildOrderDetailCsvContent(o) {
   const pairs = getOrderDetailDisplayPairsForExport(o);
@@ -2416,23 +2047,6 @@ function triggerOrderDetailPrint() {
   }, 200);
 }
 
-function getOrderReceiveSummaryCounts(items) {
-  let open = 0;
-  let partial = 0;
-  let received = 0;
-  let remainingQty = 0;
-  for (const it of items) {
-    const { kind } = getOrderLineReceiveVisualState(it);
-    if (kind === "open") open += 1;
-    else if (kind === "partial") partial += 1;
-    else if (kind === "received") received += 1;
-    const oq = getItemOrderQty(it);
-    const cum = getItemReceivedCumulative(it);
-    remainingQty += Math.max(0, oq - cum);
-  }
-  return { open, partial, received, remainingQty };
-}
-
 function ensureDetailReceiveDraft(orderId) {
   const o = _invOrdersList.find((x) => x.id === orderId);
   if (!o) return;
@@ -2455,14 +2069,6 @@ function ensureDetailReceiveDraft(orderId) {
 }
 
 /** Qty bought persisted on order line (Confirm Purchase). */
-function getItemStoredQtyBought(it) {
-  if (!it || typeof it !== "object" || it.qtyBought == null) return 0;
-  return parseNum(it.qtyBought);
-}
-
-function isItemPurchaseAppliedToInventory(it) {
-  return !!(it && typeof it === "object" && it.appliedToInventory === true);
-}
 
 /**
  * Ensures local shopping-list state for Order Details (all statuses). Seeds from receive draft when present.
@@ -2518,33 +2124,8 @@ function ensureShoppingDraft(orderId) {
 }
 
 /** Order = max(Stock - Current, 0) + max(Approved, 0). Approved is the sum of applied Supply Requests. */
-function computeOrder(stock, current, approved) {
-  const s = typeof stock === "number" ? stock : parseNum(stock);
-  const c = typeof current === "number" ? current : parseNum(current);
-  const a = approved == null ? 0 : typeof approved === "number" ? approved : parseNum(approved);
-  return Math.max(0, s - c) + Math.max(0, a);
-}
 
 /** Extract approved qty + contributions from a normalized cell (back-compat defaults). */
-function getCellApprovedInfo(cell) {
-  if (!cell || typeof cell !== "object") return { approved: 0, approvedRequests: [] };
-  const approvedRequests = Array.isArray(cell.approvedRequests) ? cell.approvedRequests : [];
-  const approved =
-    approvedRequests.length > 0
-      ? approvedRequests.reduce((acc, e) => acc + (typeof e?.qty === "number" ? e.qty : parseNum(e?.qty)), 0)
-      : typeof cell.approved === "number"
-        ? cell.approved
-        : cell.approved != null
-          ? parseNum(cell.approved)
-          : 0;
-  return { approved: Number.isFinite(approved) ? approved : 0, approvedRequests };
-}
-
-function formatOrderDisplay(n) {
-  if (Number.isInteger(n)) return String(n);
-  const r = Math.round(n * 100) / 100;
-  return String(r);
-}
 
 function formatOrderDetailEstimatedCost(n) {
   const v = Number(n);
@@ -2560,31 +2141,7 @@ function formatOrderDetailEstimatedCost(n) {
   }
 }
 
-function ensureGroupCellsForLocal(groups, rows) {
-  if (!groups || !rows) return;
-  for (const row of rows) {
-    if (row.rowNo === undefined) row.rowNo = "";
-    for (const g of groups) {
-      if (!row.byGroup[g.id]) {
-        row.byGroup[g.id] = { stock: 0, current: 0, price: "" };
-      }
-    }
-  }
-}
-
 /** Parse Firestore subcategory doc into local groups/rows without touching global table state. */
-function parseSubcategoryDocToTable(data) {
-  const groupsRaw = Array.isArray(data.groups) ? data.groups : [];
-  groupsRaw.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const groups = groupsRaw.map((g) => ({
-    id: g.id,
-    label: g.name != null ? String(g.name) : "",
-  }));
-  const rowsRaw = Array.isArray(data.rows) ? data.rows : [];
-  const rows = rowsRaw.map((r) => normalizeRowFromFirestore(r));
-  ensureGroupCellsForLocal(groups, rows);
-  return { groups, rows };
-}
 
 function findCategoryAndSubForSubId(subId) {
   if (!subId) return null;
@@ -2599,51 +2156,6 @@ function findCategoryAndSubForSubId(subId) {
  * One line per row×group where Stock − Current > 0.
  * itemId is unique across subcategories when subId is included.
  */
-function buildOrderLinesFromGroupsRows(groups, rows, subId, subName, categoryId, categoryName) {
-  if (!groups || !rows) return [];
-  const lines = [];
-  const subLabel = subName != null ? String(subName) : "";
-  const catId = categoryId != null ? String(categoryId) : null;
-  const catNm = categoryName != null ? String(categoryName) : null;
-  for (const row of rows) {
-    for (const g of groups) {
-      const cell = row.byGroup[g.id];
-      if (!cell) continue;
-      const { approved } = getCellApprovedInfo(cell);
-      const oq = computeOrder(cell.stock, cell.current, approved);
-      if (oq <= 0) continue;
-      lines.push({
-        itemId: `${subId}:${row.id}:${g.id}`,
-        rowNo: String(row.rowNo ?? ""),
-        code: String(row.code ?? ""),
-        itemName: String(row.name ?? ""),
-        supplier: String(row.supplier ?? ""),
-        url: String(row.url ?? ""),
-        groupId: g.id,
-        groupName: String(g.label ?? ""),
-        orderQty: oq,
-        price: String(cell.price ?? ""),
-        categoryId: catId,
-        categoryName: catNm,
-        subcategoryId: subId,
-        subcategoryName: subLabel,
-      });
-    }
-  }
-  return lines;
-}
-
-function sortOrderBuilderLines(lines) {
-  lines.sort((a, b) => {
-    const sa = String(a.subcategoryName || "");
-    const sb = String(b.subcategoryName || "");
-    if (sa !== sb) return sa.localeCompare(sb);
-    const ca = String(a.code || "");
-    const cb = String(b.code || "");
-    if (ca !== cb) return ca.localeCompare(cb);
-    return String(a.itemName || "").localeCompare(String(b.itemName || ""));
-  });
-}
 
 /** Apply persisted user edits to auto-generated preview line quantities. */
 function applyAutoQtyOverridesToLines(lines) {
@@ -2743,9 +2255,6 @@ function syncOrderBuilderPreviewFromCurrentSub() {
 }
 
 /** No auto-seeding — user starts with a clean tree and explicitly picks what to include. */
-function seedOrderBuilderSelectionIfEmpty() {
-  // intentionally empty
-}
 
 /** Make sure any category that contains a checked subcategory stays expanded so the selection is visible. */
 function expandOrderBuilderCatsForCurrentSelection() {
@@ -3389,37 +2898,6 @@ function commitInventoryOrderBuilderAddItem() {
 }
 
 /** Sanitize a manual item so it's safe to persist (no functions/undefineds). */
-function sanitizeManualItemForDraft(item) {
-  if (!item || typeof item !== "object") return null;
-  /** @type {Record<string, unknown>} */
-  const out = {};
-  const copyKeys = [
-    "id",
-    "itemName",
-    "orderQty",
-    "isManual",
-    "linkedInventoryItemId",
-    "code",
-    "groupId",
-    "groupName",
-    "categoryId",
-    "categoryName",
-    "subcategoryId",
-    "subcategoryName",
-    "fromSuggestionId",
-  ];
-  for (const k of copyKeys) {
-    const v = item[k];
-    if (v === undefined) continue;
-    out[k] = v;
-  }
-  if (typeof out.orderQty !== "number") {
-    const n = Number(out.orderQty);
-    out.orderQty = Number.isFinite(n) ? n : 0;
-  }
-  if (!out.id) out.id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  return out;
-}
 
 /**
  * Apply a draft doc snapshot into local state.
@@ -3633,30 +3111,6 @@ async function flushInventoryOrderDraftSave() {
 }
 
 /** Format a draft entry for the picker. */
-function renderDraftsPickerRowHtml(draft) {
-  const idEsc = escapeHtml(draft.id);
-  const isActive = draft.isActive;
-  const itemCount = Array.isArray(draft.manualItems) ? draft.manualItems.length : 0;
-  const name = draft.orderName && draft.orderName.trim() ? draft.orderName.trim() : "Untitled draft";
-  const updated = draft.updatedAt
-    ? new Date(draft.updatedAt).toLocaleString()
-    : draft.createdAt
-      ? new Date(draft.createdAt).toLocaleString()
-      : "—";
-  const switchBtn = isActive
-    ? `<span class="ff-inv2-drafts-picker-current">Current</span>`
-    : `<button type="button" class="ff-inv2-drafts-picker-switch" data-inv-drafts-picker-switch="${idEsc}">Switch</button>`;
-  return `<li class="ff-inv2-drafts-picker-row${isActive ? " ff-inv2-drafts-picker-row--active" : ""}">
-  <div class="ff-inv2-drafts-picker-main">
-    <div class="ff-inv2-drafts-picker-name">${escapeHtml(name)}</div>
-    <div class="ff-inv2-drafts-picker-meta">${itemCount} item${itemCount === 1 ? "" : "s"} · ${escapeHtml(updated)}</div>
-  </div>
-  <div class="ff-inv2-drafts-picker-actions">
-    ${switchBtn}
-    <button type="button" class="ff-inv2-drafts-picker-delete" data-inv-drafts-picker-delete="${idEsc}" aria-label="Delete draft" title="Delete draft">🗑</button>
-  </div>
-</li>`;
-}
 
 /** Modal listing all drafts — clicking the Draft chip opens this. */
 function renderInventoryDraftsPickerModal() {
@@ -3965,104 +3419,16 @@ ${tabs
 }
 
 /** Readable source label for a saved inventory order document. */
-function formatInventoryOrderSourceLabel(data) {
-  if (!data || typeof data !== "object") return "—";
-  const st = data.sourceType;
-  const sel = data.sourceSelection;
-  if (st && sel && typeof sel === "object") {
-    if (st === "subcategory") {
-      const cat = sel.categoryName != null ? String(sel.categoryName) : "";
-      const sub =
-        Array.isArray(sel.subcategoryNames) && sel.subcategoryNames.length
-          ? String(sel.subcategoryNames[0])
-          : "";
-      if (cat && sub) return `${cat} > ${sub}`;
-      if (cat) return sub ? `${cat} > ${sub}` : cat;
-      return sub || "—";
-    }
-    if (st === "category") {
-      return sel.categoryName != null ? String(sel.categoryName) : sel.categoryId != null ? String(sel.categoryId) : "—";
-    }
-    if (st === "custom") {
-      const n = Array.isArray(sel.subcategoryIds) ? sel.subcategoryIds.length : 0;
-      return `Custom (${n} subcategories)`;
-    }
-  }
-  const cat = data.categoryName != null ? String(data.categoryName) : "";
-  const sub = data.subcategoryName != null ? String(data.subcategoryName) : "";
-  if (sub) return cat ? `${cat} > ${sub}` : sub;
-  return cat || "—";
-}
-
-function getInventoryOrderDisplayName(o) {
-  if (!o || typeof o !== "object") return "Order";
-  const raw = o.orderName != null ? String(o.orderName).trim() : "";
-  if (raw !== "") return raw;
-  const lbl = formatInventoryOrderSourceLabel(o);
-  return lbl !== "—" ? lbl : "Order";
-}
-
-function formatInventoryOrderCreatedAt(ts) {
-  if (!ts) return "—";
-  let d = null;
-  if (typeof ts.toDate === "function") {
-    try {
-      d = ts.toDate();
-    } catch (e) {
-      d = null;
-    }
-  }
-  if (!d && ts.seconds != null) {
-    d = new Date(Number(ts.seconds) * 1000);
-  }
-  if (!d || Number.isNaN(d.getTime())) return "—";
-  try {
-    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  } catch (e) {
-    return d.toISOString();
-  }
-}
-
-function formatInventoryOrderStatusDisplay(o) {
-  const s = getEffectiveInventoryOrderStatus(o);
-  if (s === "open") return "open";
-  if (s === "in_progress") return "in progress";
-  if (s === "done") return "done";
-  return s;
-}
-
-function getInventoryOrderStatusKey(o) {
-  const s = getEffectiveInventoryOrderStatus(o);
-  if (s === "open" || s === "in_progress" || s === "done") return s;
-  return "open";
-}
 
 function orderMatchesInventoryStatusFilter(o) {
   if (_invOrdersStatusFilter === "all") return true;
   return getInventoryOrderStatusKey(o) === _invOrdersStatusFilter;
 }
 
-function getOrderSearchHaystack(o) {
-  const parts = [getInventoryOrderDisplayName(o), formatInventoryOrderSourceLabel(o)];
-  const items = Array.isArray(o.items) ? o.items : [];
-  for (const it of items) {
-    if (it && typeof it === "object") {
-      if (it.itemName != null) parts.push(String(it.itemName));
-      if (it.supplier != null) parts.push(String(it.supplier));
-    }
-  }
-  return parts.join(" ").toLowerCase();
-}
-
 function orderMatchesInventorySearchQuery(o) {
   const q = _invOrdersSearchQuery.trim().toLowerCase();
   if (!q) return true;
   return getOrderSearchHaystack(o).includes(q);
-}
-
-function formatInventoryOrderOrderedByDisplay(uid) {
-  if (uid == null || String(uid).trim() === "") return "—";
-  return String(uid);
 }
 
 /**
@@ -4099,15 +3465,6 @@ async function loadInventoryOrdersList(opts) {
   } finally {
     _invOrdersLoading = false;
     mountOrRefreshMockUi();
-  }
-}
-
-function clonePlainForFirestoreOrderPayload(obj) {
-  if (obj == null || typeof obj !== "object") return obj;
-  try {
-    return JSON.parse(JSON.stringify(obj));
-  } catch (e) {
-    return obj;
   }
 }
 
@@ -4627,14 +3984,6 @@ function ensureInventoryOrderReceiptsSubscription() {
   })();
 }
 
-function sanitizeReceiptStorageFileName(name) {
-  const raw = String(name || "file")
-    .replace(/[/\\]/g, "_")
-    .replace(/\s+/g, " ")
-    .trim();
-  return raw.slice(0, 180) || "file";
-}
-
 function getReceiptUploadFieldsForOrder(orderId) {
   const e = _invOrderReceiptUploadFieldsByOrderId[orderId];
   if (!e) return { note: "", supplierName: "", amount: "" };
@@ -4716,17 +4065,6 @@ async function handleInventoryOrderReceiptFileSelected(root, orderId, file) {
 }
 
 /** Pick a small emoji based on file extension for quick visual cue. */
-function getReceiptFileTypeEmoji(fileName) {
-  const s = String(fileName ?? "").toLowerCase();
-  const dot = s.lastIndexOf(".");
-  const ext = dot >= 0 ? s.slice(dot + 1) : "";
-  if (ext === "pdf") return "📄";
-  if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "svg"].includes(ext)) return "🖼️";
-  if (["txt", "csv", "log"].includes(ext)) return "📝";
-  if (["doc", "docx", "rtf", "odt"].includes(ext)) return "📄";
-  if (["xls", "xlsx", "ods"].includes(ext)) return "📊";
-  return "📎";
-}
 
 /** Receipt list block for Receipt information modal only (uses live receipts listener). */
 function buildReceiptsListBlockHtml() {
@@ -4919,20 +4257,8 @@ const INV_INSIGHTS_LOW_THRESHOLD = 0.3;
 const INV_INSIGHTS_DEAD_STOCK_MIN_CURRENT = 1;
 
 /** Convert local YYYY-MM-DD input value to a JS Date (start of day local time). */
-function ffParseDateInputStart(s) {
-  if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0);
-}
 
 /** Convert local YYYY-MM-DD input value to end of day. */
-function ffParseDateInputEnd(s) {
-  if (!s) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999);
-}
 
 /** Resolve the active range to absolute { from, to } JS Dates. `all` returns from=null. */
 function getInventoryInsightsDateRange() {
@@ -4954,28 +4280,6 @@ function getInventoryInsightsDateRange() {
 }
 
 /** Best-effort timestamp resolution for an order item event (purchase apply / receive). */
-function ffResolveItemEventDate(it, order) {
-  const candidates = [it && it.appliedAt, it && it.lastReceivedAt, order && order.updatedAt, order && order.orderedAt, order && order.createdAt];
-  for (const ts of candidates) {
-    if (!ts) continue;
-    if (typeof ts.toDate === "function") {
-      try {
-        return ts.toDate();
-      } catch (e) {
-        /* ignore */
-      }
-    }
-    if (typeof ts === "object" && ts && typeof ts.seconds === "number") {
-      return new Date(ts.seconds * 1000 + (typeof ts.nanoseconds === "number" ? ts.nanoseconds / 1e6 : 0));
-    }
-    if (typeof ts === "number") return new Date(ts);
-    if (typeof ts === "string") {
-      const d = new Date(ts);
-      if (!Number.isNaN(d.getTime())) return d;
-    }
-  }
-  return null;
-}
 
 /** Compute the previous comparison period [from, to] matching the currently-selected range. */
 function getInventoryInsightsPrevRange() {
@@ -6520,11 +5824,6 @@ function renderInvMainTabPanelsHtml() {
   return `<div class="ff-inv2-main-tab-body ff-inv2-main-tab-body--inventory">${renderInventoryTableCardHtml()}</div>`;
 }
 
-function invCellKey(inv, rowId, groupId) {
-  if (groupId != null && groupId !== "") return `${inv}:${rowId}:${groupId}`;
-  return `${inv}:${rowId}`;
-}
-
 function getInvCellKeyFromEl(el) {
   const inv = el.getAttribute("data-inv");
   const rowId = el.getAttribute("data-row-id");
@@ -6572,13 +5871,6 @@ function renderEditableCell(inv, rowId, value, opts) {
   return `<span class="${cls}" tabindex="0" role="button" data-inv-cell="1" data-inv="${escapeHtml(inv)}" data-row-id="${escapeHtml(rowId)}"${gAttr}>${escapeHtml(String(value))}</span>`;
 }
 
-function hrefForUrl(raw) {
-  const s = String(raw ?? "").trim();
-  if (!s) return "";
-  if (/^https?:\/\//i.test(s)) return s;
-  return `https://${s}`;
-}
-
 function renderUrlCell(rowId, value) {
   const key = invCellKey("url", rowId);
   const isEditing = _editCellKey === key;
@@ -6593,19 +5885,6 @@ function renderUrlCell(rowId, value) {
     : `<span class="ff-inv2-url-empty" title="No URL">—</span>`;
   const pen = `<button type="button" class="ff-inv2-url-edit" data-inv-url-edit="1" data-row-id="${escapeHtml(rowId)}" aria-label="Edit URL"><svg class="ff-inv2-url-edit-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>`;
   return `<div class="ff-inv2-url-cell">${linkBlock}${pen}</div>`;
-}
-
-function renderOrderCellTd(rowId, groupId, order, approved) {
-  const pos = order > 0;
-  const hasApproved = (approved || 0) > 0;
-  const classes = [
-    "ff-inv2-order-cell",
-    pos ? "ff-inv2-order-cell--positive" : "",
-    hasApproved ? "ff-inv2-order-cell--has-approved" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return `<td class="${classes}" data-order-for-row="${escapeHtml(rowId)}" data-order-for-group="${escapeHtml(groupId)}" data-order-approved="${escapeHtml(String(approved || 0))}" title="${hasApproved ? "Includes approved supply requests — long-press for details" : ""}"><span class="ff-inv2-order-val">${escapeHtml(formatOrderDisplay(order))}</span></td>`;
 }
 
 function handleInvEditOutsideClick(ev) {
@@ -7027,11 +6306,6 @@ function syncInvColWidthsToDom() {
     cols[i].style.width = `${urlW}px`;
     cols[i].style.minWidth = `${urlW}px`;
   }
-}
-
-function thResizeHandle(kind, extraAttrs) {
-  const ex = extraAttrs ? ` ${extraAttrs}` : "";
-  return `<div class="col-resize-handle" data-inv-resize="${escapeHtml(kind)}"${ex} aria-hidden="true"></div>`;
 }
 
 function bindInvColumnResizeOnce() {
@@ -7749,14 +7023,6 @@ function renderManageSubRow(cat, sub) {
       }
     </div>
   </div>
-</div>`;
-}
-
-function renderInlineNewSub(catId) {
-  return `<div class="ff-inv2-cat-manage-inline">
-  <input type="text" class="ff-inv2-cat-manage-input" placeholder="Subcategory name" data-cat-new-sub-input="${escapeHtml(catId)}" />
-  <button type="button" class="ff-inv2-cat-manage-mini" data-cat-new-sub-commit="${escapeHtml(catId)}">Add</button>
-  <button type="button" class="ff-inv2-cat-manage-mini" data-cat-new-sub-cancel="1">Cancel</button>
 </div>`;
 }
 
