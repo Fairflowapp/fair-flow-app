@@ -1900,7 +1900,7 @@ window.confirmSendChatMessage = async function() {
     recipientUids  = [chatState.chatReplyContext.uid];
     recipientNames = [chatState.chatReplyContext.name];
     if (!recipientUids[0] || recipientUids.length !== 1) {
-      console.warn('[Chat] blocked invalid reply recipient set', { recipientUids, chatState.chatReplyContext });
+      console.warn('[Chat] blocked invalid reply recipient set', { recipientUids, chatReplyContext: chatState.chatReplyContext });
       return;
     }
   } else {
