@@ -22,7 +22,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260627_inventory_split";
+import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260627_inv_css_quad";
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
 import {
   escapeHtml,
