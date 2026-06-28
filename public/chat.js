@@ -713,14 +713,14 @@ async function loadChatSalonUsers(options = {}) {
     chatState._chatMembersLoaded = true;
     return;
   }
-  const key = `${chatUserProfile.salonId}::${chatUserProfile.uid || ''}`;
+  const key = `${chatState.chatUserProfile.salonId}::${chatState.chatUserProfile.uid || ''}`;
   if (!options.force && chatState._chatMembersLoaded && chatState._chatUsersLoadKey === key) return;
   if (!options.force && chatState._chatUsersLoadPromise && chatState._chatUsersLoadKey === key) return chatState._chatUsersLoadPromise;
   chatState._chatUsersLoadKey = key;
   chatState._chatMembersLoaded = false;
   chatState._chatUsersLoadPromise = (async () => {
     try {
-      const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
+      const snap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/members`));
       chatState.chatSalonUsers = snap.docs
         .map(d => ({ ...d.data(), uid: d.id }))
         .filter(u => u.uid !== chatState.chatUserProfile.uid);
@@ -737,7 +737,7 @@ async function loadChatSalonUsers(options = {}) {
 async function loadChatTemplates(options = {}) {
   if (!chatState.chatUserProfile?.salonId) return;
   const locKey = _chatEffectiveLocKey();
-  const key = `${chatUserProfile.salonId}::${locKey}`;
+  const key = `${chatState.chatUserProfile.salonId}::${locKey}`;
   if (!options.force && chatState._chatTemplatesLoadKey === key && chatState.chatTemplates.length) return;
   if (!options.force && chatState._chatTemplatesLoadPromise && chatState._chatTemplatesLoadKey === key) return chatState._chatTemplatesLoadPromise;
   chatState._chatTemplatesLoadKey = key;
@@ -745,7 +745,7 @@ async function loadChatTemplates(options = {}) {
     const sharedTemplates = await loadSharedChatTemplates();
     try {
       const snap = await getDocs(query(
-        collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
+        collection(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`),
         orderBy('order','asc')
       ));
       const localTemplates = snap.docs
@@ -755,7 +755,7 @@ async function loadChatTemplates(options = {}) {
     } catch (e) {
       console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
       try {
-        const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`));
+        const snap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`));
         const localTemplates = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter(t => _itemMatchesLocation(t, locKey))
@@ -775,23 +775,23 @@ async function loadChatTemplates(options = {}) {
 async function loadChatFlows(options = {}) {
   if (!chatState.chatUserProfile?.salonId) return;
   const locKey = _chatEffectiveLocKey();
-  const key = `${chatUserProfile.salonId}::${locKey}`;
+  const key = `${chatState.chatUserProfile.salonId}::${locKey}`;
   if (!options.force && chatState._chatFlowsLoadKey === key && chatState.chatFlows.length) return;
   if (!options.force && chatState._chatFlowsLoadPromise && chatState._chatFlowsLoadKey === key) return chatState._chatFlowsLoadPromise;
   chatState._chatFlowsLoadKey = key;
   chatState._chatFlowsLoadPromise = (async () => {
     const sharedFlows = await loadSharedChatFlows();
     try {
-      const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
+      const flowsSnap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows`));
       const flows = (await Promise.all(flowsSnap.docs.map(async (fd) => {
         const flowData = { id: fd.id, ...fd.data() };
         if (!_itemMatchesLocation(flowData, locKey)) return null;
         try {
-          const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
+          const stepsSnap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
           flowData.steps = await Promise.all(stepsSnap.docs.map(async (sd) => {
             const stepData = { id: sd.id, ...sd.data() };
             try {
-              const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
+              const optsSnap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
               stepData.options = _chatSortByOrder(optsSnap.docs.map(od => ({ id: od.id, ...od.data() })));
             } catch (optErr) {
               console.warn('[Chat] flow option load failed', {
@@ -842,7 +842,7 @@ function subscribeToConversationList() {
 
   chatState.chatConvsUnsub = onSnapshot(
     query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations`),
+      collection(db, `salons/${chatState.chatUserProfile.salonId}/conversations`),
       where('participants', 'array-contains', uid)
     ),
     snap => {
@@ -1346,8 +1346,8 @@ async function markThreadRead(convId) {
   const currentUnread = _unreadCountForUid(conv || {}, chatState.chatUserProfile.uid);
   if (currentUnread <= 0) return;
   try {
-    await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId), {
-      [`unreadFor.${chatUserProfile.uid}`]: 0
+    await updateDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/conversations`, convId), {
+      [`unreadFor.${chatState.chatUserProfile.uid}`]: 0
     });
     if (conv) {
       conv.unreadFor = { ...(conv.unreadFor || {}), [chatState.chatUserProfile.uid]: 0 };
@@ -1692,7 +1692,7 @@ window._chatSendMode = function(mode) {
 
 function _chatGetFlowAccordion() {
   if (!chatState.chatSelectedFlow?.id) return null;
-  const block = document.querySelector(`.chat-message-option-block[data-type="flow"][data-id="${chatSelectedFlow.id}"]`);
+  const block = document.querySelector(`.chat-message-option-block[data-type="flow"][data-id="${chatState.chatSelectedFlow.id}"]`);
   return block?.querySelector('.chat-flow-accordion') || null;
 }
 
@@ -1739,7 +1739,7 @@ function _chatRenderFlowWizard(container) {
           style="padding:10px 14px;text-align:left;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;color:#111827;">${escHtml(o.label || '(no label)')}</button>
       `).join('')}
     </div>
-    ${chatFlowAnswers.length ? '<button type="button" class="chat-flow-back-btn" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#6b7280;background:none;border:none;cursor:pointer;">← Back</button>' : ''}
+    ${chatState.chatFlowAnswers.length ? '<button type="button" class="chat-flow-back-btn" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#6b7280;background:none;border:none;cursor:pointer;">← Back</button>' : ''}
   `;
   wizard.querySelectorAll('.chat-flow-opt-btn').forEach(btn => {
     btn.onclick = () => {
@@ -2218,7 +2218,7 @@ function _subscribeToMessages(convId) {
   if (chatState.chatMsgsUnsub) { chatState.chatMsgsUnsub(); chatState.chatMsgsUnsub = null; }
 
   const msgQuery = query(
-    collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
+    collection(db, `salons/${chatState.chatUserProfile.salonId}/conversations/${convId}/messages`),
     orderBy('sentAt','asc'),
     limit(300)
   );
@@ -2687,14 +2687,14 @@ window.deleteChatFlow = async function(id) {
     if (flow?.steps) {
       for (const s of flow.steps) {
         if (s.options) for (const o of s.options) {
-          const ref = doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps/${s.id}/options`, o.id);
+          const ref = doc(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows/${id}/steps/${s.id}/options`, o.id);
           try { await deleteDoc(ref); } catch(_) {}
         }
-        try { await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps`, s.id)); } catch(_) {}
+        try { await deleteDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows/${id}/steps`, s.id)); } catch(_) {}
       }
     }
     if (chatState.chatEditingFlowId === id) window.cancelEditChatFlow();
-    await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows`, id));
+    await deleteDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows`, id));
     await loadChatFlows({ force: true });
     _renderFlowsAdminList();
   } catch(e) {
@@ -2730,7 +2730,7 @@ function _renderFlowsAdminList() {
       <div class="chat-category-section-items">
         ${groupItems.map(f => {
     const idEsc = escHtml(f.id);
-    const isEditing = chatEditingFlowId === f.id;
+    const isEditing = chatState.chatEditingFlowId === f.id;
     const stepCount = (f.steps || []).length;
     const hasRoles = Array.isArray(f.allowedSenders) && f.allowedSenders.length > 0;
     const rolesInline = hasRoles
@@ -2878,7 +2878,7 @@ function _renderTmplList() {
       <div class="chat-category-section-items">
         ${groupItems.map(t => {
     const idEsc = escHtml(t.id);
-    const isEditing = chatEditingTmplId === t.id;
+    const isEditing = chatState.chatEditingTmplId === t.id;
     const hasRoles = Array.isArray(t.allowedSenders) && t.allowedSenders.length > 0;
     const rolesInline = hasRoles
       ? `<span class="chat-tmpl-card-roles-inline" title="${escHtml(t.allowedSenders.map(roleLabel).join(', '))}">${escHtml(t.allowedSenders.map(roleShort).join(' · '))}</span>`
@@ -2995,10 +2995,10 @@ window.saveChatTemplate = async function() {
   const locKey = _chatEffectiveLocKey();
   try {
     if (chatState.chatEditingTmplId) {
-      await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, chatState.chatEditingTmplId),
+      await updateDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`, chatState.chatEditingTmplId),
         { title, category, message, allowedSenders, locationId: locKey, updatedAt: serverTimestamp() });
     } else {
-      await addDoc(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
+      await addDoc(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`),
         { title, category, message, allowedSenders, locationId: locKey, order: chatState.chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatState.chatUserProfile.uid });
     }
     window.cancelEditChatTemplate();
@@ -3026,7 +3026,7 @@ window.deleteChatTemplate = async function(id) {
   const titleStr = tmpl?.title ? `"${tmpl.title}"` : 'this template';
   if (!confirm(`Delete ${titleStr}?`)) return;
   try {
-    await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
+    await deleteDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`, id));
     if (chatState.chatEditingTmplId === id) window.cancelEditChatTemplate();
     await loadChatTemplates({ force: true });
     _renderTmplList();
