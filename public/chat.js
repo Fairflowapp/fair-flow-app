@@ -527,6 +527,32 @@ function _chatManageAllowed() {
   );
 }
 
+// chat_manage resolves false until the staff store hydrates (or the admin-access
+// cache is set), so a first click on the gear used to silently no-op until the
+// 2nd/3rd attempt. Wait for the permission predicate to settle — re-checking on
+// each `ff-staff-cloud-updated` event plus a short poll — before deciding. The
+// timeout still returns the real (likely false) value, so genuine no-permission
+// users never open the modal.
+function _chatWaitForManagePermission(timeoutMs = 2500) {
+  if (_chatManageAllowed()) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('ff-staff-cloud-updated', onUpd);
+      clearInterval(poll);
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const check = () => { if (_chatManageAllowed()) finish(true); };
+    const onUpd = () => check();
+    document.addEventListener('ff-staff-cloud-updated', onUpd);
+    const poll = setInterval(check, 150);
+    const timer = setTimeout(() => finish(_chatManageAllowed()), timeoutMs);
+  });
+}
+
 function _chatFreeTextAllowed() {
   return (
     typeof window.ffCurrentUserHasChatFreeTextPermission === 'function' &&
@@ -2289,7 +2315,7 @@ function _ensureChatCategoryFields() {
 }
 
 window.openChatTemplatesSettings = async function() {
-  if (!_chatManageAllowed()) return;
+  if (!(await _chatWaitForManagePermission())) return;
   if (!chatState.chatUserProfile) await loadChatUserProfile();
   await Promise.all([loadChatTemplates(), loadChatFlows()]);
   _ensureChatCategoryFields();
