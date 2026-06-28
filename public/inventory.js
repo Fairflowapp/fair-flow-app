@@ -189,7 +189,7 @@ import {
   toggleShoppingRowQty,
   triggerOrderDetailExportCsv,
   triggerOrderDetailPrint,
-} from "./inventory-orders.js?v=20260627_inventory_orders2";
+} from "./inventory-orders.js?v=20260627_inventory_orders_split";
 
 // Wire inventory.js internals into the Orders sub-app (breaks the orchestrator
 // <-> orders import cycle). inventoryOrderDraftToast now lives in Orders and is
@@ -243,7 +243,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260627_inventory_table2";
+} from "./inventory-table.js?v=20260627_inventory_table3";
 
 // Wire inventory.js orchestrator spine into the Table sub-app (breaks the
 // orchestrator <-> table import cycle). The Table fns re-imported above are also

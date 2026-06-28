@@ -59,7 +59,7 @@ import {
 import {
   inventoryOrderDraftToast,
   scheduleInventoryOrderDraftSave,
-} from "./inventory-orders.js?v=20260627_inventory_orders2";
+} from "./inventory-orders.js?v=20260627_inventory_orders_split";
 
 import {
   refreshInventoryInsightsAsync,
