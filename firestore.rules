@@ -503,6 +503,10 @@ service cloud.firestore {
                 && request.resource.data.flowId is string
                 && request.resource.data.flowTitle is string
                 && request.resource.data.renderedText is string)
+            || (request.resource.data.keys().hasAll(['title', 'message'])
+                && request.resource.data.title is string
+                && request.resource.data.message is string
+                && !request.resource.data.keys().hasAny(['templateId', 'flowId']))
           );
 
         // Allow updating only readBy field (mark as read)
@@ -735,8 +739,27 @@ service cloud.firestore {
 
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
+      // Optimistic concurrency (compare-and-swap): a write that changes
+      // queue/service/log must advance rev by exactly 1. A stale-rev write is
+      // rejected (permission-denied), which triggers the existing 3-way merge +
+      // retry in queue-cloud.js and prevents stale-cache "resurrection"
+      // overwrites. Settings-only writes (no content change) may keep rev.
+      function queueContentChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasAny(['queue', 'service', 'log']);
+      }
+      function currentRev() {
+        return ('rev' in resource.data) ? resource.data.rev : 0;
+      }
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
-      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow create: if (belongsToSalon(salonId) || isKioskForSalon(salonId))
+        && request.resource.data.rev is int
+        && request.resource.data.rev >= 0;
+      allow update: if (belongsToSalon(salonId) || isKioskForSalon(salonId))
+        && (
+          !queueContentChanged()
+          || request.resource.data.rev == currentRev() + 1
+        );
+      allow delete: if false;
     }
 
     match /salons/{salonId}/tasksState/{docId} {
