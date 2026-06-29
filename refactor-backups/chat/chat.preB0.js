@@ -63,13 +63,11 @@ import {
   _readActiveLocationId,
   _activeLocKey,
   _chatEffectiveLocKey,
-  _convMatchesLocation,
-  _cacheConversations,
   loadChatUserProfile,
   loadChatSalonUsers,
   loadChatTemplates,
   loadChatFlows,
-} from "./chat-data.js?v=20260628_chat_data_b0";
+} from "./chat-data.js?v=20260628_chat_data_split";
 
 // ─── Admin module (templates + flows) — extracted to chat-admin.js ──────────────
 import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260628_chat_admin_split";
@@ -211,6 +209,38 @@ const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
  * conversation IDs have no prefix, so if Firestore has a locationId field,
  * use that instead of treating them as permanently "default".
  */
+/** True when a conversation doc belongs to the given location key. */
+function _convMatchesLocation(conv, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  const convKey = _convLocKey(conv);
+  if (convKey === k) return true;
+  // Legacy / salon-default DMs (branch "default") stay visible at any location the
+  // user is allowed to work in — not only primary. Otherwise after staff + location
+  // hydrate (~1s after load) the nav badge recomputes with a concrete location id
+  // and incorrectly drops to 0 while the thread list still shows unread.
+  if (convKey === CHAT_DEFAULT_LOC_KEY && k !== CHAT_DEFAULT_LOC_KEY) {
+    try {
+      const w = typeof window !== 'undefined' ? window : {};
+      if (typeof w.ffGetUserAllowedLocations === 'function') {
+        const locs = w.ffGetUserAllowedLocations();
+        if (Array.isArray(locs) && locs.some((loc) => loc && String(loc.id || '').trim() === k)) {
+          return true;
+        }
+      }
+      if (typeof w.ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
+        const row = w.ffResolveCurrentStaffRowFromFfStaffV1();
+        if (row && typeof w.ffEnsureStaffLocationFields === 'function') {
+          const f = w.ffEnsureStaffLocationFields(row);
+          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+          if (primary && primary === k) return true;
+          const allowed = Array.isArray(f.allowedLocationIds) ? f.allowedLocationIds : [];
+          if (allowed.some((id) => String(id || '').trim() === k)) return true;
+        }
+      }
+    } catch (_) {}
+  }
+  return false;
+}
 
 /**
  * True when a salon-scoped item (chat template, flow, …) belongs to the
@@ -357,6 +387,12 @@ function _avatarUrlForUid(uid) {
   const v = u.avatarUpdatedAtMs != null ? String(u.avatarUpdatedAtMs) : '';
   const sep = u.avatarUrl.includes('?') ? '&' : '?';
   return `${u.avatarUrl}${sep}v=${encodeURIComponent(v)}`;
+}
+function _cacheConversations(list) {
+  if (!Array.isArray(list)) return;
+  list.forEach(c => {
+    if (c && c.id) chatState.cachedConversationsById[c.id] = c;
+  });
 }
 
 function _conversationById(convId) {

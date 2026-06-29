@@ -13,7 +13,6 @@ import {
   CHAT_DEFAULT_LOC_KEY,
   _chatSortByOrder,
   _itemMatchesLocation,
-  _convLocKey,
 } from "./chat-helpers.js?v=20260626_chat_helpers_split";
 import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
 
@@ -301,53 +300,10 @@ async function loadChatFlows(options = {}) {
   return chatState._chatFlowsLoadPromise;
 }
 
-// ─── Conversation location scoping + cache (shared by core + subscriptions) ─────
-/** True when a conversation doc belongs to the given location key. */
-function _convMatchesLocation(conv, locKey) {
-  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
-  const convKey = _convLocKey(conv);
-  if (convKey === k) return true;
-  // Legacy / salon-default DMs (branch "default") stay visible at any location the
-  // user is allowed to work in — not only primary. Otherwise after staff + location
-  // hydrate (~1s after load) the nav badge recomputes with a concrete location id
-  // and incorrectly drops to 0 while the thread list still shows unread.
-  if (convKey === CHAT_DEFAULT_LOC_KEY && k !== CHAT_DEFAULT_LOC_KEY) {
-    try {
-      const w = typeof window !== 'undefined' ? window : {};
-      if (typeof w.ffGetUserAllowedLocations === 'function') {
-        const locs = w.ffGetUserAllowedLocations();
-        if (Array.isArray(locs) && locs.some((loc) => loc && String(loc.id || '').trim() === k)) {
-          return true;
-        }
-      }
-      if (typeof w.ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
-        const row = w.ffResolveCurrentStaffRowFromFfStaffV1();
-        if (row && typeof w.ffEnsureStaffLocationFields === 'function') {
-          const f = w.ffEnsureStaffLocationFields(row);
-          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
-          if (primary && primary === k) return true;
-          const allowed = Array.isArray(f.allowedLocationIds) ? f.allowedLocationIds : [];
-          if (allowed.some((id) => String(id || '').trim() === k)) return true;
-        }
-      }
-    } catch (_) {}
-  }
-  return false;
-}
-
-function _cacheConversations(list) {
-  if (!Array.isArray(list)) return;
-  list.forEach(c => {
-    if (c && c.id) chatState.cachedConversationsById[c.id] = c;
-  });
-}
-
 export {
   _readActiveLocationId,
   _activeLocKey,
   _chatEffectiveLocKey,
-  _convMatchesLocation,
-  _cacheConversations,
   getChatAccountId,
   loadSharedChatTemplates,
   loadSharedChatFlows,
