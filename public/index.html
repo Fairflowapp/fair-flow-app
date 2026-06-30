@@ -5,6 +5,57 @@
 
 <head>
 
+<!-- Inbox module-graph preload: parallel-fetch inbox.js + all sub-modules to collapse the
+     ES-module import waterfall, so the first Inbox open is not slow/blank. Keep ?v= in sync
+     with the import statements in inbox.js and the script-loader entry below. -->
+<link rel="modulepreload" href="/inbox.js?v=20260630_inbox_details_split">
+<link rel="modulepreload" href="/inbox-state.js?v=20260629_inbox_state_split">
+<link rel="modulepreload" href="/inbox-helpers.js?v=20260626_inbox_helpers_split">
+<link rel="modulepreload" href="/inbox-utils.js?v=20260630_inbox_utils_split">
+<link rel="modulepreload" href="/inbox-data.js?v=20260630_inbox_data_split">
+<link rel="modulepreload" href="/inbox-types.js?v=20260630_inbox_types_split">
+<link rel="modulepreload" href="/inbox-documents.js?v=20260629_inbox_documents_split">
+<link rel="modulepreload" href="/inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split">
+<link rel="modulepreload" href="/inbox-supplies.js?v=20260629_inbox_supplies_split">
+<link rel="modulepreload" href="/inbox-list-render.js?v=20260630_inbox_list_render_split">
+<link rel="modulepreload" href="/inbox-modals-ui.js?v=20260630_inbox_modals_ui_split">
+<link rel="modulepreload" href="/inbox-details.js?v=20260630_inbox_details_split">
+
+<script>
+  // Robust Inbox open: inbox.js wires #inboxBtn.onclick only inside initInbox(), which runs
+  // after the module graph finishes loading. Until then an early click would do nothing, which
+  // looked like a blank Inbox needing several clicks. Bridge the gap: if goToInbox is not ready,
+  // dynamic-import inbox.js (deduped with the preload above) and then open. Once inbox.js loads,
+  // initInbox replaces this with the direct goToInbox handler. Keep ?v= in sync with inbox.js.
+  (function () {
+    function ffRobustOpenInbox() {
+      if (typeof window.goToInbox === 'function') { window.goToInbox(); return; }
+      if (window.__ffInboxOpening) return;
+      window.__ffInboxOpening = true;
+      import('/inbox.js?v=20260630_inbox_details_split')
+        .then(function (m) {
+          window.__ffInboxOpening = false;
+          var fn = (m && typeof m.goToInbox === 'function') ? m.goToInbox : window.goToInbox;
+          if (typeof fn === 'function') { window.goToInbox = fn; fn(); }
+        })
+        .catch(function (err) {
+          window.__ffInboxOpening = false;
+          console.error('[Inbox] robust open failed', err);
+        });
+    }
+    function wireRobustInbox() {
+      var btn = document.getElementById('inboxBtn');
+      // Only fill the gap before initInbox wires the direct handler; never clobber it.
+      if (btn && btn.onclick == null) btn.onclick = ffRobustOpenInbox;
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wireRobustInbox);
+    } else {
+      wireRobustInbox();
+    }
+  })();
+</script>
+
 <script>
   (function enforceEnglishLocaleDefaults(){
     try {
