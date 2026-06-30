@@ -38824,7 +38824,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260629_inbox_supplies_split')
+              import('/inbox.js?v=20260629_inbox_documents_split')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -64459,7 +64459,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-ui.js?v=20260625_build_scope_warn", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
-        { src: "/inbox.js?v=20260629_inbox_supplies_split", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260629_inbox_documents_split", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260623_mediafix", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260628_chat_ui_u3", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
