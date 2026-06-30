@@ -15,64 +15,41 @@ import {
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import "./format-utils.js";
+import { ticketsState, TICKETS_PAGE_SIZE, _ticketSummaryPageSize } from "./tickets-state.js?v=20260630_tickets_state_split";
 
 // =====================
 // State
 // =====================
-let currentUserProfile = null;
-let salonServices = [];
-let serviceCategories = [];
 // Retail products (salon-wide, with per-location + per-staff overrides) shown in the ticket picker.
-let salonProducts = [];
-let productCategories = [];
-let _productsUnsub = null;
-let _productCatsUnsub = null;
-let _productsSubSalonId = null;
-let currentTickets = [];
 /** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
-const TICKETS_PAGE_SIZE = 200;
 /** Page size for Summary: paginated fetch of CLOSED tickets. */
-const _ticketSummaryPageSize = 500;
-let _ticketsFirstPageTickets = [];
-let _ticketsExtraTickets = [];
-let _ticketsNextPageCursor = null;
-let _ticketsHasMoreOlder = false;
-let _ticketsLoadingMore = false;
-let ticketsUnsubscribe = null;
-let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
-let currentTicketsTab = 'ready';
-let editingTicketId = null;
 /** When true, the ticket service/product picker shows the FULL catalog (used when a
  * manager / front-desk receiver edits a ticket) instead of filtering by the current
  * staff member's allowed services. Reset to false for the technician new-ticket flow. */
-let _ticketPickerShowAllCatalog = false;
 /** When set, opening this ticket (e.g. from list) must not show Ticket Details – we just closed it. */
-let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
-let _ticketsMembersAvatarCache = null;
 /** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
-let _ticketsMembersAvatarByName = null;
 
 function getActiveTicketsSalonId() {
   return (typeof window !== 'undefined' && window.currentSalonId)
-    || currentUserProfile?.salonId
+    || ticketsState.currentUserProfile?.salonId
     || null;
 }
 
 function resetTicketsRuntimeCache() {
-  currentTickets = [];
-  _ticketsFirstPageTickets = [];
-  _ticketsExtraTickets = [];
-  _ticketsNextPageCursor = null;
-  _ticketsHasMoreOlder = false;
-  _ticketsLoadingMore = false;
-  _ticketsListSnapshotReady = false;
-  _ticketsDataReady = false;
-  _frontDeskCache = null;
+  ticketsState.currentTickets = [];
+  ticketsState._ticketsFirstPageTickets = [];
+  ticketsState._ticketsExtraTickets = [];
+  ticketsState._ticketsNextPageCursor = null;
+  ticketsState._ticketsHasMoreOlder = false;
+  ticketsState._ticketsLoadingMore = false;
+  ticketsState._ticketsListSnapshotReady = false;
+  ticketsState._ticketsDataReady = false;
+  ticketsState._frontDeskCache = null;
 }
 
 window.ffGetCurrentTickets = function() {
-  return Array.isArray(currentTickets) ? currentTickets.slice() : [];
+  return Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets.slice() : [];
 };
 
 // Live Desk (and other surfaces) open a ticket's details by id.
@@ -87,7 +64,7 @@ window.ffTicketMoney = function(n, decimals) {
 
 window.ffLoadTicketsForAnalytics = async function() {
   const salonId = getActiveTicketsSalonId();
-  if (!currentUserProfile) {
+  if (!ticketsState.currentUserProfile) {
     try { await loadCurrentUserProfile(); } catch (_) {}
   }
   const resolvedSalonId = getActiveTicketsSalonId() || salonId;
@@ -107,7 +84,7 @@ window.ffLoadTicketsForAnalytics = async function() {
 function notifyTicketsAnalyticsDataChanged() {
   try {
     document.dispatchEvent(new CustomEvent('ff-tickets-data-changed', {
-      detail: { count: Array.isArray(currentTickets) ? currentTickets.length : 0 }
+      detail: { count: Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets.length : 0 }
     }));
   } catch (_) {}
 }
@@ -117,9 +94,7 @@ function normalizeTicketTechName(name) {
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 /** Ticket IDs opened this session (so badge count drops immediately without waiting for Firestore). */
-let _ticketsOpenedThisSession = new Set();
 /** After subscribeTickets, hide list until first Firestore snapshot (avoids empty→full flicker). */
-let _ticketsListSnapshotReady = false;
 
 // =====================
 // User Profile
@@ -127,7 +102,7 @@ let _ticketsListSnapshotReady = false;
 async function loadCurrentUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
-  _frontDeskCache = null; // reset on profile load
+  ticketsState._frontDeskCache = null; // reset on profile load
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
@@ -145,7 +120,7 @@ async function loadCurrentUserProfile() {
       const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
       const resolvedSalonId = activeSalonId || data.salonId || null;
       const resolvedStaffId = activeStaffId || data.staffId || null;
-      currentUserProfile = {
+      ticketsState.currentUserProfile = {
         uid: user.uid,
         ...data,
         salonId: resolvedSalonId,
@@ -163,15 +138,15 @@ async function loadCurrentUserProfile() {
           if (staffSnap.exists()) {
             const st = staffSnap.data() || {};
             const staffName = String(st.name || '').trim();
-            if (staffName) currentUserProfile.name = staffName;
-            currentUserProfile.permissions = { ...(currentUserProfile.permissions || {}), ...(st.permissions || {}) };
-            if (st.managerType) currentUserProfile.managerType = st.managerType;
+            if (staffName) ticketsState.currentUserProfile.name = staffName;
+            ticketsState.currentUserProfile.permissions = { ...(ticketsState.currentUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) ticketsState.currentUserProfile.managerType = st.managerType;
           }
         } catch (mergeErr) {
           console.warn('[Tickets] Failed to merge staff doc into profile', mergeErr);
         }
       }
-      return currentUserProfile;
+      return ticketsState.currentUserProfile;
     }
   } catch (err) {
     console.error('[Tickets] Failed to load user profile', err);
@@ -181,23 +156,23 @@ async function loadCurrentUserProfile() {
 
 /** If users/{uid} lacks staffId, copy from salons/{salonId}/members/{uid} so staff-store permission match works. */
 async function enrichTicketsProfileFromMemberDoc() {
-  if (!currentUserProfile?.uid) return;
-  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile.salonId;
+  if (!ticketsState.currentUserProfile?.uid) return;
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || ticketsState.currentUserProfile.salonId;
   if (!salonId) return;
-  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') return;
+  if (ticketsState.currentUserProfile.staffId != null && String(ticketsState.currentUserProfile.staffId).trim() !== '') return;
   try {
-    const ms = await getDoc(doc(db, `salons/${salonId}/members`, currentUserProfile.uid));
+    const ms = await getDoc(doc(db, `salons/${salonId}/members`, ticketsState.currentUserProfile.uid));
     if (!ms.exists()) return;
     const sid = (ms.data() || {}).staffId;
     if (sid != null && String(sid).trim() !== '') {
-      currentUserProfile.staffId = String(sid).trim();
+      ticketsState.currentUserProfile.staffId = String(sid).trim();
     }
   } catch (_) {}
 }
 
 /** Load members with avatarUrl for ticket list avatars. */
 async function loadTicketsMembersForAvatars() {
-  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || currentUserProfile?.salonId;
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || ticketsState.currentUserProfile?.salonId;
   if (!salonId) return;
   try {
     const snap = await getDocs(collection(db, `salons/${salonId}/members`));
@@ -217,12 +192,12 @@ async function loadTicketsMembersForAvatars() {
         if (nk && !byName[nk]) byName[nk] = entry;
       }
     });
-    _ticketsMembersAvatarCache = byKey;
-    _ticketsMembersAvatarByName = byName;
+    ticketsState._ticketsMembersAvatarCache = byKey;
+    ticketsState._ticketsMembersAvatarByName = byName;
   } catch (e) {
     console.warn('[Tickets] loadTicketsMembersForAvatars failed', e);
-    _ticketsMembersAvatarCache = {};
-    _ticketsMembersAvatarByName = {};
+    ticketsState._ticketsMembersAvatarCache = {};
+    ticketsState._ticketsMembersAvatarByName = {};
   }
 }
 
@@ -234,27 +209,27 @@ window.ticketsRefreshAvatars = async function() {
 
 /** Return avatar URL for the technician of ticket t (current user or from members cache). */
 function getTicketTechnicianAvatarUrl(t) {
-  if (!currentUserProfile) return null;
-  const isCreator = t.createdByUid === currentUserProfile.uid ||
-    t.technicianStaffId === currentUserProfile.staffId ||
-    t.technicianStaffId === currentUserProfile.uid ||
-    t.finalizedByUid === currentUserProfile.uid ||
+  if (!ticketsState.currentUserProfile) return null;
+  const isCreator = t.createdByUid === ticketsState.currentUserProfile.uid ||
+    t.technicianStaffId === ticketsState.currentUserProfile.staffId ||
+    t.technicianStaffId === ticketsState.currentUserProfile.uid ||
+    t.finalizedByUid === ticketsState.currentUserProfile.uid ||
     (t.technicianName && (
-      (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-      (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
+      (ticketsState.currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.email).toLowerCase())) ||
+      (ticketsState.currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.name).toLowerCase()))
     ));
   if (isCreator && typeof window.ffGetCurrentUserAvatarUrl === 'function') {
     const mine = window.ffGetCurrentUserAvatarUrl();
     if (mine) return mine;
   }
-  if (!_ticketsMembersAvatarCache) return null;
+  if (!ticketsState._ticketsMembersAvatarCache) return null;
   let entry = null;
   if (t.technicianStaffId) {
-    entry = _ticketsMembersAvatarCache[t.technicianStaffId];
+    entry = ticketsState._ticketsMembersAvatarCache[t.technicianStaffId];
   }
-  if ((!entry || !entry.avatarUrl) && _ticketsMembersAvatarByName) {
+  if ((!entry || !entry.avatarUrl) && ticketsState._ticketsMembersAvatarByName) {
     const nk = normalizeTicketTechName(t.technicianName || '');
-    if (nk) entry = _ticketsMembersAvatarByName[nk] || entry;
+    if (nk) entry = ticketsState._ticketsMembersAvatarByName[nk] || entry;
   }
   if (!entry || !entry.avatarUrl) return null;
   const v = entry.avatarUpdatedAtMs != null ? String(entry.avatarUpdatedAtMs) : '';
@@ -278,17 +253,6 @@ function getTicketTechnicianAvatarUrl(t) {
 // the location filter into `salonServices` / `serviceCategories` and
 // re-render the UI. This is why a technician sees new services the moment
 // an owner adds them — no refresh needed.
-let _ffCatalogLegacyWiped = false;
-let _rawServices = [];
-let _rawCategories = [];
-let _rawSharedServices = [];
-let _rawSharedCategories = [];
-let _rawServiceOverrides = {};
-let _catalogSource = 'unknown'; // 'shared' | 'location' | 'unknown'
-let _ffCatalogModalMode = 'location'; // 'location' | 'shared'
-let _servicesUnsub = null;
-let _serviceCatsUnsub = null;
-let _catalogSubSalonId = null;
 
 // Permission gates for the Services catalog. Default to allow when the helper
 // isn't available yet (e.g. very early load) so we never hard-block the owner.
@@ -312,10 +276,10 @@ function ffCanManageServices() {
 function getTicketsAccountId() {
   const candidates = [
     (typeof window !== 'undefined' ? window.currentSalonId : null),
-    currentUserProfile?.accountId,
-    currentUserProfile?.accountID,
-    currentUserProfile?.account_id,
-    currentUserProfile?.salonId,
+    ticketsState.currentUserProfile?.accountId,
+    ticketsState.currentUserProfile?.accountID,
+    ticketsState.currentUserProfile?.account_id,
+    ticketsState.currentUserProfile?.salonId,
     (typeof window !== 'undefined' ? window.currentAccountId : null),
     (typeof window !== 'undefined' ? window.accountId : null)
   ];
@@ -369,7 +333,7 @@ async function ensureSharedServiceCategoriesDoc(accountId) {
 }
 
 async function loadSharedServiceOverrides(accountId, locationId) {
-  _rawServiceOverrides = {};
+  ticketsState._rawServiceOverrides = {};
   if (!accountId || !locationId) return {};
   try {
     const snap = await getDocs(collection(db, `accounts/${accountId}/locations/${locationId}/serviceOverrides`));
@@ -379,17 +343,17 @@ async function loadSharedServiceOverrides(accountId, locationId) {
       const override = {};
       if (Number.isFinite(price)) override.price = price;
       if (typeof data.enabled === 'boolean') override.enabled = data.enabled;
-      if (Object.keys(override).length) _rawServiceOverrides[d.id] = override;
+      if (Object.keys(override).length) ticketsState._rawServiceOverrides[d.id] = override;
     });
   } catch (e) {
     console.warn('[SharedServices] overrides load failed', e);
   }
-  return _rawServiceOverrides;
+  return ticketsState._rawServiceOverrides;
 }
 
 function applySharedServiceCatalog() {
   const categoryMap = new Map();
-  _rawSharedCategories.forEach((c, idx) => {
+  ticketsState._rawSharedCategories.forEach((c, idx) => {
     const name = normalizeSharedCategoryName(c?.name);
     const categoryId = sharedCategoryId(name);
     if (!categoryMap.has(categoryId)) {
@@ -401,7 +365,7 @@ function applySharedServiceCatalog() {
       });
     }
   });
-  const sharedServices = _rawSharedServices
+  const sharedServices = ticketsState._rawSharedServices
     .filter((s) => s && s.active !== false)
     .map((s, idx) => {
       const categoryName = normalizeSharedCategoryName(s.category);
@@ -409,7 +373,7 @@ function applySharedServiceCatalog() {
       if (!categoryMap.has(categoryId)) {
         categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
       }
-      const override = _rawServiceOverrides[s.id];
+      const override = ticketsState._rawServiceOverrides[s.id];
       if (override && override.enabled === false) return null;
       const defaultPrice = Number(s.defaultPrice) || 0;
       const finalPrice = override && Number.isFinite(Number(override.price))
@@ -432,7 +396,7 @@ function applySharedServiceCatalog() {
     .filter((s) => s && s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
 
-  const localCategories = _rawCategories
+  const localCategories = ticketsState._rawCategories
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   localCategories.forEach((c) => {
@@ -450,7 +414,7 @@ function applySharedServiceCatalog() {
   });
 
   const sharedKeys = new Set(sharedServices.map((s) => serviceCatalogStableKey(s.name, s.category)));
-  const localServices = _rawServices
+  const localServices = ticketsState._rawServices
     .filter(_ffServiceMatchesActiveLocation)
     .map((s) => {
       const cat = localCategories.find((c) => c.id === s.categoryId);
@@ -464,7 +428,7 @@ function applySharedServiceCatalog() {
       };
     })
     .filter((s) => {
-      if (_rawSharedServices.length === 0) return true;
+      if (ticketsState._rawSharedServices.length === 0) return true;
       return !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other'));
     })
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
@@ -478,18 +442,18 @@ function applySharedServiceCatalog() {
     mergedServices.push(svc);
   });
 
-  salonServices = mergedServices;
-  serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  ticketsState.salonServices = mergedServices;
+  ticketsState.serviceCategories = Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   console.log('[SharedServices] merged catalog for picker', {
     sharedServices: sharedServices.length,
     localServices: localServices.length,
-    categories: serviceCategories.length
+    categories: ticketsState.serviceCategories.length
   });
 }
 
 function getSharedServicesForCatalogManager() {
   const categoryMap = new Map();
-  _rawSharedCategories.forEach((c, idx) => {
+  ticketsState._rawSharedCategories.forEach((c, idx) => {
     const name = normalizeSharedCategoryName(c?.name);
     const id = sharedCategoryId(name);
     categoryMap.set(id, {
@@ -500,14 +464,14 @@ function getSharedServicesForCatalogManager() {
       isSharedCategory: true
     });
   });
-  const services = _rawSharedServices
+  const services = ticketsState._rawSharedServices
     .map((s, idx) => {
       const categoryName = normalizeSharedCategoryName(s.category);
       const categoryId = sharedCategoryId(categoryName);
       if (!categoryMap.has(categoryId)) {
         categoryMap.set(categoryId, { id: categoryId, name: categoryName, sortOrder: categoryMap.size, isSharedCategory: true });
       }
-      const override = _rawServiceOverrides[s.id];
+      const override = ticketsState._rawServiceOverrides[s.id];
       const defaultPrice = Number(s.defaultPrice) || 0;
       const hasOverride = override && Number.isFinite(Number(override.price));
       const locationEnabled = !(override && override.enabled === false);
@@ -530,7 +494,7 @@ function getSharedServicesForCatalogManager() {
     .filter((s) => s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   const sharedKeys = new Set(services.map((s) => serviceCatalogStableKey(s.name, s.category)));
-  const localCategories = _rawCategories
+  const localCategories = ticketsState._rawCategories
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   localCategories.forEach((c) => {
@@ -546,7 +510,7 @@ function getSharedServicesForCatalogManager() {
       });
     }
   });
-  const localServices = _rawServices
+  const localServices = ticketsState._rawServices
     .filter(_ffServiceMatchesActiveLocation)
     .map((s) => {
       const cat = localCategories.find((c) => c.id === s.categoryId);
@@ -577,10 +541,10 @@ function getSharedServicesForCatalogManager() {
 
 function getLocationServicesForCatalogManager() {
   return {
-    services: _rawServices
+    services: ticketsState._rawServices
       .filter(_ffServiceMatchesActiveLocation)
       .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)),
-    categories: _rawCategories
+    categories: ticketsState._rawCategories
       .filter(_ffServiceMatchesActiveLocation)
       .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
   };
@@ -593,21 +557,21 @@ async function loadSharedCatalogForManager() {
     getDocs(sharedServiceCatalogItemsRef(accountId)),
     getDocs(sharedServiceCategoryItemsRef(accountId)).catch(() => ({ docs: [] }))
   ]);
-  _rawSharedServices = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  ticketsState._rawSharedServices = serviceSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  ticketsState._rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
   return getSharedServicesForCatalogManager();
 }
 
 async function loadLocationCatalogForManager() {
-  if (!currentUserProfile?.salonId) return { services: [], categories: [] };
+  if (!ticketsState.currentUserProfile?.salonId) return { services: [], categories: [] };
   await _ffWipeLegacyCatalogOnce();
   const [svcSnap, catSnap] = await Promise.all([
-    getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
-    getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+    getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/services`)),
+    getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`))
   ]);
-  _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-  _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  ticketsState._rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  ticketsState._rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
   _applyCatalogFilter();
   return getLocationServicesForCatalogManager();
 }
@@ -719,14 +683,14 @@ async function loadSharedServiceLocationOverridesForService(serviceId) {
       console.warn('[SharedServicesUI] location override load failed', loc.id, e);
     }
   }));
-  _ffServicesLocationOverridesByService[serviceId] = result;
+  ticketsState._ffServicesLocationOverridesByService[serviceId] = result;
   return result;
 }
 
 async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
   const accountId = getTicketsAccountId();
   if (!accountId || !locationId || !serviceId) throw new Error('No location');
-  const existingByService = _ffServicesLocationOverridesByService[serviceId] || {};
+  const existingByService = ticketsState._ffServicesLocationOverridesByService[serviceId] || {};
   const existing = existingByService[locationId] || {};
   const next = { ...existing, ...(patch || {}) };
   if (next.price == null || next.price === '') delete next.price;
@@ -745,11 +709,11 @@ async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
     await setDoc(ref, write, { merge: true });
     existingByService[locationId] = next;
   }
-  _ffServicesLocationOverridesByService[serviceId] = existingByService;
+  ticketsState._ffServicesLocationOverridesByService[serviceId] = existingByService;
   const activeLocationId = getActiveLocationIdForTickets();
   if (String(activeLocationId || '') === String(locationId || '')) {
-    if (!Object.keys(next).length) delete _rawServiceOverrides[serviceId];
-    else _rawServiceOverrides[serviceId] = { ...next };
+    if (!Object.keys(next).length) delete ticketsState._rawServiceOverrides[serviceId];
+    else ticketsState._rawServiceOverrides[serviceId] = { ...next };
     applySharedServiceCatalog();
   }
 }
@@ -757,22 +721,22 @@ async function saveSharedServiceLocationOverride(serviceId, locationId, patch) {
 async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
   const accountId = getTicketsAccountId();
   if (!accountId) return { seeded: false, reason: 'no-account' };
-  if (_ffServicesSharedBackfillChecked) return { seeded: false, reason: 'already-checked' };
-  _ffServicesSharedBackfillChecked = true;
+  if (ticketsState._ffServicesSharedBackfillChecked) return { seeded: false, reason: 'already-checked' };
+  ticketsState._ffServicesSharedBackfillChecked = true;
   await loadLocationCatalogForManager();
-  const localServices = Array.isArray(_rawServices) ? _rawServices.filter((s) => s && String(s.name || '').trim()) : [];
+  const localServices = Array.isArray(ticketsState._rawServices) ? ticketsState._rawServices.filter((s) => s && String(s.name || '').trim()) : [];
   if (localServices.length === 0) return { seeded: false, reason: 'no-local-services' };
   const existingSharedKeys = new Set(
-    (_rawSharedServices || []).map((s) => serviceCatalogStableKey(s.name, s.category || 'Other'))
+    (ticketsState._rawSharedServices || []).map((s) => serviceCatalogStableKey(s.name, s.category || 'Other'))
   );
   const existingCategoryNames = new Set(
-    (_rawSharedCategories || []).map((c) => normalizeSharedCategoryName(c?.name).toLowerCase())
+    (ticketsState._rawSharedCategories || []).map((c) => normalizeSharedCategoryName(c?.name).toLowerCase())
   );
 
   const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
     ? (window.ffGetActiveLocations() || [])
     : [];
-  const categoryById = new Map((_rawCategories || []).map((cat) => [cat.id, cat]));
+  const categoryById = new Map((ticketsState._rawCategories || []).map((cat) => [cat.id, cat]));
   const categorySeed = new Map();
   localServices.forEach((svc) => {
     const cat = categoryById.get(svc.categoryId);
@@ -849,9 +813,9 @@ async function tryLoadSharedServiceCatalog() {
       console.log('[SharedServices] fallback to location');
       return false;
     }
-    _catalogSource = 'shared';
-    _rawSharedServices = rows;
-    _rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    ticketsState._catalogSource = 'shared';
+    ticketsState._rawSharedServices = rows;
+    ticketsState._rawSharedCategories = categorySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
     await loadSharedServiceOverrides(accountId, getActiveLocationIdForTickets());
     applySharedServiceCatalog();
     console.log('[SharedServices] loaded from shared');
@@ -864,32 +828,32 @@ async function tryLoadSharedServiceCatalog() {
 }
 
 async function _ffWipeLegacyCatalogOnce() {
-  if (_ffCatalogLegacyWiped) return;
-  _ffCatalogLegacyWiped = true; // never retry within this session
-  if (!currentUserProfile?.salonId) return;
+  if (ticketsState._ffCatalogLegacyWiped) return;
+  ticketsState._ffCatalogLegacyWiped = true; // never retry within this session
+  if (!ticketsState.currentUserProfile?.salonId) return;
   try {
     const isOwnerOrAdmin = (() => {
       try {
         if (typeof window !== 'undefined' && typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
       } catch (_) {}
-      const r = String(currentUserProfile?.role || '').toLowerCase();
+      const r = String(ticketsState.currentUserProfile?.role || '').toLowerCase();
       return r === 'owner' || r === 'admin' || r === 'manager';
     })();
     if (!isOwnerOrAdmin) return;
     const [svcSnap, catSnap] = await Promise.all([
-      getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
-      getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`)),
+      getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/services`)),
+      getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`)),
     ]);
     const orphans = [];
     svcSnap.docs.forEach((d) => {
       const v = d.data() || {};
       const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
-      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, d.id)));
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, d.id)));
     });
     catSnap.docs.forEach((d) => {
       const v = d.data() || {};
       const loc = typeof v.locationId === 'string' ? v.locationId.trim() : '';
-      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, d.id)));
+      if (!loc) orphans.push(deleteDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`, d.id)));
     });
     if (orphans.length) {
       console.log(`[Tickets] Wiping ${orphans.length} legacy catalog docs (no locationId).`);
@@ -911,14 +875,14 @@ function _ffServiceMatchesActiveLocation(s) {
  *  current active branch. Safe to call from any event (snapshot arrival,
  *  location change, manual refresh). */
 function _applyCatalogFilter() {
-  if (_catalogSource === 'shared') {
+  if (ticketsState._catalogSource === 'shared') {
     applySharedServiceCatalog();
     return;
   }
-  salonServices = _rawServices
+  ticketsState.salonServices = ticketsState._rawServices
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  serviceCategories = _rawCategories
+  ticketsState.serviceCategories = ticketsState._rawCategories
     .filter(_ffServiceMatchesActiveLocation)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
 }
@@ -939,28 +903,28 @@ function _onCatalogSnapshot() {
 /** Live subscribe to services + serviceCategories for the current salon.
  *  Idempotent; switching salon auto-rebinds. */
 function subscribeServiceCatalog() {
-  const salonId = currentUserProfile?.salonId;
+  const salonId = ticketsState.currentUserProfile?.salonId;
   if (!salonId) return;
-  if (_catalogSubSalonId === salonId && (_servicesUnsub || _serviceCatsUnsub)) return;
+  if (ticketsState._catalogSubSalonId === salonId && (ticketsState._servicesUnsub || ticketsState._serviceCatsUnsub)) return;
   // Different salon than what we were subscribed to — tear down first.
-  if (_servicesUnsub) { try { _servicesUnsub(); } catch (_) {} _servicesUnsub = null; }
-  if (_serviceCatsUnsub) { try { _serviceCatsUnsub(); } catch (_) {} _serviceCatsUnsub = null; }
-  _catalogSubSalonId = salonId;
+  if (ticketsState._servicesUnsub) { try { ticketsState._servicesUnsub(); } catch (_) {} ticketsState._servicesUnsub = null; }
+  if (ticketsState._serviceCatsUnsub) { try { ticketsState._serviceCatsUnsub(); } catch (_) {} ticketsState._serviceCatsUnsub = null; }
+  ticketsState._catalogSubSalonId = salonId;
 
   // One-time legacy cleanup BEFORE we start listening — so the first snapshot
   // doesn't include the orphans we're about to delete.
   _ffWipeLegacyCatalogOnce().finally(() => {
     try {
-      _servicesUnsub = onSnapshot(
+      ticketsState._servicesUnsub = onSnapshot(
         collection(db, `salons/${salonId}/services`),
-        (snap) => { _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (snap) => { ticketsState._rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
         (err) => console.warn('[Tickets] services subscription error', err)
       );
     } catch (e) { console.warn('[Tickets] services subscription failed', e); }
     try {
-      _serviceCatsUnsub = onSnapshot(
+      ticketsState._serviceCatsUnsub = onSnapshot(
         collection(db, `salons/${salonId}/serviceCategories`),
-        (snap) => { _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
+        (snap) => { ticketsState._rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })); _onCatalogSnapshot(); },
         (err) => console.warn('[Tickets] categories subscription error', err)
       );
     } catch (e) { console.warn('[Tickets] categories subscription failed', e); }
@@ -972,17 +936,17 @@ function subscribeServiceCatalog() {
  *  availability/price and per-staff availability are resolved at render time.
  *  Idempotent; switching salon auto-rebinds. */
 function subscribeProductsCatalog() {
-  const salonId = currentUserProfile?.salonId;
+  const salonId = ticketsState.currentUserProfile?.salonId;
   if (!salonId) return;
-  if (_productsSubSalonId === salonId && (_productsUnsub || _productCatsUnsub)) return;
-  if (_productsUnsub) { try { _productsUnsub(); } catch (_) {} _productsUnsub = null; }
-  if (_productCatsUnsub) { try { _productCatsUnsub(); } catch (_) {} _productCatsUnsub = null; }
-  _productsSubSalonId = salonId;
+  if (ticketsState._productsSubSalonId === salonId && (ticketsState._productsUnsub || ticketsState._productCatsUnsub)) return;
+  if (ticketsState._productsUnsub) { try { ticketsState._productsUnsub(); } catch (_) {} ticketsState._productsUnsub = null; }
+  if (ticketsState._productCatsUnsub) { try { ticketsState._productCatsUnsub(); } catch (_) {} ticketsState._productCatsUnsub = null; }
+  ticketsState._productsSubSalonId = salonId;
   try {
-    _productsUnsub = onSnapshot(
+    ticketsState._productsUnsub = onSnapshot(
       collection(db, `salons/${salonId}/products`),
       (snap) => {
-        salonProducts = snap.docs
+        ticketsState.salonProducts = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
         try { setupTicketsUI(); } catch (_) {}
@@ -991,10 +955,10 @@ function subscribeProductsCatalog() {
     );
   } catch (e) { console.warn('[Tickets] products subscription failed', e); }
   try {
-    _productCatsUnsub = onSnapshot(
+    ticketsState._productCatsUnsub = onSnapshot(
       collection(db, `salons/${salonId}/productCategories`),
       (snap) => {
-        productCategories = snap.docs
+        ticketsState.productCategories = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
         try { setupTicketsUI(); } catch (_) {}
@@ -1005,28 +969,28 @@ function subscribeProductsCatalog() {
 }
 
 async function loadServices() {
-  if (!currentUserProfile?.salonId) return [];
-  if (_catalogSource !== 'location') {
+  if (!ticketsState.currentUserProfile?.salonId) return [];
+  if (ticketsState._catalogSource !== 'location') {
     const sharedLoaded = await tryLoadSharedServiceCatalog();
     if (sharedLoaded) {
       subscribeServiceCatalog();
       try {
-        if (_rawServices.length === 0 || _rawCategories.length === 0) {
+        if (ticketsState._rawServices.length === 0 || ticketsState._rawCategories.length === 0) {
           await _ffWipeLegacyCatalogOnce();
           const [svcSnap, catSnap] = await Promise.all([
-            getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`)),
-            getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`))
+            getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/services`)),
+            getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`))
           ]);
-          _rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-          _rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          ticketsState._rawServices = svcSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          ticketsState._rawCategories = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
           _applyCatalogFilter();
         }
       } catch (err) {
         console.warn('[Tickets] location catalog merge load failed', err);
       }
-      return salonServices;
+      return ticketsState.salonServices;
     }
-    _catalogSource = 'location';
+    ticketsState._catalogSource = 'location';
   }
   // Make sure live subscriptions are running; they will refresh the UI the
   // moment new data arrives.
@@ -1034,22 +998,22 @@ async function loadServices() {
   try {
     // First visit (before a snapshot has arrived) — do a one-shot getDocs
     // so the caller has data to render immediately.
-    if (_rawServices.length === 0) {
+    if (ticketsState._rawServices.length === 0) {
       await _ffWipeLegacyCatalogOnce();
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`));
-      _rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/services`));
+      ticketsState._rawServices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
     _applyCatalogFilter();
-    return salonServices;
+    return ticketsState.salonServices;
   } catch (err) {
     console.warn('[Tickets] Failed to load services', err);
-    return salonServices;
+    return ticketsState.salonServices;
   }
 }
 
 async function saveService(service) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
-  if (!currentUserProfile?.salonId) throw new Error('No salon');
+  if (!ticketsState.currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(service.name || '').trim(),
     defaultPrice: Number(service.defaultPrice) || 0,
@@ -1061,12 +1025,12 @@ async function saveService(service) {
   // (which omit it) preserve the existing value.
   if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   if (service.id) {
-    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), payload);
+    await updateDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
   } else {
     // New doc — stamp the active branch so this service only appears there.
     const activeLoc = getActiveLocationIdForTickets();
-    const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/services`), {
+    const ref = await addDoc(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/services`), {
       ...payload,
       locationId: activeLoc || null,
       createdAt: serverTimestamp()
@@ -1077,52 +1041,52 @@ async function saveService(service) {
 
 async function deleteService(serviceId) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
-  if (!currentUserProfile?.salonId || !serviceId) return;
-  await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, serviceId));
+  if (!ticketsState.currentUserProfile?.salonId || !serviceId) return;
+  await deleteDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, serviceId));
 }
 
 // =====================
 // Service Categories (managed objects, PER-LOCATION)
 // =====================
 async function loadServiceCategories() {
-  if (!currentUserProfile?.salonId) return [];
-  if (_catalogSource === 'unknown') {
+  if (!ticketsState.currentUserProfile?.salonId) return [];
+  if (ticketsState._catalogSource === 'unknown') {
     await loadServices();
-    return serviceCategories;
+    return ticketsState.serviceCategories;
   }
-  if (_catalogSource === 'shared') {
+  if (ticketsState._catalogSource === 'shared') {
     applySharedServiceCatalog();
-    return serviceCategories;
+    return ticketsState.serviceCategories;
   }
   subscribeServiceCatalog();
   try {
-    if (_rawCategories.length === 0) {
+    if (ticketsState._rawCategories.length === 0) {
       await _ffWipeLegacyCatalogOnce();
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`));
-      _rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const snap = await getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`));
+      ticketsState._rawCategories = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     }
     _applyCatalogFilter();
-    return serviceCategories;
+    return ticketsState.serviceCategories;
   } catch (err) {
     console.warn('[Tickets] Failed to load service categories', err);
-    return serviceCategories;
+    return ticketsState.serviceCategories;
   }
 }
 
 async function saveServiceCategory(cat) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
-  if (!currentUserProfile?.salonId) throw new Error('No salon');
+  if (!ticketsState.currentUserProfile?.salonId) throw new Error('No salon');
   const payload = {
     name: String(cat.name || '').trim(),
     sortOrder: Number(cat.sortOrder) || 0,
     updatedAt: serverTimestamp()
   };
   if (cat.id) {
-    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, cat.id), payload);
+    await updateDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`, cat.id), payload);
     return cat.id;
   } else {
     const activeLoc = getActiveLocationIdForTickets();
-    const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`), {
+    const ref = await addDoc(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`), {
       ...payload,
       locationId: activeLoc || null,
       createdAt: serverTimestamp()
@@ -1133,10 +1097,10 @@ async function saveServiceCategory(cat) {
 
 async function deleteServiceCategory(categoryId) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
-  if (!currentUserProfile?.salonId || !categoryId) return;
-  const count = salonServices.filter(s => s.categoryId === categoryId).length;
+  if (!ticketsState.currentUserProfile?.salonId || !categoryId) return;
+  const count = ticketsState.salonServices.filter(s => s.categoryId === categoryId).length;
   if (count > 0) throw new Error(`Cannot delete: ${count} service(s) use this category. Move them first.`);
-  await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, categoryId));
+  await deleteDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/serviceCategories`, categoryId));
 }
 
 function normalizeServiceProviderTypeText(value) {
@@ -1167,7 +1131,7 @@ function staffUsesQueueJoinAsProviderTypes(staff) {
 
 function getServiceCategoryLabel(service) {
   const categoryId = String(service?.categoryId || '').trim();
-  const cat = categoryId ? serviceCategories.find((c) => String(c.id || '').trim() === categoryId) : null;
+  const cat = categoryId ? ticketsState.serviceCategories.find((c) => String(c.id || '').trim() === categoryId) : null;
   return String(cat?.name || service?.category || '').trim();
 }
 
@@ -1211,7 +1175,7 @@ function isTicketPickerServiceAvailableForActiveLocation(service) {
   if (service.active === false || service.locationEnabled === false) return false;
   // A manager / front-desk receiver editing a ticket should see the FULL catalog,
   // so skip the per-staff override + controlled-staff provider filtering.
-  if (!_ticketPickerShowAllCatalog) {
+  if (!ticketsState._ticketPickerShowAllCatalog) {
     const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
     if (staffOverride && staffOverride.enabled === false) return false;
     try {
@@ -1241,8 +1205,8 @@ function getCurrentTicketStaffIdCandidates() {
     if (s && out.indexOf(s) === -1) out.push(s);
   };
   try { add(window.__ff_authedStaffId); } catch (_) {}
-  add(currentUserProfile?.staffId);
-  add(currentUserProfile?.uid);
+  add(ticketsState.currentUserProfile?.staffId);
+  add(ticketsState.currentUserProfile?.uid);
   try {
     const staff = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
       ? window.ffResolveCurrentStaffRowFromFfStaffV1()
@@ -1273,20 +1237,20 @@ function getTicketPriceForServiceAndCurrentStaff(service) {
 
 function getServicesGroupedByCategory() {
   const grouped = {};
-  if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => { grouped[c.id] = { label: c.name, services: [] }; });
+  if (ticketsState.serviceCategories.length > 0) {
+    ticketsState.serviceCategories.forEach((c) => { grouped[c.id] = { label: c.name, services: [] }; });
     grouped['__other__'] = { label: 'Other', services: [] };
   } else {
     grouped['__other__'] = { label: 'Other', services: [] };
   }
-  salonServices.filter(isTicketPickerServiceAvailableForActiveLocation).forEach((s) => {
+  ticketsState.salonServices.filter(isTicketPickerServiceAvailableForActiveLocation).forEach((s) => {
     const catId = s.categoryId || null;
     const key = (catId && grouped[catId]) ? catId : '__other__';
     grouped[key].services.push(s);
   });
   const ordered = {};
-  if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => {
+  if (ticketsState.serviceCategories.length > 0) {
+    ticketsState.serviceCategories.forEach((c) => {
       const bucket = grouped[c.id] || { label: c.name, services: [] };
       if ((bucket.services || []).length > 0) ordered[c.id] = bucket;
     });
@@ -1334,7 +1298,7 @@ function isTicketPickerProductAvailableForActiveLocation(product) {
   if (product.active === false) return false;
   const locOverride = getProductLocationOverrideForActiveLocation(product);
   if (locOverride && locOverride.enabled === false) return false;
-  if (!_ticketPickerShowAllCatalog) {
+  if (!ticketsState._ticketPickerShowAllCatalog) {
     const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
     if (staffOverride && staffOverride.enabled === false) return false;
   }
@@ -1350,18 +1314,18 @@ function getTicketPriceForProductAndActiveLocation(product) {
 
 function getProductsGroupedByCategory() {
   const grouped = {};
-  if (productCategories.length > 0) {
-    productCategories.forEach((c) => { grouped[c.id] = { label: c.name, products: [] }; });
+  if (ticketsState.productCategories.length > 0) {
+    ticketsState.productCategories.forEach((c) => { grouped[c.id] = { label: c.name, products: [] }; });
   }
   grouped['__other__'] = { label: 'Other', products: [] };
-  salonProducts.filter(isTicketPickerProductAvailableForActiveLocation).forEach((p) => {
+  ticketsState.salonProducts.filter(isTicketPickerProductAvailableForActiveLocation).forEach((p) => {
     const catId = p.categoryId || null;
     const key = (catId && grouped[catId]) ? catId : '__other__';
     grouped[key].products.push(p);
   });
   const ordered = {};
-  if (productCategories.length > 0) {
-    productCategories.forEach((c) => {
+  if (ticketsState.productCategories.length > 0) {
+    ticketsState.productCategories.forEach((c) => {
       const bucket = grouped[c.id];
       if (bucket && (bucket.products || []).length > 0) ordered[c.id] = bucket;
     });
@@ -1510,17 +1474,16 @@ function getTicketTaxBreakdown(ticket, lines) {
 // =====================
 // Front Desk Recipients (Send To)
 // =====================
-let _frontDeskCache = null;
 
 async function loadFrontDeskRecipients() {
-  if (!currentUserProfile?.salonId) return [];
-  if (_frontDeskCache) return _frontDeskCache;
+  if (!ticketsState.currentUserProfile?.salonId) return [];
+  if (ticketsState._frontDeskCache) return ticketsState._frontDeskCache;
   try {
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/members`));
+    const snap = await getDocs(collection(db, `salons/${ticketsState.currentUserProfile.salonId}/members`));
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
     const staffList = store?.staff || [];
-    _frontDeskCache = snap.docs
-      .filter(d => d.id !== currentUserProfile.uid)
+    ticketsState._frontDeskCache = snap.docs
+      .filter(d => d.id !== ticketsState.currentUserProfile.uid)
       .map(d => {
         const u = d.data() || {};
         const role = (u.role || '').toLowerCase();
@@ -1538,14 +1501,14 @@ async function loadFrontDeskRecipients() {
       .filter(Boolean);
   } catch (e) {
     console.warn('[Tickets] loadFrontDeskRecipients failed', e);
-    _frontDeskCache = [];
+    ticketsState._frontDeskCache = [];
   }
-  return _frontDeskCache;
+  return ticketsState._frontDeskCache;
 }
 
 /** Auto recipients: creator + all Staff with Receives Tickets ON + Owner/Admin/Manager. No manual selection. */
 async function getAutoFrontDeskRecipients() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = ticketsState.currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId) return { uids: [], names: [] };
   const seen = new Set();
   const uids = []; const names = [];
@@ -1555,7 +1518,7 @@ async function getAutoFrontDeskRecipients() {
     uids.push(uid);
     names.push((name || '').trim() || 'Front Desk');
   };
-  add(currentUserProfile.uid, currentUserProfile.name || currentUserProfile.email);
+  add(ticketsState.currentUserProfile.uid, ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email);
   try {
     const membersSnap = await getDocs(collection(db, `salons/${salonId}/members`));
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
@@ -1591,9 +1554,9 @@ function _ticketsCurrentStaffRow() {
   try {
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
     const staffList = store?.staff || [];
-    const uid = currentUserProfile?.uid ? String(currentUserProfile.uid).trim() : '';
-    const sid = currentUserProfile?.staffId != null ? String(currentUserProfile.staffId).trim() : '';
-    const email = currentUserProfile?.email ? String(currentUserProfile.email).toLowerCase().trim() : '';
+    const uid = ticketsState.currentUserProfile?.uid ? String(ticketsState.currentUserProfile.uid).trim() : '';
+    const sid = ticketsState.currentUserProfile?.staffId != null ? String(ticketsState.currentUserProfile.staffId).trim() : '';
+    const email = ticketsState.currentUserProfile?.email ? String(ticketsState.currentUserProfile.email).toLowerCase().trim() : '';
     return (
       staffList.find((s) => {
         if (sid && String(s.id || '').trim() === sid) return true;
@@ -1610,32 +1573,32 @@ function _ticketsCurrentStaffRow() {
 function getTicketsStaffPermissions() {
   const row = _ticketsCurrentStaffRow();
   if (row?.permissions && typeof row.permissions === 'object') return row.permissions;
-  const p = currentUserProfile?.permissions;
+  const p = ticketsState.currentUserProfile?.permissions;
   if (p && typeof p === 'object') return p;
   return {};
 }
 
 /** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions. */
 function canViewTicketsSummaryTab() {
-  if (!currentUserProfile) return false;
+  if (!ticketsState.currentUserProfile) return false;
   if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
-  const role = (currentUserProfile.role || '').toLowerCase();
+  const role = (ticketsState.currentUserProfile.role || '').toLowerCase();
   if (role === 'owner' || role === 'admin') return true;
   return getTicketsStaffPermissions().tickets_summary === true;
 }
 
 /** Owner / Admin (Firestore role) always see the tab; Manager and others use staff permissions (tickets_archived). */
 function canViewTicketsArchivedTab() {
-  if (!currentUserProfile) return false;
+  if (!ticketsState.currentUserProfile) return false;
   if (typeof window.ffIsOwner === 'function' && window.ffIsOwner()) return true;
-  const role = (currentUserProfile.role || '').toLowerCase();
+  const role = (ticketsState.currentUserProfile.role || '').toLowerCase();
   if (role === 'owner' || role === 'admin') return true;
   return getTicketsStaffPermissions().tickets_archived === true;
 }
 
 function canCurrentUserCloseTickets() {
-  if (!currentUserProfile) return false;
-  const role = (currentUserProfile.role || '').toLowerCase();
+  if (!ticketsState.currentUserProfile) return false;
+  const role = (ticketsState.currentUserProfile.role || '').toLowerCase();
   if (['owner', 'admin', 'manager'].includes(role)) return true;
   try {
     const staff = _ticketsCurrentStaffRow();
@@ -1679,7 +1642,7 @@ function isStaffRecordManagerOrAdmin() {
 
 /** Firestore salon profile: technician-like roles see only their own tickets in this module. */
 function isTicketsTechnicianRestrictedRole() {
-  const r = (currentUserProfile?.role || '').toLowerCase().trim();
+  const r = (ticketsState.currentUserProfile?.role || '').toLowerCase().trim();
   return (
     r === 'technician' ||
     r === 'tech' ||
@@ -1704,30 +1667,30 @@ function ffTicketsHideFrontDeskFiltersOnThisView() {
     ffTicketsIsMobileViewport() &&
     isTicketsTechnicianRestrictedRole() &&
     !isStaffRecordManagerOrAdmin() &&
-    (currentTicketsTab === 'closed' || currentTicketsTab === 'archived')
+    (ticketsState.currentTicketsTab === 'closed' || ticketsState.currentTicketsTab === 'archived')
   );
 }
 
 /** Matches ticket.technicianStaffId to staff doc id, falling back to auth uid (same as new tickets). */
 function getTicketsSelfEmployeeFilterId() {
-  if (!currentUserProfile) return 'all';
-  if (currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== '') {
-    return String(currentUserProfile.staffId).trim();
+  if (!ticketsState.currentUserProfile) return 'all';
+  if (ticketsState.currentUserProfile.staffId != null && String(ticketsState.currentUserProfile.staffId).trim() !== '') {
+    return String(ticketsState.currentUserProfile.staffId).trim();
   }
-  return String(currentUserProfile.uid);
+  return String(ticketsState.currentUserProfile.uid);
 }
 
 /** Only tickets assigned to this technician: technicianStaffId === staffId or auth uid; if missing id, exact name/email vs their staff row (no substring match). */
 function ticketBelongsToTicketsTechnician(ticket) {
-  if (!currentUserProfile || !ticket) return false;
+  if (!ticketsState.currentUserProfile || !ticket) return false;
   const techRaw = ticket.technicianStaffId;
   const techId =
     techRaw != null && String(techRaw).trim() !== '' ? String(techRaw).trim() : '';
   if (techId) {
-    const uid = String(currentUserProfile.uid || '').trim();
+    const uid = String(ticketsState.currentUserProfile.uid || '').trim();
     const sid =
-      currentUserProfile.staffId != null && String(currentUserProfile.staffId).trim() !== ''
-        ? String(currentUserProfile.staffId).trim()
+      ticketsState.currentUserProfile.staffId != null && String(ticketsState.currentUserProfile.staffId).trim() !== ''
+        ? String(ticketsState.currentUserProfile.staffId).trim()
         : '';
     if (sid && techId === sid) return true;
     if (uid && techId === uid) return true;
@@ -1777,7 +1740,7 @@ function getActiveLocationIdForTickets() {
  *  Uses FIRESTORE profile role for admin/manager check — not PIN actor.
  *  This ensures admin always sees all tickets regardless of PIN state. */
 function canSeeTicket(ticket) {
-  if (!currentUserProfile) return false;
+  if (!ticketsState.currentUserProfile) return false;
   // Location scope gate:
   //  • Stamped tickets must match the active branch (if any).
   //  • Legacy tickets without a locationId are visible in single-branch
@@ -1800,13 +1763,13 @@ function canSeeTicket(ticket) {
     }
   }
   // Firestore role: admin/owner/manager always see all tickets
-  const profileRole = (currentUserProfile.role || '').toLowerCase();
+  const profileRole = (ticketsState.currentUserProfile.role || '').toLowerCase();
   if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
   if (isStaffRecordManagerOrAdmin()) return true;
   if (isTicketsTechnicianRestrictedRole()) {
     return ticketBelongsToTicketsTechnician(ticket);
   }
-  if (ticket.createdByUid === currentUserProfile.uid) return true;
+  if (ticket.createdByUid === ticketsState.currentUserProfile.uid) return true;
   return false;
 }
 
@@ -1824,13 +1787,13 @@ function ticketHasRealPostSendEdit(ticket) {
 // =====================
 function _rebuildCurrentTicketsMerged() {
   const byId = new Map();
-  for (const t of _ticketsExtraTickets) {
+  for (const t of ticketsState._ticketsExtraTickets) {
     if (t && t.id) byId.set(t.id, t);
   }
-  for (const t of _ticketsFirstPageTickets) {
+  for (const t of ticketsState._ticketsFirstPageTickets) {
     if (t && t.id) byId.set(t.id, t);
   }
-  currentTickets = Array.from(byId.values()).sort((a, b) => {
+  ticketsState.currentTickets = Array.from(byId.values()).sort((a, b) => {
     const da = ticketSubmittedAtDate(a);
     const db = ticketSubmittedAtDate(b);
     const ma = da ? da.getTime() : 0;
@@ -1865,8 +1828,8 @@ function ffTicketsPatchLocalTicket(ticketId, patch) {
       }
     }
   };
-  apply(_ticketsExtraTickets);
-  apply(_ticketsFirstPageTickets);
+  apply(ticketsState._ticketsExtraTickets);
+  apply(ticketsState._ticketsFirstPageTickets);
   return touched;
 }
 
@@ -1874,35 +1837,35 @@ function updateTicketsLoadMoreUi() {
   const wrap = document.getElementById('ticketsLoadMoreWrap');
   const btn = document.getElementById('ticketsLoadMoreBtn');
   if (!wrap || !btn) return;
-  const onListTab = currentTicketsTab !== 'summary';
-  const show = onListTab && _ticketsHasMoreOlder;
+  const onListTab = ticketsState.currentTicketsTab !== 'summary';
+  const show = onListTab && ticketsState._ticketsHasMoreOlder;
   wrap.style.display = show ? 'block' : 'none';
-  btn.disabled = _ticketsLoadingMore;
-  btn.textContent = _ticketsLoadingMore ? 'Loading…' : 'Load more';
+  btn.disabled = ticketsState._ticketsLoadingMore;
+  btn.textContent = ticketsState._ticketsLoadingMore ? 'Loading…' : 'Load more';
 }
 
 async function loadMoreTicketsOlder() {
-  if (_ticketsLoadingMore || !_ticketsHasMoreOlder || !_ticketsNextPageCursor) return;
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  if (ticketsState._ticketsLoadingMore || !ticketsState._ticketsHasMoreOlder || !ticketsState._ticketsNextPageCursor) return;
+  const salonId = ticketsState.currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId) return;
-  _ticketsLoadingMore = true;
+  ticketsState._ticketsLoadingMore = true;
   updateTicketsLoadMoreUi();
   try {
     const qMore = query(
       collection(db, `salons/${salonId}/tickets`),
       orderBy('createdAt', 'desc'),
-      startAfter(_ticketsNextPageCursor),
+      startAfter(ticketsState._ticketsNextPageCursor),
       limit(TICKETS_PAGE_SIZE)
     );
     const batch = await getDocs(qMore);
     const newRows = batch.docs.map((d) => ({ id: d.id, ...d.data() }));
-    _ticketsExtraTickets.push(...newRows);
+    ticketsState._ticketsExtraTickets.push(...newRows);
     if (batch.docs.length < TICKETS_PAGE_SIZE) {
-      _ticketsHasMoreOlder = false;
-      _ticketsNextPageCursor = null;
+      ticketsState._ticketsHasMoreOlder = false;
+      ticketsState._ticketsNextPageCursor = null;
     } else {
-      _ticketsHasMoreOlder = true;
-      _ticketsNextPageCursor = batch.docs[batch.docs.length - 1];
+      ticketsState._ticketsHasMoreOlder = true;
+      ticketsState._ticketsNextPageCursor = batch.docs[batch.docs.length - 1];
     }
     _rebuildCurrentTicketsMerged();
     renderTicketsList();
@@ -1911,7 +1874,7 @@ async function loadMoreTicketsOlder() {
     console.error('[Tickets] load more failed', e);
     showToast(e?.message || 'Could not load more tickets', 'error');
   } finally {
-    _ticketsLoadingMore = false;
+    ticketsState._ticketsLoadingMore = false;
     updateTicketsLoadMoreUi();
   }
 }
@@ -1925,14 +1888,14 @@ function subscribeTickets(options) {
     renderTicketsList();
     return;
   }
-  if (ticketsUnsubscribe) ticketsUnsubscribe();
+  if (ticketsState.ticketsUnsubscribe) ticketsState.ticketsUnsubscribe();
   if (resetLoading) {
-    _ticketsListSnapshotReady = false;
-    _ticketsFirstPageTickets = [];
-    _ticketsExtraTickets = [];
-    _ticketsNextPageCursor = null;
-    _ticketsHasMoreOlder = false;
-    _ticketsLoadingMore = false;
+    ticketsState._ticketsListSnapshotReady = false;
+    ticketsState._ticketsFirstPageTickets = [];
+    ticketsState._ticketsExtraTickets = [];
+    ticketsState._ticketsNextPageCursor = null;
+    ticketsState._ticketsHasMoreOlder = false;
+    ticketsState._ticketsLoadingMore = false;
     _rebuildCurrentTicketsMerged();
     const loadEl = document.getElementById('ticketsLoading');
     const listEl = document.getElementById('ticketsList');
@@ -1946,17 +1909,17 @@ function subscribeTickets(options) {
     orderBy('createdAt', 'desc'),
     limit(TICKETS_PAGE_SIZE)
   );
-  ticketsUnsubscribe = onSnapshot(q, (snap) => {
-    _ticketsFirstPageTickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    if (_ticketsExtraTickets.length === 0) {
-      _ticketsNextPageCursor =
+  ticketsState.ticketsUnsubscribe = onSnapshot(q, (snap) => {
+    ticketsState._ticketsFirstPageTickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (ticketsState._ticketsExtraTickets.length === 0) {
+      ticketsState._ticketsNextPageCursor =
         snap.docs.length >= TICKETS_PAGE_SIZE ? snap.docs[snap.docs.length - 1] : null;
-      _ticketsHasMoreOlder = snap.docs.length === TICKETS_PAGE_SIZE;
+      ticketsState._ticketsHasMoreOlder = snap.docs.length === TICKETS_PAGE_SIZE;
     }
     _rebuildCurrentTicketsMerged();
-    _ticketsListSnapshotReady = true;
-    if (editingTicketId) {
-      const t = currentTickets.find((x) => x.id === editingTicketId);
+    ticketsState._ticketsListSnapshotReady = true;
+    if (ticketsState.editingTicketId) {
+      const t = ticketsState.currentTickets.find((x) => x.id === ticketsState.editingTicketId);
       const s = t ? (t.status || '').toUpperCase() : '';
       if (t && (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED')) {
         const ticketModal = document.getElementById('ticketModal');
@@ -1970,7 +1933,7 @@ function subscribeTickets(options) {
     updateTicketsNavBadge();
   }, (err) => {
     console.error('[Tickets] subscribe error', err);
-    _ticketsListSnapshotReady = true;
+    ticketsState._ticketsListSnapshotReady = true;
     renderTicketsList();
   });
 }
@@ -1979,12 +1942,12 @@ function subscribeTickets(options) {
 function updateTicketsNavBadge() {
   const badge = document.getElementById('ticketsNavBadge');
   if (!badge) return;
-  if (!currentUserProfile) {
+  if (!ticketsState.currentUserProfile) {
     badge.textContent = '';
     badge.style.display = 'none';
     return;
   }
-  const readyVisible = (currentTickets || []).filter(t => {
+  const readyVisible = (ticketsState.currentTickets || []).filter(t => {
     return String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT' && canSeeTicket(t);
   });
   badge.textContent = readyVisible.length > 0 ? String(readyVisible.length) : '';
@@ -2012,8 +1975,8 @@ async function createTicket(payload) {
     customerName: String(payload.customerName || '').trim(),
     appointmentId: payload.appointmentId || null,
     appointmentData: payload.appointmentData || null,
-    technicianStaffId: currentUserProfile.staffId || currentUserProfile.uid,
-    technicianName: currentUserProfile.name || currentUserProfile.email || 'Technician',
+    technicianStaffId: ticketsState.currentUserProfile.staffId || ticketsState.currentUserProfile.uid,
+    technicianName: ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email || 'Technician',
     performedLines: Array.isArray(payload.performedLines) ? payload.performedLines : [],
     subtotal: Number(payload.subtotal) || Number(payload.total) || 0,
     salesTax: Number(payload.salesTax) || 0,
@@ -2023,11 +1986,11 @@ async function createTicket(payload) {
     forUids: Array.isArray(payload.forUids) ? payload.forUids : [],
     forNames: Array.isArray(payload.forNames) ? payload.forNames : [],
     ...(activeLocForNewTicket ? { locationId: activeLocForNewTicket } : {}),
-    ...(status === 'READY_FOR_CHECKOUT' && { finalizedByUid: currentUserProfile.uid }),
+    ...(status === 'READY_FOR_CHECKOUT' && { finalizedByUid: ticketsState.currentUserProfile.uid }),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-    createdByUid: currentUserProfile.uid,
-    history: [{ at: Timestamp.now(), by: currentUserProfile.uid, byName: currentUserProfile.name || '', action: 'created', details: null }]
+    createdByUid: ticketsState.currentUserProfile.uid,
+    history: [{ at: Timestamp.now(), by: ticketsState.currentUserProfile.uid, byName: ticketsState.currentUserProfile.name || '', action: 'created', details: null }]
   };
   const ref = await addDoc(collection(db, `salons/${salonId}/tickets`), doc);
   return ref.id;
@@ -2047,8 +2010,8 @@ async function updateTicket(ticketId, updates) {
   const existingHist = Array.isArray(data.history) ? data.history : [];
   const hist = [...existingHist, {
     at: Timestamp.now(),
-    by: currentUserProfile.uid,
-    byName: currentUserProfile.name || '',
+    by: ticketsState.currentUserProfile.uid,
+    byName: ticketsState.currentUserProfile.name || '',
     action: updates._action || 'updated',
     details: updates._details || null
   }];
@@ -2094,7 +2057,7 @@ async function updateTicket(ticketId, updates) {
 }
 
 async function finalizeTicket(ticketId, forUids, forNames, extra) {
-  const updates = { status: 'READY_FOR_CHECKOUT', finalizedByUid: currentUserProfile.uid, _action: 'finalized' };
+  const updates = { status: 'READY_FOR_CHECKOUT', finalizedByUid: ticketsState.currentUserProfile.uid, _action: 'finalized' };
   if (Array.isArray(forUids) && forUids.length > 0) {
     updates.forUids = forUids;
     updates.forNames = Array.isArray(forNames) ? forNames : [];
@@ -2110,7 +2073,7 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
   console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: enter', {
     salonId: salonId || '(missing)',
     ticketId: ticketId || '(missing)',
-    profileRole: currentUserProfile?.role ?? '(no profile)'
+    profileRole: ticketsState.currentUserProfile?.role ?? '(no profile)'
   });
   if (!salonId || !ticketId) {
     console.log('[Tickets Summary DEBUG] appendTicketSummaryOnClose: abort — missing salonId or ticketId');
@@ -2208,7 +2171,7 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
       message: e?.message,
       code: e?.code,
       stack: e?.stack,
-      profileRole: currentUserProfile?.role ?? '(no profile)',
+      profileRole: ticketsState.currentUserProfile?.role ?? '(no profile)',
       salonId,
       ticketId
     });
@@ -2218,12 +2181,12 @@ async function appendTicketSummaryOnClose(salonId, ticketId) {
 
 async function closeTicket(ticketId, preCloseFields = null) {
   const salonId = getActiveTicketsSalonId();
-  const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
+  const closedByName = ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || 'Manager';
   console.log('[Tickets Summary DEBUG] closeTicket: before update + append', {
     salonId: salonId || '(missing)',
     ticketId: ticketId || '(missing)',
-    profileRole: currentUserProfile?.role ?? '(no profile)',
-    uid: currentUserProfile?.uid ?? '(no uid)'
+    profileRole: ticketsState.currentUserProfile?.role ?? '(no profile)',
+    uid: ticketsState.currentUserProfile?.uid ?? '(no uid)'
   });
   const extra =
     preCloseFields && typeof preCloseFields === 'object'
@@ -2234,7 +2197,7 @@ async function closeTicket(ticketId, preCloseFields = null) {
   await updateTicket(ticketId, {
     ...extra,
     status: 'CLOSED',
-    closedByUid: currentUserProfile.uid,
+    closedByUid: ticketsState.currentUserProfile.uid,
     closedByName,
     _action: 'closed'
   });
@@ -2262,8 +2225,8 @@ async function reopenTicket(ticketId) {
           updateDoc(d.ref, {
             reopenedReversed: true,
             reopenedAt: serverTimestamp(),
-            reopenedByUid: currentUserProfile?.uid ?? null,
-            reopenedByName: currentUserProfile?.name || currentUserProfile?.email || null
+            reopenedByUid: ticketsState.currentUserProfile?.uid ?? null,
+            reopenedByName: ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || null
           }).catch(() => {})
         )
       );
@@ -2275,8 +2238,8 @@ async function reopenTicket(ticketId) {
     status: 'READY_FOR_CHECKOUT',
     closedByUid: deleteField(),
     closedByName: deleteField(),
-    reopenedByUid: currentUserProfile?.uid || null,
-    reopenedByName: currentUserProfile?.name || currentUserProfile?.email || 'Manager',
+    reopenedByUid: ticketsState.currentUserProfile?.uid || null,
+    reopenedByName: ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || 'Manager',
     reopenedAt: serverTimestamp(),
     _action: 'reopened'
   });
@@ -2287,7 +2250,7 @@ async function voidTicket(ticketId) {
 }
 
 async function archiveTicket(ticketId) {
-  await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: currentUserProfile.uid, _action: 'archived' });
+  await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: ticketsState.currentUserProfile.uid, _action: 'archived' });
 }
 
 async function setTicketServiceUpgrade(ticketId, enabled) {
@@ -2300,7 +2263,7 @@ async function setTicketServiceUpgrade(ticketId, enabled) {
 function getTicketUpgradePointsAccountId() {
   return String(
     (typeof window !== 'undefined' && window.currentSalonId)
-    || currentUserProfile?.salonId
+    || ticketsState.currentUserProfile?.salonId
     || (typeof window !== 'undefined' && (window.currentAccountId || window.accountId))
     || ''
   ).trim();
@@ -2375,9 +2338,9 @@ async function awardTicketUpgradePoints(ticket) {
 /** Does not remove ticketSummaries; marks matching rows when the live ticket is permanently deleted. */
 async function markTicketSummariesSourceDeleted(salonId, ticketId) {
   if (!salonId || !ticketId) return;
-  const uid = currentUserProfile?.uid ?? null;
+  const uid = ticketsState.currentUserProfile?.uid ?? null;
   const byName =
-    currentUserProfile?.name || currentUserProfile?.email || null;
+    ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || null;
   try {
     const q = query(
       collection(db, `salons/${salonId}/ticketSummaries`),
@@ -2405,8 +2368,8 @@ async function deleteTicketPermanently(ticketId) {
   await markTicketSummariesSourceDeleted(salonId, ticketId);
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
   await deleteDoc(ticketRef);
-  _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => t.id !== ticketId);
-  _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => t.id !== ticketId);
+  ticketsState._ticketsExtraTickets = ticketsState._ticketsExtraTickets.filter((t) => t.id !== ticketId);
+  ticketsState._ticketsFirstPageTickets = ticketsState._ticketsFirstPageTickets.filter((t) => t.id !== ticketId);
   _rebuildCurrentTicketsMerged();
 }
 
@@ -2757,23 +2720,23 @@ function getSummaryStaffIdCandidates(staff, ticket) {
 function findSummaryServiceForLine(line) {
   const serviceId = String(line?.serviceId || '').trim();
   if (serviceId) {
-    const byId = salonServices.find((service) => String(service?.id || '').trim() === serviceId);
+    const byId = ticketsState.salonServices.find((service) => String(service?.id || '').trim() === serviceId);
     if (byId) return byId;
   }
   const lineName = normalizeTicketTechName(line?.serviceName || '');
   if (!lineName) return null;
-  return salonServices.find((service) => normalizeTicketTechName(service?.name || '') === lineName) || null;
+  return ticketsState.salonServices.find((service) => normalizeTicketTechName(service?.name || '') === lineName) || null;
 }
 
 function findSummaryProductForLine(line) {
   const productId = String(line?.productId || '').trim();
   if (productId) {
-    const byId = salonProducts.find((product) => String(product?.id || '').trim() === productId);
+    const byId = ticketsState.salonProducts.find((product) => String(product?.id || '').trim() === productId);
     if (byId) return byId;
   }
   const lineName = normalizeTicketTechName(line?.serviceName || '');
   if (!lineName) return null;
-  return salonProducts.find((product) => normalizeTicketTechName(product?.name || '') === lineName) || null;
+  return ticketsState.salonProducts.find((product) => normalizeTicketTechName(product?.name || '') === lineName) || null;
 }
 
 function getSummaryProductStaffOverride(product, staff, ticket) {
@@ -3029,7 +2992,7 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
 }
 
 function buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId) {
-  return buildSummaryRowsFromClosedTicketList(currentTickets, fromStr, toStr, employeeId);
+  return buildSummaryRowsFromClosedTicketList(ticketsState.currentTickets, fromStr, toStr, employeeId);
 }
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
@@ -3102,15 +3065,14 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
   return true;
 }
 
-let _ticketsSummaryFetchSeq = 0;
 
 /**
  * Summary tab: aggregate from all CLOSED tickets in Firestore (same date rules as Closed tab: createdAt).
  * Rows in ticketSummaries are still written on close for optional analytics; the UI does not depend on them.
  */
 async function loadAndRenderTicketsSummary() {
-  const seq = ++_ticketsSummaryFetchSeq;
-  if (currentTicketsTab === 'summary') {
+  const seq = ++ticketsState._ticketsSummaryFetchSeq;
+  if (ticketsState.currentTicketsTab === 'summary') {
     syncTicketsTimePeriodSelectOptions();
     ensureTicketsSummaryDefaultTimePeriod();
   }
@@ -3130,9 +3092,9 @@ async function loadAndRenderTicketsSummary() {
   tbody.innerHTML = '';
   tfoot.innerHTML = '';
 
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = ticketsState.currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
   if (!salonId) {
-    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (seq !== ticketsState._ticketsSummaryFetchSeq) return;
     if (emptyMsg) {
       emptyMsg.className = 'tickets-summary-state tickets-summary-state--empty';
       emptyMsg.textContent = 'No summary data found for the selected filters.';
@@ -3152,19 +3114,19 @@ async function loadAndRenderTicketsSummary() {
     fromStr: fromStr || '(empty)',
     toStr: toStr || '(empty)',
     employeeId,
-    profileRole: currentUserProfile?.role ?? '(no profile)',
+    profileRole: ticketsState.currentUserProfile?.role ?? '(no profile)',
     techRestricted: isTicketsTechnicianRestrictedRole() && !isStaffRecordManagerOrAdmin()
   });
 
   try {
-    if (!salonServices.length) {
+    if (!ticketsState.salonServices.length) {
       try { await loadServices(); } catch (catalogErr) { console.warn('[Tickets] Summary catalog load failed', catalogErr); }
     }
-    if (!salonProducts.length) {
+    if (!ticketsState.salonProducts.length) {
       try {
         subscribeProductsCatalog();
         const prodSnap = await getDocs(collection(db, `salons/${salonId}/products`));
-        salonProducts = prodSnap.docs
+        ticketsState.salonProducts = prodSnap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
       } catch (catalogErr) {
@@ -3172,13 +3134,13 @@ async function loadAndRenderTicketsSummary() {
       }
     }
     const closedTickets = await fetchClosedTicketsForSummary(salonId, fromStr, toStr);
-    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (seq !== ticketsState._ticketsSummaryFetchSeq) return;
 
     console.log('[Tickets Summary DEBUG] loadAndRenderTicketsSummary: fetched CLOSED ticket docs', closedTickets.length);
 
     const fb = buildSummaryRowsFromClosedTicketList(closedTickets, fromStr, toStr, employeeId);
 
-    if (seq !== _ticketsSummaryFetchSeq) return;
+    if (seq !== ticketsState._ticketsSummaryFetchSeq) return;
 
     paintTicketsSummaryTable(
       wrap,
@@ -3194,11 +3156,11 @@ async function loadAndRenderTicketsSummary() {
       code: e?.code,
       stack: e?.stack,
       salonId,
-      profileRole: currentUserProfile?.role ?? '(no profile)'
+      profileRole: ticketsState.currentUserProfile?.role ?? '(no profile)'
     });
     console.warn('[Tickets] Summary load failed', e);
-    if (seq !== _ticketsSummaryFetchSeq) return;
-    if (_ticketsListSnapshotReady) {
+    if (seq !== ticketsState._ticketsSummaryFetchSeq) return;
+    if (ticketsState._ticketsListSnapshotReady) {
       const fb = buildSummaryRowsFromLiveClosedTickets(fromStr, toStr, employeeId);
       if (
         paintTicketsSummaryTable(
@@ -3324,10 +3286,9 @@ function applyTicketsTimePeriodFromSelect() {
   renderTicketsList();
 }
 
-let _ticketsDateFiltersWired = false;
 function setupTicketsDateFilters() {
-  if (_ticketsDateFiltersWired) return;
-  _ticketsDateFiltersWired = true;
+  if (ticketsState._ticketsDateFiltersWired) return;
+  ticketsState._ticketsDateFiltersWired = true;
   const sel = document.getElementById('ticketsTimePeriodSelect');
   const fromEl = document.getElementById('ticketsFilterDateFrom');
   const toEl = document.getElementById('ticketsFilterDateTo');
@@ -3514,33 +3475,29 @@ function getInitial(name) {
 // =====================
 // Bulk select — archive (Closed tab) / permanent delete (Archived tab)
 // =====================
-let ticketsSelectionMode = false;
-let ticketsSelectionTab = null; // tab the selection was started on ('closed' | 'archived')
-const ticketsSelected = new Set();
-let ticketsClosedShownIds = [];
 
 /** Bulk archive/delete is restricted to owner/admin — same gate as the single-ticket actions. */
 function ffTicketsCanBulkArchive() {
-  return !!(currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase()));
+  return !!(ticketsState.currentUserProfile && ['owner', 'admin'].includes((ticketsState.currentUserProfile.role || '').toLowerCase()));
 }
 
 /** Tabs where bulk selection is available: Closed (archive) and Archived (permanent delete). */
 function ffTicketsBulkTabHere() {
   if (!ffTicketsCanBulkArchive()) return false;
-  return currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+  return ticketsState.currentTicketsTab === 'closed' || ticketsState.currentTicketsTab === 'archived';
 }
 
 function ffTicketsExitSelectionMode() {
-  ticketsSelectionMode = false;
-  ticketsSelectionTab = null;
-  ticketsSelected.clear();
+  ticketsState.ticketsSelectionMode = false;
+  ticketsState.ticketsSelectionTab = null;
+  ticketsState.ticketsSelected.clear();
 }
 
 function ffTicketsToggleSelect(id, cardEl) {
-  if (ticketsSelected.has(id)) ticketsSelected.delete(id);
-  else ticketsSelected.add(id);
+  if (ticketsState.ticketsSelected.has(id)) ticketsState.ticketsSelected.delete(id);
+  else ticketsState.ticketsSelected.add(id);
   if (cardEl) {
-    const on = ticketsSelected.has(id);
+    const on = ticketsState.ticketsSelected.has(id);
     cardEl.classList.toggle('ticket-selected', on);
     const cb = cardEl.querySelector('.ticket-select-cb');
     if (cb) cb.textContent = on ? '\u2713' : '';
@@ -3555,28 +3512,28 @@ function ffTicketsUpdateBulkBar() {
   bar.style.display = onBulkTab ? 'flex' : 'none';
   // Mobile CSS pins the bar to the bottom of the screen while selecting.
   const screenEl = document.getElementById('ticketsScreen');
-  if (screenEl) screenEl.classList.toggle('ff-tickets-selecting', onBulkTab && ticketsSelectionMode);
+  if (screenEl) screenEl.classList.toggle('ff-tickets-selecting', onBulkTab && ticketsState.ticketsSelectionMode);
   if (!onBulkTab) return;
-  const onArchived = currentTicketsTab === 'archived';
+  const onArchived = ticketsState.currentTicketsTab === 'archived';
   const toggleBtn = document.getElementById('ticketsSelectToggleBtn');
   const selectAllBtn = document.getElementById('ticketsSelectAllBtn');
   const info = document.getElementById('ticketsBulkInfo');
   const archiveBtn = document.getElementById('ticketsBulkArchiveBtn');
   const cancelBtn = document.getElementById('ticketsBulkCancelBtn');
-  const n = ticketsSelected.size;
-  const total = ticketsClosedShownIds.length;
-  if (toggleBtn) toggleBtn.style.display = ticketsSelectionMode ? 'none' : '';
+  const n = ticketsState.ticketsSelected.size;
+  const total = ticketsState.ticketsClosedShownIds.length;
+  if (toggleBtn) toggleBtn.style.display = ticketsState.ticketsSelectionMode ? 'none' : '';
   if (selectAllBtn) {
-    selectAllBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    selectAllBtn.style.display = ticketsState.ticketsSelectionMode ? '' : 'none';
     const allSelected = total > 0 && n >= total;
     selectAllBtn.textContent = allSelected ? 'Clear all' : 'Select all';
   }
   if (info) {
-    info.style.display = ticketsSelectionMode ? '' : 'none';
+    info.style.display = ticketsState.ticketsSelectionMode ? '' : 'none';
     info.textContent = n > 0 ? `${n} selected` : 'Tap tickets to select';
   }
   if (archiveBtn) {
-    archiveBtn.style.display = ticketsSelectionMode ? '' : 'none';
+    archiveBtn.style.display = ticketsState.ticketsSelectionMode ? '' : 'none';
     archiveBtn.disabled = n === 0;
     archiveBtn.style.opacity = n === 0 ? '0.5' : '1';
     archiveBtn.style.background = onArchived ? '#ef4444' : '#7c3aed';
@@ -3584,7 +3541,7 @@ function ffTicketsUpdateBulkBar() {
       ? (n > 0 ? `Delete selected (${n})` : 'Delete selected')
       : (n > 0 ? `Archive selected (${n})` : 'Archive selected');
   }
-  if (cancelBtn) cancelBtn.style.display = ticketsSelectionMode ? '' : 'none';
+  if (cancelBtn) cancelBtn.style.display = ticketsState.ticketsSelectionMode ? '' : 'none';
 }
 
 function ffTicketsBulkInit() {
@@ -3595,18 +3552,18 @@ function ffTicketsBulkInit() {
   if (toggleBtn && !toggleBtn._ffWired) {
     toggleBtn._ffWired = true;
     toggleBtn.onclick = () => {
-      ticketsSelectionMode = true;
-      ticketsSelectionTab = currentTicketsTab;
-      ticketsSelected.clear();
+      ticketsState.ticketsSelectionMode = true;
+      ticketsState.ticketsSelectionTab = ticketsState.currentTicketsTab;
+      ticketsState.ticketsSelected.clear();
       renderTicketsList();
     };
   }
   if (selectAllBtn && !selectAllBtn._ffWired) {
     selectAllBtn._ffWired = true;
     selectAllBtn.onclick = () => {
-      const allSelected = ticketsClosedShownIds.length > 0 && ticketsSelected.size >= ticketsClosedShownIds.length;
-      ticketsSelected.clear();
-      if (!allSelected) ticketsClosedShownIds.forEach((id) => ticketsSelected.add(id));
+      const allSelected = ticketsState.ticketsClosedShownIds.length > 0 && ticketsState.ticketsSelected.size >= ticketsState.ticketsClosedShownIds.length;
+      ticketsState.ticketsSelected.clear();
+      if (!allSelected) ticketsState.ticketsClosedShownIds.forEach((id) => ticketsState.ticketsSelected.add(id));
       renderTicketsList();
     };
   }
@@ -3617,7 +3574,7 @@ function ffTicketsBulkInit() {
   if (archiveBtn && !archiveBtn._ffWired) {
     archiveBtn._ffWired = true;
     archiveBtn.onclick = () => {
-      if (currentTicketsTab === 'archived') void ffTicketsDeleteSelected();
+      if (ticketsState.currentTicketsTab === 'archived') void ffTicketsDeleteSelected();
       else void ffTicketsArchiveSelected();
     };
   }
@@ -3626,7 +3583,7 @@ function ffTicketsBulkInit() {
 /** Archive every selected CLOSED/VOID ticket in chunked Firestore batches (handles hundreds at once). */
 async function ffTicketsArchiveSelected() {
   if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
-  const ids = Array.from(ticketsSelected);
+  const ids = Array.from(ticketsState.ticketsSelected);
   if (ids.length === 0) return;
   const ok = await ticketConfirm(`Move ${ids.length} ticket${ids.length > 1 ? 's' : ''} to Archived?`, 'Archive tickets');
   if (!ok) return;
@@ -3642,21 +3599,21 @@ async function ffTicketsArchiveSelected() {
       const batch = writeBatch(db);
       const batchPatches = [];
       slice.forEach((id) => {
-        const t = currentTickets.find((x) => x.id === id);
+        const t = ticketsState.currentTickets.find((x) => x.id === id);
         // Defensive: only ever archive CLOSED/VOID tickets.
         if (!t || !(t.status === 'CLOSED' || t.status === 'VOID')) return;
         const ref = doc(db, `salons/${salonId}/tickets`, id);
         const existingHist = Array.isArray(t.history) ? t.history : [];
         const hist = [...existingHist, {
           at: Timestamp.now(),
-          by: currentUserProfile.uid,
-          byName: currentUserProfile.name || '',
+          by: ticketsState.currentUserProfile.uid,
+          byName: ticketsState.currentUserProfile.name || '',
           action: 'archived',
           details: 'bulk'
         }];
         const fields = {
           status: 'ARCHIVED',
-          archivedByUid: currentUserProfile.uid,
+          archivedByUid: ticketsState.currentUserProfile.uid,
           history: hist
         };
         batch.update(ref, { ...fields, updatedAt: serverTimestamp() });
@@ -3692,7 +3649,7 @@ async function ffTicketsArchiveSelected() {
  */
 async function ffTicketsDeleteSelected() {
   if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
-  const ids = Array.from(ticketsSelected);
+  const ids = Array.from(ticketsState.ticketsSelected);
   if (ids.length === 0) return;
   const ok = await ticketConfirm(
     `Permanently delete ${ids.length} ticket${ids.length > 1 ? 's' : ''}? This cannot be undone.`,
@@ -3705,15 +3662,15 @@ async function ffTicketsDeleteSelected() {
   if (actionBtn) { actionBtn.disabled = true; actionBtn.textContent = 'Deleting\u2026'; }
   // Defensive: only ever bulk-delete ARCHIVED tickets.
   const delIds = ids.filter((id) => {
-    const t = currentTickets.find((x) => x.id === id);
+    const t = ticketsState.currentTickets.find((x) => x.id === id);
     return !!t && t.status === 'ARCHIVED';
   });
   try {
     // 1) Mark matching Summary rows as source-deleted (same as single permanent delete).
     //    Failure here must not block the delete itself — same tolerance as the single flow.
     try {
-      const uid = currentUserProfile?.uid ?? null;
-      const byName = currentUserProfile?.name || currentUserProfile?.email || null;
+      const uid = ticketsState.currentUserProfile?.uid ?? null;
+      const byName = ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || null;
       const IN_CHUNK = 10; // conservative 'in' filter size
       for (let i = 0; i < delIds.length; i += IN_CHUNK) {
         const slice = delIds.slice(i, i + IN_CHUNK);
@@ -3750,8 +3707,8 @@ async function ffTicketsDeleteSelected() {
       // Remove from the local pagination caches — "Load more" rows are not in the
       // live snapshot and would otherwise keep rendering until a full reload.
       const gone = new Set(slice);
-      _ticketsExtraTickets = _ticketsExtraTickets.filter((t) => !gone.has(t.id));
-      _ticketsFirstPageTickets = _ticketsFirstPageTickets.filter((t) => !gone.has(t.id));
+      ticketsState._ticketsExtraTickets = ticketsState._ticketsExtraTickets.filter((t) => !gone.has(t.id));
+      ticketsState._ticketsFirstPageTickets = ticketsState._ticketsFirstPageTickets.filter((t) => !gone.has(t.id));
       if (actionBtn) actionBtn.textContent = `Deleting\u2026 (${done}/${delIds.length})`;
     }
     _rebuildCurrentTicketsMerged();
@@ -3789,7 +3746,7 @@ function ffBuildTicketCardHTML(t) {
   const initial = getInitial(t.technicianName);
   const sk = statusKey(t.status);
   const statusLabel = { ready: 'READY', closed: 'CLOSED', open: 'OPEN', void: 'VOID', archived: 'ARCHIVED' }[sk] || sk.toUpperCase();
-  const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
+  const isAdminOrManager = ticketsState.currentUserProfile && ['owner', 'admin', 'manager'].includes((ticketsState.currentUserProfile.role || '').toLowerCase());
   const isReady = sk === 'ready';
   const showEdited = isAdminOrManager && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
   const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
@@ -3860,22 +3817,22 @@ function renderTicketsList() {
   if (!listEl) return;
 
   updateTicketsTabsVisibility();
-  if (currentTicketsTab === 'summary' && !canViewTicketsSummaryTab()) {
-    currentTicketsTab = 'ready';
+  if (ticketsState.currentTicketsTab === 'summary' && !canViewTicketsSummaryTab()) {
+    ticketsState.currentTicketsTab = 'ready';
     document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
     const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
     if (rb) rb.classList.add('active');
-  } else if (currentTicketsTab === 'archived' && !canViewTicketsArchivedTab()) {
-    currentTicketsTab = 'ready';
+  } else if (ticketsState.currentTicketsTab === 'archived' && !canViewTicketsArchivedTab()) {
+    ticketsState.currentTicketsTab = 'ready';
     document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
     const rb = document.querySelector('.tickets-tab[data-tab="ready"]');
     if (rb) rb.classList.add('active');
   }
 
-  if (ticketsSelectionMode && currentTicketsTab !== ticketsSelectionTab) ffTicketsExitSelectionMode();
+  if (ticketsState.ticketsSelectionMode && ticketsState.currentTicketsTab !== ticketsState.ticketsSelectionTab) ffTicketsExitSelectionMode();
   ffTicketsUpdateBulkBar();
 
-  if (currentTicketsTab === 'summary') {
+  if (ticketsState.currentTicketsTab === 'summary') {
     if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'none';
     if (summaryPanel) summaryPanel.style.display = 'block';
@@ -3892,7 +3849,7 @@ function renderTicketsList() {
   }
   if (summaryPanel) summaryPanel.style.display = 'none';
 
-  if (!_ticketsListSnapshotReady) {
+  if (!ticketsState._ticketsListSnapshotReady) {
     if (loadingEl) loadingEl.style.display = 'block';
     if (emptyEl) emptyEl.style.display = 'none';
     listEl.innerHTML = '';
@@ -3900,15 +3857,15 @@ function renderTicketsList() {
     return;
   }
 
-  const statusFilter = { ready: 'READY_FOR_CHECKOUT', closed: 'CLOSED', archived: 'ARCHIVED' }[currentTicketsTab] || 'READY_FOR_CHECKOUT';
-  let toShow = currentTicketsTab === 'archived'
-    ? currentTickets.filter(t => t.status === 'ARCHIVED')
-    : currentTicketsTab === 'closed'
-    ? currentTickets.filter(t => t.status === 'CLOSED' || t.status === 'VOID')
-    : currentTickets.filter(t => t.status === statusFilter);
+  const statusFilter = { ready: 'READY_FOR_CHECKOUT', closed: 'CLOSED', archived: 'ARCHIVED' }[ticketsState.currentTicketsTab] || 'READY_FOR_CHECKOUT';
+  let toShow = ticketsState.currentTicketsTab === 'archived'
+    ? ticketsState.currentTickets.filter(t => t.status === 'ARCHIVED')
+    : ticketsState.currentTicketsTab === 'closed'
+    ? ticketsState.currentTickets.filter(t => t.status === 'CLOSED' || t.status === 'VOID')
+    : ticketsState.currentTickets.filter(t => t.status === statusFilter);
   toShow = toShow.filter(t => canSeeTicket(t));
 
-  const showDateFilters = currentTicketsTab === 'closed' || currentTicketsTab === 'archived';
+  const showDateFilters = ticketsState.currentTicketsTab === 'closed' || ticketsState.currentTicketsTab === 'archived';
   const hideDeskFiltersHere = showDateFilters && ffTicketsHideFrontDeskFiltersOnThisView();
   const filtersOn = showDateFilters && !hideDeskFiltersHere;
   ffTicketsSetTimePeriodFiltersVisible(filtersOn);
@@ -3956,21 +3913,21 @@ function renderTicketsList() {
     }
   }
 
-  listEl.classList.toggle('tickets-list--closed', currentTicketsTab === 'closed');
-  listEl.classList.toggle('tickets-list--archived', currentTicketsTab === 'archived');
+  listEl.classList.toggle('tickets-list--closed', ticketsState.currentTicketsTab === 'closed');
+  listEl.classList.toggle('tickets-list--archived', ticketsState.currentTicketsTab === 'archived');
 
   // Track which tickets are currently shown (for "Select all"), and drop
   // any selected ids that are no longer visible (e.g. archived/deleted elsewhere).
   if (ffTicketsBulkTabHere()) {
-    ticketsClosedShownIds = toShow.map((t) => t.id);
-    if (ticketsSelected.size) {
-      const shown = new Set(ticketsClosedShownIds);
-      Array.from(ticketsSelected).forEach((id) => { if (!shown.has(id)) ticketsSelected.delete(id); });
+    ticketsState.ticketsClosedShownIds = toShow.map((t) => t.id);
+    if (ticketsState.ticketsSelected.size) {
+      const shown = new Set(ticketsState.ticketsClosedShownIds);
+      Array.from(ticketsState.ticketsSelected).forEach((id) => { if (!shown.has(id)) ticketsState.ticketsSelected.delete(id); });
     }
   } else {
-    ticketsClosedShownIds = [];
+    ticketsState.ticketsClosedShownIds = [];
   }
-  const inBulkSelect = ticketsSelectionMode && ffTicketsBulkTabHere();
+  const inBulkSelect = ticketsState.ticketsSelectionMode && ffTicketsBulkTabHere();
 
   // Helper: status css key
   const statusKey = (s) => {
@@ -3992,23 +3949,23 @@ function renderTicketsList() {
     const initial = getInitial(t.technicianName);
     const sk = statusKey(t.status);
     const statusLabel = { ready:'READY', closed:'CLOSED', open:'OPEN', void:'VOID', archived:'ARCHIVED' }[sk] || sk.toUpperCase();
-    const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner && !inBulkSelect;
-    const isCreator = currentUserProfile && (
-      t.createdByUid === currentUserProfile.uid ||
-      t.technicianStaffId === currentUserProfile.staffId ||
-      t.technicianStaffId === currentUserProfile.uid ||
-      t.finalizedByUid === currentUserProfile.uid ||
+    const isAdminOrOwner = ticketsState.currentUserProfile && ['owner', 'admin'].includes((ticketsState.currentUserProfile.role || '').toLowerCase());
+    const showDeleteBtn = ticketsState.currentTicketsTab === 'archived' && isAdminOrOwner && !inBulkSelect;
+    const isCreator = ticketsState.currentUserProfile && (
+      t.createdByUid === ticketsState.currentUserProfile.uid ||
+      t.technicianStaffId === ticketsState.currentUserProfile.staffId ||
+      t.technicianStaffId === ticketsState.currentUserProfile.uid ||
+      t.finalizedByUid === ticketsState.currentUserProfile.uid ||
       (t.technicianName && (
-        (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-        (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
+        (ticketsState.currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.email).toLowerCase())) ||
+        (ticketsState.currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.name).toLowerCase()))
       ))
     );
     const canEdit = isCreator && t.status !== 'CLOSED' && t.status !== 'ARCHIVED' && t.status !== 'VOID';
     const editBtnHtml = canEdit
       ? `<button type="button" class="ticket-edit-btn" data-ticket-id="${t.id}" title="Edit ticket" style="padding:6px;background:none;border:none;cursor:pointer;flex-shrink:0;color:#9ca3af;line-height:0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
       : '';
-    const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
+    const isAdminOrManager = ticketsState.currentUserProfile && ['owner', 'admin', 'manager'].includes((ticketsState.currentUserProfile.role || '').toLowerCase());
     const canSeeEditedFlag = isAdminOrManager;
     const isReady = sk === 'ready';
     const showEdited = canSeeEditedFlag && isReady && t.serviceUpgrade !== true && ticketHasRealPostSendEdit(t);
@@ -4045,7 +4002,7 @@ function renderTicketsList() {
       ? `<div style="font-size:11px;color:#059669;margin-top:2px;">✓ Closed by ${escapeHtml(t.closedByName)}</div>`
       : '';
 
-    const isSel = inBulkSelect && ticketsSelected.has(t.id);
+    const isSel = inBulkSelect && ticketsState.ticketsSelected.has(t.id);
     const selCbHtml = inBulkSelect ? `<div class="ticket-select-cb">${isSel ? '\u2713' : ''}</div>` : '';
     const cardClass = `ticket-card${inBulkSelect ? ' ticket-selectable' : ''}${isSel ? ' ticket-selected' : ''}`;
 
@@ -4092,7 +4049,7 @@ function renderTicketsList() {
     const ticketId = card.getAttribute('data-ticket-id');
     card.onclick = (e) => {
       if (e.target.closest('.ticket-delete-btn')) return;
-      if (ticketsSelectionMode && ffTicketsBulkTabHere()) {
+      if (ticketsState.ticketsSelectionMode && ffTicketsBulkTabHere()) {
         e.preventDefault();
         ffTicketsToggleSelect(ticketId, card);
         return;
@@ -4147,7 +4104,7 @@ function setTicketsTab(tab) {
   let t = tab;
   if (t === 'summary' && !canViewTicketsSummaryTab()) t = 'ready';
   if (t === 'archived' && !canViewTicketsArchivedTab()) t = 'ready';
-  currentTicketsTab = t;
+  ticketsState.currentTicketsTab = t;
   document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
   const btn = document.querySelector(`.tickets-tab[data-tab="${t}"]`);
   if (btn) btn.classList.add('active');
@@ -4158,14 +4115,14 @@ function setTicketsTab(tab) {
 // UI: Ticket Modal (create/edit)
 // =====================
 function openTicketModal(ticketId, appointmentData = null) {
-  editingTicketId = ticketId || null;
+  ticketsState.editingTicketId = ticketId || null;
   window._ticketModalAppointmentData = appointmentData || null;
   const modal = document.getElementById('ticketModal');
   const title = document.getElementById('ticketModalTitle');
   if (!modal || !title) return;
 
-  if (editingTicketId) {
-    const t = currentTickets.find(x => x.id === editingTicketId);
+  if (ticketsState.editingTicketId) {
+    const t = ticketsState.currentTickets.find(x => x.id === ticketsState.editingTicketId);
     if (!t) return;
     if (!canSeeTicket(t)) {
       showToast('You cannot view this ticket.', 'error');
@@ -4173,8 +4130,8 @@ function openTicketModal(ticketId, appointmentData = null) {
     }
     const s = (t.status || '').toUpperCase();
     if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
-      if (_justClosedTicketId === editingTicketId) {
-        _justClosedTicketId = null;
+      if (ticketsState._justClosedTicketId === ticketsState.editingTicketId) {
+        ticketsState._justClosedTicketId = null;
         return;
       }
       openTicketDetailsModal(t);
@@ -4184,7 +4141,7 @@ function openTicketModal(ticketId, appointmentData = null) {
     // Admin/manager/owner viewing a READY ticket → simplified view with Close Ticket only
     if (canCurrentUserCloseTickets() && s === 'READY_FOR_CHECKOUT') {
       if (!t.seenByFrontDeskAt) {
-        _ticketsOpenedThisSession.add(t.id);
+        ticketsState._ticketsOpenedThisSession.add(t.id);
         t.seenByFrontDeskAt = true;
         updateTicketsNavBadge();
         markTicketSeenByFrontDesk(t.id).catch(() => {});
@@ -4202,7 +4159,7 @@ function openTicketModal(ticketId, appointmentData = null) {
     }
 
     if (s === 'READY_FOR_CHECKOUT' && !t.seenByFrontDeskAt) {
-      _ticketsOpenedThisSession.add(t.id);
+      ticketsState._ticketsOpenedThisSession.add(t.id);
       t.seenByFrontDeskAt = true;
       updateTicketsNavBadge();
       const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
@@ -4244,7 +4201,7 @@ function ffFormatReviewedAt(v) {
 }
 
 async function toggleTicketReviewed(ticketId) {
-  const t = (currentTickets || []).find(x => x.id === ticketId);
+  const t = (ticketsState.currentTickets || []).find(x => x.id === ticketId);
   if (!t) return;
   if (!canCurrentUserCloseTickets()) { showToast('Not allowed', 'error'); return; }
   const makeReviewed = !(t.reviewedByFrontDesk === true);
@@ -4252,13 +4209,13 @@ async function toggleTicketReviewed(ticketId) {
     if (makeReviewed) {
       await updateTicket(ticketId, {
         reviewedByFrontDesk: true,
-        reviewedByUid: (currentUserProfile && currentUserProfile.uid) || null,
-        reviewedByName: (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '',
+        reviewedByUid: (ticketsState.currentUserProfile && ticketsState.currentUserProfile.uid) || null,
+        reviewedByName: (ticketsState.currentUserProfile && (ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email)) || '',
         reviewedAt: serverTimestamp(),
         _action: 'reviewed_marked'
       });
       t.reviewedByFrontDesk = true;
-      t.reviewedByName = (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || '';
+      t.reviewedByName = (ticketsState.currentUserProfile && (ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email)) || '';
       t.reviewedAt = new Date();
     } else {
       await updateTicket(ticketId, {
@@ -4406,7 +4363,7 @@ function openAdminTicketView(t) {
       editBtn.textContent = 'Edit Services';
       editBtn.onclick = () => {
         delete modal.dataset.adminView;
-        editingTicketId = t.id;
+        ticketsState.editingTicketId = t.id;
         // Reset the admin-view button styling so the edit form looks normal.
         if (closeBtn) {
           closeBtn.style.width = '';
@@ -4496,7 +4453,7 @@ function closeTicketModal() {
       }
     }
   }
-  editingTicketId = null;
+  ticketsState.editingTicketId = null;
   requestAnimationFrame(() => updateTicketsNavBadge());
 }
 
@@ -4564,7 +4521,7 @@ function openTicketDetailsModal(t) {
     ${asIsHtml}
     ${serviceUpgradeHtml}
   `;
-  const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
+  const isAdminOrOwner = ticketsState.currentUserProfile && ['owner', 'admin'].includes((ticketsState.currentUserProfile.role || '').toLowerCase());
   const canReopenTicket = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
   let actionsHtml = '';
   if (t.status === 'CLOSED' && canReopenTicket) {
@@ -4646,7 +4603,7 @@ function ffApplyTicketCustomerRequiredUI() {
 
 function resetTicketForm() {
   // New-ticket flow (technicians) keeps the staff-filtered catalog.
-  _ticketPickerShowAllCatalog = false;
+  ticketsState._ticketPickerShowAllCatalog = false;
   // Rebuild the picker so it reflects the (filtered) catalog for this flow.
   try { if (typeof setupTicketsUI === 'function') setupTicketsUI(); } catch (_) {}
   const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
@@ -4733,7 +4690,7 @@ function populateTicketForm(t) {
   const isReadOnly = ['CLOSED', 'VOID', 'ARCHIVED'].includes((t.status || '').toUpperCase());
   // Managers / front-desk receivers editing a ticket see the FULL service + product
   // catalog (not just their own assigned services). Technicians keep the filtered view.
-  _ticketPickerShowAllCatalog = (typeof canCurrentUserCloseTickets === 'function')
+  ticketsState._ticketPickerShowAllCatalog = (typeof canCurrentUserCloseTickets === 'function')
     ? !!canCurrentUserCloseTickets()
     : false;
   renderPerformedLines(lines, isReadOnly);
@@ -4750,7 +4707,7 @@ function populateTicketForm(t) {
   if (!isReadOnly) {
     (async () => {
       try {
-        if (!Array.isArray(salonServices) || salonServices.length === 0) {
+        if (!Array.isArray(ticketsState.salonServices) || ticketsState.salonServices.length === 0) {
           try { await loadServiceCategories(); } catch (_) {}
           try { await loadServices(); } catch (_) {}
         }
@@ -4763,19 +4720,19 @@ function populateTicketForm(t) {
   if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
   if (customerInput) customerInput.readOnly = isReadOnly;
   updateTicketTotal(lines);
-  const isCreator = currentUserProfile && (
-    t.createdByUid === currentUserProfile.uid ||
-    t.technicianStaffId === currentUserProfile.staffId ||
-    t.technicianStaffId === currentUserProfile.uid ||
-    t.finalizedByUid === currentUserProfile.uid ||
+  const isCreator = ticketsState.currentUserProfile && (
+    t.createdByUid === ticketsState.currentUserProfile.uid ||
+    t.technicianStaffId === ticketsState.currentUserProfile.staffId ||
+    t.technicianStaffId === ticketsState.currentUserProfile.uid ||
+    t.finalizedByUid === ticketsState.currentUserProfile.uid ||
     (t.technicianName && (
-      (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-      (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
+      (ticketsState.currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.email).toLowerCase())) ||
+      (ticketsState.currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.name).toLowerCase()))
     ))
   );
   const canViewTicket = canSeeTicket(t);
   const canSaveEdits = (isCreator || canViewTicket) && (t.status === 'OPEN' || t.status === 'READY_FOR_CHECKOUT');
-  const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
+  const isAdminOrOwner = ticketsState.currentUserProfile && ['owner', 'admin'].includes((ticketsState.currentUserProfile.role || '').toLowerCase());
   // Only manager/admin/owner can close ticket; technicians must not see Close button.
   const canCloseTicket = canCurrentUserCloseTickets();
   const finalizeBtn = document.getElementById('ticketFinalizeBtn');
@@ -5076,13 +5033,13 @@ async function saveTicket() {
   const totals = computeTicketTotalsFromLines(lines);
 
   try {
-    if (editingTicketId) {
+    if (ticketsState.editingTicketId) {
       // If someone who received the ticket (front desk / manager) changes the
       // services, preserve the technician's original lines once and tag the edit
       // so we can show what changed and by whom.
       const fdUpdate = {};
       try {
-        const existingT = (currentTickets || []).find(x => x.id === editingTicketId);
+        const existingT = (ticketsState.currentTickets || []).find(x => x.id === ticketsState.editingTicketId);
         const isCloser = typeof canCurrentUserCloseTickets === 'function' && canCurrentUserCloseTickets();
         if (isCloser && existingT) {
           const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
@@ -5091,14 +5048,14 @@ async function saveTicket() {
               fdUpdate.frontDeskOriginalLines = beforeLines;
             }
             fdUpdate.frontDeskEdited = true;
-            fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+            fdUpdate.frontDeskEditedByUid = (ticketsState.currentUserProfile && ticketsState.currentUserProfile.uid) || null;
             fdUpdate.frontDeskEditedByName =
-              (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+              (ticketsState.currentUserProfile && (ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email)) || null;
             fdUpdate.frontDeskEditedAt = serverTimestamp();
           }
         }
       } catch (_) {}
-      await updateTicket(editingTicketId, {
+      await updateTicket(ticketsState.editingTicketId, {
         customerName,
         performedLines: lines,
         subtotal: totals.subtotal,
@@ -5111,13 +5068,13 @@ async function saveTicket() {
         ...fdUpdate,
         _action: 'edited_after_send'
       });
-      const t = currentTickets.find(x => x.id === editingTicketId);
+      const t = ticketsState.currentTickets.find(x => x.id === ticketsState.editingTicketId);
       if (t && (String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT') && !t.seenByFrontDeskAt) {
-        _ticketsOpenedThisSession.add(editingTicketId);
+        ticketsState._ticketsOpenedThisSession.add(ticketsState.editingTicketId);
         t.seenByFrontDeskAt = true;
         updateTicketsNavBadge();
         const { isPrimaryAdmin } = getTicketVisibility();
-        if (isPrimaryAdmin) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
+        if (isPrimaryAdmin) markTicketSeenByFrontDesk(ticketsState.editingTicketId).catch(() => {});
       }
       showToast('Ticket updated', 'success');
     } else {
@@ -5202,7 +5159,7 @@ async function doFinalizeTicket(ticketId) {
 async function doCloseTicket(ticketId) {
   const ok = await ticketConfirm('Mark this ticket as Paid? (Checkout done)', 'Paid ticket');
   if (!ok) return;
-  _justClosedTicketId = ticketId;
+  ticketsState._justClosedTicketId = ticketId;
   try {
     syncTicketFormLinesFromDom();
     const customerNameEl = document.getElementById('ticketCustomerName');
@@ -5214,7 +5171,7 @@ async function doCloseTicket(ticketId) {
     // Capture front-desk edits made right before paying (vs technician original).
     const fdUpdate = {};
     try {
-      const existingT = (currentTickets || []).find(x => x.id === ticketId);
+      const existingT = (ticketsState.currentTickets || []).find(x => x.id === ticketId);
       if (existingT) {
         const beforeLines = Array.isArray(existingT.performedLines) ? existingT.performedLines : [];
         if (ffTicketLinesChanged(beforeLines, lines)) {
@@ -5222,9 +5179,9 @@ async function doCloseTicket(ticketId) {
             fdUpdate.frontDeskOriginalLines = beforeLines;
           }
           fdUpdate.frontDeskEdited = true;
-          fdUpdate.frontDeskEditedByUid = (currentUserProfile && currentUserProfile.uid) || null;
+          fdUpdate.frontDeskEditedByUid = (ticketsState.currentUserProfile && ticketsState.currentUserProfile.uid) || null;
           fdUpdate.frontDeskEditedByName =
-            (currentUserProfile && (currentUserProfile.name || currentUserProfile.email)) || null;
+            (ticketsState.currentUserProfile && (ticketsState.currentUserProfile.name || ticketsState.currentUserProfile.email)) || null;
           fdUpdate.frontDeskEditedAt = serverTimestamp();
         }
       }
@@ -5245,9 +5202,9 @@ async function doCloseTicket(ticketId) {
     closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed', 'error');
-    _justClosedTicketId = null;
+    ticketsState._justClosedTicketId = null;
   }
-  setTimeout(() => { _justClosedTicketId = null; }, 1500);
+  setTimeout(() => { ticketsState._justClosedTicketId = null; }, 1500);
 }
 
 // =====================
@@ -5262,21 +5219,11 @@ async function doCloseTicket(ticketId) {
 // Legacy two-tab view + subcategory concept are removed.
 
 /** Which categories are open (in-memory; reset when the modal closes). */
-const _ffOpenCats = new Set();
 /** True after the first render of the modal in the current opening. Used to
  *  auto-expand the first category so the user sees services immediately. */
-let _ffCatalogRenderedOnce = false;
-let _ffCatalogRenderRootId = 'servicesModal';
-let _ffSelectedServiceId = null;
-let _ffSelectedCategoryId = null;
-let _ffServicesInlineEditServiceId = null;
-let _ffServicesDetailTab = 'details';
-let _ffServicesLocationOverridesByService = {};
-let _ffServicesLocationOverridesLoading = {};
-let _ffServicesSharedBackfillChecked = false;
 
 function _ffCatalogRenderRoot() {
-  return document.getElementById(_ffCatalogRenderRootId || 'servicesModal') || document;
+  return document.getElementById(ticketsState._ffCatalogRenderRootId || 'servicesModal') || document;
 }
 
 function _ffCatalogEl(id) {
@@ -5292,7 +5239,7 @@ function _ffEnsureCatalogEditorPortal() {
 }
 
 function _ffIsServicesScreenRoot() {
-  return _ffCatalogRenderRootId === 'servicesScreen';
+  return ticketsState._ffCatalogRenderRootId === 'servicesScreen';
 }
 
 // ===== Services screen mobile drill-down (list -> service menu -> section) =====
@@ -5357,11 +5304,11 @@ async function openServicesModal(opts = {}) {
   const modal = document.getElementById('servicesModal');
   if (!modal) return;
   _ffEnsureCatalogEditorPortal();
-  _ffCatalogRenderRootId = 'servicesModal';
-  _ffCatalogModalMode = opts && opts.mode === 'shared' ? 'shared' : 'location';
-  _ffOpenCats.clear();
-  _ffCatalogRenderedOnce = false;
-  if (_ffCatalogModalMode === 'shared') {
+  ticketsState._ffCatalogRenderRootId = 'servicesModal';
+  ticketsState._ffCatalogModalMode = opts && opts.mode === 'shared' ? 'shared' : 'location';
+  ticketsState._ffOpenCats.clear();
+  ticketsState._ffCatalogRenderedOnce = false;
+  if (ticketsState._ffCatalogModalMode === 'shared') {
     await loadSharedCatalogForManager();
   } else {
     await loadLocationCatalogForManager();
@@ -5384,7 +5331,7 @@ function renderServicesCatalogV2() {
   const sourceHelp = _ffCatalogEl('servicesCatalogSourceHelp');
   const addSharedBtn = _ffCatalogEl('servicesCatalogAddSharedBtn');
   const addCategoryBtn = _ffCatalogEl('servicesCatalogAddCategoryBtn');
-  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
   const catalogData = isSharedCatalog
     ? getSharedServicesForCatalogManager()
     : getLocationServicesForCatalogManager();
@@ -5411,14 +5358,14 @@ function renderServicesCatalogV2() {
     addCategoryBtn.textContent = '+ Add Category';
   }
 
-  if (!_ffCatalogRenderedOnce && _ffOpenCats.size === 0 && catalogCategories.length > 0) {
+  if (!ticketsState._ffCatalogRenderedOnce && ticketsState._ffOpenCats.size === 0 && catalogCategories.length > 0) {
     if (_ffIsServicesScreenRoot()) {
-      catalogCategories.forEach((cat) => _ffOpenCats.add(cat.id));
+      catalogCategories.forEach((cat) => ticketsState._ffOpenCats.add(cat.id));
     } else {
-      _ffOpenCats.add(catalogCategories[0].id);
+      ticketsState._ffOpenCats.add(catalogCategories[0].id);
     }
   }
-  _ffCatalogRenderedOnce = true;
+  ticketsState._ffCatalogRenderedOnce = true;
 
   // Group services under each category. Services with no categoryId (or a
   // category id that no longer exists) land in a virtual "Other" bucket,
@@ -5456,7 +5403,7 @@ function renderServicesCatalogV2() {
 
   let html = '';
   for (const cat of grouped.values()) {
-    const isOpen = _ffOpenCats.has(cat.id);
+    const isOpen = ticketsState._ffOpenCats.has(cat.id);
     const arrow = isOpen ? '▾' : '▸';
     const count = cat.services.length;
     const isOther = cat.id === '__other__';
@@ -5521,7 +5468,7 @@ function renderServicesCatalogV2() {
       const row = head.closest('.ffcat-row');
       const catId = row?.getAttribute('data-cat-id');
       if (!catId) return;
-      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      if (ticketsState._ffOpenCats.has(catId)) ticketsState._ffOpenCats.delete(catId); else ticketsState._ffOpenCats.add(catId);
       renderServicesCatalogV2();
     });
   });
@@ -5538,7 +5485,7 @@ function renderServicesCatalogV2() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const catId = btn.getAttribute('data-cat-id');
-      _ffOpenCats.add(catId);
+      ticketsState._ffOpenCats.add(catId);
       if (btn.getAttribute('data-add-mode') === 'shared') {
         const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
         _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
@@ -5567,9 +5514,9 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
   for (const cat of grouped.values()) {
     const isOther = cat.id === '__other__';
     const canEditCategory = !isOther;
-    const isOpen = _ffOpenCats.has(cat.id);
+    const isOpen = ticketsState._ffOpenCats.has(cat.id);
     const arrow = isOpen ? '▾' : '▸';
-    const isCategorySelected = String(cat.id) === String(_ffSelectedCategoryId || '');
+    const isCategorySelected = String(cat.id) === String(ticketsState._ffSelectedCategoryId || '');
     html += `<div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">`;
     html += `<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px 0;">`;
     html += `<button type="button" class="ff-services-cat-toggle" data-cat-id="${escapeHtml(cat.id)}" aria-expanded="${isOpen ? 'true' : 'false'}" style="border:none;background:none;color:#6b7280;cursor:pointer;font-size:14px;line-height:1;padding:2px;width:16px;flex-shrink:0;">${arrow}</button>`;
@@ -5580,7 +5527,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
       html += `<div style="padding:6px 8px;color:#9ca3af;font-size:12px;">No services yet.</div>`;
     } else {
       cat.services.forEach((s) => {
-        const isSelected = String(s.id) === String(_ffSelectedServiceId || '');
+        const isSelected = String(s.id) === String(ticketsState._ffSelectedServiceId || '');
         const serviceOpacity = s.active === false ? 'opacity:0.62;' : '';
         html += `<div class="staff-sidebar-item ff-services-sidebar-service${isSelected ? ' is-selected' : ''}" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 8px;border:none;border-radius:6px;background:${isSelected ? '#ede9fe' : 'transparent'};cursor:pointer;text-align:left;${serviceOpacity}">`;
         html += `<span class="ff-services-drag-handle" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder" style="color:#9ca3af;font-size:12px;line-height:1;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>`;
@@ -5607,7 +5554,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
       e.stopPropagation();
       const catId = btn.getAttribute('data-cat-id');
       if (!catId) return;
-      if (_ffOpenCats.has(catId)) _ffOpenCats.delete(catId); else _ffOpenCats.add(catId);
+      if (ticketsState._ffOpenCats.has(catId)) ticketsState._ffOpenCats.delete(catId); else ticketsState._ffOpenCats.add(catId);
       renderServicesCatalogV2();
     });
   });
@@ -5616,9 +5563,9 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
       e.stopPropagation();
       const catId = btn.getAttribute('data-cat-id');
       if (!catId) return;
-      _ffSelectedCategoryId = catId;
-      _ffSelectedServiceId = null;
-      _ffServicesInlineEditServiceId = null;
+      ticketsState._ffSelectedCategoryId = catId;
+      ticketsState._ffSelectedServiceId = null;
+      ticketsState._ffServicesInlineEditServiceId = null;
       renderServicesCatalogV2();
       // Mobile: open the category detail full-screen.
       _ffServicesMobileShowDetail('detail');
@@ -5628,7 +5575,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const catId = btn.getAttribute('data-cat-id');
-      _ffOpenCats.add(catId);
+      ticketsState._ffOpenCats.add(catId);
       if (btn.getAttribute('data-add-mode') === 'shared') {
         const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
         _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
@@ -5640,10 +5587,10 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
   list.querySelectorAll('.ff-services-sidebar-service').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       if (e.target.closest('.ffsvc-menu-btn')) return;
-      _ffSelectedServiceId = btn.getAttribute('data-svc-id');
-      _ffSelectedCategoryId = null;
-      if (String(_ffServicesInlineEditServiceId || '') !== String(_ffSelectedServiceId || '')) {
-        _ffServicesInlineEditServiceId = null;
+      ticketsState._ffSelectedServiceId = btn.getAttribute('data-svc-id');
+      ticketsState._ffSelectedCategoryId = null;
+      if (String(ticketsState._ffServicesInlineEditServiceId || '') !== String(ticketsState._ffSelectedServiceId || '')) {
+        ticketsState._ffServicesInlineEditServiceId = null;
       }
       renderServicesCatalogV2();
       // Mobile: open the service menu (Details/Locations/Staff) full-screen.
@@ -5658,14 +5605,14 @@ function _ffWireServicesScreenDragDrop(listEl) {
     const handle = e.target.closest('.ff-services-drag-handle[data-drag-kind="service"]');
     if (!handle) return;
     const row = handle.closest('.ff-services-sidebar-service');
-    _ffDragSrc = {
+    ticketsState._ffDragSrc = {
       kind: 'service',
       catId: handle.getAttribute('data-cat-id') || null,
       svcId: handle.getAttribute('data-svc-id') || null,
     };
     try {
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || '');
+      e.dataTransfer.setData('text/plain', ticketsState._ffDragSrc.svcId || '');
     } catch (_) {}
     if (row) row.style.opacity = '0.4';
   });
@@ -5674,25 +5621,25 @@ function _ffWireServicesScreenDragDrop(listEl) {
     const row = e.target.closest('.ff-services-sidebar-service');
     if (row) row.style.opacity = '';
     _ffClearDragHover();
-    _ffDragSrc = null;
+    ticketsState._ffDragSrc = null;
   });
 
   listEl.addEventListener('dragover', (e) => {
-    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    if (!ticketsState._ffDragSrc || ticketsState._ffDragSrc.kind !== 'service') return;
     const targetSvc = e.target.closest('.ff-services-sidebar-service');
     if (
       !targetSvc ||
-      targetSvc.getAttribute('data-svc-id') === _ffDragSrc.svcId ||
-      targetSvc.getAttribute('data-cat-id') !== _ffDragSrc.catId
+      targetSvc.getAttribute('data-svc-id') === ticketsState._ffDragSrc.svcId ||
+      targetSvc.getAttribute('data-cat-id') !== ticketsState._ffDragSrc.catId
     ) {
-      if (_ffDragHoverEl) _ffClearDragHover();
+      if (ticketsState._ffDragHoverEl) _ffClearDragHover();
       return;
     }
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    if (targetSvc !== _ffDragHoverEl) {
+    if (targetSvc !== ticketsState._ffDragHoverEl) {
       _ffClearDragHover();
-      _ffDragHoverEl = targetSvc;
+      ticketsState._ffDragHoverEl = targetSvc;
     }
     const rect = targetSvc.getBoundingClientRect();
     const placeAfter = e.clientY > rect.top + rect.height / 2;
@@ -5703,11 +5650,11 @@ function _ffWireServicesScreenDragDrop(listEl) {
   });
 
   listEl.addEventListener('drop', async (e) => {
-    if (!_ffDragSrc || _ffDragSrc.kind !== 'service') return;
+    if (!ticketsState._ffDragSrc || ticketsState._ffDragSrc.kind !== 'service') return;
     const targetSvc = e.target.closest('.ff-services-sidebar-service');
-    const src = _ffDragSrc;
+    const src = ticketsState._ffDragSrc;
     _ffClearDragHover();
-    _ffDragSrc = null;
+    ticketsState._ffDragSrc = null;
     if (
       !targetSvc ||
       targetSvc.getAttribute('data-svc-id') === src.svcId ||
@@ -5734,9 +5681,9 @@ function _ffWireServicesScreenDragDrop(listEl) {
 
 async function _ffReorderServiceWithinCategory(srcId, targetSvcId, categoryId, placeAfter) {
   if (!categoryId || categoryId === '__other__') return;
-  const src = salonServices.find(s => s.id === srcId);
+  const src = ticketsState.salonServices.find(s => s.id === srcId);
   if (!src || src.categoryId !== categoryId) return;
-  const siblings = salonServices
+  const siblings = ticketsState.salonServices
     .filter(s => s.categoryId === categoryId && s.id !== srcId)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   const targetIdx = siblings.findIndex(s => s.id === targetSvcId);
@@ -5763,10 +5710,10 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
 
   const services = Array.isArray(catalogServices) ? catalogServices : [];
   const categories = Array.isArray(catalogCategories) ? catalogCategories : [];
-  let selectedService = services.find((s) => String(s.id) === String(_ffSelectedServiceId || ''));
-  if (!selectedService && _ffSelectedServiceId) _ffSelectedServiceId = null;
-  let selectedCategory = categories.find((c) => String(c.id) === String(_ffSelectedCategoryId || ''));
-  if (!selectedCategory && _ffSelectedCategoryId) _ffSelectedCategoryId = null;
+  let selectedService = services.find((s) => String(s.id) === String(ticketsState._ffSelectedServiceId || ''));
+  if (!selectedService && ticketsState._ffSelectedServiceId) ticketsState._ffSelectedServiceId = null;
+  let selectedCategory = categories.find((c) => String(c.id) === String(ticketsState._ffSelectedCategoryId || ''));
+  if (!selectedCategory && ticketsState._ffSelectedCategoryId) ticketsState._ffSelectedCategoryId = null;
   if (!selectedService && !selectedCategory) {
     placeholder.style.display = 'flex';
     container.style.display = 'none';
@@ -5777,7 +5724,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
   container.style.display = 'block';
 
   if (selectedCategory && !selectedService) {
-    const categoryMode = _ffCatalogModalMode === 'shared' ? 'shared-category-edit' : 'category-edit';
+    const categoryMode = ticketsState._ffCatalogModalMode === 'shared' ? 'shared-category-edit' : 'category-edit';
     nav.innerHTML = `
       <button type="button" class="staff-nav-item is-active" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
     `;
@@ -5827,8 +5774,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
   const durationText = rawDuration == null || rawDuration === ''
     ? ''
     : (Number.isFinite(Number(rawDuration)) ? `${Number(rawDuration)} min` : String(rawDuration));
-  const isInlineEditingService = String(_ffServicesInlineEditServiceId || '') === String(selected.id || '');
-  const activeServiceTab = _ffServicesDetailTab || 'details';
+  const isInlineEditingService = String(ticketsState._ffServicesInlineEditServiceId || '') === String(selected.id || '');
+  const activeServiceTab = ticketsState._ffServicesDetailTab || 'details';
   const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
   const categoryOptions = categories
     .filter((cat) => cat.id !== '__other__')
@@ -5921,8 +5868,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      _ffServicesDetailTab = btn.getAttribute('data-services-tab') || 'details';
-      _ffServicesInlineEditServiceId = null;
+      ticketsState._ffServicesDetailTab = btn.getAttribute('data-services-tab') || 'details';
+      ticketsState._ffServicesInlineEditServiceId = null;
       renderServicesCatalogV2();
       // Mobile: drill into the chosen section (Details/Locations/Staff).
       _ffServicesMobileShowDetail('tab');
@@ -5949,7 +5896,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       editBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        _ffServicesInlineEditServiceId = selected.id;
+        ticketsState._ffServicesInlineEditServiceId = selected.id;
         renderServicesCatalogV2();
       });
     }
@@ -5959,7 +5906,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
     cancelBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      _ffServicesInlineEditServiceId = null;
+      ticketsState._ffServicesInlineEditServiceId = null;
       renderServicesCatalogV2();
     });
   }
@@ -5984,7 +5931,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       saveBtn.disabled = true;
       saveBtn.style.opacity = '0.7';
       try {
-        if (selected.isSharedService || _ffCatalogModalMode === 'shared') {
+        if (selected.isSharedService || ticketsState._ffCatalogModalMode === 'shared') {
           await saveSharedService({
             id: selected.id,
             name,
@@ -6010,8 +5957,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         selected.categoryId = categoryId;
         selected.defaultPrice = defaultPrice;
         selected.taxable = taxable;
-        _ffServicesInlineEditServiceId = null;
-        if (categoryId) _ffOpenCats.add(categoryId);
+        ticketsState._ffServicesInlineEditServiceId = null;
+        if (categoryId) ticketsState._ffOpenCats.add(categoryId);
         renderServicesCatalogV2();
         if (typeof setupTicketsUI === 'function') setupTicketsUI();
         showToast('Updated', 'success');
@@ -6030,7 +5977,7 @@ function renderServicesLocationsTabHtml(service) {
     ? (window.ffGetActiveLocations() || [])
     : [];
   if (!service || !service.id) return '';
-  if (_ffCatalogModalMode !== 'shared' && !service.isSharedService) {
+  if (ticketsState._ffCatalogModalMode !== 'shared' && !service.isSharedService) {
     return `
       <div style="padding:14px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:6px;">Locations</div>
@@ -6046,18 +5993,18 @@ function renderServicesLocationsTabHtml(service) {
       </div>
     `;
   }
-  if (!_ffServicesLocationOverridesByService[service.id] && !_ffServicesLocationOverridesLoading[service.id]) {
-    _ffServicesLocationOverridesLoading[service.id] = true;
+  if (!ticketsState._ffServicesLocationOverridesByService[service.id] && !ticketsState._ffServicesLocationOverridesLoading[service.id]) {
+    ticketsState._ffServicesLocationOverridesLoading[service.id] = true;
     loadSharedServiceLocationOverridesForService(service.id)
       .catch((e) => console.warn('[Services] failed loading location overrides', e))
       .finally(() => {
-        _ffServicesLocationOverridesLoading[service.id] = false;
-        if (_ffSelectedServiceId === service.id && _ffServicesDetailTab === 'locations') renderServicesCatalogV2();
+        ticketsState._ffServicesLocationOverridesLoading[service.id] = false;
+        if (ticketsState._ffSelectedServiceId === service.id && ticketsState._ffServicesDetailTab === 'locations') renderServicesCatalogV2();
       });
   }
-  const overrides = _ffServicesLocationOverridesByService[service.id] || {};
+  const overrides = ticketsState._ffServicesLocationOverridesByService[service.id] || {};
   const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
-  const loading = _ffServicesLocationOverridesLoading[service.id] === true;
+  const loading = ticketsState._ffServicesLocationOverridesLoading[service.id] === true;
   const cards = locations.map((loc) => {
     const override = overrides[loc.id] || {};
     const enabled = override.enabled !== false;
@@ -6124,7 +6071,7 @@ function wireServicesLocationsTab(root, service) {
       if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
       try {
         await saveSharedServiceLocationOverride(service.id, locationId, patch);
-        const catalogData = _ffCatalogModalMode === 'shared'
+        const catalogData = ticketsState._ffCatalogModalMode === 'shared'
           ? getSharedServicesForCatalogManager()
           : getLocationServicesForCatalogManager();
         renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
@@ -6416,26 +6363,26 @@ async function saveServiceStaffOverride(service, staffId, patch) {
   // silently didn't persist (toggle reverted on reload, and the staff member's
   // ticket picker stayed empty). updateDoc REPLACES the whole staffOverrides
   // field with exactly what we computed.
-  if (service.isSharedService || _ffCatalogModalMode === 'shared') {
+  if (service.isSharedService || ticketsState._ffCatalogModalMode === 'shared') {
     const accountId = getTicketsAccountId();
     if (!accountId) throw new Error('No account');
     await updateDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), {
       staffOverrides: nextOverrides,
       updatedAt: serverTimestamp()
     });
-    const raw = _rawSharedServices.find((s) => String(s.id) === String(service.id));
+    const raw = ticketsState._rawSharedServices.find((s) => String(s.id) === String(service.id));
     if (raw) raw.staffOverrides = nextOverrides;
   } else {
-    if (!currentUserProfile?.salonId) throw new Error('No salon');
-    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), {
+    if (!ticketsState.currentUserProfile?.salonId) throw new Error('No salon');
+    await updateDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, service.id), {
       staffOverrides: nextOverrides,
       updatedAt: serverTimestamp()
     });
-    const raw = _rawServices.find((s) => String(s.id) === String(service.id));
+    const raw = ticketsState._rawServices.find((s) => String(s.id) === String(service.id));
     if (raw) raw.staffOverrides = nextOverrides;
   }
   service.staffOverrides = nextOverrides;
-  const live = salonServices.find((s) => String(s.id) === String(service.id));
+  const live = ticketsState.salonServices.find((s) => String(s.id) === String(service.id));
   if (live) live.staffOverrides = nextOverrides;
 }
 
@@ -6443,14 +6390,14 @@ async function ffStaffServicesLoadForStaffMember() {
   await loadServices();
   _applyCatalogFilter();
   return {
-    services: salonServices.slice(),
-    categories: serviceCategories.slice()
+    services: ticketsState.salonServices.slice(),
+    categories: ticketsState.serviceCategories.slice()
   };
 }
 
 async function ffStaffServicesSaveOverrideForStaffMember(serviceId, staffId, patch) {
   await loadServices();
-  const service = salonServices.find((s) => String(s.id) === String(serviceId));
+  const service = ticketsState.salonServices.find((s) => String(s.id) === String(serviceId));
   if (!service) throw new Error('Service not found');
   await saveServiceStaffOverride(service, staffId, patch);
   return service;
@@ -6544,7 +6491,7 @@ function wireServicesStaffTab(root, service) {
       if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.7'; }
       try {
         await saveServiceStaffOverride(service, staffId, patch);
-        const catalogData = _ffCatalogModalMode === 'shared'
+        const catalogData = ticketsState._ffCatalogModalMode === 'shared'
           ? getSharedServicesForCatalogManager()
           : getLocationServicesForCatalogManager();
         renderServicesScreenDetail(catalogData.services || [], catalogData.categories || []);
@@ -6579,7 +6526,7 @@ function wireServicesStaffTab(root, service) {
 
 function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
-  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
   const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
   const cat = catalogData.categories.find((c) => String(c.id) === String(catId));
   if (!cat) return;
@@ -6600,8 +6547,8 @@ function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
           await deleteServiceCategory(catId);
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
-        _ffSelectedCategoryId = null;
-        _ffOpenCats.delete(catId);
+        ticketsState._ffSelectedCategoryId = null;
+        ticketsState._ffOpenCats.delete(catId);
         renderServicesCatalogV2();
         showToast('Category deleted', 'success');
       } catch (e) {
@@ -6616,7 +6563,7 @@ function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
 function _ffShowCategoryMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
   if (!ffCanManageServices()) return;
-  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
   const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
   const cat = catalogData.categories.find((c) => c.id === catId);
   if (!cat) return;
@@ -6634,7 +6581,7 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
         try {
           await deleteSharedServiceCategory(cat.docId || catId);
           await loadSharedCatalogForManager();
-          _ffOpenCats.delete(catId);
+          ticketsState._ffOpenCats.delete(catId);
           renderServicesCatalogV2();
           showToast('Category deleted', 'success');
         } catch (e) { showToast(e?.message || 'Failed', 'error'); }
@@ -6651,7 +6598,7 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
       try {
         await deleteServiceCategory(catId);
         await Promise.all([loadServiceCategories(), loadServices()]);
-        _ffOpenCats.delete(catId);
+        ticketsState._ffOpenCats.delete(catId);
         renderServicesCatalogV2();
     setupTicketsUI();
         showToast('Category deleted', 'success');
@@ -6665,17 +6612,17 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
 function _ffShowServiceMenu(anchorBtn, svcId) {
   _ffCloseAllPopovers();
   if (!ffCanManageServices()) return;
-  const isSharedCatalog = _ffCatalogModalMode === 'shared';
+  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
   const svc = isSharedCatalog
     ? getSharedServicesForCatalogManager().services.find((s) => s.id === svcId)
-    : salonServices.find((s) => s.id === svcId);
+    : ticketsState.salonServices.find((s) => s.id === svcId);
   if (!svc) return;
   const items = [
     { label: 'Edit service', onClick: () => {
       if (_ffIsServicesScreenRoot()) {
-        _ffSelectedServiceId = svcId;
-        _ffSelectedCategoryId = null;
-        _ffServicesInlineEditServiceId = svcId;
+        ticketsState._ffSelectedServiceId = svcId;
+        ticketsState._ffSelectedCategoryId = null;
+        ticketsState._ffServicesInlineEditServiceId = svcId;
         renderServicesCatalogV2();
       } else {
         _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-service-edit' : 'service-edit', serviceId: svcId });
@@ -6688,7 +6635,7 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
       if (!ok) return;
       try {
         await deleteSharedService(svcId);
-        if (_ffSelectedServiceId === svcId) _ffSelectedServiceId = null;
+        if (ticketsState._ffSelectedServiceId === svcId) ticketsState._ffSelectedServiceId = null;
         await loadSharedCatalogForManager();
         renderServicesCatalogV2();
         setupTicketsUI();
@@ -6702,7 +6649,7 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
   // Offer a "Move to…" shortcut for keyboards / touch devices where HTML5
   // drag-and-drop isn't available. Only appears when there's somewhere
   // meaningful to move to (another real category).
-  const otherCats = serviceCategories.filter((c) => c.id !== svc.categoryId);
+  const otherCats = ticketsState.serviceCategories.filter((c) => c.id !== svc.categoryId);
   if (otherCats.length > 0) {
     items.push({ label: 'Move to category…', onClick: () => _ffShowMoveServicePicker(anchorBtn, svcId) });
   }
@@ -6724,9 +6671,9 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
 /** Secondary popover: list of categories to move the service into. */
 function _ffShowMoveServicePicker(anchorBtn, svcId) {
   _ffCloseAllPopovers();
-  const svc = salonServices.find((s) => s.id === svcId);
+  const svc = ticketsState.salonServices.find((s) => s.id === svcId);
   if (!svc) return;
-  const items = serviceCategories
+  const items = ticketsState.serviceCategories
     .filter((c) => c.id !== svc.categoryId)
     .map((c) => ({
       label: c.name,
@@ -6788,15 +6735,13 @@ function _ffBuildPopover(anchorBtn, items) {
 // affected; the onSnapshot subscription re-renders the UI.
 
 /** @type {{kind:'category'|'service', catId:string|null, svcId:string|null}|null} */
-let _ffDragSrc = null;
-let _ffDragHoverEl = null;
 
 function _ffClearDragHover() {
-  if (_ffDragHoverEl) {
-    _ffDragHoverEl.style.boxShadow = '';
-    _ffDragHoverEl.style.background = _ffDragHoverEl._ffPrevBg || '';
-    _ffDragHoverEl._ffPrevBg = undefined;
-    _ffDragHoverEl = null;
+  if (ticketsState._ffDragHoverEl) {
+    ticketsState._ffDragHoverEl.style.boxShadow = '';
+    ticketsState._ffDragHoverEl.style.background = ticketsState._ffDragHoverEl._ffPrevBg || '';
+    ticketsState._ffDragHoverEl._ffPrevBg = undefined;
+    ticketsState._ffDragHoverEl = null;
   }
 }
 
@@ -6806,7 +6751,7 @@ function _ffWireCatalogDragDrop(listEl) {
   listEl.addEventListener('dragstart', (e) => {
     const row = e.target.closest('[data-drag-kind]');
     if (!row) return;
-    _ffDragSrc = {
+    ticketsState._ffDragSrc = {
       kind: row.getAttribute('data-drag-kind'),
       catId: row.getAttribute('data-cat-id') || null,
       svcId: row.getAttribute('data-svc-id') || null,
@@ -6814,7 +6759,7 @@ function _ffWireCatalogDragDrop(listEl) {
     try {
       e.dataTransfer.effectAllowed = 'move';
       // Firefox needs data set for dragstart to actually begin.
-      e.dataTransfer.setData('text/plain', _ffDragSrc.svcId || _ffDragSrc.catId || '');
+      e.dataTransfer.setData('text/plain', ticketsState._ffDragSrc.svcId || ticketsState._ffDragSrc.catId || '');
     } catch (_) {}
     row.style.opacity = '0.4';
   });
@@ -6823,21 +6768,21 @@ function _ffWireCatalogDragDrop(listEl) {
     const row = e.target.closest('[data-drag-kind]');
     if (row) row.style.opacity = '';
     _ffClearDragHover();
-    _ffDragSrc = null;
+    ticketsState._ffDragSrc = null;
   });
 
   listEl.addEventListener('dragover', (e) => {
-    if (!_ffDragSrc) return;
+    if (!ticketsState._ffDragSrc) return;
     let hl = null;
-    if (_ffDragSrc.kind === 'category') {
+    if (ticketsState._ffDragSrc.kind === 'category') {
       const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
-      if (targetHead && targetHead.getAttribute('data-cat-id') !== _ffDragSrc.catId) {
+      if (targetHead && targetHead.getAttribute('data-cat-id') !== ticketsState._ffDragSrc.catId) {
         hl = targetHead;
       }
-    } else if (_ffDragSrc.kind === 'service') {
+    } else if (ticketsState._ffDragSrc.kind === 'service') {
       const targetSvc = e.target.closest('.ffsvc-row');
       const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
-      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== _ffDragSrc.svcId) {
+      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== ticketsState._ffDragSrc.svcId) {
         hl = targetSvc;
       } else if (targetHead) {
         hl = targetHead;
@@ -6846,9 +6791,9 @@ function _ffWireCatalogDragDrop(listEl) {
     if (hl) {
       e.preventDefault();
       try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-      if (hl !== _ffDragHoverEl) {
+      if (hl !== ticketsState._ffDragHoverEl) {
         _ffClearDragHover();
-        _ffDragHoverEl = hl;
+        ticketsState._ffDragHoverEl = hl;
         if (hl.classList.contains('ffcat-head')) {
           hl._ffPrevBg = hl.style.background;
           hl.style.background = '#ede9fe';
@@ -6857,17 +6802,17 @@ function _ffWireCatalogDragDrop(listEl) {
           hl.style.boxShadow = 'inset 0 2px 0 0 #7c3aed';
         }
       }
-    } else if (_ffDragHoverEl) {
+    } else if (ticketsState._ffDragHoverEl) {
       _ffClearDragHover();
     }
   });
 
   listEl.addEventListener('drop', async (e) => {
-    if (!_ffDragSrc) return;
+    if (!ticketsState._ffDragSrc) return;
     e.preventDefault();
-    const src = _ffDragSrc;
+    const src = ticketsState._ffDragSrc;
     _ffClearDragHover();
-    _ffDragSrc = null;
+    ticketsState._ffDragSrc = null;
     try {
       if (src.kind === 'category') {
         const targetHead = e.target.closest('.ffcat-head[data-drag-kind="category"]');
@@ -6897,7 +6842,7 @@ function _ffWireCatalogDragDrop(listEl) {
 /** Move `srcId` so it lands immediately before `beforeId` in the category
  *  order, then persist a fresh sortOrder (0,1,2,…) to every category. */
 async function _ffReorderCategoriesBefore(srcId, beforeId) {
-  const arr = [...serviceCategories];
+  const arr = [...ticketsState.serviceCategories];
   const srcIdx = arr.findIndex(c => c.id === srcId);
   if (srcIdx < 0) return;
   const [moved] = arr.splice(srcIdx, 1);
@@ -6912,9 +6857,9 @@ async function _ffReorderCategoriesBefore(srcId, beforeId) {
  *  bucket, bail out — it isn't a real category. */
 async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId) {
   if (!targetCatId || targetCatId === '__other__') return;
-  const src = salonServices.find(s => s.id === srcId);
+  const src = ticketsState.salonServices.find(s => s.id === srcId);
   if (!src) return;
-  const siblings = salonServices
+  const siblings = ticketsState.salonServices
     .filter(s => s.categoryId === targetCatId && s.id !== srcId)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   const beforeIdx = siblings.findIndex(s => s.id === beforeSvcId);
@@ -6931,10 +6876,10 @@ async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId) {
 /** Drop on a category header = move the service to the END of that category. */
 async function _ffMoveServiceToCategoryEnd(srcId, targetCatId) {
   if (!targetCatId || targetCatId === '__other__') return;
-  const src = salonServices.find(s => s.id === srcId);
+  const src = ticketsState.salonServices.find(s => s.id === srcId);
   if (!src) return;
   if (src.categoryId === targetCatId) return;
-  const siblings = salonServices
+  const siblings = ticketsState.salonServices
     .filter(s => s.categoryId === targetCatId)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   const lastOrder = siblings.length > 0 ? (siblings[siblings.length - 1].sortOrder ?? siblings.length - 1) : -1;
@@ -6945,7 +6890,7 @@ async function _ffMoveServiceToCategoryEnd(srcId, targetCatId) {
     defaultPrice: src.defaultPrice || 0,
     sortOrder: lastOrder + 1,
   });
-  _ffOpenCats.add(targetCatId);
+  ticketsState._ffOpenCats.add(targetCatId);
 }
 
 // ---------- Shared mini editor modal (Add/Edit category or service) ----------
@@ -6996,7 +6941,7 @@ function _ffCatalogEditorOpen(opts) {
   } else if (opts.mode === 'category-edit' || opts.mode === 'shared-category-edit') {
     const c = opts.mode === 'shared-category-edit'
       ? getSharedServicesForCatalogManager().categories.find((x) => x.id === opts.categoryId)
-      : serviceCategories.find((x) => x.id === opts.categoryId);
+      : ticketsState.serviceCategories.find((x) => x.id === opts.categoryId);
     if (!c) return;
     title.textContent = 'Rename category';
     nameInp.placeholder = 'Category name';
@@ -7027,13 +6972,13 @@ function _ffCatalogEditorOpen(opts) {
     } else {
       // Populate category dropdown for the existing location fallback catalog.
       let optsHtml = '';
-      serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
+      ticketsState.serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
       catSel.innerHTML = optsHtml;
     }
     if (opts.mode === 'service-edit' || opts.mode === 'shared-service-edit') {
       const s = isSharedServiceMode
         ? getSharedServicesForCatalogManager().services.find((x) => x.id === opts.serviceId)
-        : salonServices.find((x) => x.id === opts.serviceId);
+        : ticketsState.salonServices.find((x) => x.id === opts.serviceId);
       if (!s) return;
       if (isSharedServiceMode) console.log('[SharedServicesUI] editing shared service', { serviceId: s.id });
       nameInp.value = s.name || '';
@@ -7051,12 +6996,12 @@ function _ffCatalogEditorOpen(opts) {
             overridePriceInp.style.display = 'block';
           }
         }
-      } else if (s.categoryId && serviceCategories.some((c) => c.id === s.categoryId)) {
+      } else if (s.categoryId && ticketsState.serviceCategories.some((c) => c.id === s.categoryId)) {
         catSel.value = s.categoryId;
       }
       ctx.existing = s;
     } else if (!isSharedServiceMode) {
-      if (opts.categoryId && serviceCategories.some((c) => c.id === opts.categoryId)) {
+      if (opts.categoryId && ticketsState.serviceCategories.some((c) => c.id === opts.categoryId)) {
         catSel.value = opts.categoryId;
       }
     }
@@ -7096,7 +7041,7 @@ async function _ffCatalogEditorSubmit(ctx) {
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   try {
     if (ctx.mode === 'category-add') {
-      await saveServiceCategory({ name, sortOrder: serviceCategories.length });
+      await saveServiceCategory({ name, sortOrder: ticketsState.serviceCategories.length });
       await Promise.all([loadServiceCategories(), loadServices()]);
       showToast('Category added', 'success');
     } else if (ctx.mode === 'category-edit') {
@@ -7108,7 +7053,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const data = getSharedServicesForCatalogManager();
       const categoryId = await saveSharedServiceCategory({ name, sortOrder: data.categories.length });
       await loadSharedCatalogForManager();
-      _ffOpenCats.add(categoryId);
+      ticketsState._ffOpenCats.add(categoryId);
       showToast('Category added', 'success');
     } else if (ctx.mode === 'shared-category-edit') {
       const c = ctx.existing;
@@ -7116,7 +7061,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const newName = normalizeSharedCategoryName(name);
       await saveSharedServiceCategory({ id: c.docId || c.id, name: newName, sortOrder: c.sortOrder });
       if (oldName !== newName) {
-        const affected = _rawSharedServices.filter((s) => normalizeSharedCategoryName(s.category) === oldName);
+        const affected = ticketsState._rawSharedServices.filter((s) => normalizeSharedCategoryName(s.category) === oldName);
         await Promise.all(affected.map((s) => saveSharedService({
           id: s.id,
           name: s.name,
@@ -7127,14 +7072,14 @@ async function _ffCatalogEditorSubmit(ctx) {
         })));
       }
       await loadSharedCatalogForManager();
-      _ffOpenCats.add(sharedCategoryId(newName));
+      ticketsState._ffOpenCats.add(sharedCategoryId(newName));
       showToast('Category updated', 'success');
     } else if (ctx.mode === 'service-add') {
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
       await saveService({ name, categoryId, defaultPrice });
       await Promise.all([loadServiceCategories(), loadServices()]);
-      if (categoryId) _ffOpenCats.add(categoryId);
+      if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Service added', 'success');
     } else if (ctx.mode === 'service-edit') {
       const s = ctx.existing;
@@ -7142,7 +7087,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const defaultPrice = parseFloat(priceInp?.value) || 0;
       await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder });
       await Promise.all([loadServiceCategories(), loadServices()]);
-      if (categoryId) _ffOpenCats.add(categoryId);
+      if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Updated', 'success');
     } else if (ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit') {
       const s = ctx.existing || {};
@@ -7169,7 +7114,7 @@ async function _ffCatalogEditorSubmit(ctx) {
         }
       }
       await loadSharedCatalogForManager();
-      _ffOpenCats.add(sharedCategoryId(category));
+      ticketsState._ffOpenCats.add(sharedCategoryId(category));
       showToast(ctx.mode === 'shared-service-add' ? 'Service added' : 'Service updated', 'success');
     }
     _ffCatalogEditorClose();
@@ -7185,7 +7130,7 @@ async function _ffCatalogEditorSubmit(ctx) {
 /** Entry from header "+ Add Category" button. */
 function addServiceCategoryV2() {
   if (!ffCanManageServices()) { if (typeof showToast === 'function') showToast('You do not have permission to manage services.', 'error'); return; }
-  _ffCatalogEditorOpen({ mode: _ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
+  _ffCatalogEditorOpen({ mode: ticketsState._ffCatalogModalMode === 'shared' ? 'shared-category-add' : 'category-add' });
 }
 
 /** Entry from header "+ Add Service" button. */
@@ -7280,7 +7225,7 @@ export function goToTickets() {
     if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
   } catch (e) {}
 
-  if (_ticketsDataReady && currentUserProfile) {
+  if (ticketsState._ticketsDataReady && ticketsState.currentUserProfile) {
     enrichTicketsProfileFromMemberDoc()
       .then(() => {
         subscribeTickets({ resetLoading: true });
@@ -7306,7 +7251,7 @@ export function goToTickets() {
         await loadServiceCategories();
         await loadServices();
         await setupTicketsUI();
-        _ticketsDataReady = true;
+        ticketsState._ticketsDataReady = true;
         await loadTicketsMembersForAvatars();
         renderTicketsList();
         updateTicketsNavBadge();
@@ -7371,13 +7316,13 @@ export async function goToServices() {
   servicesScreen.style.display = 'block';
   servicesScreen.style.pointerEvents = 'auto';
   _ffEnsureCatalogEditorPortal();
-  _ffCatalogRenderRootId = 'servicesScreen';
-  _ffCatalogModalMode = 'shared';
-  _ffOpenCats.clear();
-  _ffCatalogRenderedOnce = false;
+  ticketsState._ffCatalogRenderRootId = 'servicesScreen';
+  ticketsState._ffCatalogModalMode = 'shared';
+  ticketsState._ffOpenCats.clear();
+  ticketsState._ffCatalogRenderedOnce = false;
   // Mobile: always open at the top level (the services list).
-  _ffSelectedServiceId = null;
-  _ffSelectedCategoryId = null;
+  ticketsState._ffSelectedServiceId = null;
+  ticketsState._ffSelectedCategoryId = null;
   _ffServicesMobileShowList();
 
   try {
@@ -7391,10 +7336,10 @@ export async function goToServices() {
     const backfillResult = await seedSharedServiceCatalogFromLocationCatalogIfEmpty();
     if (backfillResult && backfillResult.seeded) {
       sharedCatalog = await loadSharedCatalogForManager();
-      _ffCatalogModalMode = 'shared';
+      ticketsState._ffCatalogModalMode = 'shared';
     }
     if (!sharedCatalog || ((sharedCatalog.services || []).length === 0 && (sharedCatalog.categories || []).length === 0)) {
-      _ffCatalogModalMode = 'location';
+      ticketsState._ffCatalogModalMode = 'location';
       await loadLocationCatalogForManager();
     }
     renderServicesCatalogV2();
@@ -7450,8 +7395,8 @@ function ffRenderTicketServiceSearch() {
   // Multi-word partial match, case-insensitive, against service name + category
   // name ("gel mani" matches "Gel Manicure").
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const catNameById = new Map(serviceCategories.map((c) => [c.id, c.name]));
-  const matches = salonServices
+  const catNameById = new Map(ticketsState.serviceCategories.map((c) => [c.id, c.name]));
+  const matches = ticketsState.salonServices
     .filter(isTicketPickerServiceAvailableForActiveLocation)
     .filter((s) => {
       const catLabel = catNameById.get(s.categoryId) || s.category || 'Other';
@@ -7475,7 +7420,7 @@ function ffRenderTicketServiceSearch() {
   results.querySelectorAll('.ticket-service-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
-      const svc = salonServices.find((x) => x.id === id);
+      const svc = ticketsState.salonServices.find((x) => x.id === id);
       doServiceSelect(svc);
     };
   });
@@ -7491,7 +7436,7 @@ function ffTicketServiceSearchWire() {
 function updateNewTicketButtonVisibility() {
   const newTicketBtn = document.getElementById('ticketsNewBtn');
   if (!newTicketBtn) return;
-  if (!currentUserProfile) {
+  if (!ticketsState.currentUserProfile) {
     newTicketBtn.style.display = 'none';
     return;
   }
@@ -7501,12 +7446,12 @@ function updateNewTicketButtonVisibility() {
     return;
   }
   // Fallback only when the salon staff row is not hydrated yet.
-  const profileRole = (currentUserProfile?.role || '').toLowerCase();
+  const profileRole = (ticketsState.currentUserProfile?.role || '').toLowerCase();
   newTicketBtn.style.display = ['owner', 'admin', 'manager'].includes(profileRole) ? 'none' : 'inline-flex';
 }
 
 function ensureTicketsBackgroundSubscription(attempt = 0) {
-  if (!currentUserProfile) return;
+  if (!ticketsState.currentUserProfile) return;
   if (getActiveTicketsSalonId()) {
     subscribeTickets();
     return;
@@ -7567,14 +7512,14 @@ async function setupTicketsUI() {
   container.querySelectorAll('.ticket-service-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
-      const svc = salonServices.find((x) => x.id === id);
+      const svc = ticketsState.salonServices.find((x) => x.id === id);
       doServiceSelect(svc);
     };
   });
   container.querySelectorAll('.ticket-product-btn').forEach((btn) => {
     btn.onclick = () => {
       const id = btn.getAttribute('data-id');
-      const prod = salonProducts.find((x) => x.id === id);
+      const prod = ticketsState.salonProducts.find((x) => x.id === id);
       if (prod) addProductToTicket(prod);
     };
   });
@@ -7645,13 +7590,13 @@ export function initTickets() {
   if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
     window.__ffTicketsLocationListenerBound = true;
     document.addEventListener('ff-active-location-changed', function () {
-      if (ticketsUnsubscribe) { try { ticketsUnsubscribe(); } catch (_) {} ticketsUnsubscribe = null; }
+      if (ticketsState.ticketsUnsubscribe) { try { ticketsState.ticketsUnsubscribe(); } catch (_) {} ticketsState.ticketsUnsubscribe = null; }
       resetTicketsRuntimeCache();
       if (typeof subscribeTickets === 'function') subscribeTickets({ resetLoading: true });
       try { renderTicketsList(); } catch (_) {}
       try { updateTicketsNavBadge(); } catch (_) {}
       try {
-        if (currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
+        if (ticketsState.currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
           loadAndRenderTicketsSummary();
         }
       } catch (_) {}
@@ -7660,20 +7605,20 @@ export function initTickets() {
       // branch (no Firestore roundtrip), then refresh anything on screen.
       try {
         const refreshCatalogForLocation = async () => {
-          if (_catalogSource === 'shared') {
+          if (ticketsState._catalogSource === 'shared') {
             await loadSharedServiceOverrides(getTicketsAccountId(), getActiveLocationIdForTickets());
           }
           _applyCatalogFilter();
           setupTicketsUI();
-          if (_ffCatalogModalMode === 'shared') {
+          if (ticketsState._ffCatalogModalMode === 'shared') {
             await loadSharedCatalogForManager();
           }
           const modal = document.getElementById('servicesModal');
           const servicesScreen = document.getElementById('servicesScreen');
           if ((modal && modal.style.display !== 'none' && modal.style.display !== '') ||
               (servicesScreen && servicesScreen.style.display !== 'none' && servicesScreen.style.display !== '')) {
-            _ffOpenCats.clear();
-            _ffCatalogRenderedOnce = false;
+            ticketsState._ffOpenCats.clear();
+            ticketsState._ffCatalogRenderedOnce = false;
             renderServicesCatalogV2();
           }
         };

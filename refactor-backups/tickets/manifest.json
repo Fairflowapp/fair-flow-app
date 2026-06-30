@@ -1,0 +1,285 @@
+{
+  "importLine": "import { ticketsState, TICKETS_PAGE_SIZE, _ticketSummaryPageSize } from \"./tickets-state.js?v=20260630_tickets_state_split\";",
+  "names": [
+    "currentUserProfile",
+    "salonServices",
+    "serviceCategories",
+    "salonProducts",
+    "productCategories",
+    "_productsUnsub",
+    "_productCatsUnsub",
+    "_productsSubSalonId",
+    "currentTickets",
+    "_ticketsFirstPageTickets",
+    "_ticketsExtraTickets",
+    "_ticketsNextPageCursor",
+    "_ticketsHasMoreOlder",
+    "_ticketsLoadingMore",
+    "ticketsUnsubscribe",
+    "_ticketsDataReady",
+    "currentTicketsTab",
+    "editingTicketId",
+    "_ticketPickerShowAllCatalog",
+    "_justClosedTicketId",
+    "_ticketsMembersAvatarCache",
+    "_ticketsMembersAvatarByName",
+    "_ticketsOpenedThisSession",
+    "_ticketsListSnapshotReady",
+    "_ffCatalogLegacyWiped",
+    "_rawServices",
+    "_rawCategories",
+    "_rawSharedServices",
+    "_rawSharedCategories",
+    "_rawServiceOverrides",
+    "_catalogSource",
+    "_ffCatalogModalMode",
+    "_servicesUnsub",
+    "_serviceCatsUnsub",
+    "_catalogSubSalonId",
+    "_frontDeskCache",
+    "_ticketsSummaryFetchSeq",
+    "_ticketsDateFiltersWired",
+    "ticketsSelectionMode",
+    "ticketsSelectionTab",
+    "ticketsSelected",
+    "ticketsClosedShownIds",
+    "_ffOpenCats",
+    "_ffCatalogRenderedOnce",
+    "_ffCatalogRenderRootId",
+    "_ffSelectedServiceId",
+    "_ffSelectedCategoryId",
+    "_ffServicesInlineEditServiceId",
+    "_ffServicesDetailTab",
+    "_ffServicesLocationOverridesByService",
+    "_ffServicesLocationOverridesLoading",
+    "_ffServicesSharedBackfillChecked",
+    "_ffDragSrc",
+    "_ffDragHoverEl"
+  ],
+  "decls": [
+    {
+      "index0": 21,
+      "text": "let currentUserProfile = null;"
+    },
+    {
+      "index0": 22,
+      "text": "let salonServices = [];"
+    },
+    {
+      "index0": 23,
+      "text": "let serviceCategories = [];"
+    },
+    {
+      "index0": 25,
+      "text": "let salonProducts = [];"
+    },
+    {
+      "index0": 26,
+      "text": "let productCategories = [];"
+    },
+    {
+      "index0": 27,
+      "text": "let _productsUnsub = null;"
+    },
+    {
+      "index0": 28,
+      "text": "let _productCatsUnsub = null;"
+    },
+    {
+      "index0": 29,
+      "text": "let _productsSubSalonId = null;"
+    },
+    {
+      "index0": 30,
+      "text": "let currentTickets = [];"
+    },
+    {
+      "index0": 32,
+      "text": "const TICKETS_PAGE_SIZE = 200;"
+    },
+    {
+      "index0": 34,
+      "text": "const _ticketSummaryPageSize = 500;"
+    },
+    {
+      "index0": 35,
+      "text": "let _ticketsFirstPageTickets = [];"
+    },
+    {
+      "index0": 36,
+      "text": "let _ticketsExtraTickets = [];"
+    },
+    {
+      "index0": 37,
+      "text": "let _ticketsNextPageCursor = null;"
+    },
+    {
+      "index0": 38,
+      "text": "let _ticketsHasMoreOlder = false;"
+    },
+    {
+      "index0": 39,
+      "text": "let _ticketsLoadingMore = false;"
+    },
+    {
+      "index0": 40,
+      "text": "let ticketsUnsubscribe = null;"
+    },
+    {
+      "index0": 41,
+      "text": "let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits"
+    },
+    {
+      "index0": 42,
+      "text": "let currentTicketsTab = 'ready';"
+    },
+    {
+      "index0": 43,
+      "text": "let editingTicketId = null;"
+    },
+    {
+      "index0": 47,
+      "text": "let _ticketPickerShowAllCatalog = false;"
+    },
+    {
+      "index0": 49,
+      "text": "let _justClosedTicketId = null;"
+    },
+    {
+      "index0": 51,
+      "text": "let _ticketsMembersAvatarCache = null;"
+    },
+    {
+      "index0": 53,
+      "text": "let _ticketsMembersAvatarByName = null;"
+    },
+    {
+      "index0": 119,
+      "text": "let _ticketsOpenedThisSession = new Set();"
+    },
+    {
+      "index0": 121,
+      "text": "let _ticketsListSnapshotReady = false;"
+    },
+    {
+      "index0": 280,
+      "text": "let _ffCatalogLegacyWiped = false;"
+    },
+    {
+      "index0": 281,
+      "text": "let _rawServices = [];"
+    },
+    {
+      "index0": 282,
+      "text": "let _rawCategories = [];"
+    },
+    {
+      "index0": 283,
+      "text": "let _rawSharedServices = [];"
+    },
+    {
+      "index0": 284,
+      "text": "let _rawSharedCategories = [];"
+    },
+    {
+      "index0": 285,
+      "text": "let _rawServiceOverrides = {};"
+    },
+    {
+      "index0": 286,
+      "text": "let _catalogSource = 'unknown'; // 'shared' | 'location' | 'unknown'"
+    },
+    {
+      "index0": 287,
+      "text": "let _ffCatalogModalMode = 'location'; // 'location' | 'shared'"
+    },
+    {
+      "index0": 288,
+      "text": "let _servicesUnsub = null;"
+    },
+    {
+      "index0": 289,
+      "text": "let _serviceCatsUnsub = null;"
+    },
+    {
+      "index0": 290,
+      "text": "let _catalogSubSalonId = null;"
+    },
+    {
+      "index0": 1512,
+      "text": "let _frontDeskCache = null;"
+    },
+    {
+      "index0": 3104,
+      "text": "let _ticketsSummaryFetchSeq = 0;"
+    },
+    {
+      "index0": 3326,
+      "text": "let _ticketsDateFiltersWired = false;"
+    },
+    {
+      "index0": 3516,
+      "text": "let ticketsSelectionMode = false;"
+    },
+    {
+      "index0": 3517,
+      "text": "let ticketsSelectionTab = null; // tab the selection was started on ('closed' | 'archived')"
+    },
+    {
+      "index0": 3518,
+      "text": "const ticketsSelected = new Set();"
+    },
+    {
+      "index0": 3519,
+      "text": "let ticketsClosedShownIds = [];"
+    },
+    {
+      "index0": 5264,
+      "text": "const _ffOpenCats = new Set();"
+    },
+    {
+      "index0": 5267,
+      "text": "let _ffCatalogRenderedOnce = false;"
+    },
+    {
+      "index0": 5268,
+      "text": "let _ffCatalogRenderRootId = 'servicesModal';"
+    },
+    {
+      "index0": 5269,
+      "text": "let _ffSelectedServiceId = null;"
+    },
+    {
+      "index0": 5270,
+      "text": "let _ffSelectedCategoryId = null;"
+    },
+    {
+      "index0": 5271,
+      "text": "let _ffServicesInlineEditServiceId = null;"
+    },
+    {
+      "index0": 5272,
+      "text": "let _ffServicesDetailTab = 'details';"
+    },
+    {
+      "index0": 5273,
+      "text": "let _ffServicesLocationOverridesByService = {};"
+    },
+    {
+      "index0": 5274,
+      "text": "let _ffServicesLocationOverridesLoading = {};"
+    },
+    {
+      "index0": 5275,
+      "text": "let _ffServicesSharedBackfillChecked = false;"
+    },
+    {
+      "index0": 6790,
+      "text": "let _ffDragSrc = null;"
+    },
+    {
+      "index0": 6791,
+      "text": "let _ffDragHoverEl = null;"
+    }
+  ]
+}
