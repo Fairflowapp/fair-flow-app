@@ -8,7 +8,7 @@
 <!-- Inbox module-graph preload: parallel-fetch inbox.js + all sub-modules to collapse the
      ES-module import waterfall, so the first Inbox open is not slow/blank. Keep ?v= in sync
      with the import statements in inbox.js and the script-loader entry below. -->
-<link rel="modulepreload" href="/inbox.js?v=20260630_inbox_listeners_split">
+<link rel="modulepreload" href="/inbox.js?v=20260630_inbox_cleanup">
 <link rel="modulepreload" href="/inbox-state.js?v=20260629_inbox_state_split">
 <link rel="modulepreload" href="/inbox-helpers.js?v=20260626_inbox_helpers_split">
 <link rel="modulepreload" href="/inbox-utils.js?v=20260630_inbox_utils_split">
@@ -36,7 +36,7 @@
       if (typeof window.goToInbox === 'function') { window.goToInbox(); return; }
       if (window.__ffInboxOpening) return;
       window.__ffInboxOpening = true;
-      import('/inbox.js?v=20260630_inbox_listeners_split')
+      import('/inbox.js?v=20260630_inbox_cleanup')
         .then(function (m) {
           window.__ffInboxOpening = false;
           var fn = (m && typeof m.goToInbox === 'function') ? m.goToInbox : window.goToInbox;
@@ -38879,7 +38879,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260630_inbox_listeners_split')
+              import('/inbox.js?v=20260630_inbox_cleanup')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -64514,7 +64514,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-ui.js?v=20260625_build_scope_warn", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
-        { src: "/inbox.js?v=20260630_inbox_listeners_split", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260630_inbox_cleanup", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260623_mediafix", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260628_chat_ui_u3", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },

@@ -6,106 +6,32 @@
  * Permissions: Technician (own requests), Manager (all requests), Admin (approve/deny)
  */
 
-import { 
-  collection, 
-  query, 
-  where, 
-  orderBy, 
-  limit,
-  addDoc,
-  updateDoc,
-  setDoc,
+import {
   doc,
   getDoc,
-  getDocs,
-  deleteDoc,
-  onSnapshot,
-  serverTimestamp,
-  Timestamp,
-  increment,
-  runTransaction,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
-  ffSyncStaffDocumentOnInboxApprove,
-  ffSyncStaffDocumentOnInboxReject,
-  ffSendExpiryChatReminderForStaffDocContext,
-  ffStaffDocumentTypeSelectOptionsHtml,
-  ffExpirationTimestampToYmdInput,
-} from "./staff-documents.js?v=20260505_full_specialist_doc_type";
-import {
-  ffInboxYmdFromRaw,
-  enumerateInclusiveDateKeysForInbox,
-  inboxEffectiveTypeForGrouping,
-  inboxDocAlertIsExpiredForUi,
-  ffInboxIsStaffCallOtherNoise,
-  inboxItemActivityMs,
-  inboxErrorNeedsIndex,
   inboxNormalizeLineStaffRoleLc,
   inboxCanViewInboxEval,
   inboxCanManageInboxEval,
-  inboxCanSendRequestsEval,
-  ffInboxRuleString,
-  ffSuggestionFmtDays,
-  ffSuggestionFmtRate,
-  inboxSupplyRequestIsPending,
-  inboxSupplyStatusDisplayLabel,
-  suppliesRowRequiresVariant,
-  formatRelativeDate,
 } from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
 
 // ── Module state + config tables — extracted to inbox-state.js
-import {
-  inboxState,
-  REQUEST_CATEGORY_ORDER,
-  REQUEST_CATEGORY_LABELS,
-  BUILTIN_TYPES,
-  LEGACY_INBOX_TYPE_INFO,
-  MANAGER_ONLY_INBOX_TYPES,
-  INBOX_SETTINGS_DOC_ID,
-  FF_INVENTORY_SUPPLY_VARIANT_KEYS,
-  SUPPLIES_VARIANT_LABELS,
-  CUSTOM_TYPE_EMOJIS,
-} from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
 
 // ── Smart Inventory Suggestion feature — extracted to inbox-inventory-suggestion.js
-import {
-  initInboxInventorySuggestion,
-  ffShowInventorySuggestionModal,
-  ffRenderInventorySuggestionCard,
-} from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
+import { initInboxInventorySuggestion } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
 initInboxInventorySuggestion({ escapeHtml, showToast, renderInboxList, updateInboxBadges });
 
 // ── Supplies request feature — extracted to inbox-supplies.js
-import {
-  initInboxSupplies,
-  applyApprovedSupplyRequestToInventory,
-  approveSupplyRequest,
-  denySupplyRequest,
-  SUPPLIES_ITEM_ROW_INNER_HTML,
-  wireSuppliesItemRow,
-  classifySuppliesRow,
-  readSuppliesRowSnapshot,
-  initSuppliesRequestForm,
-} from "./inbox-supplies.js?v=20260629_inbox_supplies_split";
+import { initInboxSupplies } from "./inbox-supplies.js?v=20260629_inbox_supplies_split";
 initInboxSupplies({ showToast });
 
 // ── Staff document alert presentation helpers — extracted to inbox-documents.js
-import {
-  initInboxDocuments,
-  ffDocAlertIsHebrewUI,
-  ffDocAlertStaffName,
-  ffDocAlertDocTitle,
-  ffDocAlertDocType,
-  ffDocAlertExpFormattedLong,
-  ffDocAlertHumanSummary,
-  ffDocAlertStaffId,
-  ffDocAlertWhatToDoLine,
-  ffDocAlertModalFooterIds,
-} from "./inbox-documents.js?v=20260629_inbox_documents_split";
+import { initInboxDocuments } from "./inbox-documents.js?v=20260629_inbox_documents_split";
 initInboxDocuments({ escapeHtml });
 
 // ── Request types registry — extracted to inbox-types.js
@@ -113,17 +39,12 @@ import {
   initInboxTypes,
   loadCustomTypes,
   loadInboxSettings,
-  setInboxTypeVisibility,
-  getRequestTypesGroupedByCategory,
-  getRequestTypeInfo,
 } from "./inbox-types.js?v=20260630_inbox_types_split";
 initInboxTypes({ inboxUserRoleLc });
 
 // ── Shared UI utilities — extracted to inbox-utils.js
 import {
   escapeHtml,
-  showConfirmModal,
-  showPromptModal,
   showToast,
 } from "./inbox-utils.js?v=20260630_inbox_utils_split";
 
@@ -134,11 +55,7 @@ import {
   inboxCanManageInbox,
   inboxCanSendRequests,
   mergeSalonStaffIntoUserProfile,
-  resolveCurrentInboxActorName,
-  loadSalonUsersForRecipients,
   loadCurrentUserProfile,
-  getInboxRecipientsList,
-  getCreateRequestSelectedRecipients,
 } from "./inbox-data.js?v=20260630_inbox_data_split";
 
 // ── Modals + settings UI — extracted to inbox-modals-ui.js
@@ -148,9 +65,6 @@ import "./inbox-modals-ui.js?v=20260630_inbox_modals_ui_split";
 import {
   renderInboxList,
   updateInboxBadges,
-  updateInboxStaffFilterOptions,
-  inboxGetStaffLocationMap,
-  inboxItemMatchesActiveLocation,
   initInboxListRender,
 } from "./inbox-list-render.js?v=20260630_inbox_list_render_split";
 initInboxListRender({ showRequestDetails, inboxTechnicianNoiseFilter });
