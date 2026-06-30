@@ -57,71 +57,24 @@ import {
   formatRelativeDate,
 } from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
 
+// ── Module state + config tables — extracted to inbox-state.js
+import {
+  inboxState,
+  REQUEST_CATEGORY_ORDER,
+  REQUEST_CATEGORY_LABELS,
+  BUILTIN_TYPES,
+  LEGACY_INBOX_TYPE_INFO,
+  MANAGER_ONLY_INBOX_TYPES,
+  INBOX_SETTINGS_DOC_ID,
+  FF_INVENTORY_SUPPLY_VARIANT_KEYS,
+  SUPPLIES_VARIANT_LABELS,
+  CUSTOM_TYPE_EMOJIS,
+} from "./inbox-state.js?v=20260629_inbox_state_split";
+
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)
-const REQUEST_CATEGORY_ORDER = ['schedule', 'payments', 'operations', 'documents', 'other'];
-const REQUEST_CATEGORY_LABELS = {
-  schedule: '🗓️ Schedule',
-  payments: '💰 Payments',
-  operations: '🛠️ Operations',
-  documents: '📄 Documents',
-  other: '⭐ Other'
-};
 
-// Built-in request types (id, icon, label, description, category)
-const BUILTIN_TYPES = [
-  // Schedule
-  { id: 'vacation', icon: '🏖️', label: 'Vacation Request', description: 'PTO — one day or a date range (same start & end = single day)', category: 'schedule' },
-  { id: 'late_start', icon: '⏰', label: 'Late Start', description: 'Request to start later', category: 'schedule' },
-  { id: 'early_leave', icon: '🏃', label: 'Early Leave', description: 'Request to leave early', category: 'schedule' },
-  { id: 'schedule_change', icon: '📅', label: 'Schedule Change', description: 'Request schedule modification', category: 'schedule' },
-  { id: 'extra_shift', icon: '✅', label: 'Extra Shift / Pick Up Shift', description: 'Request to work on a day you\'re not scheduled', category: 'schedule' },
-  { id: 'swap_shift', icon: '🔄', label: 'Swap Shift', description: 'Swap a shift with another staff member', category: 'schedule' },
-  { id: 'break_change', icon: '☕', label: 'Break Change', description: 'Request to change break time', category: 'schedule' },
-  // Payments
-  { id: 'commission_review', icon: '💰', label: 'Commission Review', description: 'Question about commission or payment', category: 'payments' },
-  { id: 'tip_adjustment', icon: '💵', label: 'Tip Adjustment', description: 'Change tip after a service', category: 'payments' },
-  { id: 'payment_issue', icon: '📋', label: 'Payment Issue', description: 'Report a payment problem', category: 'payments' },
-  // Operations
-  { id: 'supplies', icon: '📦', label: 'Supplies', description: 'Request supplies or materials', category: 'operations' },
-  { id: 'maintenance', icon: '🔧', label: 'Maintenance', description: 'Report maintenance issue', category: 'operations' },
-  { id: 'client_issue', icon: '👤', label: 'Client Issue', description: 'Report or discuss a client-related matter', category: 'operations' },
-  { id: 'staff_birthday_reminder', icon: '🎂', label: 'Staff birthday reminder', description: 'Automated — upcoming staff birthday (management only)', category: 'operations' },
-  // Documents
-  { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
-  {
-    id: 'document_renewal_request',
-    icon: '📩',
-    label: 'Request a new document (from staff)',
-    description: 'Ask a service provider to upload a renewed document (e.g. insurance or license before it expires).',
-    category: 'documents',
-  },
-  { id: 'document_upload', icon: '📤', label: 'Upload a Document', description: 'Upload a document to the business (license, insurance, certification)', category: 'documents' },
-  { id: 'document_expiring_soon', icon: '⏳', label: 'Document expiring soon', description: 'Automated — staff document expires within 30 days (management only)', category: 'documents' },
-  { id: 'document_expired', icon: '⚠️', label: 'Document expired', description: 'Automated — staff document past expiration (management only)', category: 'documents' },
-  // Other (always last)
-  { id: 'other', icon: '📝', label: 'Other', description: 'Other request', category: 'other' }
-];
 
-/** Old inbox items only — not offered in “New request”. */
-const LEGACY_INBOX_TYPE_INFO = {
-  day_off: { id: 'day_off', icon: '📴', label: 'Day off', description: 'Legacy request', category: 'schedule' },
-  time_off: { id: 'time_off', icon: '🕐', label: 'Time off', description: 'Legacy request', category: 'schedule' },
-  inventory_suggestion: { id: 'inventory_suggestion', icon: '📉', label: 'Smart Inventory Alert', description: 'Automated — item forecast to run out soon', category: 'operations' },
-};
 
-// =====================
-// State
-// =====================
-let currentInboxTab = 'open';
-let inboxViewMode = 'to_handle'; // 'mine' | 'to_handle' — only for admin/manager
-let inboxUnsubscribe = null;
-let currentUserProfile = null;
-/** Technicians: merge outgoing (createdByUid) + incoming (forUid) inbox queries. */
-let _techInboxOutgoing = [];
-let _techInboxIncoming = [];
-
-/** Automated inbox items for management ("To handle") only — never list for technicians. */
-const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "document_expiring_soon", "document_expired", "inventory_suggestion"]);
 
 /** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
 function inboxTechnicianNoiseFilter(rows) {
@@ -132,14 +85,14 @@ function inboxTechnicianNoiseFilter(rows) {
 
 function applyInboxSnapshotRows(snapshot, loadingEl) {
   if (loadingEl) loadingEl.style.display = 'none';
-  currentRequests = snapshot.docs
+  inboxState.currentRequests = snapshot.docs
     .map(doc => ({
       id: doc.id,
       ...doc.data()
     }))
     .sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
 
-  console.log('[Inbox] Loaded', currentRequests.length, 'requests');
+  console.log('[Inbox] Loaded', inboxState.currentRequests.length, 'requests');
   updateInboxStaffFilterOptions();
   updateInboxBadges();
   renderInboxList();
@@ -147,7 +100,7 @@ function applyInboxSnapshotRows(snapshot, loadingEl) {
 
 function showInboxLoadError(error, loadingEl, listEl, emptyEl) {
   if (loadingEl) loadingEl.style.display = 'none';
-  currentRequests = [];
+  inboxState.currentRequests = [];
   if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
   if (emptyEl) {
     emptyEl.style.display = 'block';
@@ -180,19 +133,19 @@ function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, em
 
 function applyTechInboxMerge(loadingEl) {
   const map = new Map();
-  _techInboxOutgoing.forEach((row) => map.set(row.id, row));
-  _techInboxIncoming.forEach((row) => map.set(row.id, row));
-  currentRequests = Array.from(map.values()).sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
-  currentRequests = inboxTechnicianNoiseFilter(currentRequests);
+  inboxState._techInboxOutgoing.forEach((row) => map.set(row.id, row));
+  inboxState._techInboxIncoming.forEach((row) => map.set(row.id, row));
+  inboxState.currentRequests = Array.from(map.values()).sort((a, b) => inboxItemActivityMs(b) - inboxItemActivityMs(a));
+  inboxState.currentRequests = inboxTechnicianNoiseFilter(inboxState.currentRequests);
   if (loadingEl) loadingEl.style.display = 'none';
-  console.log('[Inbox] Loaded (technician merged)', currentRequests.length, 'requests');
+  console.log('[Inbox] Loaded (technician merged)', inboxState.currentRequests.length, 'requests');
   updateInboxStaffFilterOptions();
   updateInboxBadges();
   renderInboxList();
 }
 
 function inboxUserRoleLc() {
-  return inboxNormalizeLineStaffRoleLc((currentUserProfile && currentUserProfile.role) || "");
+  return inboxNormalizeLineStaffRoleLc((inboxState.currentUserProfile && inboxState.currentUserProfile.role) || "");
 }
 
 /** Merge salons/{salonId}/staff/{staffId} (permissions, managerType) into a user profile object. */
@@ -222,14 +175,14 @@ async function mergeSalonStaffIntoUserProfile(profile) {
 
 async function resolveCurrentInboxActorName() {
   const fallback =
-    currentUserProfile?.name ||
-    currentUserProfile?.displayName ||
-    currentUserProfile?.email ||
+    inboxState.currentUserProfile?.name ||
+    inboxState.currentUserProfile?.displayName ||
+    inboxState.currentUserProfile?.email ||
     "";
   try {
     const w = (typeof window !== "undefined") ? window : {};
-    const salonId = w.currentSalonId ? String(w.currentSalonId).trim() : String(currentUserProfile?.salonId || "").trim();
-    const staffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : String(currentUserProfile?.staffId || "").trim();
+    const salonId = w.currentSalonId ? String(w.currentSalonId).trim() : String(inboxState.currentUserProfile?.salonId || "").trim();
+    const staffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : String(inboxState.currentUserProfile?.staffId || "").trim();
     if (!salonId || !staffId) return fallback;
     const snap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
     if (!snap.exists()) return fallback;
@@ -243,15 +196,15 @@ async function resolveCurrentInboxActorName() {
 }
 
 function inboxCanViewInbox() {
-  return inboxCanViewInboxEval(currentUserProfile);
+  return inboxCanViewInboxEval(inboxState.currentUserProfile);
 }
 
 function inboxCanManageInbox() {
-  return inboxCanManageInboxEval(currentUserProfile);
+  return inboxCanManageInboxEval(inboxState.currentUserProfile);
 }
 
 function inboxCanSendRequests() {
-  return inboxCanSendRequestsEval(currentUserProfile);
+  return inboxCanSendRequestsEval(inboxState.currentUserProfile);
 }
 
 /** Hide INBOX nav when the signed-in user has no inbox access (uses users + staff permissions). */
@@ -278,21 +231,16 @@ export async function ffRefreshInboxNavVisibility() {
   }
 }
 
-let currentRequests = [];
-let customRequestTypes = [];
-let inboxStaffFilterUid = '';
-let inboxHiddenTypes = []; // loaded from salons/{salonId}/requestTypes
-let _inboxUsersCache = null; // { uid, name, staffId, role }[] — loaded from Firestore users
 
 /** Load same-salon users from Firestore (managers/admins/owners can read via updated rules). Cached per session. */
 async function loadSalonUsersForRecipients() {
-  if (_inboxUsersCache !== null) return _inboxUsersCache;
-  if (!currentUserProfile?.salonId) return [];
+  if (inboxState._inboxUsersCache !== null) return inboxState._inboxUsersCache;
+  if (!inboxState.currentUserProfile?.salonId) return [];
   try {
     // Read from salons/{salonId}/members — readable by any salon member, no complex rules
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/members`));
-    _inboxUsersCache = snap.docs
-      .filter(d => d.id !== currentUserProfile.uid)
+    const snap = await getDocs(collection(db, `salons/${inboxState.currentUserProfile.salonId}/members`));
+    inboxState._inboxUsersCache = snap.docs
+      .filter(d => d.id !== inboxState.currentUserProfile.uid)
       .map(d => {
         const u = d.data() || {};
         return {
@@ -303,11 +251,11 @@ async function loadSalonUsersForRecipients() {
         };
       })
       .filter(u => u.name);
-    console.log('[Inbox] members loaded:', _inboxUsersCache.length, '| managers/admins:', _inboxUsersCache.filter(u => ['manager','admin','owner'].includes(u.role)).length);
-    return _inboxUsersCache;
+    console.log('[Inbox] members loaded:', inboxState._inboxUsersCache.length, '| managers/admins:', inboxState._inboxUsersCache.filter(u => ['manager','admin','owner'].includes(u.role)).length);
+    return inboxState._inboxUsersCache;
   } catch (e) {
     console.error('[Inbox] loadSalonUsersForRecipients failed:', e.code, e.message);
-    _inboxUsersCache = [];
+    inboxState._inboxUsersCache = [];
     return [];
   }
 }
@@ -315,8 +263,8 @@ async function loadSalonUsersForRecipients() {
 /** Recipients for "Send to": managers/admins from Firestore users cache, falling back to ff_staff_v1. */
 function getInboxRecipientsList() {
   // Prefer Firestore cache (has real Firebase UIDs)
-  if (_inboxUsersCache && _inboxUsersCache.length > 0) {
-    return _inboxUsersCache
+  if (inboxState._inboxUsersCache && inboxState._inboxUsersCache.length > 0) {
+    return inboxState._inboxUsersCache
       .filter(u => ['manager', 'admin', 'owner'].includes(u.role))
       .map(u => ({ uid: u.uid, id: u.staffId || u.uid, name: u.name }));
   }
@@ -325,8 +273,8 @@ function getInboxRecipientsList() {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('ff_staff_v1') : null;
     const store = raw ? JSON.parse(raw) : {};
     const staff = Array.isArray(store.staff) ? store.staff : [];
-    const currentStaffId = (currentUserProfile?.staffId || currentUserProfile?.id) || '';
-    const currentName = (currentUserProfile?.name) || '';
+    const currentStaffId = (inboxState.currentUserProfile?.staffId || inboxState.currentUserProfile?.id) || '';
+    const currentName = (inboxState.currentUserProfile?.name) || '';
     return staff
       .filter(s => s && !s.isArchived && (s.isAdmin || s.isManager) && s.id !== currentStaffId && s.name !== currentName)
       .map(s => ({ uid: '', id: s.id || '', name: (s.name || '').trim() }));
@@ -442,7 +390,7 @@ export function goToInbox(onReady) {
       return;
     }
     if (!inboxCanManageInbox() && inboxCanSendRequests()) {
-      inboxViewMode = "mine";
+      inboxState.inboxViewMode = "mine";
     }
     loadCustomTypes().then(() => {
       loadInboxSettings().then(() => {
@@ -464,46 +412,45 @@ export function goToInbox(onReady) {
 }
 
 async function loadCustomTypes() {
-  if (!currentUserProfile?.salonId) return;
+  if (!inboxState.currentUserProfile?.salonId) return;
   try {
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/requestTypes`));
-    customRequestTypes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    console.log('[Inbox] Custom request types loaded', customRequestTypes.length);
+    const snap = await getDocs(collection(db, `salons/${inboxState.currentUserProfile.salonId}/requestTypes`));
+    inboxState.customRequestTypes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    console.log('[Inbox] Custom request types loaded', inboxState.customRequestTypes.length);
   } catch (err) {
     console.warn('[Inbox] Failed to load custom types', err);
-    customRequestTypes = [];
+    inboxState.customRequestTypes = [];
   }
 }
 
-const INBOX_SETTINGS_DOC_ID = 'visibility';
 
 async function loadInboxSettings() {
-  if (!currentUserProfile?.salonId) return;
+  if (!inboxState.currentUserProfile?.salonId) return;
   try {
-    const ref = doc(db, 'salons', currentUserProfile.salonId, 'inboxSettings', INBOX_SETTINGS_DOC_ID);
+    const ref = doc(db, 'salons', inboxState.currentUserProfile.salonId, 'inboxSettings', INBOX_SETTINGS_DOC_ID);
     const snap = await getDoc(ref);
-    inboxHiddenTypes = Array.isArray(snap.data()?.hiddenRequestTypes) ? snap.data().hiddenRequestTypes : [];
+    inboxState.inboxHiddenTypes = Array.isArray(snap.data()?.hiddenRequestTypes) ? snap.data().hiddenRequestTypes : [];
   } catch (err) {
     console.warn('[Inbox] Failed to load inbox settings', err);
-    inboxHiddenTypes = [];
+    inboxState.inboxHiddenTypes = [];
   }
 }
 
 async function setInboxTypeVisibility(typeId, hidden) {
-  if (!currentUserProfile?.salonId) return;
+  if (!inboxState.currentUserProfile?.salonId) return;
   if (hidden) {
-    if (!inboxHiddenTypes.includes(typeId)) inboxHiddenTypes = [...inboxHiddenTypes, typeId];
+    if (!inboxState.inboxHiddenTypes.includes(typeId)) inboxState.inboxHiddenTypes = [...inboxState.inboxHiddenTypes, typeId];
   } else {
-    inboxHiddenTypes = inboxHiddenTypes.filter(id => id !== typeId);
+    inboxState.inboxHiddenTypes = inboxState.inboxHiddenTypes.filter(id => id !== typeId);
   }
-  const salonId = currentUserProfile.salonId;
+  const salonId = inboxState.currentUserProfile.salonId;
   const ref = doc(db, 'salons', salonId, 'inboxSettings', INBOX_SETTINGS_DOC_ID);
-  await setDoc(ref, { hiddenRequestTypes: inboxHiddenTypes }, { merge: true });
+  await setDoc(ref, { hiddenRequestTypes: inboxState.inboxHiddenTypes }, { merge: true });
 }
 
 function getAllRequestTypes() {
-  const hidden = new Set(inboxHiddenTypes || []);
-  const custom = (customRequestTypes || []).map(t => ({
+  const hidden = new Set(inboxState.inboxHiddenTypes || []);
+  const custom = (inboxState.customRequestTypes || []).map(t => ({
     id: t.id,
     icon: t.icon || '📝',
     label: t.label || 'Request',
@@ -550,7 +497,7 @@ function getRequestTypesGroupedByCategory() {
 async function loadCurrentUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
-  _inboxUsersCache = null; // reset recipients cache on each profile load
+  inboxState._inboxUsersCache = null; // reset recipients cache on each profile load
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
@@ -570,33 +517,33 @@ async function loadCurrentUserProfile() {
       const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
       const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
       const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
-      currentUserProfile = {
+      inboxState.currentUserProfile = {
         uid: user.uid,
         ...data,
         salonId: activeSalonId || data.salonId || null,
         staffId: activeStaffId || data.staffId || null,
         role: activeRole || data.role || '',
       };
-      await mergeSalonStaffIntoUserProfile(currentUserProfile);
-      console.log('[Inbox] User profile loaded', { role: currentUserProfile.role, permissions: currentUserProfile.permissions });
+      await mergeSalonStaffIntoUserProfile(inboxState.currentUserProfile);
+      console.log('[Inbox] User profile loaded', { role: inboxState.currentUserProfile.role, permissions: inboxState.currentUserProfile.permissions });
       // Register in members directory so others can find this user in "Send to"
-      if (currentUserProfile.salonId) {
+      if (inboxState.currentUserProfile.salonId) {
         const memberData = {
           name: ffInboxRuleString(
-            currentUserProfile.name || currentUserProfile.displayName || user.email || ''
+            inboxState.currentUserProfile.name || inboxState.currentUserProfile.displayName || user.email || ''
           ),
-          role: ffInboxRuleString(currentUserProfile.role),
-          staffId: ffInboxRuleString(currentUserProfile.staffId),
+          role: ffInboxRuleString(inboxState.currentUserProfile.role),
+          staffId: ffInboxRuleString(inboxState.currentUserProfile.staffId),
           email: ffInboxRuleString(user.email)
         };
         // Include avatarUrl so Chat, Tickets, Staff Members show the correct photo
-        if (currentUserProfile.avatarUrl) {
-          memberData.avatarUrl = currentUserProfile.avatarUrl;
-          if (currentUserProfile.avatarUpdatedAtMs) {
-            memberData.avatarUpdatedAtMs = currentUserProfile.avatarUpdatedAtMs;
+        if (inboxState.currentUserProfile.avatarUrl) {
+          memberData.avatarUrl = inboxState.currentUserProfile.avatarUrl;
+          if (inboxState.currentUserProfile.avatarUpdatedAtMs) {
+            memberData.avatarUpdatedAtMs = inboxState.currentUserProfile.avatarUpdatedAtMs;
           }
         }
-        setDoc(doc(db, `salons/${currentUserProfile.salonId}/members`, user.uid), memberData, { merge: true })
+        setDoc(doc(db, `salons/${inboxState.currentUserProfile.salonId}/members`, user.uid), memberData, { merge: true })
           .catch(e => console.warn('[Inbox] Could not write member doc', e.message));
         // Birthday Inbox items depend on members + settings; run after directory row exists.
         setTimeout(() => {
@@ -609,7 +556,7 @@ async function loadCurrentUserProfile() {
           }
         }, 600);
       }
-      return currentUserProfile;
+      return inboxState.currentUserProfile;
     }
   } catch (err) {
     console.error('[Inbox] Failed to load user profile', err);
@@ -618,7 +565,7 @@ async function loadCurrentUserProfile() {
 }
 
 function setupInboxUI() {
-  if (!currentUserProfile) return;
+  if (!inboxState.currentUserProfile) return;
 
   const role = inboxUserRoleLc();
   const canManageInbox = inboxCanManageInbox();
@@ -640,7 +587,7 @@ function setupInboxUI() {
   // New Request: show only when inbox_send (or manage) allows; hide in "To handle"
   const showNewRequest =
     canCreateRequests &&
-    (role === 'technician' || sendOnlyDesk || inboxViewMode === 'mine');
+    (role === 'technician' || sendOnlyDesk || inboxState.inboxViewMode === 'mine');
   if (headerNewBtn) headerNewBtn.style.display = showNewRequest ? '' : 'none';
   // Hide empty-state New Request — only the header button is used
   if (emptyStateBtn) emptyStateBtn.style.display = 'none';
@@ -656,7 +603,7 @@ function setupInboxUI() {
   if (filterRow) filterRow.style.display = (role === 'technician') ? 'none' : 'flex';
   if (staffFilterSelect) {
     staffFilterSelect.onchange = () => {
-      inboxStaffFilterUid = staffFilterSelect.value || '';
+      inboxState.inboxStaffFilterUid = staffFilterSelect.value || '';
       renderInboxList();
     };
   }
@@ -668,9 +615,9 @@ function setupInboxUI() {
     if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
     if (inboxTabs) inboxTabs.classList.add('hidden');
     if (emptyStateMsg) emptyStateMsg.textContent = canSend ? 'No requests yet' : 'No updates yet';
-    currentInboxTab = 'my_requests';
+    inboxState.currentInboxTab = 'my_requests';
   } else if (sendOnlyDesk) {
-    inboxViewMode = 'mine';
+    inboxState.inboxViewMode = 'mine';
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'none';
     if (filterRow) filterRow.style.display = 'none';
@@ -680,28 +627,28 @@ function setupInboxUI() {
       inboxTabs.style.display = 'none';
     }
     if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-    currentInboxTab = 'my_requests';
+    inboxState.currentInboxTab = 'my_requests';
     if (emptyStateMsg) emptyStateMsg.textContent = 'No requests yet';
   } else if (canManageInbox) {
     // Manager / Admin / Owner — show view switcher (My Requests | To handle)
     const viewSwitcher = document.getElementById('inboxViewSwitcher');
     if (viewSwitcher) viewSwitcher.style.display = 'flex';
     document.querySelectorAll('.inbox-view-btn').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxViewMode);
+      btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxState.inboxViewMode);
     });
-    if (filterRow) filterRow.style.display = inboxViewMode === 'mine' ? 'none' : 'flex';
-    if (headerRow) headerRow.style.display = inboxViewMode === 'mine' && showNewRequest ? '' : 'none';
+    if (filterRow) filterRow.style.display = inboxState.inboxViewMode === 'mine' ? 'none' : 'flex';
+    if (headerRow) headerRow.style.display = inboxState.inboxViewMode === 'mine' && showNewRequest ? '' : 'none';
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
-    if (inboxViewMode === 'mine') {
+    if (inboxState.inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
     } else {
       if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
     }
     if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-    currentInboxTab = currentInboxTab || 'open';
+    inboxState.currentInboxTab = inboxState.currentInboxTab || 'open';
     if (emptyStateMsg) emptyStateMsg.textContent = 'No requests in this category';
     document.querySelectorAll('.inbox-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.inboxTab === currentInboxTab);
+      btn.classList.toggle('active', btn.dataset.inboxTab === inboxState.currentInboxTab);
     });
     syncInboxStatusFilterSelect();
   } else {
@@ -723,9 +670,9 @@ function setupInboxUI() {
 // View Mode (My Requests | To handle) — called from HTML onclick
 // =====================
 window.setInboxViewMode = function(mode) {
-  if (!currentUserProfile || inboxUserRoleLc() === "technician") return;
+  if (!inboxState.currentUserProfile || inboxUserRoleLc() === "technician") return;
   if (mode === "to_handle" && !inboxCanManageInbox()) return;
-  inboxViewMode = mode;
+  inboxState.inboxViewMode = mode;
   document.querySelectorAll('.inbox-view-btn').forEach(b => {
     b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
   });
@@ -750,7 +697,7 @@ window.setInboxViewMode = function(mode) {
 function syncInboxStatusFilterSelect() {
   const statusSel = document.getElementById("inboxStatusFilterSelect");
   if (!statusSel) return;
-  const t = String(currentInboxTab || "").trim();
+  const t = String(inboxState.currentInboxTab || "").trim();
   if (statusSel.querySelector(`option[value="${t}"]`)) statusSel.value = t;
 }
 
@@ -769,7 +716,7 @@ function ffWireInboxStatusFilterSelect() {
 // Tab Management
 // =====================
 window.setInboxTab = function (tab) {
-  currentInboxTab = tab;
+  inboxState.currentInboxTab = tab;
   // Update active tab
   document.querySelectorAll(".inbox-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.inboxTab === tab);
@@ -786,17 +733,17 @@ window.setInboxTab = function (tab) {
 // Load & Render Requests
 // =====================
 async function loadInboxItems() {
-  if (!currentUserProfile) return;
+  if (!inboxState.currentUserProfile) return;
   
-  const salonId = currentUserProfile.salonId;
+  const salonId = inboxState.currentUserProfile.salonId;
   const role = inboxUserRoleLc();
-  const uid = currentUserProfile.uid;
+  const uid = inboxState.currentUserProfile.uid;
 
   console.log('[Inbox] loadInboxItems', { salonId, role, uid });
 
   // Guard: salonId must exist, otherwise rules will always deny
   if (!salonId) {
-    console.error('[Inbox] salonId is missing from user profile', currentUserProfile);
+    console.error('[Inbox] salonId is missing from user profile', inboxState.currentUserProfile);
     const emptyEl = document.getElementById('inboxEmpty');
     const loadingEl = document.getElementById('inboxLoading');
     if (loadingEl) loadingEl.style.display = 'none';
@@ -813,9 +760,9 @@ async function loadInboxItems() {
   }
   
   // Unsubscribe from previous listener
-  if (inboxUnsubscribe) {
-    inboxUnsubscribe();
-    inboxUnsubscribe = null;
+  if (inboxState.inboxUnsubscribe) {
+    inboxState.inboxUnsubscribe();
+    inboxState.inboxUnsubscribe = null;
   }
   
   // Show loading
@@ -835,8 +782,8 @@ async function loadInboxItems() {
     
     if (role === 'technician') {
       // Technicians: outgoing (to managers) + incoming (e.g. document renewal directed to them)
-      _techInboxOutgoing = [];
-      _techInboxIncoming = [];
+      inboxState._techInboxOutgoing = [];
+      inboxState._techInboxIncoming = [];
       const qOut = query(
         collection(db, `salons/${salonId}/inboxItems`),
         where('createdByUid', '==', uid),
@@ -852,13 +799,13 @@ async function loadInboxItems() {
       const unsubOut = onSnapshot(
         qOut,
         (snapshot) => {
-          _techInboxOutgoing = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          inboxState._techInboxOutgoing = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           applyTechInboxMerge(loadingEl);
         },
         (error) => {
           console.error('[Inbox] Technician outgoing query error', error);
           if (loadingEl) loadingEl.style.display = 'none';
-          currentRequests = [];
+          inboxState.currentRequests = [];
           if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
           if (emptyEl) {
             emptyEl.style.display = 'block';
@@ -874,13 +821,13 @@ async function loadInboxItems() {
       const unsubIn = onSnapshot(
         qIn,
         (snapshot) => {
-          _techInboxIncoming = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          inboxState._techInboxIncoming = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           applyTechInboxMerge(loadingEl);
         },
         (error) => {
           console.error('[Inbox] Technician incoming query error', error);
           if (loadingEl) loadingEl.style.display = 'none';
-          currentRequests = [];
+          inboxState.currentRequests = [];
           if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
           if (emptyEl) {
             emptyEl.style.display = 'block';
@@ -893,19 +840,19 @@ async function loadInboxItems() {
           }
         }
       );
-      inboxUnsubscribe = () => {
+      inboxState.inboxUnsubscribe = () => {
         unsubOut();
         unsubIn();
       };
       return;
     } else if (role !== "technician" && !inboxCanManageInbox() && !inboxCanSendRequests()) {
       if (loadingEl) loadingEl.style.display = "none";
-      currentRequests = [];
+      inboxState.currentRequests = [];
       updateInboxStaffFilterOptions();
       updateInboxBadges();
       renderInboxList();
       return;
-    } else if (inboxViewMode === "mine" || !inboxCanManageInbox()) {
+    } else if (inboxState.inboxViewMode === "mine" || !inboxCanManageInbox()) {
       // "My Requests" (created by me) — send-only staff use this path only
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
@@ -915,7 +862,7 @@ async function loadInboxItems() {
       );
     } else {
       // "To handle" — full inbox managers only
-      if (currentInboxTab === 'open') {
+      if (inboxState.currentInboxTab === 'open') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
@@ -923,7 +870,7 @@ async function loadInboxItems() {
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
-      } else if (currentInboxTab === 'needs_info') {
+      } else if (inboxState.currentInboxTab === 'needs_info') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
@@ -931,7 +878,7 @@ async function loadInboxItems() {
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
-      } else if (currentInboxTab === 'approved') {
+      } else if (inboxState.currentInboxTab === 'approved') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
@@ -939,7 +886,7 @@ async function loadInboxItems() {
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
-      } else if (currentInboxTab === 'denied') {
+      } else if (inboxState.currentInboxTab === 'denied') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
@@ -947,7 +894,7 @@ async function loadInboxItems() {
           orderBy('lastActivityAt', 'desc'),
           limit(50)
         );
-      } else if (currentInboxTab === 'archived') {
+      } else if (inboxState.currentInboxTab === 'archived') {
         q = query(
           collection(db, `salons/${salonId}/inboxItems`),
           where('forUid', '==', uid),
@@ -967,18 +914,18 @@ async function loadInboxItems() {
     }
     
     // Listen for changes
-    inboxUnsubscribe = onSnapshot(q, (snapshot) => {
+    inboxState.inboxUnsubscribe = onSnapshot(q, (snapshot) => {
       applyInboxSnapshotRows(snapshot, loadingEl);
     }, (error) => {
       console.error('[Inbox] Query error', error);
       if (inboxErrorNeedsIndex(error)) {
         try {
-          if (typeof inboxUnsubscribe === 'function') inboxUnsubscribe();
+          if (typeof inboxState.inboxUnsubscribe === 'function') inboxState.inboxUnsubscribe();
         } catch (_) {}
-        inboxUnsubscribe = subscribeInboxIndexFallback({
+        inboxState.inboxUnsubscribe = subscribeInboxIndexFallback({
           salonId,
           uid,
-          mode: inboxViewMode === "mine" || !inboxCanManageInbox() ? "mine" : "to_handle",
+          mode: inboxState.inboxViewMode === "mine" || !inboxCanManageInbox() ? "mine" : "to_handle",
           loadingEl,
           listEl,
           emptyEl
@@ -999,7 +946,7 @@ async function loadInboxItems() {
 function updateInboxBadges() {
   if (!inboxCanManageInbox()) return;
 
-  const uid = currentUserProfile.uid;
+  const uid = inboxState.currentUserProfile.uid;
 
   // Scope the counts to the currently active branch so the badges match
   // what the user actually sees in the list for that location.
@@ -1018,7 +965,7 @@ function updateInboxBadges() {
   const inActiveLoc = (r) => !activeLocId || inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
 
   // Open: new requests not yet seen by recipient
-  const openCount = currentRequests.filter(
+  const openCount = inboxState.currentRequests.filter(
     (r) =>
       r.forUid === uid &&
       (r.status === "open" || r.status === "pending") &&
@@ -1027,7 +974,7 @@ function updateInboxBadges() {
   ).length;
 
   // Needs Info: requests where staff replied but recipient hasn't seen it yet
-  const needsInfoCount = currentRequests.filter(
+  const needsInfoCount = inboxState.currentRequests.filter(
     r => r.forUid === uid && r.status === 'needs_info' && r.unreadForManagers === true && inActiveLoc(r)
   ).length;
 
@@ -1066,15 +1013,15 @@ function updateInboxStaffFilterOptions() {
   if (role === "technician") return;
 
   const seen = new Map();
-  currentRequests.forEach(req => {
+  inboxState.currentRequests.forEach(req => {
     const uid = req.forUid || req.createdByUid || '';
     const name = (req.forStaffName || req.createdByName || '').trim() || uid || 'Unknown';
     if (uid && !seen.has(uid)) seen.set(uid, name);
   });
   const options = [['', 'ALL STAFF']];
   seen.forEach((name, uid) => options.push([uid, name]));
-  const current = inboxStaffFilterUid;
-  if (!options.some(([v]) => v === current)) inboxStaffFilterUid = '';
+  const current = inboxState.inboxStaffFilterUid;
+  if (!options.some(([v]) => v === current)) inboxState.inboxStaffFilterUid = '';
 
   sel.innerHTML = '';
   for (const [val, lab] of options) {
@@ -1083,7 +1030,7 @@ function updateInboxStaffFilterOptions() {
     o.textContent = lab;
     sel.appendChild(o);
   }
-  sel.value = inboxStaffFilterUid;
+  sel.value = inboxState.inboxStaffFilterUid;
 }
 
 function renderInboxList() {
@@ -1201,7 +1148,7 @@ function _renderInboxListInner() {
   const emptyEl = document.getElementById('inboxEmpty');
   const loadingEl = document.getElementById('inboxLoading');
 
-  let requestsToShow = currentRequests;
+  let requestsToShow = inboxState.currentRequests;
 
   // Technician merged list is already noise-filtered in applyTechInboxMerge; keep filter here if data came from elsewhere.
   if (role === "technician") {
@@ -1209,28 +1156,28 @@ function _renderInboxListInner() {
   }
 
   // Admin/manager "My Requests": createdByUid query can still return automated rows (scanner uid) + staff-call noise
-  if (role !== "technician" && inboxViewMode === "mine" && inboxCanManageInbox()) {
+  if (role !== "technician" && inboxState.inboxViewMode === "mine" && inboxCanManageInbox()) {
     requestsToShow = requestsToShow.filter((r) => !MANAGER_ONLY_INBOX_TYPES.has(String(r.type || "").trim()));
     requestsToShow = requestsToShow.filter((r) => !ffInboxIsStaffCallOtherNoise(r));
   }
 
   // Client-side status filter to prevent flicker when Firestore sends intermediate snapshots
-  if (inboxViewMode === 'to_handle' || role === 'technician') {
-    if (currentInboxTab === 'open') {
+  if (inboxState.inboxViewMode === 'to_handle' || role === 'technician') {
+    if (inboxState.currentInboxTab === 'open') {
       requestsToShow = requestsToShow.filter((r) => r.status === "open" || r.status === "pending");
-    } else if (currentInboxTab === 'needs_info') {
+    } else if (inboxState.currentInboxTab === 'needs_info') {
       requestsToShow = requestsToShow.filter(r => r.status === 'needs_info');
-    } else if (currentInboxTab === 'approved') {
+    } else if (inboxState.currentInboxTab === 'approved') {
       requestsToShow = requestsToShow.filter(r => r.status === 'approved' || r.status === 'done');
-    } else if (currentInboxTab === 'denied') {
+    } else if (inboxState.currentInboxTab === 'denied') {
       requestsToShow = requestsToShow.filter(r => r.status === 'denied');
-    } else if (currentInboxTab === 'archived') {
+    } else if (inboxState.currentInboxTab === 'archived') {
       requestsToShow = requestsToShow.filter(r => r.status === 'archived');
     }
   }
 
-  if (role !== 'technician' && inboxViewMode !== 'mine' && inboxStaffFilterUid) {
-    requestsToShow = requestsToShow.filter(r => (r.forUid || r.createdByUid) === inboxStaffFilterUid);
+  if (role !== 'technician' && inboxState.inboxViewMode !== 'mine' && inboxState.inboxStaffFilterUid) {
+    requestsToShow = requestsToShow.filter(r => (r.forUid || r.createdByUid) === inboxState.inboxStaffFilterUid);
   }
 
   // Scope the Inbox to the active location. An item for a staff member who
@@ -1260,7 +1207,7 @@ function _renderInboxListInner() {
       emptyEl.style.display = 'block';
       const msgEl = emptyEl.querySelector('#emptyStateMessage');
       if (msgEl) {
-        msgEl.textContent = inboxStaffFilterUid ? 'No requests from this staff in this tab' : 'No requests in this category';
+        msgEl.textContent = inboxState.inboxStaffFilterUid ? 'No requests from this staff in this tab' : 'No requests in this category';
       }
     }
     return;
@@ -1599,14 +1546,14 @@ function ffShowInventorySuggestionModal(request) {
       // Optimistic local cleanup — remove from in-memory list so UI updates immediately
       // even if the Firestore listener is slow to reflect the change.
       try {
-        if (Array.isArray(currentRequests)) {
-          currentRequests = currentRequests.filter((r) => r && r.id !== request.id);
+        if (Array.isArray(inboxState.currentRequests)) {
+          inboxState.currentRequests = inboxState.currentRequests.filter((r) => r && r.id !== request.id);
         }
-        if (typeof _techInboxOutgoing !== 'undefined' && Array.isArray(_techInboxOutgoing)) {
-          _techInboxOutgoing = _techInboxOutgoing.filter((r) => r && r.id !== request.id);
+        if (typeof inboxState._techInboxOutgoing !== 'undefined' && Array.isArray(inboxState._techInboxOutgoing)) {
+          inboxState._techInboxOutgoing = inboxState._techInboxOutgoing.filter((r) => r && r.id !== request.id);
         }
-        if (typeof _techInboxIncoming !== 'undefined' && Array.isArray(_techInboxIncoming)) {
-          _techInboxIncoming = _techInboxIncoming.filter((r) => r && r.id !== request.id);
+        if (typeof inboxState._techInboxIncoming !== 'undefined' && Array.isArray(inboxState._techInboxIncoming)) {
+          inboxState._techInboxIncoming = inboxState._techInboxIncoming.filter((r) => r && r.id !== request.id);
         }
         if (typeof renderInboxList === 'function') renderInboxList();
         if (typeof updateInboxBadges === 'function') updateInboxBadges();
@@ -1630,11 +1577,11 @@ function ffShowInventorySuggestionModal(request) {
 /** Archive an inventory suggestion (Dismiss or Add-to-Order). Status update respects inbox rules. */
 async function ffDismissInventorySuggestion(request, opts) {
   if (!request || !request.id) throw new Error('Missing request id');
-  const salonId = currentUserProfile && currentUserProfile.salonId;
+  const salonId = inboxState.currentUserProfile && inboxState.currentUserProfile.salonId;
   if (!salonId) throw new Error('No salonId in profile');
   const patch = {
     status: 'archived',
-    decidedBy: currentUserProfile.uid || null,
+    decidedBy: inboxState.currentUserProfile.uid || null,
     decidedAt: serverTimestamp(),
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1707,7 +1654,6 @@ function ffRenderInventorySuggestionCard(request, card, dateStr, statusStr) {
   return card;
 }
 
-const FF_INVENTORY_SUPPLY_VARIANT_KEYS = new Set(["dip", "gel", "regular"]);
 
 /**
  * Apply approved Supply Request to inventory (Order Quantity contribution only).
@@ -1717,7 +1663,7 @@ const FF_INVENTORY_SUPPLY_VARIANT_KEYS = new Set(["dip", "gel", "regular"]);
  * inbox doc's `appliedToInventory === true`. Does NOT touch stock or current.
  */
 async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
-  const salonId = currentUserProfile?.salonId;
+  const salonId = inboxState.currentUserProfile?.salonId;
   if (!salonId) return;
   const rid = String(requestId || "").trim();
   if (!rid) return;
@@ -1779,9 +1725,9 @@ async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
   }
 
   const byName =
-    currentUserProfile && currentUserProfile.name ? String(currentUserProfile.name) : "";
+    inboxState.currentUserProfile && inboxState.currentUserProfile.name ? String(inboxState.currentUserProfile.name) : "";
   const byUid =
-    currentUserProfile && currentUserProfile.uid ? String(currentUserProfile.uid) : "";
+    inboxState.currentUserProfile && inboxState.currentUserProfile.uid ? String(inboxState.currentUserProfile.uid) : "";
   /** @type {Array<{catId: string, subId: string, rowId: string, groupId: string | null}>} */
   const appliedInventoryRefs = [];
   /** @type {string[]} */
@@ -1909,13 +1855,13 @@ async function applyApprovedSupplyRequestToInventory(requestId, requestData) {
 }
 
 async function approveSupplyRequest(requestId, requestData) {
-  const salonId = currentUserProfile.salonId;
+  const salonId = inboxState.currentUserProfile.salonId;
   const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
   // 1) Update inbox status first (safe, uses only allowed keys).
   await updateDoc(inboxRef, {
     status: "approved",
     decidedAt: serverTimestamp(),
-    decidedBy: currentUserProfile.uid,
+    decidedBy: inboxState.currentUserProfile.uid,
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     unreadForManagers: false,
@@ -1940,14 +1886,14 @@ async function approveSupplyRequest(requestId, requestData) {
 }
 
 async function denySupplyRequest(requestId, responseNote) {
-  const salonId = currentUserProfile.salonId;
+  const salonId = inboxState.currentUserProfile.salonId;
   const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
   await updateDoc(inboxRef, {
     status: "denied",
     deniedAt: serverTimestamp(),
-    deniedBy: currentUserProfile.uid,
+    deniedBy: inboxState.currentUserProfile.uid,
     decidedAt: serverTimestamp(),
-    decidedBy: currentUserProfile.uid,
+    decidedBy: inboxState.currentUserProfile.uid,
     responseNote: responseNote != null && String(responseNote).trim() !== "" ? String(responseNote).trim() : null,
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -1957,7 +1903,6 @@ async function denySupplyRequest(requestId, responseNote) {
 
 // --- Supplies request form: inventory master (categories → subcategories → items) ---
 
-const SUPPLIES_VARIANT_LABELS = { dip: "Dip", gel: "Gel", regular: "Regular" };
 
 function syncSuppliesRowVariantUi(row) {
   const varWrap = row.querySelector(".supplies-variant-wrap");
@@ -2021,7 +1966,7 @@ const SUPPLIES_ITEM_ROW_INNER_HTML = `
 `.trim();
 
 async function ffFetchInventoryCategoriesForSupplies() {
-  const salonId = currentUserProfile?.salonId;
+  const salonId = inboxState.currentUserProfile?.salonId;
   if (!salonId) return [];
   const q = query(
     collection(db, `salons/${salonId}/inventoryCategories`),
@@ -2042,7 +1987,7 @@ async function ffFetchInventoryCategoriesForSupplies() {
 
 async function ffFetchInventorySubcategoriesForSupplies(categoryId) {
   const cid = String(categoryId || "").trim();
-  const salonId = currentUserProfile?.salonId;
+  const salonId = inboxState.currentUserProfile?.salonId;
   if (!cid || !salonId) return [];
   const q = query(
     collection(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories`),
@@ -2069,7 +2014,7 @@ async function ffFetchInventorySubcategoriesForSupplies(categoryId) {
 async function ffFetchInventoryItemsForSupplies(categoryId, subcategoryId) {
   const cid = String(categoryId || "").trim();
   const sid = String(subcategoryId || "").trim();
-  const salonId = currentUserProfile?.salonId;
+  const salonId = inboxState.currentUserProfile?.salonId;
   if (!cid || !sid || !salonId) return [];
   const ref = doc(db, `salons/${salonId}/inventoryCategories/${cid}/inventorySubcategories/${sid}`);
   const snap = await getDoc(ref);
@@ -2710,7 +2655,7 @@ window.toggleRequestCategory = function(cat) {
 // Inbox Settings Modal (admin/owner only) — custom request types
 // =====================
 window.openInboxSettingsModal = function() {
-  if (!currentUserProfile?.salonId || !["admin", "owner"].includes(inboxUserRoleLc())) return;
+  if (!inboxState.currentUserProfile?.salonId || !["admin", "owner"].includes(inboxUserRoleLc())) return;
   const modal = document.createElement('div');
   modal.id = 'inboxSettingsModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:999999;padding:20px;';
@@ -2725,7 +2670,7 @@ window.openInboxSettingsModal = function() {
     if (types.length === 0) return;
     const label = categoryLabels[cat] || cat;
     const rows = types.map(t => {
-      const hidden = (inboxHiddenTypes || []).includes(t.id);
+      const hidden = (inboxState.inboxHiddenTypes || []).includes(t.id);
       return `<div class="inbox-visibility-row" data-type-id="${t.id}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;">
         <span style="font-size:18px;">${t.icon || '📝'}</span>
         <span style="flex:1;margin-left:10px;font-size:14px;font-weight:500;">${escapeHtml(t.label)}</span>
@@ -2805,8 +2750,8 @@ window.closeInboxSettingsModal = function() {
 function renderCustomTypesList(container) {
   if (!container) return;
   container.innerHTML = '';
-  const hiddenSet = new Set(inboxHiddenTypes || []);
-  (customRequestTypes || []).forEach(t => {
+  const hiddenSet = new Set(inboxState.inboxHiddenTypes || []);
+  (inboxState.customRequestTypes || []).forEach(t => {
     const hidden = hiddenSet.has(t.id);
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:6px;';
@@ -2836,7 +2781,7 @@ function renderCustomTypesList(container) {
       }
     };
   });
-  if ((customRequestTypes || []).length === 0) {
+  if ((inboxState.customRequestTypes || []).length === 0) {
     const empty = document.createElement('div');
     empty.style.cssText = 'font-size:13px;color:#9ca3af;padding:12px;';
     empty.textContent = 'No custom types yet. Add one below.';
@@ -2845,15 +2790,14 @@ function renderCustomTypesList(container) {
 }
 
 window.editCustomType = function(typeId) {
-  const t = (customRequestTypes || []).find(x => x.id === typeId);
-  if (!t || !currentUserProfile?.salonId) return;
+  const t = (inboxState.customRequestTypes || []).find(x => x.id === typeId);
+  if (!t || !inboxState.currentUserProfile?.salonId) return;
   const modal = document.getElementById('inboxSettingsModal');
   const content = modal?.firstElementChild;
   openAddCustomTypeForm(content, typeId, t);
 };
 
 // Emojis the admin can pick from (no typing needed)
-const CUSTOM_TYPE_EMOJIS = ['📝', '📚', '📋', '📅', '⏰', '📦', '🔧', '✅', '🎯', '🪴', '📌', '🔔', '🏖️', '🏃', '💡', '📎'];
 
 function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
   if (!settingsContent) return;
@@ -2915,10 +2859,10 @@ function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
     try {
       const payload = { label, icon, description };
       if (isEdit) {
-        await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/requestTypes`, editTypeId), payload);
+        await updateDoc(doc(db, `salons/${inboxState.currentUserProfile.salonId}/requestTypes`, editTypeId), payload);
         showToast('Updated', 'success');
       } else {
-        await addDoc(collection(db, `salons/${currentUserProfile.salonId}/requestTypes`), payload);
+        await addDoc(collection(db, `salons/${inboxState.currentUserProfile.salonId}/requestTypes`), payload);
         showToast('Custom type added', 'success');
       }
       await loadCustomTypes();
@@ -2932,9 +2876,9 @@ function openAddCustomTypeForm(settingsContent, editTypeId, editData) {
 }
 
 window.deleteCustomType = async function(typeId) {
-  if (!currentUserProfile?.salonId || !confirm('Delete this request type? Existing requests of this type will keep their label.')) return;
+  if (!inboxState.currentUserProfile?.salonId || !confirm('Delete this request type? Existing requests of this type will keep their label.')) return;
   try {
-    await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/requestTypes`, typeId));
+    await deleteDoc(doc(db, `salons/${inboxState.currentUserProfile.salonId}/requestTypes`, typeId));
     await loadCustomTypes();
     const listEl = document.getElementById('customTypesList');
     if (listEl) renderCustomTypesList(listEl);
@@ -2993,12 +2937,12 @@ async function ffResolveStaffFirestoreIdByScanInbox(salonId, uid, emailHint) {
 /** Firestore staff doc id for the signed-in uploader (scan uid/email first, then profile/members/users). */
 async function resolveSubmittingStaffIdForDocumentUpload(salonId) {
   const sid = String(salonId || "").trim();
-  const uid = String(auth?.currentUser?.uid || currentUserProfile?.uid || "").trim();
+  const uid = String(auth?.currentUser?.uid || inboxState.currentUserProfile?.uid || "").trim();
   if (!sid || !uid) return "";
-  const emailHint = String(currentUserProfile?.email || "").trim();
+  const emailHint = String(inboxState.currentUserProfile?.email || "").trim();
   const scanned = await ffResolveStaffFirestoreIdByScanInbox(sid, uid, emailHint);
   if (scanned) return scanned;
-  let id = String(currentUserProfile?.staffId || "").trim();
+  let id = String(inboxState.currentUserProfile?.staffId || "").trim();
   if (id) return id;
   try {
     const mSnap = await getDoc(doc(db, "salons", sid, "members", uid));
@@ -3095,7 +3039,7 @@ function createRequestForm(type) {
     : '';
   const isRenewal = type === 'document_renewal_request';
   const technicians = isRenewal
-    ? (_inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician')
+    ? (inboxState._inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician')
     : [];
   const renewalStaffHtml =
     technicians.length === 0
@@ -3517,18 +3461,18 @@ async function submitRequest(type) {
   console.log('[Inbox] Submitting request:', type);
 
   await loadCurrentUserProfile();
-  if (!currentUserProfile) {
+  if (!inboxState.currentUserProfile) {
     showToast('User profile not loaded', 'error');
     return;
   }
 
-  const salonIdForStaff = String(currentUserProfile.salonId || '').trim();
+  const salonIdForStaff = String(inboxState.currentUserProfile.salonId || '').trim();
   if (!salonIdForStaff) {
     showToast('No salon is selected for this account.', 'error');
     return;
   }
 
-  let creatorStaffId = String(currentUserProfile.staffId || '').trim();
+  let creatorStaffId = String(inboxState.currentUserProfile.staffId || '').trim();
   if (!creatorStaffId) {
     creatorStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonIdForStaff);
   }
@@ -3539,9 +3483,9 @@ async function submitRequest(type) {
     );
     return;
   }
-  if (String(currentUserProfile.staffId || '').trim() !== creatorStaffId) {
-    currentUserProfile.staffId = creatorStaffId;
-    await mergeSalonStaffIntoUserProfile(currentUserProfile);
+  if (String(inboxState.currentUserProfile.staffId || '').trim() !== creatorStaffId) {
+    inboxState.currentUserProfile.staffId = creatorStaffId;
+    await mergeSalonStaffIntoUserProfile(inboxState.currentUserProfile);
   }
 
   if (!inboxCanSendRequests()) {
@@ -3573,8 +3517,8 @@ async function submitRequest(type) {
         endDate,
         daysCount,
         note,
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
       
     } else if (type === 'late_start') {
@@ -3593,8 +3537,8 @@ async function submitRequest(type) {
         startTime: time,
         reason,
         normalTime: null,
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
       
     } else if (type === 'early_leave') {
@@ -3613,8 +3557,8 @@ async function submitRequest(type) {
         endTime: time,
         reason,
         normalTime: null,
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
       
     } else if (type === 'day_off') {
@@ -3628,8 +3572,8 @@ async function submitRequest(type) {
         date,
         note,
         affectedDates: [date],
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
 
     } else if (type === 'time_off') {
@@ -3646,8 +3590,8 @@ async function submitRequest(type) {
         endDate: endDate || startDate,
         note,
         affectedDates,
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
 
     } else if (type === 'schedule_change') {
@@ -3675,8 +3619,8 @@ async function submitRequest(type) {
         startDate,
         endDate: endDate || startDate,
         affectedDates,
-        subjectUid: currentUserProfile.uid,
-        subjectStaffId: currentUserProfile.staffId || '',
+        subjectUid: inboxState.currentUserProfile.uid,
+        subjectStaffId: inboxState.currentUserProfile.staffId || '',
       };
       
     } else if (type === 'extra_shift') {
@@ -3716,7 +3660,7 @@ async function submitRequest(type) {
       const reason = document.getElementById('doc_req_reason')?.value?.trim();
       const dueDate = document.getElementById('doc_req_due')?.value || null;
       const deliveryMethod = document.getElementById('doc_req_delivery')?.value || 'Email';
-      const contactEmail = document.getElementById('doc_req_email')?.value?.trim() || auth.currentUser?.email || currentUserProfile?.email || null;
+      const contactEmail = document.getElementById('doc_req_email')?.value?.trim() || auth.currentUser?.email || inboxState.currentUserProfile?.email || null;
       if (!documentType || !reason) { showToast('Please select document type and enter reason', 'error'); return; }
       data = { documentType, reason, dueDate, deliveryMethod, contactEmail };
 
@@ -3726,7 +3670,7 @@ async function submitRequest(type) {
       const renewForDocId = (document.getElementById('doc_up_renew_for_doc_id')?.value || '').trim();
       const fileInput = document.getElementById('doc_up_file');
       const notes = document.getElementById('doc_up_notes')?.value?.trim() || null;
-      const salonId = currentUserProfile.salonId;
+      const salonId = inboxState.currentUserProfile.salonId;
       const ownerStaffId = await resolveSubmittingStaffIdForDocumentUpload(salonId);
       if (!ownerStaffId) {
         showToast(
@@ -3868,7 +3812,7 @@ async function submitRequest(type) {
       // Recipient selected but uid not known — try one more time to load from members
       await loadSalonUsersForRecipients();
       const recipName = sentToNames[0] || '';
-      const found = (_inboxUsersCache || []).find(u =>
+      const found = (inboxState._inboxUsersCache || []).find(u =>
         u.name && recipName && u.name.toLowerCase().trim() === recipName.toLowerCase().trim()
       );
       if (found && found.uid) {
@@ -3880,7 +3824,7 @@ async function submitRequest(type) {
       }
     }
     
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     const creatorName = await resolveCurrentInboxActorName();
 
     const docUploadOwnerExtra =
@@ -3935,20 +3879,20 @@ async function submitRequest(type) {
       const forStaffIdStr = ffInboxRuleString(forStaffId);
       const forStaffNameStr = ffInboxRuleString(forStaffName);
       const createdByNameStr = ffInboxRuleString(
-        creatorName || currentUserProfile.name || currentUserProfile.displayName
+        creatorName || inboxState.currentUserProfile.name || inboxState.currentUserProfile.displayName
       );
-      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
+      const createdByRoleStr = ffInboxRuleString(inboxState.currentUserProfile.role);
 
-      console.log('[Inbox] Sending request: createdByUid=', currentUserProfile.uid, 'forUid=', forUidStr, 'forName=', forStaffNameStr);
+      console.log('[Inbox] Sending request: createdByUid=', inboxState.currentUserProfile.uid, 'forUid=', forUidStr, 'forName=', forStaffNameStr);
 
-      if (forUidStr === currentUserProfile.uid) {
+      if (forUidStr === inboxState.currentUserProfile.uid) {
         showToast('Cannot send a request to yourself', 'error');
         return;
       }
 
       const requestDoc = {
         ...baseDoc,
-        createdByUid: currentUserProfile.uid,
+        createdByUid: inboxState.currentUserProfile.uid,
         createdByStaffId: creatorStaffId,
         createdByName: createdByNameStr,
         createdByRole: createdByRoleStr,
@@ -3964,16 +3908,16 @@ async function submitRequest(type) {
     } else {
       // Technician creating for self — direct Firestore (forUid = creator)
       const createdByNameStr = ffInboxRuleString(
-        creatorName || currentUserProfile.name || currentUserProfile.displayName
+        creatorName || inboxState.currentUserProfile.name || inboxState.currentUserProfile.displayName
       );
-      const createdByRoleStr = ffInboxRuleString(currentUserProfile.role);
+      const createdByRoleStr = ffInboxRuleString(inboxState.currentUserProfile.role);
       const requestDoc = {
         ...baseDoc,
-        createdByUid: currentUserProfile.uid,
+        createdByUid: inboxState.currentUserProfile.uid,
         createdByStaffId: creatorStaffId,
         createdByName: createdByNameStr,
         createdByRole: createdByRoleStr,
-        forUid: currentUserProfile.uid,
+        forUid: inboxState.currentUserProfile.uid,
         forStaffId: creatorStaffId,
         forStaffName: createdByNameStr,
         createdAt: serverTimestamp(),
@@ -4024,21 +3968,21 @@ function showToast(message, type = 'success') {
 // Request Details Modal
 // =====================
 function showRequestDetails(requestId) {
-  const request = currentRequests.find(r => r.id === requestId);
+  const request = inboxState.currentRequests.find(r => r.id === requestId);
   if (!request) return;
   
   console.log('[Inbox] Showing request details', requestId);
 
   // Mark as read only if the current user IS the recipient (forUid), not the sender
   const isManagerRole = inboxCanManageInbox();
-  const isRecipientViewing = isManagerRole && request.forUid === currentUserProfile.uid;
-  if (isRecipientViewing && request.unreadForManagers === true && currentUserProfile.salonId) {
+  const isRecipientViewing = isManagerRole && request.forUid === inboxState.currentUserProfile.uid;
+  if (isRecipientViewing && request.unreadForManagers === true && inboxState.currentUserProfile.salonId) {
     // Optimistic: update local state immediately
-    const idx = currentRequests.findIndex(r => r.id === requestId);
-    if (idx !== -1) currentRequests[idx] = { ...currentRequests[idx], unreadForManagers: false };
+    const idx = inboxState.currentRequests.findIndex(r => r.id === requestId);
+    if (idx !== -1) inboxState.currentRequests[idx] = { ...inboxState.currentRequests[idx], unreadForManagers: false };
     updateInboxBadges();
     // Persist to Firestore in background (no lastActivityAt change to avoid reorder)
-    updateDoc(doc(db, `salons/${currentUserProfile.salonId}/inboxItems`, requestId), {
+    updateDoc(doc(db, `salons/${inboxState.currentUserProfile.salonId}/inboxItems`, requestId), {
       unreadForManagers: false
     }).catch(err => console.warn('[Inbox] Mark read failed', err));
   }
@@ -4086,8 +4030,8 @@ function showRequestDetails(requestId) {
 
   // Role checks
   const isManager = inboxCanManageInbox();
-  const isTechnician = currentUserProfile && inboxUserRoleLc() === "technician";
-  const isMyRequest = currentUserProfile && request.forUid === currentUserProfile.uid;
+  const isTechnician = inboxState.currentUserProfile && inboxUserRoleLc() === "technician";
+  const isMyRequest = inboxState.currentUserProfile && request.forUid === inboxState.currentUserProfile.uid;
 
   let docAlertPanelHtml = '';
   if (isDocAlert) {
@@ -4211,7 +4155,7 @@ function showRequestDetails(requestId) {
   `;
   
   // Reply box: shown to the REQUEST CREATOR when status is needs_info (any role)
-  const isCreator = currentUserProfile && request.createdByUid === currentUserProfile.uid;
+  const isCreator = inboxState.currentUserProfile && request.createdByUid === inboxState.currentUserProfile.uid;
   if (isCreator && request.status === 'needs_info' && !request.staffReply) {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
@@ -4244,8 +4188,8 @@ function showRequestDetails(requestId) {
 
   const isRenewalCreator =
     inboxCanSendRequests() &&
-    currentUserProfile &&
-    request.createdByUid === currentUserProfile.uid &&
+    inboxState.currentUserProfile &&
+    request.createdByUid === inboxState.currentUserProfile.uid &&
     request.type === 'document_renewal_request' &&
     request.createdByUid !== request.forUid;
   if (isRenewalCreator && (request.status === 'open' || request.status === 'needs_info')) {
@@ -4261,7 +4205,7 @@ function showRequestDetails(requestId) {
   }
   
   // Manager actions — only for the RECIPIENT (who the request was sent TO), not the creator
-  const isRecipient = currentUserProfile && request.forUid === currentUserProfile.uid;
+  const isRecipient = inboxState.currentUserProfile && request.forUid === inboxState.currentUserProfile.uid;
   if (isManager && isRecipient && request.status === 'open' && request.type === 'staff_birthday_reminder') {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
@@ -4288,7 +4232,7 @@ function showRequestDetails(requestId) {
       documentId: (rd.documentId || request.documentId || '').trim(),
     };
     const chatPayload = {
-      salonId: currentUserProfile.salonId,
+      salonId: inboxState.currentUserProfile.salonId,
       staffId: renewPayload.staffId,
       documentId: renewPayload.documentId,
     };
@@ -4828,11 +4772,11 @@ window.submitStaffReply = async function(requestId) {
   if (!reply) { showToast('Please enter a reply', 'error'); return; }
 
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
 
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
       staffReply: reply,
       status: 'open',
@@ -4864,11 +4808,11 @@ window.needsMoreInfo = async function(requestId) {
   if (!question) return;
 
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
 
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
       status: 'needs_info',
       needsInfoQuestion: question,
@@ -4889,7 +4833,7 @@ window.uploadDocumentResponse = async function(requestId) {
     if (typeof showToast === "function") showToast("You do not have permission to upload a response.", "error");
     return;
   }
-  const request = currentRequests.find(r => r.id === requestId);
+  const request = inboxState.currentRequests.find(r => r.id === requestId);
   if (!request || request.type !== 'document_request') return;
   const fileInput = document.getElementById('docResponseFile_' + requestId);
   if (!fileInput?.files?.length) {
@@ -4903,7 +4847,7 @@ window.uploadDocumentResponse = async function(requestId) {
     return;
   }
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     const yyyyMm = new Date().toISOString().slice(0, 7);
     const fileId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const safeName = (file.name || 'response').replace(/[^a-zA-Z0-9.-]/g, '_').slice(0, 80);
@@ -4916,7 +4860,7 @@ window.uploadDocumentResponse = async function(requestId) {
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
       data: { ...currentData, responseFileUrl, responseFilePath: path },
       status: 'done',
-      decidedBy: currentUserProfile.uid,
+      decidedBy: inboxState.currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -4937,13 +4881,13 @@ window.markBirthdayReminderDone = async function(requestId) {
     return;
   }
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     await updateDoc(doc(db, `salons/${salonId}/inboxItems`, requestId), {
       status: 'archived',
-      decidedBy: currentUserProfile.uid,
+      decidedBy: inboxState.currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -4970,7 +4914,7 @@ window.openDocumentAlertStaffMember = function(staffId) {
 /** Same chat reminder as Staff → Documents (expiring soon). Payload: { salonId, staffId, documentId }. */
 window.ffDocAlertSendChatReminder = async function (payload) {
   const p = payload && typeof payload === 'object' ? payload : {};
-  const salonId = String(p.salonId || currentUserProfile?.salonId || '').trim();
+  const salonId = String(p.salonId || inboxState.currentUserProfile?.salonId || '').trim();
   const staffId = String(p.staffId || '').trim();
   const docId = String(p.documentId || '').trim();
   if (!salonId || !staffId || !docId) {
@@ -5011,8 +4955,8 @@ window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
     return;
   }
   const rid = String(requestId || "").trim();
-  if (!rid || !currentUserProfile?.salonId) return;
-  const salonId = currentUserProfile.salonId;
+  if (!rid || !inboxState.currentUserProfile?.salonId) return;
+  const salonId = inboxState.currentUserProfile.salonId;
   const inboxRef = doc(db, `salons/${salonId}/inboxItems`, rid);
   let snap;
   try {
@@ -5123,8 +5067,8 @@ window.ffInboxOpenDocumentMetadataEdit = async function (requestId) {
       const fresh = await getDoc(inboxRef);
       if (fresh.exists()) {
         const row = { id: rid, ...fresh.data() };
-        const idx2 = currentRequests.findIndex((r) => r.id === rid);
-        if (idx2 !== -1) currentRequests[idx2] = row;
+        const idx2 = inboxState.currentRequests.findIndex((r) => r.id === rid);
+        if (idx2 !== -1) inboxState.currentRequests[idx2] = row;
       }
       showToast("Details saved.", "success");
       document.removeEventListener("keydown", onKey);
@@ -5155,11 +5099,11 @@ window.approveRequest = async function(requestId) {
 
   // Optimistic: remove immediately from UI before Firestore confirms
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
 
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
     const snap = await getDoc(inboxRef);
     if (!snap.exists()) {
@@ -5191,7 +5135,7 @@ window.approveRequest = async function(requestId) {
         salonId,
         inboxItemId: requestId,
         inboxItem: { id: requestId, ...item },
-        approverUid: currentUserProfile.uid,
+        approverUid: inboxState.currentUserProfile.uid,
       });
       if (!staffDocumentId) {
         console.warn('[Inbox] Approve sync returned no staff document id', requestId, item.type, item.data);
@@ -5206,7 +5150,7 @@ window.approveRequest = async function(requestId) {
 
     const approvePayload = {
       status: 'approved',
-      decidedBy: currentUserProfile.uid,
+      decidedBy: inboxState.currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -5249,11 +5193,11 @@ window.denyRequest = async function(requestId) {
 
   // Optimistic: remove immediately from UI before Firestore confirms
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
 
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     const inboxRef = doc(db, `salons/${salonId}/inboxItems`, requestId);
     const snap = await getDoc(inboxRef);
     if (!snap.exists()) {
@@ -5279,7 +5223,7 @@ window.denyRequest = async function(requestId) {
 
     await updateDoc(inboxRef, {
       status: 'denied',
-      decidedBy: currentUserProfile.uid,
+      decidedBy: inboxState.currentUserProfile.uid,
       decidedAt: serverTimestamp(),
       responseNote: reason || null,
       lastActivityAt: serverTimestamp(),
@@ -5305,7 +5249,7 @@ window.ffInboxApplySupplyToInventory = async function (requestId, btnEl) {
       if (typeof showToast === "function") showToast("You do not have permission.", "error");
       return;
     }
-    const salonId = currentUserProfile?.salonId;
+    const salonId = inboxState.currentUserProfile?.salonId;
     if (!salonId || !requestId) return;
     if (btnEl instanceof HTMLButtonElement) {
       btnEl.disabled = true;
@@ -5363,11 +5307,11 @@ window.archiveRequest = async function(requestId) {
   if (!confirmed) return;
 
   closeRequestDetailsModal();
-  currentRequests = currentRequests.filter(r => r.id !== requestId);
+  inboxState.currentRequests = inboxState.currentRequests.filter(r => r.id !== requestId);
   renderInboxList();
 
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     const ref = doc(db, `salons/${salonId}/inboxItems`, requestId);
     const prevSnap = await getDoc(ref);
     const previousStatus = String(prevSnap.data()?.status || "").trim() || null;
@@ -5400,7 +5344,7 @@ window.deleteArchivedRequest = async function(requestId) {
   if (!confirmed) return;
   
   try {
-    const salonId = currentUserProfile.salonId;
+    const salonId = inboxState.currentUserProfile.salonId;
     await deleteDoc(doc(db, `salons/${salonId}/inboxItems`, requestId));
     
     closeRequestDetailsModal();
@@ -5517,15 +5461,10 @@ if (document.readyState === 'loading') {
 // =====================
 // Background badge listener — runs regardless of which screen is visible
 // =====================
-let _bgBadgeUnsubscribe = null;
-// Latest snapshot rows cached so we can re-render the badges when the
-// user switches location without waiting for a new Firestore snapshot.
-let _bgBadgeLatestRows = [];
-let _bgBadgeIsTech = false;
 
 function _bgBadgeRecompute() {
   try {
-    let rows = _bgBadgeLatestRows || [];
+    let rows = inboxState._bgBadgeLatestRows || [];
 
     // Scope the badges to the currently active branch. Use the same rule
     // set as the main inbox list (explicit locationId → subject staff
@@ -5568,19 +5507,19 @@ function _bgBadgeRecompute() {
 }
 
 function startBgBadgeListener(uid, salonId, roleLc) {
-  if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+  if (inboxState._bgBadgeUnsubscribe) { inboxState._bgBadgeUnsubscribe(); inboxState._bgBadgeUnsubscribe = null; }
   const q = query(
     collection(db, `salons/${salonId}/inboxItems`),
     where('forUid', '==', uid),
     where('unreadForManagers', '==', true)
   );
-  _bgBadgeIsTech = String(roleLc || '').toLowerCase() === 'technician';
-  _bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
+  inboxState._bgBadgeIsTech = String(roleLc || '').toLowerCase() === 'technician';
+  inboxState._bgBadgeUnsubscribe = onSnapshot(q, (snap) => {
     let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    if (_bgBadgeIsTech) {
+    if (inboxState._bgBadgeIsTech) {
       rows = inboxTechnicianNoiseFilter(rows);
     }
-    _bgBadgeLatestRows = rows;
+    inboxState._bgBadgeLatestRows = rows;
     _bgBadgeRecompute();
   }, () => {});
 }
@@ -5600,7 +5539,7 @@ if (typeof document !== 'undefined' && !window.__ffInboxBadgeLocListener) {
 
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    if (_bgBadgeUnsubscribe) { _bgBadgeUnsubscribe(); _bgBadgeUnsubscribe = null; }
+    if (inboxState._bgBadgeUnsubscribe) { inboxState._bgBadgeUnsubscribe(); inboxState._bgBadgeUnsubscribe = null; }
     void ffRefreshInboxNavVisibility();
     return;
   }
@@ -5616,9 +5555,9 @@ onAuthStateChanged(auth, async (user) => {
       (inboxCanManageInboxEval(profile) || roleLc === 'technician');
     if (runBadge) {
       startBgBadgeListener(user.uid, profile.salonId, roleLc);
-    } else if (_bgBadgeUnsubscribe) {
-      _bgBadgeUnsubscribe();
-      _bgBadgeUnsubscribe = null;
+    } else if (inboxState._bgBadgeUnsubscribe) {
+      inboxState._bgBadgeUnsubscribe();
+      inboxState._bgBadgeUnsubscribe = null;
     }
   } catch (e) {
     console.warn('[Inbox] bg badge listener error', e.message);
