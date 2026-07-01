@@ -98,7 +98,7 @@ import {
   _chatRenderFlowWizard,
   _updateChatSendBtn,
   _updateRecipientSummary,
-} from "./chat-ui.js?v=20260628_chat_ui_u3";
+} from "./chat-ui.js?v=20260701_chat_ui_modal_split";
 initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
