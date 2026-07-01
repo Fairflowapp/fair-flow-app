@@ -1,55 +1,59 @@
-import fs from 'fs';
-import crypto from 'crypto';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import * as acorn from 'acorn';
 
-const sha = s => crypto.createHash('sha256').update(s).digest('hex');
-const MOD = fs.readFileSync('public/tickets-modal.js', 'utf8');
-const NEW = fs.readFileSync('public/tickets.js', 'utf8');
-const PRE = fs.readFileSync('refactor-backups/tickets/tickets.pre-modal.js', 'utf8');
-const m = JSON.parse(fs.readFileSync('refactor-backups/tickets/manifest-modal.json', 'utf8'));
+const sha = s => createHash('sha1').update(s).digest('hex');
+const backup = readFileSync('refactor-backups/tickets/tickets-modal.pre-split.js', 'utf8');
+const view = readFileSync('public/tickets-modal-view.js', 'utf8');
+const edit = readFileSync('public/tickets-modal-edit.js', 'utf8');
+const barrel = readFileSync('public/tickets-modal.js', 'utf8');
 
-// ---------- BYTE-IDENTITY ----------
-const blockText = m.blockLines.join('\n');
-console.log('=== BYTE-IDENTITY ===');
-console.log('moved block (' + m.blockLines.length + ' lines) verbatim in module:', MOD.includes(blockText));
-console.log('functions exported:', m.allNames.length);
+const bl = backup.split('\n');
+const truthA = bl.slice(46, 582).join('\n');   // 47..582
+const truthB = bl.slice(583, 1138).join('\n');  // 584..1138
 
-// ---------- DEPENDENCY / INJECTION SCAN ----------
-const injected = ['showToast', 'ticketConfirm', 'computeDiff', 'ffTicketLinesChanged', 'ffRenderFrontDeskChangesHtml', 'ffTicketServiceSearchClear', 'ffTicketServiceSearchSetVisible', 'setupTicketsUI', 'getTicketPriceForServiceAndCurrentStaff', 'getTicketPriceForProductAndActiveLocation'];
-const imported = ['updateTicketsNavBadge', 'markTicketSeenByFrontDesk', 'updateTicket', 'reopenTicket', 'archiveTicket', 'deleteTicketPermanently', 'setTicketServiceUpgrade', 'awardTicketUpgradePoints', 'createTicket', 'finalizeTicket', 'getTicketCustomerPriceApprovedFromForm', 'closeTicket', 'renderTicketsList', 'escapeHtml', 'ffTicketMoney', 'ffTicketCurSym', 'formatTicketDisplayDateTime', 'computeTicketTotalsFromLines', 'canSeeTicket', 'canCurrentUserCloseTickets', 'getTicketVisibility', 'getAutoFrontDeskRecipients', 'loadServiceCategories', 'loadServices'];
-const firebase = ['serverTimestamp'];
-console.log('\n=== INJECTED DEP REFS (calls in block) ===');
-for (const n of injected) {
-  console.log(`  ${n}:`, (blockText.match(new RegExp('\\b' + n + '\\(', 'g')) || []).length);
-}
+let pass = true; const ok = (c,m)=>{ if(!c) pass=false; console.log((c?'PASS':'FAIL')+' — '+m); };
 
-// Foreign-call scan
-const calls = [...blockText.matchAll(/(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map(x => x[2]);
-const local = new Set(m.allNames);
-const known = new Set([...injected, ...imported, ...firebase]);
-const builtins = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'typeof', 'await', 'new', 'async', 'String', 'Number', 'Boolean', 'Array', 'Object', 'Map', 'Set', 'Date', 'Promise', 'Math', 'JSON', 'Intl', 'isNaN', 'parseInt', 'parseFloat', 'console', 'document', 'window', 'setTimeout', 'requestAnimationFrame', 'CustomEvent', 'Error', 'set', 'fn']);
-const foreign = [...new Set(calls)].filter(c => !local.has(c) && !known.has(c) && !builtins.has(c));
-console.log('\n=== FOREIGN CALL IDENTIFIERS (review) ===');
-console.log(JSON.stringify(foreign));
-const win = [...new Set([...blockText.matchAll(/window\.([A-Za-z_$][\w$]*)/g)].map(x => x[1]))];
-console.log('window.* members used:', JSON.stringify(win));
+// A/B byte identity
+ok(sha(truthA)==='225c6f77dab84c75dc72636028a1f1baa6194da2', 'blockA sha == extract ('+sha(truthA)+')');
+ok(sha(truthB)==='2f91fc553801d9602f7fa733f9fbefd0ef9117dc', 'blockB sha == extract ('+sha(truthB)+')');
+ok(view.includes(truthA), 'view.js contains blockA verbatim');
+ok(edit.includes(truthB), 'edit.js contains blockB verbatim');
 
-// ---------- REVERSIBILITY ----------
-let lines = NEW.split('\n');
-for (const ins of m.insertedLines) {
-  const idx = lines.indexOf(ins);
-  if (idx < 0) throw new Error('inserted line not found: ' + ins);
-  lines.splice(idx, 1);
-}
-lines.splice(m.blockStartIndex0, 0, ...m.removeSlice);
-const reconstructed = lines.join('\n');
+// tiling / reversibility at block level
+const recon = [...bl.slice(0,46), truthA, bl[582], truthB, ...bl.slice(1138)].join('\n');
+ok(sha(recon)===sha(backup), 'preamble+A+sep+B+tail tiles original byte-identically');
+console.log('   backup sha :', sha(backup));
+console.log('   recon  sha :', sha(recon));
 
-console.log('\n=== REVERSIBILITY ===');
-console.log('pre-modal sha:   ', sha(PRE));
-console.log('reconstructed sha:', sha(reconstructed));
-console.log('BYTE-IDENTICAL:', sha(PRE) === sha(reconstructed));
-if (sha(PRE) !== sha(reconstructed)) {
-  const a = PRE.split('\n'), b = reconstructed.split('\n');
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if (a[i] !== b[i]) { console.log('first diff line', i + 1, '\n PRE :', JSON.stringify(a[i]), '\n RECON:', JSON.stringify(b[i])); break; }
+// exported API parity
+function exportsOf(src){
+  const ast = acorn.parse(src,{ecmaVersion:'latest',sourceType:'module'});
+  const s=new Set();
+  for(const n of ast.body){
+    if(n.type==='ExportNamedDeclaration'){
+      if(n.declaration&&n.declaration.type==='FunctionDeclaration') s.add(n.declaration.id.name);
+      for(const sp of n.specifiers) s.add(sp.exported.name);
+    }
   }
+  return s;
 }
+const bE = exportsOf(backup), rE = exportsOf(barrel);
+bE.delete('initTicketsModal'); rE.delete('initTicketsModal');
+const missing=[...bE].filter(x=>!rE.has(x)); const extra=[...rE].filter(x=>!bE.has(x));
+ok(missing.length===0 && extra.length===0, `barrel re-exports same ${bE.size} fns (missing=[${missing}] extra=[${extra}])`);
+ok(exportsOf(barrel).has('initTicketsModal'), 'barrel exports initTicketsModal');
+
+// cross-injection integrity
+const VIEW_EXPORTS=['openTicketModal','ffFormatReviewedAt','toggleTicketReviewed','openAdminTicketView','closeTicketModal','openTicketDetailsModal','closeTicketDetailsModal','ffTicketRequiresCustomerName','ffApplyTicketCustomerRequiredUI','resetTicketForm'];
+const EDIT_EXPORTS=['populateTicketForm','syncTicketFormLinesFromDom','renderPerformedLines','renderDiff','addServiceToTicket','addProductToTicket','setupTicketFormToggles','updateTicketDiff','updateTicketTotal','paintTicketServiceUpgradeButton','setupTicketServiceUpgradeControl','saveTicket','doSendNewTicket','doFinalizeTicket','doCloseTicket'];
+const VIEW_CROSS=['populateTicketForm','setupTicketServiceUpgradeControl','doCloseTicket','doSendNewTicket','paintTicketServiceUpgradeButton','updateTicketDiff','setupTicketFormToggles'];
+const EDIT_CROSS=['closeTicketModal','openTicketDetailsModal','ffTicketRequiresCustomerName','ffApplyTicketCustomerRequiredUI'];
+ok(VIEW_CROSS.every(n=>EDIT_EXPORTS.includes(n)), 'all VIEW cross-deps are exported by edit');
+ok(EDIT_CROSS.every(n=>VIEW_EXPORTS.includes(n)), 'all EDIT cross-deps are exported by view');
+// each cross fn wired in barrel init calls
+ok(VIEW_CROSS.every(n=>new RegExp('initModalView[\\s\\S]*?\\b'+n+'\\b[\\s\\S]*?\\}\\);').test(barrel)), 'barrel passes all VIEW cross-deps to initModalView');
+ok(EDIT_CROSS.every(n=>new RegExp('initModalEdit[\\s\\S]*?\\b'+n+'\\b[\\s\\S]*?\\}\\);').test(barrel)), 'barrel passes all EDIT cross-deps to initModalEdit');
+
+console.log('\n'+(pass?'ALL CHECKS PASS':'*** FAILURES ***'));
+process.exit(pass?0:1);
