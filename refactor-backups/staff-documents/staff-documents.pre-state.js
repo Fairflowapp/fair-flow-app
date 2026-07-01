@@ -4,6 +4,7 @@
  *
  * Phase 2 — inbox approval sync helpers (used by inbox.js).
  */
+import { getApp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
 import {
   collection,
   doc,
@@ -28,8 +29,8 @@ import {
   getDownloadURL,
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
-import { sdState, STAFF_DOC_FILTER_IDS, getMediaDownloadUrlCallable } from "./staff-documents-state.js?v=20260701_staffdoc_state_split";
 import {
   trimStr,
   stripUndefined,
@@ -149,6 +150,44 @@ export async function ffUpdateStaffDocumentMetadata({ salonId, staffId, document
 }
 
 
+let _unsub = null;
+let _mountedKey = "";
+let _mountCtx = { salonId: "", staffId: "" };
+/** After a successful send, ignore duplicate sends for the same doc briefly (double-click / dual handlers). */
+let _ffExpiryNotifyDedupe = { key: "", at: 0 };
+let _ffExpiryNotifyInFlight = false;
+let _ffBoundContainer = null;
+let _onDocActionClick = null;
+/** @type {Array<Record<string, unknown>> | null} */
+let _lastDocList = null;
+
+/** Staff Member > Documents filter chip (Phase 9). Default "active" (less confusing than "all"). */
+let _staffDocumentsFilter = "active";
+
+const STAFF_DOC_FILTER_IDS = new Set([
+  "all",
+  "expired",
+  "expiring_soon",
+  "active",
+  "archived",
+]);
+
+/** Phase 10: search query (raw); empty = no search filter. */
+let _staffDocumentsSearchQuery = "";
+
+/** True when signed-in user may edit document type / expiration (managers etc.). */
+let _staffDocsViewerCanEditMeta = false;
+
+let _onStaffDocSearchInput = null;
+
+const _functions = getFunctions(getApp(), "us-central1");
+let _getMediaDownloadUrlCallable = null;
+function getMediaDownloadUrlCallable() {
+  if (!_getMediaDownloadUrlCallable) {
+    _getMediaDownloadUrlCallable = httpsCallable(_functions, "getMediaDownloadUrl");
+  }
+  return _getMediaDownloadUrlCallable;
+}
 
 
 function ffToast(msg, kind) {
@@ -266,25 +305,25 @@ function ffStaffDocumentsConfirm({ title, message, confirmLabel, cancelLabel = "
 }
 
 async function refreshStaffDocViewerEditMeta() {
-  sdState._staffDocsViewerCanEditMeta = false;
+  _staffDocsViewerCanEditMeta = false;
   const uid = auth.currentUser?.uid;
   if (!uid) return;
   try {
     const u = await getDoc(doc(db, "users", uid));
     const role = String(u.data()?.role || "").toLowerCase();
-    sdState._staffDocsViewerCanEditMeta = ["manager", "admin", "owner", "assistant_manager", "front_desk"].includes(role);
+    _staffDocsViewerCanEditMeta = ["manager", "admin", "owner", "assistant_manager", "front_desk"].includes(role);
   } catch (_) {}
 }
 
 async function ffOpenStaffDocumentEditMetadataModal(docId) {
-  const sid = trimStr(sdState._mountCtx.salonId);
-  const stid = trimStr(sdState._mountCtx.staffId);
+  const sid = trimStr(_mountCtx.salonId);
+  const stid = trimStr(_mountCtx.staffId);
   const did = trimStr(docId);
   if (!sid || !stid || !did) {
     ffToast("Missing context.", "error");
     return;
   }
-  if (!sdState._staffDocsViewerCanEditMeta) {
+  if (!_staffDocsViewerCanEditMeta) {
     ffToast("Only managers can edit document details.", "error");
     return;
   }
@@ -608,10 +647,10 @@ async function ffHandleStaffDocumentActionClick(e) {
     e.preventDefault();
     e.stopPropagation();
     const id = filterBtn.getAttribute("data-ff-doc-filter");
-    if (id && STAFF_DOC_FILTER_IDS.has(id) && sdState._staffDocumentsFilter !== id) {
-      sdState._staffDocumentsFilter = id;
-      if (sdState._lastDocList !== null && sdState._ffBoundContainer) {
-        renderListIntoContainer(sdState._ffBoundContainer, sdState._lastDocList);
+    if (id && STAFF_DOC_FILTER_IDS.has(id) && _staffDocumentsFilter !== id) {
+      _staffDocumentsFilter = id;
+      if (_lastDocList !== null && _ffBoundContainer) {
+        renderListIntoContainer(_ffBoundContainer, _lastDocList);
       }
     }
     return;
@@ -621,11 +660,11 @@ async function ffHandleStaffDocumentActionClick(e) {
   if (clearSearchBtn && !clearSearchBtn.disabled) {
     e.preventDefault();
     e.stopPropagation();
-    if (sdState._staffDocumentsSearchQuery !== "") {
-      sdState._staffDocumentsSearchQuery = "";
-      if (sdState._lastDocList !== null && sdState._ffBoundContainer) {
-        renderListIntoContainer(sdState._ffBoundContainer, sdState._lastDocList);
-        const inp = sdState._ffBoundContainer.querySelector("input[data-ff-doc-search]");
+    if (_staffDocumentsSearchQuery !== "") {
+      _staffDocumentsSearchQuery = "";
+      if (_lastDocList !== null && _ffBoundContainer) {
+        renderListIntoContainer(_ffBoundContainer, _lastDocList);
+        const inp = _ffBoundContainer.querySelector("input[data-ff-doc-search]");
         if (inp) inp.focus();
       }
     }
@@ -638,7 +677,7 @@ async function ffHandleStaffDocumentActionClick(e) {
   e.stopPropagation();
   const action = btn.getAttribute("data-ff-doc-action");
   const docId = btn.getAttribute("data-doc-id");
-  const { salonId, staffId } = sdState._mountCtx;
+  const { salonId, staffId } = _mountCtx;
   if (!salonId || !staffId || !docId) {
     ffToast("Missing context. Refresh the page.", "error");
     return;
@@ -1029,33 +1068,33 @@ async function ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId })
 
 async function ffRunExpiryChatNotify(docId) {
   const did = trimStr(docId);
-  const { salonId: sid0, staffId: st0 } = sdState._mountCtx;
+  const { salonId: sid0, staffId: st0 } = _mountCtx;
   const dk = `${sid0}|${st0}|${did}`;
   const now0 = Date.now();
-  if (dk === sdState._ffExpiryNotifyDedupe.key && now0 - sdState._ffExpiryNotifyDedupe.at < 1500) {
+  if (dk === _ffExpiryNotifyDedupe.key && now0 - _ffExpiryNotifyDedupe.at < 1500) {
     ffToast("Reminder just sent. Try again in a moment.", "info");
     return false;
   }
-  if (sdState._ffExpiryNotifyInFlight) {
+  if (_ffExpiryNotifyInFlight) {
     ffToast("Still sending the previous reminder…", "info");
     return false;
   }
   // Set immediately after checks — otherwise two parallel calls can both pass the guard and send twice.
-  sdState._ffExpiryNotifyInFlight = true;
+  _ffExpiryNotifyInFlight = true;
   try {
     ffToast("Sending reminder…", "info");
     if (!auth.currentUser) {
       ffToast("Sign in required.", "error");
       return false;
     }
-    const { salonId, staffId } = sdState._mountCtx;
+    const { salonId, staffId } = _mountCtx;
     if (!salonId || !staffId || !did) {
       ffToast("Missing context. Refresh the page.", "error");
       return false;
     }
 
     await ffSendExpiryChatReminderFromStaffDoc({ salonId, staffId, docId: did });
-    sdState._ffExpiryNotifyDedupe = { key: dk, at: Date.now() };
+    _ffExpiryNotifyDedupe = { key: dk, at: Date.now() };
     console.log("[staff-documents] Chat reminder flow finished (check toast + Chat).");
     return true;
   } catch (err) {
@@ -1070,7 +1109,7 @@ async function ffRunExpiryChatNotify(docId) {
     }
     return false;
   } finally {
-    sdState._ffExpiryNotifyInFlight = false;
+    _ffExpiryNotifyInFlight = false;
   }
 }
 
@@ -1079,12 +1118,12 @@ export async function ffSendExpiryChatReminderForStaffDocContext({ salonId, staf
   const sid = trimStr(salonId);
   const stid = trimStr(staffId);
   const did = trimStr(docId);
-  const prevCtx = sdState._mountCtx;
+  const prevCtx = _mountCtx;
   try {
-    sdState._mountCtx = { salonId: sid, staffId: stid };
+    _mountCtx = { salonId: sid, staffId: stid };
     await ffRunExpiryChatNotify(did);
   } finally {
-    sdState._mountCtx = prevCtx;
+    _mountCtx = prevCtx;
   }
 }
 
@@ -1129,7 +1168,7 @@ function renderFilteredSingleSection(docs, chip) {
 
 
 function renderSearchRowHtml() {
-  const v = escapeHtml(sdState._staffDocumentsSearchQuery);
+  const v = escapeHtml(_staffDocumentsSearchQuery);
   return `<div style="display:flex;align-items:stretch;gap:8px;">
   <input type="search" data-ff-doc-search placeholder="Search documents" value="${v}" autocomplete="off" style="flex:1;min-width:0;min-height:34px;padding:7px 11px;font-size:12px;border:1px solid #e5e7eb;border-radius:8px;box-sizing:border-box;font-family:inherit;color:#111827;background:#fff;" />
   <button type="button" data-ff-doc-search-clear title="Clear search" aria-label="Clear search" style="min-height:34px;padding:0 12px;font-size:11px;font-weight:600;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;">Clear</button>
@@ -1137,11 +1176,11 @@ function renderSearchRowHtml() {
 }
 
 function renderListContentBody(list) {
-  if (!STAFF_DOC_FILTER_IDS.has(sdState._staffDocumentsFilter)) {
-    sdState._staffDocumentsFilter = "active";
+  if (!STAFF_DOC_FILTER_IDS.has(_staffDocumentsFilter)) {
+    _staffDocumentsFilter = "active";
   }
-  const f = sdState._staffDocumentsFilter || "active";
-  const q = normalizeStaffDocSearch(sdState._staffDocumentsSearchQuery);
+  const f = _staffDocumentsFilter || "active";
+  const q = normalizeStaffDocSearch(_staffDocumentsSearchQuery);
   const chips = renderFilterChipsHtml(f, list);
   const searchRow = renderSearchRowHtml();
   const chipsWrap = `<div class="ff-staff-doc-filters" style="display:flex;align-items:center;gap:8px;">${chips}</div>`;
@@ -1175,25 +1214,25 @@ function renderListContentBody(list) {
 function ensureStaffDocSearchListeners(container) {
   if (!container || container.__ffStaffSearchBound) return;
   container.__ffStaffSearchBound = true;
-  if (!sdState._onStaffDocSearchInput) {
-    sdState._onStaffDocSearchInput = function (e) {
+  if (!_onStaffDocSearchInput) {
+    _onStaffDocSearchInput = function (e) {
       const t = e.target && e.target.closest && e.target.closest("input[data-ff-doc-search]");
       if (!t) return;
-      sdState._staffDocumentsSearchQuery = t.value;
-      if (sdState._lastDocList !== null && sdState._ffBoundContainer) {
-        renderListIntoContainer(sdState._ffBoundContainer, sdState._lastDocList);
+      _staffDocumentsSearchQuery = t.value;
+      if (_lastDocList !== null && _ffBoundContainer) {
+        renderListIntoContainer(_ffBoundContainer, _lastDocList);
       }
     };
   }
-  container.addEventListener("input", sdState._onStaffDocSearchInput);
+  container.addEventListener("input", _onStaffDocSearchInput);
   container.addEventListener("change", (e) => {
     const sel = e.target && e.target.closest && e.target.closest("select[data-ff-doc-filter-select]");
     if (!sel) return;
     const id = sel.value;
-    if (id && STAFF_DOC_FILTER_IDS.has(id) && sdState._staffDocumentsFilter !== id) {
-      sdState._staffDocumentsFilter = id;
-      if (sdState._lastDocList !== null && sdState._ffBoundContainer) {
-        renderListIntoContainer(sdState._ffBoundContainer, sdState._lastDocList);
+    if (id && STAFF_DOC_FILTER_IDS.has(id) && _staffDocumentsFilter !== id) {
+      _staffDocumentsFilter = id;
+      if (_lastDocList !== null && _ffBoundContainer) {
+        renderListIntoContainer(_ffBoundContainer, _lastDocList);
       }
     }
   });
@@ -1250,7 +1289,7 @@ function renderListIntoContainer(container, list) {
   }
 
   if (!list.length) {
-    sdState._staffDocumentsSearchQuery = "";
+    _staffDocumentsSearchQuery = "";
     container.innerHTML = `<div style="${staffDocsShellStyle()}">${renderEmpty()}</div>`;
     return;
   }
@@ -1270,48 +1309,48 @@ function renderListIntoContainer(container, list) {
 }
 
 function applyDocumentsSnapshot() {
-  const sid = sdState._mountCtx.salonId;
-  const stid = sdState._mountCtx.staffId;
+  const sid = _mountCtx.salonId;
+  const stid = _mountCtx.staffId;
   const key = `${sid}::${stid}`;
-  if (sdState._mountedKey !== key) return;
-  const list = sdState._lastDocList;
+  if (_mountedKey !== key) return;
+  const list = _lastDocList;
   if (list === null) return;
-  if (sdState._ffBoundContainer) {
-    renderListIntoContainer(sdState._ffBoundContainer, list);
+  if (_ffBoundContainer) {
+    renderListIntoContainer(_ffBoundContainer, list);
   }
 }
 
 function ensureSubscription(sid, stid) {
   const key = `${sid}::${stid}`;
-  if (sdState._mountedKey === key && sdState._unsub) return;
+  if (_mountedKey === key && _unsub) return;
 
-  if (typeof sdState._unsub === "function") {
+  if (typeof _unsub === "function") {
     try {
-      sdState._unsub();
+      _unsub();
     } catch (_) {}
   }
-  sdState._unsub = null;
-  sdState._mountedKey = key;
-  sdState._mountCtx = { salonId: sid, staffId: stid };
-  sdState._lastDocList = null;
-  sdState._staffDocumentsFilter = "active";
-  sdState._staffDocumentsSearchQuery = "";
+  _unsub = null;
+  _mountedKey = key;
+  _mountCtx = { salonId: sid, staffId: stid };
+  _lastDocList = null;
+  _staffDocumentsFilter = "active";
+  _staffDocumentsSearchQuery = "";
 
   void refreshStaffDocViewerEditMeta().then(() => {
-    if (sdState._mountedKey === key && sdState._lastDocList && sdState._ffBoundContainer) {
+    if (_mountedKey === key && _lastDocList && _ffBoundContainer) {
       applyDocumentsSnapshot();
     }
   });
 
-  if (sdState._ffBoundContainer) {
-    sdState._ffBoundContainer.innerHTML = `<div style="min-height:88px;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading documents…</p></div>`;
+  if (_ffBoundContainer) {
+    _ffBoundContainer.innerHTML = `<div style="min-height:88px;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading documents…</p></div>`;
   }
 
   const colRef = collection(db, "salons", sid, "staff", stid, "documents");
-  sdState._unsub = onSnapshot(
+  _unsub = onSnapshot(
     colRef,
     (snap) => {
-      if (sdState._mountedKey !== key) return;
+      if (_mountedKey !== key) return;
       const list = [];
       snap.forEach((d) => {
         list.push({ id: d.id, ...d.data() });
@@ -1321,15 +1360,15 @@ function ensureSubscription(sid, stid) {
         const tb = toDateMaybe(b.createdAt)?.getTime() ?? 0;
         return tb - ta;
       });
-      sdState._lastDocList = list;
+      _lastDocList = list;
       applyDocumentsSnapshot();
     },
     (err) => {
       console.warn("[staff-documents]", err);
-      if (sdState._mountedKey !== key) return;
+      if (_mountedKey !== key) return;
       const errHtml = `<p style="margin:0;font-size:13px;color:#b91c1c;">Could not load documents.</p>`;
-      if (sdState._ffBoundContainer) {
-        sdState._ffBoundContainer.innerHTML = errHtml;
+      if (_ffBoundContainer) {
+        _ffBoundContainer.innerHTML = errHtml;
       }
     },
   );
@@ -1373,7 +1412,7 @@ function renderDocumentCard(doc) {
 
   // Pill-sized actions (same line as status badges; ~10px / 3px 9px padding)
   const editMetaPillBtn =
-    sdState._staffDocsViewerCanEditMeta && !isArchived
+    _staffDocsViewerCanEditMeta && !isArchived
       ? `<button type="button" data-ff-doc-action="edit_meta" data-doc-id="${escapeHtml(doc.id)}" title="Edit type, title, expiration" style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#faf5ff;color:#5b21b6;border:1px solid #c4b5fd;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">✎ Edit</button>`
       : "";
   const deletePillBtn = isArchived
@@ -1484,35 +1523,35 @@ function renderEmpty() {
  * Unsubscribe from Firestore and clear listener state.
  */
 export function ffStaffDocumentsUnmount() {
-  if (typeof sdState._unsub === "function") {
+  if (typeof _unsub === "function") {
     try {
-      sdState._unsub();
+      _unsub();
     } catch (_) {}
   }
-  sdState._unsub = null;
-  sdState._mountedKey = "";
-  sdState._mountCtx = { salonId: "", staffId: "" };
-  sdState._lastDocList = null;
-  sdState._staffDocumentsFilter = "active";
-  sdState._staffDocumentsSearchQuery = "";
-  sdState._staffDocsViewerCanEditMeta = false;
-  if (sdState._ffBoundContainer && sdState._onDocActionClick) {
+  _unsub = null;
+  _mountedKey = "";
+  _mountCtx = { salonId: "", staffId: "" };
+  _lastDocList = null;
+  _staffDocumentsFilter = "active";
+  _staffDocumentsSearchQuery = "";
+  _staffDocsViewerCanEditMeta = false;
+  if (_ffBoundContainer && _onDocActionClick) {
     try {
-      sdState._ffBoundContainer.removeEventListener("click", sdState._onDocActionClick);
+      _ffBoundContainer.removeEventListener("click", _onDocActionClick);
     } catch (_) {}
   }
-  if (sdState._ffBoundContainer && sdState._onStaffDocSearchInput) {
+  if (_ffBoundContainer && _onStaffDocSearchInput) {
     try {
-      sdState._ffBoundContainer.removeEventListener("input", sdState._onStaffDocSearchInput);
+      _ffBoundContainer.removeEventListener("input", _onStaffDocSearchInput);
     } catch (_) {}
   }
-  if (sdState._ffBoundContainer) {
+  if (_ffBoundContainer) {
     try {
-      delete sdState._ffBoundContainer.__ffStaffSearchBound;
+      delete _ffBoundContainer.__ffStaffSearchBound;
     } catch (_) {}
   }
-  sdState._ffBoundContainer = null;
-  sdState._onDocActionClick = null;
+  _ffBoundContainer = null;
+  _onDocActionClick = null;
 }
 
 /** Kept for compatibility; document counts/filters live only in the Documents tab. */
@@ -1533,41 +1572,41 @@ export function ffMountStaffDocuments(container, salonId, staffId) {
     container.innerHTML = `<p style="margin:0;font-size:13px;color:#b91c1c;">Missing salon or staff.</p>`;
     return;
   }
-  sdState._mountCtx = { salonId: sid, staffId: stid };
+  _mountCtx = { salonId: sid, staffId: stid };
 
-  if (sdState._ffBoundContainer && sdState._ffBoundContainer !== container && sdState._onDocActionClick) {
+  if (_ffBoundContainer && _ffBoundContainer !== container && _onDocActionClick) {
     try {
-      sdState._ffBoundContainer.removeEventListener("click", sdState._onDocActionClick);
+      _ffBoundContainer.removeEventListener("click", _onDocActionClick);
     } catch (_) {}
-    if (sdState._onStaffDocSearchInput) {
+    if (_onStaffDocSearchInput) {
       try {
-        sdState._ffBoundContainer.removeEventListener("input", sdState._onStaffDocSearchInput);
+        _ffBoundContainer.removeEventListener("input", _onStaffDocSearchInput);
       } catch (_) {}
     }
     try {
-      delete sdState._ffBoundContainer.__ffStaffSearchBound;
+      delete _ffBoundContainer.__ffStaffSearchBound;
     } catch (_) {}
-    sdState._ffBoundContainer = null;
+    _ffBoundContainer = null;
   }
-  if (!sdState._onDocActionClick) {
-    sdState._onDocActionClick = (e) => ffHandleStaffDocumentActionClick(e);
+  if (!_onDocActionClick) {
+    _onDocActionClick = (e) => ffHandleStaffDocumentActionClick(e);
   }
-  if (sdState._ffBoundContainer !== container) {
-    container.addEventListener("click", sdState._onDocActionClick);
-    sdState._ffBoundContainer = container;
+  if (_ffBoundContainer !== container) {
+    container.addEventListener("click", _onDocActionClick);
+    _ffBoundContainer = container;
   }
   ensureStaffDocSearchListeners(container);
 
   const key = `${sid}::${stid}`;
-  if (sdState._mountedKey !== key) {
+  if (_mountedKey !== key) {
     container.innerHTML = `<p style="margin:0;font-size:13px;color:#6b7280;">Loading documents…</p>`;
     ensureSubscription(sid, stid);
     return;
   }
 
-  sdState._mountCtx = { salonId: sid, staffId: stid };
-  if (sdState._lastDocList !== null) {
-    renderListIntoContainer(container, sdState._lastDocList);
+  _mountCtx = { salonId: sid, staffId: stid };
+  if (_lastDocList !== null) {
+    renderListIntoContainer(container, _lastDocList);
   } else {
     container.innerHTML = `<p style="margin:0;font-size:13px;color:#6b7280;">Loading documents…</p>`;
   }
@@ -1583,8 +1622,8 @@ if (typeof window !== "undefined") {
   /** For console debugging: run `ffStaffDocDebugContext()` while Staff → Documents is open. */
   window.ffStaffDocDebugContext = function () {
     return {
-      mountCtx: { salonId: sdState._mountCtx.salonId, staffId: sdState._mountCtx.staffId },
-      mountedKey: sdState._mountedKey,
+      mountCtx: { salonId: _mountCtx.salonId, staffId: _mountCtx.staffId },
+      mountedKey: _mountedKey,
       signedIn: !!auth.currentUser,
       uid: auth.currentUser?.uid || null,
     };
