@@ -122,7 +122,7 @@ initChatSubscriptions({
 });
 
 // ─── Admin module (templates + flows) — extracted to chat-admin.js ──────────────
-import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260628_chat_admin_split";
+import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260701_chat_admin_flows_split";
 initChatAdmin({
   _chatManageAllowed,
   _chatWaitForManagePermission,
