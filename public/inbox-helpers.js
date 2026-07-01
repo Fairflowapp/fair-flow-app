@@ -8,7 +8,7 @@
  * Extracted verbatim from inbox.js.
  */
 
-import { ffExpirationTimestampToYmdInput } from "./staff-documents.js?v=20260701_staffdoc_ui_split";
+import { ffExpirationTimestampToYmdInput } from "./staff-documents.js?v=20260701_staffdoc_expiry_split";
 
 /** Normalize Firestore/string date to YYYY-MM-DD for &lt;input type="date"&gt;. */
 export function ffInboxYmdFromRaw(v) {

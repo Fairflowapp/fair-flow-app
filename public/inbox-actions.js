@@ -32,7 +32,7 @@ import {
   ffSyncStaffDocumentOnInboxReject,
   ffSendExpiryChatReminderForStaffDocContext,
   ffStaffDocumentTypeSelectOptionsHtml,
-} from "./staff-documents.js?v=20260701_staffdoc_ui_split";
+} from "./staff-documents.js?v=20260701_staffdoc_expiry_split";
 
 // loadInboxItems lives in inbox.js (many callers); injected here.
 let loadInboxItems = () => {};
