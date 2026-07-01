@@ -23,7 +23,7 @@ import {
   wireSuppliesItemRow,
   initSuppliesRequestForm,
 } from "./inbox-supplies.js?v=20260629_inbox_supplies_split";
-import { ffStaffDocumentTypeSelectOptionsHtml } from "./staff-documents.js?v=20260701_staffdoc_format_split";
+import { ffStaffDocumentTypeSelectOptionsHtml } from "./staff-documents.js?v=20260701_staffdoc_inbox_sync_split";
 
 // submitRequest is injected from inbox.js (function declaration) until M5 extraction.
 let submitRequest = () => {};
