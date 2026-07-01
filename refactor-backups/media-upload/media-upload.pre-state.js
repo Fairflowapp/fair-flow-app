@@ -7,15 +7,6 @@ import { getDoc, getDocs, doc, collection, query, where, setDoc } from "https://
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
-  mediaState,
-  MEDIA_UPLOAD_POINTS_DAILY_CAP,
-  MEDIA_MAX_IMAGES_PER_UPLOAD,
-  MEDIA_DROPDOWN_FLOAT_MQ,
-  MY_UPLOADS_FILTERS,
-  TO_HANDLE_FILTERS,
-  SORT_OPTIONS,
-} from "./media-state.js?v=20260701_media_state_split";
-import {
   createWorkWithMedia,
   createWorkWithMediaBestEffort,
   addMediaToExistingWork,
@@ -40,6 +31,26 @@ import {
   deleteMediaCategory,
 } from "./media-cloud.js?v=20260623_mediafix";
 
+let currentUserProfile = null;
+let userWorks = [];
+let allWorks = [];
+let unsubMyWorks = null;
+let unsubAllWorks = null;
+let currentMediaTab = "my_uploads";
+let selectedWorkId = null;
+let currentMediaFilter = "all";
+let currentMediaSort = "newest";
+let currentMediaEmployeeFilter = "all"; // staffId or "all"; only used in TO HANDLE
+let currentMediaCategoryFilter = "all"; // categoryId or "all"; filter by category
+let mediaCategories = [];
+let unsubMediaCategories = null;
+const MEDIA_UPLOAD_POINTS_DAILY_CAP = 10;
+const MEDIA_MAX_IMAGES_PER_UPLOAD = 15;
+/** First Firestore snapshot received (avoid empty-state flash while queries run). */
+let mediaMyWorksHydrated = false;
+let mediaAllWorksHydrated = false;
+/** Skip tearing down subscriptions when uid/staff/salon/to-handle unchanged (faster return to Media). */
+let _mediaWorkListSubKey = "";
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {
@@ -161,8 +172,8 @@ async function loadUserProfile() {
   const authedPre =
     typeof window !== "undefined" && window.__ff_authedStaffId ? String(window.__ff_authedStaffId).trim() : "";
   const profileCacheKey = `${user.uid}|${sidPre}|${authedPre}`;
-  if (mediaState.currentUserProfile && mediaState.currentUserProfile._ffMediaProfileKey === profileCacheKey) {
-    return mediaState.currentUserProfile;
+  if (currentUserProfile && currentUserProfile._ffMediaProfileKey === profileCacheKey) {
+    return currentUserProfile;
   }
   try {
     const snap = await getDoc(doc(db, "users", user.uid));
@@ -226,7 +237,7 @@ async function loadUserProfile() {
       "User"
     ).trim() || "User";
 
-    mediaState.currentUserProfile = {
+    currentUserProfile = {
       uid: user.uid,
       staffId,
       staffName,
@@ -237,12 +248,12 @@ async function loadUserProfile() {
     };
     if (salonId) {
       setDoc(doc(db, `salons/${salonId}/members`, user.uid), {
-        name: mediaState.currentUserProfile.staffName,
-        role: mediaState.currentUserProfile.createdByRole,
-        staffId: mediaState.currentUserProfile.staffId,
+        name: currentUserProfile.staffName,
+        role: currentUserProfile.createdByRole,
+        staffId: currentUserProfile.staffId,
       }, { merge: true }).catch(() => {});
     }
-    return mediaState.currentUserProfile;
+    return currentUserProfile;
   } catch (e) {
     console.warn("[Media] loadUserProfile failed", e);
   }
@@ -250,8 +261,8 @@ async function loadUserProfile() {
 }
 
 function canHandleMediaWork() {
-  if (mediaState.currentUserProfile?.mediaHandleAllowed === true) return true;
-  if (mediaState.currentUserProfile && mediaState.currentUserProfile.mediaHandleAllowed === false) return false;
+  if (currentUserProfile?.mediaHandleAllowed === true) return true;
+  if (currentUserProfile && currentUserProfile.mediaHandleAllowed === false) return false;
   const wr =
     typeof window !== "undefined" && window.__ff_user_role
       ? String(window.__ff_user_role).toLowerCase().trim()
@@ -261,7 +272,7 @@ function canHandleMediaWork() {
 }
 
 function isAdmin() {
-  const r = (mediaState.currentUserProfile?.createdByRole || "").toLowerCase();
+  const r = (currentUserProfile?.createdByRole || "").toLowerCase();
   return ["admin", "owner"].includes(r);
 }
 
@@ -270,9 +281,9 @@ function isAdmin() {
 // =====================
 
 function setMediaTab(tab) {
-  mediaState.currentMediaTab = tab;
-  mediaState.currentMediaFilter = "all";
-  mediaState.currentMediaEmployeeFilter = "all";
+  currentMediaTab = tab;
+  currentMediaFilter = "all";
+  currentMediaEmployeeFilter = "all";
   const screenEl = document.getElementById("mediaScreen");
   if (screenEl) screenEl.setAttribute("data-media-tab", tab);
   const myBtn = document.getElementById("mediaTabMyUploads");
@@ -296,6 +307,29 @@ function setMediaTab(tab) {
 // Filters & Sorting
 // =====================
 
+const MY_UPLOADS_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "active", label: "Active" },
+  { id: "posted", label: "Posted" },
+  { id: "featured", label: "Featured" },
+  { id: "archived", label: "Archived" },
+];
+
+const TO_HANDLE_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "not_posted", label: "Not Posted" },
+  { id: "posted", label: "Posted" },
+  { id: "featured", label: "Featured" },
+  { id: "archived", label: "Archived" },
+  { id: "duplicate", label: "Duplicate" },
+];
+
+const SORT_OPTIONS = [
+  { id: "newest", label: "Newest" },
+  { id: "oldest", label: "Oldest" },
+  { id: "most_posted", label: "Most Posted" },
+  { id: "featured_first", label: "Featured First" },
+];
 
 function applyEmployeeFilter(works, staffIdOrAll) {
   if (staffIdOrAll === "all" || !staffIdOrAll) return works;
@@ -307,7 +341,7 @@ function applyEmployeeFilter(works, staffIdOrAll) {
 
 function applyCategoryFilter(works, categoryIdOrAll) {
   if (categoryIdOrAll === "all" || !categoryIdOrAll) return works;
-  const category = mediaState.mediaCategories.find((c) => c.id === categoryIdOrAll);
+  const category = mediaCategories.find((c) => c.id === categoryIdOrAll);
   const categoryName = category?.name || "";
   return works.filter((w) => {
     if (Array.isArray(w.categoryIds) && w.categoryIds.includes(categoryIdOrAll)) return true;
@@ -321,7 +355,7 @@ function applyCategoryFilter(works, categoryIdOrAll) {
 
 function applyFilter(works, filterId) {
   if (filterId === "all") return works;
-  if (mediaState.currentMediaTab === "my_uploads") {
+  if (currentMediaTab === "my_uploads") {
     switch (filterId) {
       case "active": return works.filter((w) => w.status === "active");
       case "posted": return works.filter((w) => (w.postedCount || 0) > 0);
@@ -376,6 +410,7 @@ function getSortLabel(id) {
   return SORT_OPTIONS.find((s) => s.id === id)?.label || "Sort";
 }
 
+const MEDIA_DROPDOWN_FLOAT_MQ = "(max-width: 768px)";
 
 function _clearMediaDropdownPanelPosition(panel) {
   if (!panel) return;
@@ -436,16 +471,16 @@ function renderMediaFilters() {
   const sortTrigger = document.getElementById("mediaSortTrigger");
   if (!filterDropdown || !sortDropdown || !filterTrigger || !sortTrigger) return;
 
-  const filters = mediaState.currentMediaTab === "my_uploads" ? MY_UPLOADS_FILTERS : TO_HANDLE_FILTERS;
+  const filters = currentMediaTab === "my_uploads" ? MY_UPLOADS_FILTERS : TO_HANDLE_FILTERS;
   filterDropdown.innerHTML = "";
   filters.forEach((f) => {
     const opt = document.createElement("div");
-    opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaFilter === f.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+    opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaFilter === f.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
     opt.textContent = f.label;
     opt.dataset.filter = f.id;
     opt.onclick = (e) => {
       e.stopPropagation();
-      mediaState.currentMediaFilter = f.id;
+      currentMediaFilter = f.id;
       filterTrigger.innerHTML = `Filters: ${f.label} <span style="font-size:10px;">▼</span>`;
       closeMediaDropdowns();
       renderMediaList();
@@ -456,12 +491,12 @@ function renderMediaFilters() {
   sortDropdown.innerHTML = "";
   SORT_OPTIONS.forEach((s) => {
     const opt = document.createElement("div");
-    opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaSort === s.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+    opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaSort === s.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
     opt.textContent = s.label;
     opt.dataset.sort = s.id;
     opt.onclick = (e) => {
       e.stopPropagation();
-      mediaState.currentMediaSort = s.id;
+      currentMediaSort = s.id;
       sortTrigger.innerHTML = `Sort: ${s.label} <span style="font-size:10px;">▼</span>`;
       closeMediaDropdowns();
       renderMediaList();
@@ -469,16 +504,16 @@ function renderMediaFilters() {
     sortDropdown.appendChild(opt);
   });
 
-  filterTrigger.innerHTML = `Filters: ${getFilterLabel(mediaState.currentMediaFilter)} <span style="font-size:10px;">▼</span>`;
-  sortTrigger.innerHTML = `Sort: ${getSortLabel(mediaState.currentMediaSort)} <span style="font-size:10px;">▼</span>`;
+  filterTrigger.innerHTML = `Filters: ${getFilterLabel(currentMediaFilter)} <span style="font-size:10px;">▼</span>`;
+  sortTrigger.innerHTML = `Sort: ${getSortLabel(currentMediaSort)} <span style="font-size:10px;">▼</span>`;
 
   const employeeWrap = document.getElementById("mediaEmployeeFilterWrap");
   const employeeTrigger = document.getElementById("mediaEmployeeFilterTrigger");
   const employeeDropdown = document.getElementById("mediaEmployeeFilterDropdown");
   if (employeeWrap && employeeTrigger && employeeDropdown) {
-    employeeWrap.style.setProperty("display", mediaState.currentMediaTab === "to_handle" ? "block" : "none", "important");
-    if (mediaState.currentMediaTab === "to_handle") {
-      const worksForList = mediaState.allWorks.filter((w) => w.status !== "deleted");
+    employeeWrap.style.setProperty("display", currentMediaTab === "to_handle" ? "block" : "none", "important");
+    if (currentMediaTab === "to_handle") {
+      const worksForList = allWorks.filter((w) => w.status !== "deleted");
       const staffMap = new Map();
       worksForList.forEach((w) => {
         const id = w.staffId || w.createdByUid || "";
@@ -489,12 +524,12 @@ function renderMediaFilters() {
       const staffList = [...staffMap.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
       employeeDropdown.innerHTML = "";
       const allOpt = document.createElement("div");
-      allOpt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaEmployeeFilter === "all" ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+      allOpt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaEmployeeFilter === "all" ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
       allOpt.textContent = "All Employees";
       allOpt.dataset.staffId = "all";
       allOpt.onclick = (e) => {
         e.stopPropagation();
-        mediaState.currentMediaEmployeeFilter = "all";
+        currentMediaEmployeeFilter = "all";
         employeeTrigger.innerHTML = `Employee: All Employees <span style="font-size:10px;">▼</span>`;
         closeMediaDropdowns();
         renderMediaList();
@@ -502,19 +537,19 @@ function renderMediaFilters() {
       employeeDropdown.appendChild(allOpt);
       staffList.forEach(([staffId, staffName]) => {
         const opt = document.createElement("div");
-        opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaEmployeeFilter === staffId ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+        opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaEmployeeFilter === staffId ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
         opt.textContent = staffName || staffId || "—";
         opt.dataset.staffId = staffId;
         opt.onclick = (e) => {
           e.stopPropagation();
-          mediaState.currentMediaEmployeeFilter = staffId;
+          currentMediaEmployeeFilter = staffId;
           employeeTrigger.innerHTML = `Employee: ${staffName || staffId} <span style="font-size:10px;">▼</span>`;
           closeMediaDropdowns();
           renderMediaList();
         };
         employeeDropdown.appendChild(opt);
       });
-      const label = mediaState.currentMediaEmployeeFilter === "all" ? "All Employees" : (staffMap.get(mediaState.currentMediaEmployeeFilter) || mediaState.currentMediaEmployeeFilter || "All Employees");
+      const label = currentMediaEmployeeFilter === "all" ? "All Employees" : (staffMap.get(currentMediaEmployeeFilter) || currentMediaEmployeeFilter || "All Employees");
       employeeTrigger.innerHTML = `Employee: ${label} <span style="font-size:10px;">▼</span>`;
     }
   }
@@ -523,17 +558,17 @@ function renderMediaFilters() {
   const categoryTrigger = document.getElementById("mediaCategoryFilterTrigger");
   const categoryDropdown = document.getElementById("mediaCategoryFilterDropdown");
   if (categoryWrap && categoryTrigger && categoryDropdown) {
-    categoryWrap.style.setProperty("display", mediaState.currentMediaTab === "to_handle" ? "block" : "none", "important");
-    if (mediaState.currentMediaTab === "to_handle") {
-      const activeCategories = mediaState.mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+    categoryWrap.style.setProperty("display", currentMediaTab === "to_handle" ? "block" : "none", "important");
+    if (currentMediaTab === "to_handle") {
+      const activeCategories = mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
       categoryDropdown.innerHTML = "";
       const allOpt = document.createElement("div");
-      allOpt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaCategoryFilter === "all" ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+      allOpt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaCategoryFilter === "all" ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
       allOpt.textContent = "All Categories";
       allOpt.dataset.categoryId = "all";
       allOpt.onclick = (e) => {
         e.stopPropagation();
-        mediaState.currentMediaCategoryFilter = "all";
+        currentMediaCategoryFilter = "all";
         categoryTrigger.innerHTML = `Category: All Categories <span style="font-size:10px;">▼</span>`;
         closeMediaDropdowns();
         renderMediaList();
@@ -541,21 +576,21 @@ function renderMediaFilters() {
       categoryDropdown.appendChild(allOpt);
       activeCategories.forEach((c) => {
         const opt = document.createElement("div");
-        opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${mediaState.currentMediaCategoryFilter === c.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
+        opt.style.cssText = `padding:10px 14px;font-size:10px;cursor:pointer;border-bottom:1px solid #f3f4f6;${currentMediaCategoryFilter === c.id ? "background:#ede9fe;color:#7c3aed;font-weight:600;" : ""}`;
         opt.textContent = c.name || c.id || "—";
         opt.dataset.categoryId = c.id || "";
         opt.onclick = (e) => {
           e.stopPropagation();
-          mediaState.currentMediaCategoryFilter = c.id || "all";
+          currentMediaCategoryFilter = c.id || "all";
           categoryTrigger.innerHTML = `Category: ${c.name || c.id || "—"} <span style="font-size:10px;">▼</span>`;
           closeMediaDropdowns();
           renderMediaList();
         };
         categoryDropdown.appendChild(opt);
       });
-      const catLabel = mediaState.currentMediaCategoryFilter === "all"
+      const catLabel = currentMediaCategoryFilter === "all"
         ? "All Categories"
-        : (activeCategories.find((c) => c.id === mediaState.currentMediaCategoryFilter)?.name || mediaState.currentMediaCategoryFilter || "All Categories");
+        : (activeCategories.find((c) => c.id === currentMediaCategoryFilter)?.name || currentMediaCategoryFilter || "All Categories");
       categoryTrigger.innerHTML = `Category: ${catLabel} <span style="font-size:10px;">▼</span>`;
     }
   }
@@ -641,7 +676,7 @@ function showMediaConfirm(text, onConfirm, confirmLabel = "Delete My Work") {
 function isSelfDeleteEligible(work) {
   const uid = auth.currentUser?.uid;
   if (!uid || !work) return false;
-  const isOwner = work.createdByUid === uid || work.staffId === mediaState.currentUserProfile?.staffId;
+  const isOwner = work.createdByUid === uid || work.staffId === currentUserProfile?.staffId;
   if (!isOwner) return false;
   if ((work.postedCount || 0) > 0) return false;
   if (work.featured === true) return false;
@@ -654,7 +689,7 @@ function isSelfDeleteEligible(work) {
 
 /** Technician or Manager (not Admin) – eligible for Self Delete button */
 function canShowSelfDeleteButton() {
-  const r = (mediaState.currentUserProfile?.createdByRole || "").toLowerCase();
+  const r = (currentUserProfile?.createdByRole || "").toLowerCase();
   return r === "technician" || r === "manager";
 }
 
@@ -662,7 +697,7 @@ function canShowSelfDeleteButton() {
 function updateMediaUploadWorkButtonVisibility() {
   const uploadBtn = document.getElementById("mediaUploadWorkBtn");
   if (uploadBtn) {
-    const show = mediaState.currentMediaTab === "my_uploads";
+    const show = currentMediaTab === "my_uploads";
     uploadBtn.style.setProperty("display", show ? "inline-flex" : "none", "important");
   }
 }
@@ -670,7 +705,7 @@ function updateMediaUploadWorkButtonVisibility() {
 /** Apply tab visibility – Everyone sees My Uploads; Manager/Admin/Owner also see To Handle. */
 function applyToHandleVisibility() {
   const showToHandle = canHandleMediaWork();
-  if (!showToHandle) mediaState.currentMediaTab = "my_uploads";
+  if (!showToHandle) currentMediaTab = "my_uploads";
   const tabsWrap = document.getElementById("mediaTabsWrap");
   if (tabsWrap) {
     tabsWrap.style.setProperty("display", showToHandle ? "flex" : "none", "important");
@@ -684,7 +719,7 @@ function applyToHandleVisibility() {
   if (myUploadsBtn) myUploadsBtn.style.borderRadius = showToHandle ? "8px 0 0 8px" : "8px";
   updateMediaUploadWorkButtonVisibility();
   const mediaScreenEl = document.getElementById("mediaScreen");
-  if (mediaScreenEl) mediaScreenEl.setAttribute("data-media-tab", mediaState.currentMediaTab);
+  if (mediaScreenEl) mediaScreenEl.setAttribute("data-media-tab", currentMediaTab);
 }
 
 /** Thumbnail for grid: enriched cache, or denormalized preview on work doc (no subcollection read). */
@@ -715,12 +750,12 @@ function renderMediaList() {
   if (!list || !empty || !loading) return;
 
   const awaitingMy =
-    mediaState.currentMediaTab === "my_uploads" && auth.currentUser && !mediaState.mediaMyWorksHydrated;
+    currentMediaTab === "my_uploads" && auth.currentUser && !mediaMyWorksHydrated;
   const awaitingAll =
-    mediaState.currentMediaTab === "to_handle" &&
+    currentMediaTab === "to_handle" &&
     auth.currentUser &&
     canHandleMediaWork() &&
-    !mediaState.mediaAllWorksHydrated;
+    !mediaAllWorksHydrated;
   if (awaitingMy || awaitingAll) {
     loading.style.display = "block";
     list.style.display = "none";
@@ -728,16 +763,16 @@ function renderMediaList() {
     return;
   }
 
-  const works = mediaState.currentMediaTab === "my_uploads" ? mediaState.userWorks : mediaState.allWorks;
+  const works = currentMediaTab === "my_uploads" ? userWorks : allWorks;
   const filtered = works.filter((w) => w.status !== "deleted");
-  const filteredByFilter = applyFilter(filtered, mediaState.currentMediaFilter);
-  const filteredByEmployee = mediaState.currentMediaTab === "to_handle"
-    ? applyEmployeeFilter(filteredByFilter, mediaState.currentMediaEmployeeFilter)
+  const filteredByFilter = applyFilter(filtered, currentMediaFilter);
+  const filteredByEmployee = currentMediaTab === "to_handle"
+    ? applyEmployeeFilter(filteredByFilter, currentMediaEmployeeFilter)
     : filteredByFilter;
-  const filteredByCategory = applyCategoryFilter(filteredByEmployee, mediaState.currentMediaCategoryFilter);
-  const sorted = applySort(filteredByCategory, mediaState.currentMediaSort);
+  const filteredByCategory = applyCategoryFilter(filteredByEmployee, currentMediaCategoryFilter);
+  const sorted = applySort(filteredByCategory, currentMediaSort);
 
-  if (works.length === 0 && mediaState.currentMediaTab === "my_uploads" && mediaState.mediaMyWorksHydrated) {
+  if (works.length === 0 && currentMediaTab === "my_uploads" && mediaMyWorksHydrated) {
     loading.style.display = "none";
     list.style.display = "none";
     empty.style.display = "block";
@@ -770,7 +805,7 @@ function renderMediaList() {
       ? `<div style="display:flex;flex-wrap:wrap;gap:2px;margin-top:4px;">${labels.map((l) => `<span style="font-size:9px;padding:1px 4px;background:#e5e7eb;border-radius:3px;color:#6b7280;">${l}</span>`).join("")}</div>`
       : "";
 
-    const byLine = mediaState.currentMediaTab === "to_handle" ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;">by ${work.staffName || "—"}</div>` : "";
+    const byLine = currentMediaTab === "to_handle" ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;">by ${work.staffName || "—"}</div>` : "";
 
     card.innerHTML = `
       ${preview}
@@ -779,7 +814,7 @@ function renderMediaList() {
         ${work.caption ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${String(work.caption).slice(0, 25)}</div>` : ""}
         ${byLine}
         <div style="font-size:9px;color:#9ca3af;margin-top:2px;">${formatDate(work.createdAt)}</div>
-        ${mediaState.currentMediaTab === "to_handle" && (work.postedCount || 0) > 0 ? `<div style="font-size:9px;color:#166534;margin-top:1px;">Posted ${work.postedCount}x</div>` : ""}
+        ${currentMediaTab === "to_handle" && (work.postedCount || 0) > 0 ? `<div style="font-size:9px;color:#166534;margin-top:1px;">Posted ${work.postedCount}x</div>` : ""}
         ${labelsHtml}
       </div>
     `;
@@ -839,7 +874,7 @@ function buildMediaUploadSummary(successCount, failureCount) {
 function getMediaPointsAccountId() {
   const candidates = [
     typeof window !== "undefined" ? window.currentSalonId : "",
-    mediaState.currentUserProfile?.salonId,
+    currentUserProfile?.salonId,
     typeof window !== "undefined" ? window.currentAccountId : "",
     typeof window !== "undefined" ? window.accountId : "",
   ];
@@ -935,8 +970,8 @@ async function awardMediaUploadPoints({ mediaIds, mediaType, work, fileHashes })
     if (!ids.length) return;
     const accountId = getMediaPointsAccountId();
     const locationId = getMediaPointsLocationId(work);
-    const staffId = String(mediaState.currentUserProfile?.staffId || "").trim();
-    const staffName = String(mediaState.currentUserProfile?.staffName || "").trim();
+    const staffId = String(currentUserProfile?.staffId || "").trim();
+    const staffName = String(currentUserProfile?.staffName || "").trim();
     if (!accountId || !locationId || !staffId) return;
     if (typeof window.ffGetPointsSettings !== "function" || typeof window.ffCreatePointsEvent !== "function") return;
 
@@ -1042,7 +1077,7 @@ function populateMediaCategoriesDropdown() {
   const dropdown = document.getElementById("uploadWorkCategoryDropdown");
   const trigger = document.getElementById("uploadWorkCategoryTrigger");
   if (!dropdown || !trigger) return;
-  const active = mediaState.mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
+  const active = mediaCategories.filter((c) => c.active !== false).sort((a, b) => (a.sortOrder ?? 999) - (b.sortOrder ?? 999));
   dropdown.innerHTML = "";
   if (!active.length) {
     const empty = document.createElement("div");
@@ -1145,7 +1180,7 @@ function populateWorksDropdown() {
   const select = document.getElementById("uploadWorkExistingSelect");
   if (!select) return;
   select.innerHTML = '<option value="">-- Choose a work --</option>';
-  mediaState.userWorks
+  userWorks
     .filter((w) => w.status === "active" || w.status === "archived")
     .forEach((w) => {
       const opt = document.createElement("option");
@@ -1183,7 +1218,7 @@ function validateUpload() {
   }
   if (mode === "new") {
     const checked = document.querySelectorAll('input[name="uploadWorkCategory"]:checked');
-    const activeCategories = mediaState.mediaCategories.filter((c) => c.active !== false);
+    const activeCategories = mediaCategories.filter((c) => c.active !== false);
     if (activeCategories.length === 0) {
       showUploadMessage("No media categories yet. Add categories in Settings > Media Categories.", true);
       return false;
@@ -1209,12 +1244,12 @@ function formatMediaUploadError(err) {
 }
 
 async function doUpload() {
-  if (auth.currentUser && !mediaState.currentUserProfile) {
+  if (auth.currentUser && !currentUserProfile) {
     try {
       await loadUserProfile();
     } catch (_) {}
   }
-  if (!mediaState.currentUserProfile) {
+  if (!currentUserProfile) {
     showUploadMessage("Please sign in first.", true);
     return;
   }
@@ -1237,9 +1272,9 @@ async function doUpload() {
       const caption = document.getElementById("uploadWorkCaption")?.value?.trim() || "";
       const files = getUploadSelectedFiles(mediaType);
       const workPayload = {
-        staffId: mediaState.currentUserProfile.staffId,
-        staffName: mediaState.currentUserProfile.staffName,
-        createdByRole: mediaState.currentUserProfile.createdByRole,
+        staffId: currentUserProfile.staffId,
+        staffName: currentUserProfile.staffName,
+        createdByRole: currentUserProfile.createdByRole,
         categoryIds,
         categoryNames,
         serviceType: categoryNames[0] || "", // backward compat
@@ -1268,7 +1303,7 @@ async function doUpload() {
         work: { locationId: typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function" ? window.ffGetActiveLocationId() : "" },
       });
       showUploadMessage(`Work created. ${buildMediaUploadSummary(mediaIds.length, failures.length)}`, failures.length > 0);
-      mediaState.userWorks.unshift({ id: workId, categoryIds, categoryNames, categoryId: categoryIds[0], categoryName: categoryNames[0], serviceType: categoryNames[0], caption, status: "active" });
+      userWorks.unshift({ id: workId, categoryIds, categoryNames, categoryId: categoryIds[0], categoryName: categoryNames[0], serviceType: categoryNames[0], caption, status: "active" });
       populateWorksDropdown();
       document.getElementById("uploadWorkFileInput").value = "";
       document.getElementById("uploadWorkFileBefore").value = "";
@@ -1677,7 +1712,7 @@ async function triggerMediaFileDownload(blob, fileName, mediaUrlFallback, opts =
 }
 
 async function openWorkDetails(workId) {
-  mediaState.selectedWorkId = workId;
+  selectedWorkId = workId;
   const modal = document.getElementById("workDetailsModal");
   const content = document.getElementById("workDetailsContent");
   const actions = document.getElementById("workDetailsActions");
@@ -1693,7 +1728,7 @@ async function openWorkDetails(workId) {
   await enrichWorkWithPreview(work);
   const canHandleMedia = canHandleMediaWork();
   const isAdminUser = isAdmin();
-  const inToHandleView = mediaState.currentMediaTab === "to_handle";
+  const inToHandleView = currentMediaTab === "to_handle";
   const showManagerRow = inToHandleView && canHandleMedia;
   const showAdminRow = inToHandleView && isAdminUser;
 
@@ -2140,11 +2175,11 @@ async function openWorkDetails(workId) {
   };
   addActionBtn(shareBtn);
 
-  const role = (mediaState.currentUserProfile?.createdByRole || "").toLowerCase();
+  const role = (currentUserProfile?.createdByRole || "").toLowerCase();
   const uid = auth.currentUser?.uid;
   const createdDate = work?.createdAt?.toDate ? work.createdAt.toDate() : (work?.createdAt ? new Date(work.createdAt) : null);
   const hoursSinceCreated = createdDate ? (Date.now() - createdDate.getTime()) / (1000 * 60 * 60) : null;
-  const isOwner = work?.createdByUid === uid || work?.staffId === mediaState.currentUserProfile?.staffId;
+  const isOwner = work?.createdByUid === uid || work?.staffId === currentUserProfile?.staffId;
   const within24h = hoursSinceCreated !== null && hoursSinceCreated < 24;
   const canShowBtn = canShowSelfDeleteButton();
   const isEligible = isSelfDeleteEligible(work);
@@ -2286,7 +2321,7 @@ async function openWorkDetails(workId) {
 function closeWorkDetails() {
   const modal = document.getElementById("workDetailsModal");
   if (modal) modal.style.display = "none";
-  mediaState.selectedWorkId = null;
+  selectedWorkId = null;
 }
 
 // =====================
@@ -2383,7 +2418,7 @@ function closeMarkPostedModal() {
 async function saveMarkPosted() {
   const modal = document.getElementById("markPostedModal");
   const workId = modal?.dataset?.workId;
-  if (!workId || !mediaState.currentUserProfile) return;
+  if (!workId || !currentUserProfile) return;
 
   const platforms = getMarkPostedSelectedPlatforms();
   if (platforms.length === 0) {
@@ -2400,13 +2435,13 @@ async function saveMarkPosted() {
         platform,
         format,
         postedDate,
-        markedByStaffId: mediaState.currentUserProfile.staffId,
-        markedByName: mediaState.currentUserProfile.staffName,
+        markedByStaffId: currentUserProfile.staffId,
+        markedByName: currentUserProfile.staffName,
         notes,
       });
     }
     closeMarkPostedModal();
-    if (mediaState.selectedWorkId === workId) openWorkDetails(workId);
+    if (selectedWorkId === workId) openWorkDetails(workId);
     renderMediaList();
   } catch (e) {
     console.error("[Media] addPostedHistory failed", e);
@@ -2461,7 +2496,7 @@ export async function goToMedia() {
   const screen = document.getElementById("mediaScreen");
   if (screen) {
     screen.style.display = "flex";
-    screen.setAttribute("data-media-tab", mediaState.currentMediaTab);
+    screen.setAttribute("data-media-tab", currentMediaTab);
     document.querySelectorAll(".btn-pill").forEach((b) => b.classList.remove("active"));
     const btn = document.getElementById("mediaBtn");
     if (btn) btn.classList.add("active");
@@ -2471,8 +2506,8 @@ export async function goToMedia() {
   if (auth.currentUser) {
     renderMediaList();
   } else {
-    mediaState.mediaMyWorksHydrated = true;
-    mediaState.mediaAllWorksHydrated = true;
+    mediaMyWorksHydrated = true;
+    mediaAllWorksHydrated = true;
     renderMediaList();
   }
 
@@ -2487,8 +2522,8 @@ export async function goToMedia() {
         renderMediaList();
       } catch (e) {
         console.warn("[Media] goToMedia profile/subscriptions", e);
-        mediaState.mediaMyWorksHydrated = true;
-        mediaState.mediaAllWorksHydrated = true;
+        mediaMyWorksHydrated = true;
+        mediaAllWorksHydrated = true;
         renderMediaList();
       }
     })();
@@ -2616,7 +2651,7 @@ function initMediaModule() {
       e.stopPropagation();
       const open = employeeDropdown.style.display === "block";
       closeMediaDropdowns();
-      if (!open && mediaState.currentMediaTab === "to_handle") {
+      if (!open && currentMediaTab === "to_handle") {
         _positionMediaDropdownPanel(employeeDropdown, employeeTrigger);
         employeeDropdown.style.display = "block";
       }
@@ -2661,38 +2696,38 @@ function initMediaModule() {
 
 function setupMediaWorkListSubscriptions() {
   const canAll = canHandleMediaWork();
-  const subKey = `${mediaState.currentUserProfile?.uid || ""}|${mediaState.currentUserProfile?.staffId || ""}|${mediaState.currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
-  if (mediaState.unsubMyWorks && mediaState._mediaWorkListSubKey === subKey) {
+  const subKey = `${currentUserProfile?.uid || ""}|${currentUserProfile?.staffId || ""}|${currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
+  if (unsubMyWorks && _mediaWorkListSubKey === subKey) {
     applyToHandleVisibility();
     renderMediaList();
     return;
   }
-  mediaState._mediaWorkListSubKey = subKey;
+  _mediaWorkListSubKey = subKey;
 
-  if (mediaState.unsubMyWorks) {
-    mediaState.unsubMyWorks();
-    mediaState.unsubMyWorks = null;
+  if (unsubMyWorks) {
+    unsubMyWorks();
+    unsubMyWorks = null;
   }
-  if (mediaState.unsubAllWorks) {
-    mediaState.unsubAllWorks();
-    mediaState.unsubAllWorks = null;
+  if (unsubAllWorks) {
+    unsubAllWorks();
+    unsubAllWorks = null;
   }
 
-  mediaState.mediaMyWorksHydrated = false;
-  mediaState.mediaAllWorksHydrated = false;
+  mediaMyWorksHydrated = false;
+  mediaAllWorksHydrated = false;
 
-  if (mediaState.currentUserProfile?.staffId || mediaState.currentUserProfile?.uid) {
-    const staffIdForQuery = String(mediaState.currentUserProfile?.staffId || "").trim();
-    mediaState.unsubMyWorks = subscribeContentWorks(staffIdForQuery ? { staffId: staffIdForQuery } : {}, async (works) => {
-      const uid = String(mediaState.currentUserProfile?.uid || "").trim();
-      const staffId = String(mediaState.currentUserProfile?.staffId || "").trim();
+  if (currentUserProfile?.staffId || currentUserProfile?.uid) {
+    const staffIdForQuery = String(currentUserProfile?.staffId || "").trim();
+    unsubMyWorks = subscribeContentWorks(staffIdForQuery ? { staffId: staffIdForQuery } : {}, async (works) => {
+      const uid = String(currentUserProfile?.uid || "").trim();
+      const staffId = String(currentUserProfile?.staffId || "").trim();
       const ownWorks = (Array.isArray(works) ? works : []).filter((work) => {
         const workStaffId = String(work?.staffId || "").trim();
         const workCreatedByUid = String(work?.createdByUid || "").trim();
         return (staffId && workStaffId === staffId) || (uid && workCreatedByUid === uid);
       });
-      mediaState.mediaMyWorksHydrated = true;
-      mediaState.userWorks = ownWorks.slice();
+      mediaMyWorksHydrated = true;
+      userWorks = ownWorks.slice();
       populateWorksDropdown();
       renderMediaList();
       const toEnrich = ownWorks.slice(0, 8);
@@ -2704,21 +2739,21 @@ function setupMediaWorkListSubscriptions() {
           void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
         }
       }
-      mediaState.userWorks = [...enriched, ...ownWorks.slice(toEnrich.length)];
+      userWorks = [...enriched, ...ownWorks.slice(toEnrich.length)];
       populateWorksDropdown();
       renderMediaList();
     });
   } else {
-    mediaState.mediaMyWorksHydrated = true;
-    mediaState.userWorks = [];
+    mediaMyWorksHydrated = true;
+    userWorks = [];
   }
 
   applyToHandleVisibility();
   if (canHandleMediaWork()) {
-    mediaState.unsubAllWorks = subscribeContentWorks({}, async (works) => {
+    unsubAllWorks = subscribeContentWorks({}, async (works) => {
       const arr = Array.isArray(works) ? works : [];
-      mediaState.mediaAllWorksHydrated = true;
-      mediaState.allWorks = arr.slice();
+      mediaAllWorksHydrated = true;
+      allWorks = arr.slice();
       renderMediaFilters();
       renderMediaList();
       const toEnrich = arr.slice(0, 8);
@@ -2730,13 +2765,13 @@ function setupMediaWorkListSubscriptions() {
           void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
         }
       }
-      mediaState.allWorks = [...enriched, ...arr.slice(toEnrich.length)];
+      allWorks = [...enriched, ...arr.slice(toEnrich.length)];
       renderMediaFilters();
       renderMediaList();
     });
   } else {
-    mediaState.mediaAllWorksHydrated = true;
-    mediaState.allWorks = [];
+    mediaAllWorksHydrated = true;
+    allWorks = [];
   }
 }
 
@@ -2744,23 +2779,23 @@ export function initMediaUpload() {
   onAuthStateChanged(auth, async (user) => {
     if (!user) {
       hideMediaScreen();
-      mediaState.currentUserProfile = null;
-      mediaState._mediaWorkListSubKey = "";
-      mediaState.mediaMyWorksHydrated = true;
-      mediaState.mediaAllWorksHydrated = true;
-      mediaState.userWorks = [];
-      mediaState.allWorks = [];
-      if (mediaState.unsubMyWorks) {
-        mediaState.unsubMyWorks();
-        mediaState.unsubMyWorks = null;
+      currentUserProfile = null;
+      _mediaWorkListSubKey = "";
+      mediaMyWorksHydrated = true;
+      mediaAllWorksHydrated = true;
+      userWorks = [];
+      allWorks = [];
+      if (unsubMyWorks) {
+        unsubMyWorks();
+        unsubMyWorks = null;
       }
-    if (mediaState.unsubAllWorks) {
-      mediaState.unsubAllWorks();
-      mediaState.unsubAllWorks = null;
+    if (unsubAllWorks) {
+      unsubAllWorks();
+      unsubAllWorks = null;
     }
-    if (mediaState.unsubMediaCategories) {
-      mediaState.unsubMediaCategories();
-      mediaState.unsubMediaCategories = null;
+    if (unsubMediaCategories) {
+      unsubMediaCategories();
+      unsubMediaCategories = null;
     }
     return;
   }
@@ -2769,12 +2804,12 @@ export function initMediaUpload() {
 
     setupMediaWorkListSubscriptions();
 
-    if (mediaState.unsubMediaCategories) {
-      mediaState.unsubMediaCategories();
-      mediaState.unsubMediaCategories = null;
+    if (unsubMediaCategories) {
+      unsubMediaCategories();
+      unsubMediaCategories = null;
     }
-    mediaState.unsubMediaCategories = subscribeMediaCategories((cats) => {
-      mediaState.mediaCategories = cats || [];
+    unsubMediaCategories = subscribeMediaCategories((cats) => {
+      mediaCategories = cats || [];
       populateMediaCategoriesDropdown();
     });
 
