@@ -92,5 +92,6 @@ export function initInventoryOrders(deps) {
     getSelectedSubMeta,
     fetchSubcategoryInventoryDoc,
     findCategoryAndSubForSubId,
+    goToInventory: deps.goToInventory,
   });
 }

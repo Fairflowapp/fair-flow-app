@@ -28,9 +28,9 @@ import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inve
 import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260627_inventory_orders_split";
 
 // ── injected by initOrdersBuilder() (orchestrator spine + builder back-edges) ──
-let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId;
+let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId, goToInventory;
 export function initOrdersBuilder(deps) {
-  ({ getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId } = deps);
+  ({ getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId, goToInventory } = deps);
 }
 
 
