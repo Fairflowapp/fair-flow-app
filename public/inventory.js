@@ -140,11 +140,11 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_split";
+} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260701_inventory_delegates_workspace_split";
+} from "./inventory-delegates-workspace.js?v=20260701_inventory_delegates_workspace_brace_fix";
 
 import {
   initInventoryInsights,
@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260627_inventory_table3";
+} from "./inventory-table.js?v=20260701_inventory_table_persist_split";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,
