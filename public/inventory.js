@@ -144,7 +144,7 @@ import {
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260701_inventory_delegates_orders_brace_fix2";
+} from "./inventory-delegates-workspace.js?v=20260701_inventory_delegates_workspace_brace_fix2";
 
 import {
   initInventoryInsights,

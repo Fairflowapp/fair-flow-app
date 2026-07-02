@@ -147,17 +147,17 @@ function handleInventoryWorkspaceDelegateClickNav(ev, root, t) {
       }
       return true;
     }
-
-    if (handleInventoryOrdersDelegateClick(ev, root, t)) return;
-
-    const urlEditBtn = t.closest("[data-inv-url-edit]");
-    if (urlEditBtn && root.contains(urlEditBtn)) {
-      ev.preventDefault();
   return false;
 }
 
 /** @returns {boolean} */
 function handleInventoryWorkspaceDelegateClick(ev, root, t) {
+    const urlEditBtn = t.closest("[data-inv-url-edit]");
+    if (urlEditBtn && root.contains(urlEditBtn)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const rid = urlEditBtn.getAttribute("data-row-id");
+      if (rid) {
         const key = invCellKey("url", rid);
         if (invState._editCellKey === key) {
           queueMicrotask(() => {
@@ -567,7 +567,6 @@ function handleInventoryWorkspaceDelegateClick(ev, root, t) {
     }
   return false;
 }
-
 export function bindInventoryDelegatesWorkspaceOnce(root) {
   bindInvColumnResizeOnce();
   bindInvRowDnDOnce(root);
