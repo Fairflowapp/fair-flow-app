@@ -24,6 +24,7 @@ import {
 } from "./inventory-helpers.js?v=20260627_inventory_split";
 import { getCategoryTree } from "./inventory-catalog.js?v=20260627_inventory_catalog";
 import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260627_inventory_orders_split";
+import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260701_inventory_spine_split";
 
 // ── injected by initOrdersDrafts() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync;
