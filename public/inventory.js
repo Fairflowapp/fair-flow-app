@@ -908,7 +908,6 @@ function ensureInventoryScreenDelegates(root) {
   });
   root.addEventListener("keydown", (ev) => {
     if (handleInventoryOrdersDelegateKeydown(ev)) return;
-    }
     if (
       ev.key === "Enter" &&
       ev.target instanceof HTMLInputElement &&
@@ -958,16 +957,11 @@ function ensureInventoryScreenDelegates(root) {
       return;
     }
     if (handleInventoryOrdersDelegateKeydownEscape(ev)) return;
-    }
-    }
     if (invState._invOrderBuilderAddModal) {
       ev.preventDefault();
       invState._invOrderBuilderAddModal = null;
       mountOrRefreshMockUi();
       return;
-    }
-    }
-    }
     }
     if (!invState._groupRemoveModalGroupId) return;
     ev.preventDefault();
