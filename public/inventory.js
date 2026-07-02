@@ -140,7 +140,7 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix";
+} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix2";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,

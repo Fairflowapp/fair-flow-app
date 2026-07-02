@@ -16,6 +16,7 @@ import {
   triggerOrderDetailExportCsv,
   confirmInventoryOrderPurchase,
   confirmInventoryOrderReceived,
+  commitOrderLineInventoryPrice,
   deleteInventoryOrderReceipt,
   inventoryOrderDraftToast,
 } from "./inventory-orders.js?v=20260627_inventory_orders_split";
@@ -86,48 +87,54 @@ export function handleInventoryOrdersDelegateFocusout(ev, root, t) {
 
 /** @returns {boolean} */
 export function handleInventoryOrdersDelegateKeydown(ev) {
-    if (
-      ev.key === "Enter" &&
-      ev.target instanceof HTMLInputElement &&
-      ev.target.hasAttribute("data-inv-orders-rename-input") &&
-      invState._invOrdersRenameModal &&
-      !invState._invOrdersRenameModal.busy
-    ) {
-      ev.preventDefault();
-      void renameInventoryOrderConfirmed(invState._invOrdersRenameModal.orderId, ev.target.value);
-      return true;
+  if (
+    ev.key === "Enter" &&
+    ev.target instanceof HTMLInputElement &&
+    ev.target.hasAttribute("data-inv-orders-rename-input") &&
+    invState._invOrdersRenameModal &&
+    !invState._invOrdersRenameModal.busy
+  ) {
+    ev.preventDefault();
+    void renameInventoryOrderConfirmed(invState._invOrdersRenameModal.orderId, ev.target.value);
+    return true;
+  }
   return false;
 }
 
 /** @returns {boolean} */
 export function handleInventoryOrdersDelegateKeydownEscape(ev) {
-    if (invState._invOrderDetailLineViewIdx != null) {
-      ev.preventDefault();
-      invState._invOrderDetailLineViewIdx = null;
-      mountOrRefreshMockUi();
-      return true;
-    if (invState._invOrdersRenameModal && !invState._invOrdersRenameModal.busy) {
-      ev.preventDefault();
-      invState._invOrdersRenameModal = null;
-      mountOrRefreshMockUi();
-      return true;
-    if (invState._invOrderCellBreakdownModal && !invState._invOrderCellBreakdownModal.busy) {
-      ev.preventDefault();
-      invState._invOrderCellBreakdownModal = null;
-      mountOrRefreshMockUi();
-      return true;
-    if (invState._invReceiptInfoModalOrderId) {
-      ev.preventDefault();
-      invState._invReceiptInfoModalOrderId = null;
-      mountOrRefreshMockUi();
-      return true;
-    if (invState._invOrdersDetailOrderId) {
-      ev.preventDefault();
-      if (isInvOrderDetailCommitBusy()) return;
-      invState._invOrderDetailLineViewIdx = null;
-      invState._invOrdersDetailOrderId = null;
-      mountOrRefreshMockUi();
-      return true;
+  if (invState._invOrderDetailLineViewIdx != null) {
+    ev.preventDefault();
+    invState._invOrderDetailLineViewIdx = null;
+    mountOrRefreshMockUi();
+    return true;
+  }
+  if (invState._invOrdersRenameModal && !invState._invOrdersRenameModal.busy) {
+    ev.preventDefault();
+    invState._invOrdersRenameModal = null;
+    mountOrRefreshMockUi();
+    return true;
+  }
+  if (invState._invOrderCellBreakdownModal && !invState._invOrderCellBreakdownModal.busy) {
+    ev.preventDefault();
+    invState._invOrderCellBreakdownModal = null;
+    mountOrRefreshMockUi();
+    return true;
+  }
+  if (invState._invReceiptInfoModalOrderId) {
+    ev.preventDefault();
+    invState._invReceiptInfoModalOrderId = null;
+    mountOrRefreshMockUi();
+    return true;
+  }
+  if (invState._invOrdersDetailOrderId) {
+    ev.preventDefault();
+    if (isInvOrderDetailCommitBusy()) return true;
+    invState._invOrderDetailLineViewIdx = null;
+    invState._invOrdersDetailOrderId = null;
+    mountOrRefreshMockUi();
+    return true;
+  }
   return false;
 }
 

@@ -16,7 +16,7 @@ import {
   handleInventoryOrdersDelegateFocusout,
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
-} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_split";
+} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix2";
 import {
   bindInvColumnResizeOnce,
   bindInvRowDnDOnce,
