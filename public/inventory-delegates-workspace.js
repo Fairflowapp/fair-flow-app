@@ -32,7 +32,7 @@ import {
   invMobileAnyOptionalColumnHidden,
   resetInvMobileOptionalColumns,
   ensureInvMobileColHeaderBindOnce,
-} from "./inventory-table.js?v=20260627_inventory_table3";
+} from "./inventory-table.js?v=20260701_inventory_table_ui_split";
 import {
   handleOrderBuilderSourceChange,
   commitInventoryOrderBuilderAddItem,

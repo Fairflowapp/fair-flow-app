@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260701_inventory_table_layout_split";
+} from "./inventory-table.js?v=20260701_inventory_table_ui_split";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,

@@ -24,9 +24,9 @@ import {
   flushInventoryTableToFirestore,
   commitPendingInventoryDeleteIfAny,
   startInventoryUndo,
-} from "./inventory-table-persist.js?v=20260701_inventory_table_persist_split";
+} from "./inventory-table-persist.js?v=20260701_inventory_table_ui_split";
 
-import { getInvColWidths } from "./inventory-table-layout.js?v=20260701_inventory_table_layout_split";
+import { getInvColWidths } from "./inventory-table-layout.js?v=20260701_inventory_table_ui_split";
 
 let mountOrRefreshMockUi, ffCanManageInventory;
 
