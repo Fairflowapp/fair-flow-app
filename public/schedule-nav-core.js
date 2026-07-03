@@ -15,7 +15,6 @@ import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import { _ffSchedActiveLocId } from "./schedule-ack.js?v=20260702_schedule_ack";
 import { getStaffByScheduleKey } from "./schedule-dnd.js?v=20260702_schedule_dnd";
-import { initScheduleDraft } from "./schedule-draft.js?v=20260702_schedule_draft";
 import {
   formatScheduleRawRangeDisplay,
   getDayNameFromDateKey,
@@ -183,37 +182,6 @@ function resolveStandByStaffMember(sid, staffList, draft) {
   return null;
 }
 
-// Wire draft helpers (function declarations below are hoisted).
-initScheduleDraft({
-  _ffActiveLocationNameForIcs,
-  applyBusinessSettingsToDraft,
-  cloneStandByByDateMap,
-  getBusinessStatusForDate,
-  getStaffByScheduleKey,
-  normalizeStandByBlock,
-  refreshSchedulePreview,
-  renderScheduleBoard,
-  renderScheduleSummary,
-  revalidateLocalDraft,
-  standByMapsEqual,
-});
-
-
-// Wire schedule-cloud after storage constants initialize (avoid TDZ for const deps).
-initScheduleCloud({
-  SCHEDULE_DRAFT_OVERRIDE_KEY_VER,
-  SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER,
-  SCHEDULE_LAST_BUILD_CACHE_VER,
-  clearScheduleLocalDirtyForCurrentUser,
-  clearSharedScheduleDraftOverrideForWeek,
-  cloneStandByByDateMap,
-  loadScheduleDraftOverridePayload,
-  persistStaffShiftFingerprintsForWeek,
-  refreshSchedulePreview,
-  serializeDraftDaysForStorage,
-});
-
-
 function computeStaffWeeklyScheduledMinutes(staffKey, draftDays, assignmentLookup) {
   let total = 0;
   for (const day of draftDays) {
@@ -228,14 +196,6 @@ function computeStaffWeeklyScheduledMinutes(staffKey, draftDays, assignmentLooku
   }
   return total;
 }
-
-
-// Wire DnD helpers (function declarations below are hoisted).
-initScheduleDnd({
-  renderScheduleBoard,
-  renderScheduleSummary,
-  renderScheduleViewTabs,
-});
 
 
 function getBusinessStatusForDate(dateKey) {

@@ -257,10 +257,46 @@ import {
   standByDayEntryHasAny,
   standByMapsEqual,
   initScheduleNavCore,
-} from "./schedule-nav-core.js?v=20260703_schedule_nav_core_fix";
+} from "./schedule-nav-core.js?v=20260703_schedule_nav_wiring_fix";
 
 // Wire nav-core back-references.
 initScheduleNavCore({ renderScheduleBoard, refreshSchedulePreview });
+
+// Wire draft helpers (function declarations below are hoisted).
+initScheduleDraft({
+  _ffActiveLocationNameForIcs,
+  applyBusinessSettingsToDraft,
+  cloneStandByByDateMap,
+  getBusinessStatusForDate,
+  getStaffByScheduleKey,
+  normalizeStandByBlock,
+  refreshSchedulePreview,
+  renderScheduleBoard,
+  renderScheduleSummary,
+  revalidateLocalDraft,
+  standByMapsEqual,
+});
+
+// Wire schedule-cloud back-references (storage constants are imports here, no TDZ).
+initScheduleCloud({
+  SCHEDULE_DRAFT_OVERRIDE_KEY_VER,
+  SCHEDULE_DRAFT_OVERRIDE_PAYLOAD_VER,
+  SCHEDULE_LAST_BUILD_CACHE_VER,
+  clearScheduleLocalDirtyForCurrentUser,
+  clearSharedScheduleDraftOverrideForWeek,
+  cloneStandByByDateMap,
+  loadScheduleDraftOverridePayload,
+  persistStaffShiftFingerprintsForWeek,
+  refreshSchedulePreview,
+  serializeDraftDaysForStorage,
+});
+
+// Wire DnD helpers (function declarations below are hoisted).
+initScheduleDnd({
+  renderScheduleBoard,
+  renderScheduleSummary,
+  renderScheduleViewTabs,
+});
 
 // Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
 scheduleState.schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
