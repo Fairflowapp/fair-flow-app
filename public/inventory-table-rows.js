@@ -407,6 +407,7 @@ export {
   ensureInvEditDocListenerOnce,
   findInvEditInput,
   getInvCellKeyFromEl,
+  groupHasAnyValues,
   removeInventoryGroup,
   renderEditableCell,
   renderUrlCell,

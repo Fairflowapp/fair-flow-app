@@ -41,7 +41,7 @@ import {
   findInvEditInput,
   getInvCellKeyFromEl,
   removeInventoryGroup,
-} from "./inventory-table-rows.js?v=20260701_inventory_table_ui_split";
+} from "./inventory-table-rows.js?v=20260702_inventory_table_rows_export_fix";
 
 import {
   initInventoryTableUi,
