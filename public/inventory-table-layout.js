@@ -4,7 +4,7 @@
 
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
 
-import { persistColumnWidthsToFirestore } from "./inventory-table-persist.js?v=20260702_inventory_table_graph_bump";
+import { persistColumnWidthsToFirestore } from "./inventory-table-persist.js?v=20260702_inventory_orders_detail_split";
 
 const INV_MOBILE_COL_HIDE_SS_KEY = "ff_inv_mobile_col_hide_v1";
 

@@ -5,11 +5,11 @@
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
 import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
 import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260627_inventory_catalog";
-import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
+import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_orders_detail_split";
 import {
   loadInventoryOrdersList,
   loadInventoryOrderDraft,
-} from "./inventory-orders.js?v=20260701_inventory_orders_split";
+} from "./inventory-orders.js?v=20260702_inventory_orders_detail_split";
 import {
   refreshInventoryInsightsAsync,
   scanInventorySuggestionsOnce,

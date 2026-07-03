@@ -122,7 +122,7 @@ import {
   sharedInvStateDocRef,
 } from "./inventory-spine.js?v=20260701_inventory_spine_split";
 import { initInventoryShell, mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
-import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_table_graph_bump";
+import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_orders_detail_split";
 export { goToInventory };
 import "./inventory-devtools.js?v=20260701_inventory_devtools_split";
 import {
@@ -140,11 +140,11 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_orders_detail_split";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-delegates-workspace.js?v=20260702_inventory_orders_detail_split";
 
 import {
   initInventoryInsights,
@@ -200,7 +200,7 @@ import {
   toggleShoppingRowQty,
   triggerOrderDetailExportCsv,
   triggerOrderDetailPrint,
-} from "./inventory-orders.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders.js?v=20260702_inventory_orders_detail_split";
 
 
 import {
@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-table.js?v=20260702_inventory_orders_detail_split";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,

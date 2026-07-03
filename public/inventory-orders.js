@@ -16,29 +16,29 @@
  */
 import {
   initOrdersList,
-} from "./inventory-orders-list.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders-list.js?v=20260702_inventory_orders_detail_split";
 import {
   initOrdersDetail,
-} from "./inventory-orders-detail.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders-detail.js?v=20260702_inventory_orders_detail_split";
 import {
   initOrdersReceipts,
-} from "./inventory-orders-receipts.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders-receipts.js?v=20260702_inventory_orders_detail_split";
 import {
   initOrdersBuilder,
   refreshOrderBuilderPreviewAsync,
   renderOrderBuilderSourceHtml,
-} from "./inventory-orders-builder.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders-builder.js?v=20260702_inventory_orders_detail_split";
 import {
   initOrdersDrafts,
-} from "./inventory-orders-drafts.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders-drafts.js?v=20260702_inventory_orders_detail_split";
 
 // Re-export the full Orders public surface (verbatim names) from the sub-modules.
-export * from "./inventory-orders-core.js?v=20260627_inventory_orders_split";
-export * from "./inventory-orders-list.js?v=20260627_inventory_orders_split";
-export * from "./inventory-orders-detail.js?v=20260627_inventory_orders_split";
-export * from "./inventory-orders-builder.js?v=20260627_inventory_orders_split";
-export * from "./inventory-orders-drafts.js?v=20260627_inventory_orders_split";
-export * from "./inventory-orders-receipts.js?v=20260627_inventory_orders_split";
+export * from "./inventory-orders-core.js?v=20260702_inventory_orders_detail_split";
+export * from "./inventory-orders-list.js?v=20260702_inventory_orders_detail_split";
+export * from "./inventory-orders-detail.js?v=20260702_inventory_orders_detail_split";
+export * from "./inventory-orders-builder.js?v=20260702_inventory_orders_detail_split";
+export * from "./inventory-orders-drafts.js?v=20260702_inventory_orders_detail_split";
+export * from "./inventory-orders-receipts.js?v=20260702_inventory_orders_detail_split";
 
 /**
  * Wire the orchestrator spine (from inventory.js) into each Orders sub-module,

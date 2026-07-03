@@ -33,7 +33,7 @@ import { getCategoryTree } from "./inventory-catalog.js?v=20260627_inventory_cat
 import {
   inventoryOrderDraftToast,
   scheduleInventoryOrderDraftSave,
-} from "./inventory-orders.js?v=20260627_inventory_orders_split";
+} from "./inventory-orders.js?v=20260702_inventory_orders_detail_split";
 
 import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260627_inventory_insights";
 
@@ -41,20 +41,20 @@ import {
   scheduleInventoryTablePersist,
   ensureTableReadyForEdits,
   loadInventoryTableForSub,
-} from "./inventory-table-persist.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-table-persist.js?v=20260702_inventory_orders_detail_split";
 
 import {
   getInvColWidths,
   getInvMobileGroupSubColWidthsPx,
   renderColgroup,
-} from "./inventory-table-layout.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-table-layout.js?v=20260702_inventory_orders_detail_split";
 
 import {
   groupHasAnyValues,
   renderEditableCell,
   renderUrlCell,
   updateOrderCellEl,
-} from "./inventory-table-rows.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-table-rows.js?v=20260702_inventory_orders_detail_split";
 
 let mountOrRefreshMockUi, ffCanManageInventory, getSalonId;
 

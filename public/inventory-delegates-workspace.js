@@ -16,7 +16,7 @@ import {
   handleInventoryOrdersDelegateFocusout,
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_orders_detail_split";
 import {
   bindInvColumnResizeOnce,
   bindInvRowDnDOnce,
@@ -32,7 +32,7 @@ import {
   invMobileAnyOptionalColumnHidden,
   resetInvMobileOptionalColumns,
   ensureInvMobileColHeaderBindOnce,
-} from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
+} from "./inventory-table.js?v=20260702_inventory_orders_detail_split";
 import {
   handleOrderBuilderSourceChange,
   commitInventoryOrderBuilderAddItem,
@@ -47,7 +47,7 @@ import {
   loadInventoryOrderDraft,
   loadInventoryOrdersList,
   refreshOrderBuilderPreviewAsync,
-} from "./inventory-orders.js?v=20260701_inventory_orders_split";
+} from "./inventory-orders.js?v=20260702_inventory_orders_detail_split";
 import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260627_inventory_insights";
 
 let mountOrRefreshMockUi;
