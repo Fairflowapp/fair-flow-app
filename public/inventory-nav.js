@@ -5,7 +5,7 @@
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
 import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
 import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260627_inventory_catalog";
-import { loadInventoryTableForSub } from "./inventory-table.js?v=20260701_inventory_table_ui_split";
+import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
 import {
   loadInventoryOrdersList,
   loadInventoryOrderDraft,

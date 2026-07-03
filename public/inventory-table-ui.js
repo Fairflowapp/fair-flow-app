@@ -41,20 +41,20 @@ import {
   scheduleInventoryTablePersist,
   ensureTableReadyForEdits,
   loadInventoryTableForSub,
-} from "./inventory-table-persist.js?v=20260701_inventory_table_ui_split";
+} from "./inventory-table-persist.js?v=20260702_inventory_table_graph_bump";
 
 import {
   getInvColWidths,
   getInvMobileGroupSubColWidthsPx,
   renderColgroup,
-} from "./inventory-table-layout.js?v=20260701_inventory_table_ui_split";
+} from "./inventory-table-layout.js?v=20260702_inventory_table_graph_bump";
 
 import {
   groupHasAnyValues,
   renderEditableCell,
   renderUrlCell,
   updateOrderCellEl,
-} from "./inventory-table-rows.js?v=20260702_inventory_table_rows_export_fix";
+} from "./inventory-table-rows.js?v=20260702_inventory_table_graph_bump";
 
 let mountOrRefreshMockUi, ffCanManageInventory, getSalonId;
 

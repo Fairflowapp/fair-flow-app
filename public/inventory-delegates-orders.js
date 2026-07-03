@@ -3,7 +3,7 @@
 // ensureInventoryScreenDelegates in inventory.js (Phase 13).
 
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
-import { removeApprovedContributionForCell, bindInventoryOrderCellLongPressOnce } from "./inventory-table.js?v=20260701_inventory_table_ui_split";
+import { removeApprovedContributionForCell, bindInventoryOrderCellLongPressOnce } from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
 import {
   bindOrderDetailRowLongPressOnce,
   toggleShoppingRowQty,

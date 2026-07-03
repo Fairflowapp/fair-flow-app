@@ -16,7 +16,7 @@ import {
   handleInventoryOrdersDelegateFocusout,
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
-} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix2";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_table_graph_bump";
 import {
   bindInvColumnResizeOnce,
   bindInvRowDnDOnce,
@@ -32,7 +32,7 @@ import {
   invMobileAnyOptionalColumnHidden,
   resetInvMobileOptionalColumns,
   ensureInvMobileColHeaderBindOnce,
-} from "./inventory-table.js?v=20260701_inventory_table_ui_split";
+} from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
 import {
   handleOrderBuilderSourceChange,
   commitInventoryOrderBuilderAddItem,

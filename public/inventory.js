@@ -122,7 +122,7 @@ import {
   sharedInvStateDocRef,
 } from "./inventory-spine.js?v=20260701_inventory_spine_split";
 import { initInventoryShell, mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
-import { goToInventory } from "./inventory-nav.js?v=20260701_inventory_nav_split";
+import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_table_graph_bump";
 export { goToInventory };
 import "./inventory-devtools.js?v=20260701_inventory_devtools_split";
 import {
@@ -140,11 +140,11 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260701_inventory_delegates_orders_brace_fix2";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_table_graph_bump";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260701_inventory_delegates_workspace_brace_fix2";
+} from "./inventory-delegates-workspace.js?v=20260702_inventory_table_graph_bump";
 
 import {
   initInventoryInsights,
@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260702_inventory_table_rows_export_fix";
+} from "./inventory-table.js?v=20260702_inventory_table_graph_bump";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,
