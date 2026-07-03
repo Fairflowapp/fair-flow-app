@@ -15,6 +15,7 @@ import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import { _ffSchedActiveLocId } from "./schedule-ack.js?v=20260702_schedule_ack";
 import { getStaffByScheduleKey } from "./schedule-dnd.js?v=20260702_schedule_dnd";
+import { initScheduleDraft } from "./schedule-draft.js?v=20260702_schedule_draft";
 import {
   formatScheduleRawRangeDisplay,
   getDayNameFromDateKey,

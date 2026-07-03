@@ -257,30 +257,13 @@ import {
   standByDayEntryHasAny,
   standByMapsEqual,
   initScheduleNavCore,
-} from "./schedule-nav-core.js?v=20260703_schedule_nav_split";
+} from "./schedule-nav-core.js?v=20260703_schedule_nav_core_fix";
 
 // Wire nav-core back-references.
 initScheduleNavCore({ renderScheduleBoard, refreshSchedulePreview });
 
 // Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
 scheduleState.schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
-
-import {
-  _ffSchedActiveLocId,
-  _ffSchedPerLocDocId,
-  _ffSchedPublishDocId,
-  ensureScheduleChangePingListener,
-  ensureScheduleWeekAckListener,
-  ffScheduleAppToast,
-  ffScheduleStaffBroadcastToast,
-  getAuthedStaffIdForSchedule,
-  initScheduleAck,
-  loadScheduleWeekPingMap,
-  submitScheduleWeekAck,
-  teardownScheduleAckListener,
-  teardownScheduleChangePingListener,
-  updateScheduleWeekAckStrip,
-} from "./schedule-ack.js?v=20260702_schedule_ack";
 
 // Wire the ack module's back-references into this file (function declarations
 // below are hoisted, so this is safe at module-eval time).
@@ -292,21 +275,6 @@ initScheduleAck({
   scheduleInboxUserIsFirestoreManager,
   scheduleUserCanManualEdit,
 });
-
-import {
-  bindScheduleBoardManualAdd,
-  bindScheduleShiftEditButtons,
-  closeScheduleShiftEdit,
-  ensureScheduleRebuildConfirmModal,
-  escapeScheduleAttr,
-  escapeScheduleHtml,
-  formatLunchBreakCellSubtitle,
-  getScheduleAccessContext,
-  initScheduleShiftEdit,
-  openScheduleDnDOffConfirm,
-  openScheduleShiftEdit,
-  scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
 
 // Wire the shift-edit module's back-references into this file (function
 // declarations below are hoisted, so this is safe at module-eval time).
@@ -1047,7 +1015,6 @@ if (document.readyState === "loading") {
 
 
 export {
-  goToSchedule,
   refreshSchedulePreview,
   hideScheduleScreen,
 };
