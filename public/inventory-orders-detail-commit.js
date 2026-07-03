@@ -23,8 +23,8 @@ import {
   isItemPurchaseAppliedToInventory,
   formatOrderDisplay,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_orders_detail_split";
-import { loadInventoryOrdersList } from "./inventory-orders-list.js?v=20260702_inventory_orders_detail_split";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_insights_split";
+import { loadInventoryOrdersList } from "./inventory-orders-list.js?v=20260702_inventory_insights_split";
 
 // ── injected by initOrdersDetailCommit() (orchestrator spine + back-edges) ──
 let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, loadInventoryTableForSub, findCategoryAndSubForSubId;

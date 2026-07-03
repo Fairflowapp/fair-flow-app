@@ -22,10 +22,10 @@ import {
   sanitizeManualItemForDraft,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
 import { getCategoryTree } from "./inventory-catalog.js?v=20260627_inventory_catalog";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_orders_detail_split";
-import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260702_inventory_orders_detail_split";
-import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260702_inventory_orders_detail_split";
-import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260702_inventory_orders_detail_split";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_insights_split";
+import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260702_inventory_insights_split";
+import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260702_inventory_insights_split";
+import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260702_inventory_insights_split";
 
 // ── injected by initOrdersBuilder() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId, goToInventory;

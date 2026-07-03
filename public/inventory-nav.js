@@ -5,16 +5,16 @@
 import { invState } from "./inventory-state.js?v=20260627_inventory_split";
 import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
 import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260627_inventory_catalog";
-import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_orders_detail_split";
+import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_insights_split";
 import {
   loadInventoryOrdersList,
   loadInventoryOrderDraft,
-} from "./inventory-orders.js?v=20260702_inventory_orders_detail_split";
+} from "./inventory-orders.js?v=20260702_inventory_insights_split";
 import {
   refreshInventoryInsightsAsync,
   scanInventorySuggestionsOnce,
   scanProductReorderAlertsOnce,
-} from "./inventory-insights.js?v=20260627_inventory_insights";
+} from "./inventory-insights.js?v=20260702_inventory_insights_split";
 
 /**
  * External hook: force-reload a subcategory's inventory data so live changes (e.g. approved supply

@@ -23,7 +23,7 @@ import {
   renderDraftsPickerRowHtml,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
 import { getCategoryTree } from "./inventory-catalog.js?v=20260627_inventory_catalog";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_orders_detail_split";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_insights_split";
 import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260701_inventory_spine_split";
 
 // ── injected by initOrdersDrafts() (orchestrator spine + builder back-edges) ──
