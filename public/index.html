@@ -38943,7 +38943,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260702_schedule_nav')
+              import('/schedule-ui.js?v=20260703_schedule_nav_split')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -64511,7 +64511,7 @@ function hookSettingsGuard_DISABLED(){
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260702_schedule_nav", type: "module", delay: 2300 },
+        { src: "/schedule-ui.js?v=20260703_schedule_nav_split", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260630_inbox_cleanup", type: "module", delay: 2700 },
