@@ -26,7 +26,7 @@ import {
   isInvOrderDetailCommitBusy,
   parseInventoryCellRefFromOrderLine,
   ensureShoppingDraft,
-} from "./inventory-orders-detail-commit.js?v=20260702_inventory_insights_split";
+} from "./inventory-orders-detail-commit.js?v=20260702_inventory_catalog_split";
 
 // ── injected by initOrdersDetailUi() (orchestrator spine) ──
 let mountOrRefreshMockUi;

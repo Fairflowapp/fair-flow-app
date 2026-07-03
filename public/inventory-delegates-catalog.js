@@ -18,7 +18,7 @@ import {
   ensureValidSubcategorySelection,
   resetCatModalTransientState,
   bindCatManageDnDOnce,
-} from "./inventory-catalog.js?v=20260627_inventory_catalog";
+} from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
 
 let mountOrRefreshMockUi;
 

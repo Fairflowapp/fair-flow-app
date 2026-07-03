@@ -21,8 +21,8 @@ import {
   sanitizeReceiptStorageFileName,
   getReceiptFileTypeEmoji,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_insights_split";
-import { isInvOrderDetailCommitBusy } from "./inventory-orders-detail.js?v=20260702_inventory_insights_split";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_catalog_split";
+import { isInvOrderDetailCommitBusy } from "./inventory-orders-detail.js?v=20260702_inventory_catalog_split";
 
 // ── injected by initOrdersReceipts() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi;

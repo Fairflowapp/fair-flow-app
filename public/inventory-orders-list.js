@@ -27,7 +27,7 @@ import {
   getOrderSearchHaystack,
   clonePlainForFirestoreOrderPayload,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_insights_split";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_catalog_split";
 
 // ── injected by initOrdersList() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, isInvMobileNarrow, renderOrderBuilderSourceHtml;

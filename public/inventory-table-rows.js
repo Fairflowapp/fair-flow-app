@@ -17,16 +17,16 @@ import {
   hrefForUrl,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
 
-import { resetCatModalTransientState } from "./inventory-catalog.js?v=20260627_inventory_catalog";
+import { resetCatModalTransientState } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
 
 import {
   ensureTableReadyForEdits,
   flushInventoryTableToFirestore,
   commitPendingInventoryDeleteIfAny,
   startInventoryUndo,
-} from "./inventory-table-persist.js?v=20260702_inventory_insights_split";
+} from "./inventory-table-persist.js?v=20260702_inventory_catalog_split";
 
-import { getInvColWidths } from "./inventory-table-layout.js?v=20260702_inventory_insights_split";
+import { getInvColWidths } from "./inventory-table-layout.js?v=20260702_inventory_catalog_split";
 
 let mountOrRefreshMockUi, ffCanManageInventory;
 

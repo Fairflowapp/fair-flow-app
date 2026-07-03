@@ -109,7 +109,7 @@ import {
   renderSidebarHtml,
   renderManageCategoriesModal,
   renderCategoryDeleteConfirmModal,
-} from "./inventory-catalog.js?v=20260627_inventory_catalog";
+} from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
 
 import {
   ffCanManageInventory,
@@ -122,7 +122,7 @@ import {
   sharedInvStateDocRef,
 } from "./inventory-spine.js?v=20260701_inventory_spine_split";
 import { initInventoryShell, mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
-import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_insights_split";
+import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_catalog_split";
 export { goToInventory };
 import "./inventory-devtools.js?v=20260701_inventory_devtools_split";
 import {
@@ -131,7 +131,7 @@ import {
   handleInventoryCatalogDelegateClick,
   handleInventoryCatalogDelegateKeydownActivate,
   handleInventoryCatalogDelegateKeydownEscape,
-} from "./inventory-delegates-catalog.js?v=20260701_inventory_delegates_catalog_split";
+} from "./inventory-delegates-catalog.js?v=20260702_inventory_catalog_split";
 import {
   initInventoryDelegatesOrders,
   bindInventoryDelegatesOrdersOnce,
@@ -140,11 +140,11 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_insights_split";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_catalog_split";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260702_inventory_insights_split";
+} from "./inventory-delegates-workspace.js?v=20260702_inventory_catalog_split";
 
 import {
   initInventoryInsights,
@@ -152,7 +152,7 @@ import {
   renderInventoryInsightsTabHtml,
   scanInventorySuggestionsOnce,
   scanProductReorderAlertsOnce,
-} from "./inventory-insights.js?v=20260702_inventory_insights_split";
+} from "./inventory-insights.js?v=20260702_inventory_catalog_split";
 
 
 import {
@@ -200,7 +200,7 @@ import {
   toggleShoppingRowQty,
   triggerOrderDetailExportCsv,
   triggerOrderDetailPrint,
-} from "./inventory-orders.js?v=20260702_inventory_insights_split";
+} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
 
 
 import {
@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260702_inventory_insights_split";
+} from "./inventory-table.js?v=20260702_inventory_catalog_split";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,

@@ -13,7 +13,7 @@ import {
   INV_INSIGHTS_LOW_DAYS,
   INV_INSIGHTS_LOW_THRESHOLD,
   INV_INSIGHTS_CHART_COLORS,
-} from "./inventory-insights-compute.js?v=20260702_inventory_insights_split";
+} from "./inventory-insights-compute.js?v=20260702_inventory_catalog_split";
 
 function renderInsightsDonutSvg(rows, totalSpend) {
   const sum = rows.reduce((acc, r) => acc + (Number(r.spend) || 0), 0);

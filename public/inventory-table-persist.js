@@ -36,11 +36,11 @@ import {
   sharedInvCategoriesRef,
   sharedInvSubcategoriesRef,
   getCategoryTree,
-} from "./inventory-catalog.js?v=20260627_inventory_catalog";
+} from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
 
-import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260702_inventory_insights_split";
+import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260702_inventory_catalog_split";
 
-import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260702_inventory_insights_split";
+import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
 
 let _ffInvActiveLocId,
   ffCanManageInventory,

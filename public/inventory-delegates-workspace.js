@@ -10,13 +10,13 @@ import {
   handleInventoryCatalogDelegateClick,
   handleInventoryCatalogDelegateKeydownActivate,
   handleInventoryCatalogDelegateKeydownEscape,
-} from "./inventory-delegates-catalog.js?v=20260701_inventory_delegates_catalog_split";
+} from "./inventory-delegates-catalog.js?v=20260702_inventory_catalog_split";
 import {
   handleInventoryOrdersDelegateClick,
   handleInventoryOrdersDelegateFocusout,
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_insights_split";
+} from "./inventory-delegates-orders.js?v=20260702_inventory_catalog_split";
 import {
   bindInvColumnResizeOnce,
   bindInvRowDnDOnce,
@@ -32,7 +32,7 @@ import {
   invMobileAnyOptionalColumnHidden,
   resetInvMobileOptionalColumns,
   ensureInvMobileColHeaderBindOnce,
-} from "./inventory-table.js?v=20260702_inventory_insights_split";
+} from "./inventory-table.js?v=20260702_inventory_catalog_split";
 import {
   handleOrderBuilderSourceChange,
   commitInventoryOrderBuilderAddItem,
@@ -47,8 +47,8 @@ import {
   loadInventoryOrderDraft,
   loadInventoryOrdersList,
   refreshOrderBuilderPreviewAsync,
-} from "./inventory-orders.js?v=20260702_inventory_insights_split";
-import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_insights_split";
+} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
+import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
 
 let mountOrRefreshMockUi;
 

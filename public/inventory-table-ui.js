@@ -28,33 +28,33 @@ import {
   getItemOrderQty,
 } from "./inventory-helpers.js?v=20260627_inventory_split";
 
-import { getCategoryTree } from "./inventory-catalog.js?v=20260627_inventory_catalog";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
 
 import {
   inventoryOrderDraftToast,
   scheduleInventoryOrderDraftSave,
-} from "./inventory-orders.js?v=20260702_inventory_insights_split";
+} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
 
-import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_insights_split";
+import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
 
 import {
   scheduleInventoryTablePersist,
   ensureTableReadyForEdits,
   loadInventoryTableForSub,
-} from "./inventory-table-persist.js?v=20260702_inventory_insights_split";
+} from "./inventory-table-persist.js?v=20260702_inventory_catalog_split";
 
 import {
   getInvColWidths,
   getInvMobileGroupSubColWidthsPx,
   renderColgroup,
-} from "./inventory-table-layout.js?v=20260702_inventory_insights_split";
+} from "./inventory-table-layout.js?v=20260702_inventory_catalog_split";
 
 import {
   groupHasAnyValues,
   renderEditableCell,
   renderUrlCell,
   updateOrderCellEl,
-} from "./inventory-table-rows.js?v=20260702_inventory_insights_split";
+} from "./inventory-table-rows.js?v=20260702_inventory_catalog_split";
 
 let mountOrRefreshMockUi, ffCanManageInventory, getSalonId;
 
