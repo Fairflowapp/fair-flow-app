@@ -7,4 +7,4 @@ export {
   goToSchedule,
   refreshSchedulePreview,
   hideScheduleScreen,
-} from "./schedule-nav-runtime.js?v=20260704_schedule_nav_runtime_sidefx_fix";
+} from "./schedule-nav-runtime.js?v=20260704_schedule_nav_runtime_viewtabs_fix";

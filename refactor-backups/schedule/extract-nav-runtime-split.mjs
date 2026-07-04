@@ -28,7 +28,6 @@ import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
   renderScheduleSummary,
-  renderScheduleViewTabs,
   setSchedulePreviewMode,
   setSchedulePreviewView,
 } from "./schedule-render.js?v=20260703_schedule_render_split";
@@ -60,6 +59,7 @@ import {
 import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
 import {
   renderScheduleCrossLocationConflictBanner,
+  renderScheduleViewTabs,
   scheduleInboxUserIsFirestoreManager,
 } from "./schedule-nav-core.js?v=20260703_schedule_nav_wiring_fix";
 `;
