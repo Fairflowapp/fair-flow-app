@@ -4,7 +4,7 @@
 // Extracted verbatim from schedule-ui.js (Phase 3 of the schedule-ui split).
 
 import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260615_default_schedule_source";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260702_schedule_ack";
 import {

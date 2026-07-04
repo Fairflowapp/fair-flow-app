@@ -25,7 +25,7 @@ import {
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
 } from "./schedule-availability.js?v=20260615_default_schedule_source";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 import "./format-utils.js";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {

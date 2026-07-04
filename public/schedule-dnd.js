@@ -6,7 +6,7 @@
 // initScheduleDnd().
 
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import { loadCrossLocationBusyForWeek } from "./schedule-cloud.js?v=20260702_schedule_cloud";
 import {

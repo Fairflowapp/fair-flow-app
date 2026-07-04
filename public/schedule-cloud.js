@@ -16,7 +16,7 @@ import {
   deleteField,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260420_per_loc_no_default";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   _ffSchedActiveLocId,
