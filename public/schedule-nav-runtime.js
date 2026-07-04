@@ -51,7 +51,7 @@ import {
   setSchedulePreviewMode,
   setSchedulePreviewView,
   shortenCoverageWarningForModal,
-} from "./schedule-render.js?v=20260702_schedule_render";
+} from "./schedule-render.js?v=20260703_schedule_render_split";
 import {
   _ffActiveLocationNameForIcs,
   _ffAdaptAssignmentToShift,
