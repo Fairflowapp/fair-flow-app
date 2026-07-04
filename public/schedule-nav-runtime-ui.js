@@ -2,7 +2,7 @@
 // Schedule UI runtime — week filter, navigation, event binding, window hooks.
 // Extracted verbatim from schedule-nav-runtime.js (nav-runtime split T2).
 
-import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260704_schedule_nav_runtime_split";
+import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260704_schedule_nav_runtime_sidefx_fix";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
