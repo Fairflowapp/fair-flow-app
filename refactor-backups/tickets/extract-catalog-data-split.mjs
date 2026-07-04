@@ -5,7 +5,7 @@ import path from "path";
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const backupPath = path.join(ROOT, "refactor-backups/tickets/tickets-catalog-data.pre-split.js");
 const pub = path.join(ROOT, "public");
-const TOKEN = "20260704_tickets_catalog_data_split";
+const TOKEN = "20260704_tickets_catalog_data_local_fix";
 
 const backup = fs.readFileSync(backupPath, "utf8");
 const lines = backup.split("\n");

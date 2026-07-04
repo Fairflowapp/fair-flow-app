@@ -19,7 +19,8 @@ import {
   saveSharedServiceLocationOverride,
   serviceCatalogStableKey,
   tryLoadSharedServiceCatalog,
-} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_split";
+  _ffServiceMatchesActiveLocation,
+} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_local_fix";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {

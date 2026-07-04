@@ -12,7 +12,7 @@ import { getTicketsSelfEmployeeFilterId, isStaffRecordManagerOrAdmin, isTicketsT
 import { getTicketTaxConfig } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
 import { fetchClosedTicketsForSummary, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, formatSummaryMoney, formatSummaryInt, getSummaryFilterDateRangeFromDom, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
 import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
-import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_split";
+import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_local_fix";
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
   // Mobile drill-down: tapping a summary row toggles its detail breakdown.

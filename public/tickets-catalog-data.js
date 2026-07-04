@@ -2,10 +2,10 @@
  * tickets-catalog-data.js
  * Service catalog data entry — re-exports shared + local modules from the split.
  */
-import "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_split";
-import "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_split";
+import "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_local_fix";
+import "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_local_fix";
 
-export { initTicketsCatalogData } from "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_split";
+export { initTicketsCatalogData } from "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_local_fix";
 export {
   ffCanViewServices,
   ffCanManageServices,
@@ -35,7 +35,7 @@ export {
   saveSharedServiceLocationOverride,
   tryLoadSharedServiceCatalog,
   _ffServiceMatchesActiveLocation,
-} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_split";
+} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_local_fix";
 export {
   loadLocationCatalogForManager,
   seedSharedServiceCatalogFromLocationCatalogIfEmpty,
@@ -50,4 +50,4 @@ export {
   loadServiceCategories,
   saveServiceCategory,
   deleteServiceCategory,
-} from "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_split";
+} from "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_local_fix";
