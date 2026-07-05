@@ -20,7 +20,7 @@ import {
   serviceCatalogStableKey,
   tryLoadSharedServiceCatalog,
   _ffServiceMatchesActiveLocation,
-} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_local_fix";
+} from "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_dup_export_fix";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {
@@ -395,7 +395,6 @@ async function deleteServiceCategory(categoryId) {
 }
 
 export {
-  initTicketsCatalogData,
   loadLocationCatalogForManager,
   seedSharedServiceCatalogFromLocationCatalogIfEmpty,
   _ffWipeLegacyCatalogOnce,

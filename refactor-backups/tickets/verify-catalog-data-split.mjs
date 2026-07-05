@@ -127,10 +127,10 @@ else {
 }
 
 console.log("\n=== ENTRY WIRING ===");
-if (entry.includes('import "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_local_fix";')) {
+if (entry.includes('import "./tickets-catalog-data-shared.js?v=20260704_tickets_catalog_data_dup_export_fix";')) {
   ok("entry side-effect import shared");
 } else fail("entry missing side-effect import shared");
-if (entry.includes('import "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_local_fix";')) {
+if (entry.includes('import "./tickets-catalog-data-local.js?v=20260704_tickets_catalog_data_dup_export_fix";')) {
   ok("entry side-effect import local");
 } else fail("entry missing side-effect import local");
 
