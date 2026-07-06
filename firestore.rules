@@ -43,6 +43,143 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    /** True when this user is the salon doc ownerUid (covers multi-salon when member role is missing). */
+    function isFirestoreSalonOwnerUid(salonId) {
+      return isSignedIn()
+        && salonId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId))
+        && get(/databases/$(database)/documents/salons/$(salonId)).data.ownerUid == request.auth.uid;
+    }
+
+    /**
+     * Platform admin = entry exists at platformAdmins/{uid}.
+     * Bootstrapped manually via Firebase Console / Admin SDK.
+     */
+    function isPlatformAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid));
+    }
+
+    function permPointsManageAllowed(salonId) {
+      return isAdminOrOwner(salonId)
+        || (
+          mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.points_manage == true
+        );
+    }
+
+    function memberExists(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid));
+    }
+
+    function memberDocData(salonId) {
+      return get(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid)).data;
+    }
+
+    function memberStaffId(salonId) {
+      return memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        ? memberDocData(salonId).staffId
+        : '';
+    }
+
+    function membershipStaffId(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId != ''
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId
+        : '';
+    }
+
+    function activeStaffIdForSalon(salonId) {
+      return memberStaffId(salonId) != ''
+        ? memberStaffId(salonId)
+        : (membershipStaffId(salonId) != '' ? membershipStaffId(salonId) : userStaffId());
+    }
+
+    function memberStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return memberExists(salonId)
+        && staffDocId is string
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId.size() >= 14
+        && staffDocId.size() >= memberDocData(salonId).staffId.size()
+        && staffDocId.matches('^' + memberDocData(salonId).staffId + '.*');
+    }
+
+    function userStaffPrefixMatchesStaffDocId(staffDocId) {
+      return userExists()
+        && staffDocId is string
+        && userDocData().staffId is string
+        && userDocData().staffId.size() >= 14
+        && staffDocId.size() >= userDocData().staffId.size()
+        && staffDocId.matches('^' + userDocData().staffId + '.*');
+    }
+
+    function membershipStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return isSignedIn()
+        && staffDocId is string
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size() >= 14
+        && staffDocId.size() >= get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size()
+        && staffDocId.matches('^' + get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId + '.*');
+    }
+
+    function staffDocUidMatches(salonId, staffId) {
+      return isSignedIn()
+        && staffId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId))
+        && (
+          get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseAuthUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.authUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.userUid == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email.lower() == request.auth.token.email.lower()
+          )
+          || (
+            memberExists(salonId)
+            && memberDocData(salonId).staffId is string
+            && memberDocData(salonId).staffId == staffId
+          )
+          || (
+            userExists()
+            && userDocData().staffId is string
+            && userDocData().staffId == staffId
+          )
+          || memberStaffPrefixMatchesStaffDocId(salonId, staffId)
+          || userStaffPrefixMatchesStaffDocId(staffId)
+          || membershipStaffPrefixMatchesStaffDocId(salonId, staffId)
+        );
+    }
+
+    function matchesOwnStaffId(salonId, staffId) {
+      return (
+        userExists()
+        && userDocData().staffId is string
+        && userDocData().staffId == staffId
+      ) || (
+        activeStaffIdForSalon(salonId) != ''
+        && activeStaffIdForSalon(salonId) == staffId
+      ) || (
+        memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId == staffId
+      )
+        || staffDocUidMatches(salonId, staffId);
+    }
+
+    function staffDocumentLifecycleIsArchived() {
+      return resource.data.lifecycleStatus is string
+        && resource.data.lifecycleStatus.lower() == 'archived';
+    }
+
     function isKioskForSalon(salonId) {
       return isSignedIn()
         && request.auth.token.isKiosk == true
@@ -222,6 +359,15 @@ service cloud.firestore {
     // Basic salon doc: any signed-in user can read
     match /salons/{salonId} {
       allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // Stripe billing state — written by Cloud Functions (Admin SDK) only.
+    // Owner can read so the Settings UI can show subscription status.
+    match /salons/{salonId}/billing/{docId} {
+      allow read: if isFirestoreSalonOwnerUid(salonId);
+      allow create, update, delete:
+        if docId == 'override' && isPlatformAdmin();
       allow write: if false;
     }
 
@@ -429,6 +575,21 @@ service cloud.firestore {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
       allow create, update, delete: if belongsToSalon(salonId)
         && isManager(salonId);
+
+      // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
+      match /documents/{documentId} {
+        allow read: if (belongsToSalon(salonId) && isManager(salonId))
+          || matchesOwnStaffId(salonId, staffId)
+          || (
+            memberExists(salonId)
+            && memberStaffId(salonId) is string
+            && memberStaffId(salonId) == staffId
+          )
+          || staffDocUidMatches(salonId, staffId);
+        allow create, update: if belongsToSalon(salonId) && isManager(salonId);
+        allow delete: if belongsToSalon(salonId) && isManager(salonId)
+          && staffDocumentLifecycleIsArchived();
+      }
     }
 
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
@@ -921,16 +1082,18 @@ service cloud.firestore {
       allow create, update, delete: if isManager(accountId);
     }
 
-    // Points settings (account-level and per-location).
+    // Points settings (account-level and per-location) — from sync/production.
     match /accounts/{accountId}/settings/{settingId} {
-      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
-      allow create, update: if isManager(accountId);
+      allow read: if settingId == "points" && isSignedIn();
+      allow create, update: if settingId == "points"
+        && permPointsManageAllowed(accountId);
       allow delete: if false;
     }
 
     match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
-      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
-      allow create, update: if isManager(accountId);
+      allow read: if settingId == "points" && isSignedIn();
+      allow create, update: if settingId == "points"
+        && permPointsManageAllowed(accountId);
       allow delete: if false;
     }
 

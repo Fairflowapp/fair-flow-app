@@ -44,6 +44,12 @@ bower_components
 # Compiled binary addons (http://nodejs.org/api/addons.html)
 build/Release
 
+# iOS build artifacts (xcarchive / ipa / export) — never commit build output
+build/
+
+# Local data recovery snapshots & scripts (may contain live customer data)
+recovery/
+
 # Dependency directories
 node_modules/
 
@@ -67,3 +73,8 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Android signing keystore — NEVER commit signing keys to the repo
+keystore/
+*.jks
+*.keystore

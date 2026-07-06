@@ -16,6 +16,21 @@ const {
 } = require("./kiosk/seed");
 const { TECHNICIAN_KIOSK_ROLE_ID } = require("./kiosk/permissions");
 
+// Stripe billing integration (createStripeCheckoutSession,
+// createStripePortalSession, stripeWebhook). Lives in its own file so this
+// module stays focused on existing concerns.
+Object.assign(exports, require("./stripe"));
+
+// Internal billing override (owner-only comped/free access). Imports
+// recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
+Object.assign(exports, require("./billing"));
+
+// Server-side scheduled queue auto-reset (runs even when no device is open).
+const _queueAutoReset = require("./queue-auto-reset");
+exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
+exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
+
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
@@ -1142,5 +1157,389 @@ exports.onPairingApproved = functions
       console.error(`[onPairingApproved] ${pairId}: failed —`, msg);
       return null;
     }
+  });
+
+
+// ============================================================================
+// Phase 3 — Staff document expiration reminders (Gen1 scheduled, daily)
+// ============================================================================
+
+/**
+ * Parse expiration to UTC millis (staff docs may store Timestamp, Date, or YYYY-MM-DD string).
+ */
+function _staffDocExpirationToMillis(raw) {
+  if (raw == null || raw === "") return null;
+  try {
+    if (typeof raw.toDate === "function") return raw.toDate().getTime();
+    if (raw instanceof admin.firestore.Timestamp) return raw.toDate().getTime();
+    if (raw instanceof Date) return raw.getTime();
+    if (typeof raw === "string") {
+      const s = raw.trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+      return new Date(`${s}T12:00:00.000Z`).getTime();
+    }
+  } catch (e) {
+    console.warn("[staffDocExpiry] bad expiration field", e && e.message);
+  }
+  return null;
+}
+
+/** Whole UTC days from today to expiration day (negative = expired). */
+function _utcDayDiffFromToday(expMs) {
+  const exp = new Date(expMs);
+  const expDay = Date.UTC(exp.getUTCFullYear(), exp.getUTCMonth(), exp.getUTCDate());
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((expDay - today) / 86400000);
+}
+
+async function _getSalonManagersForReminders(salonId) {
+  const snap = await admin.firestore().collection("users").where("salonId", "==", salonId).get();
+  const out = [];
+  snap.forEach((d) => {
+    const x = d.data() || {};
+    const r = String(x.role || "").toLowerCase();
+    if (["owner", "admin", "manager"].includes(r)) {
+      out.push({
+        uid: d.id,
+        staffId: String(x.staffId || ""),
+        name: String(x.name || x.displayName || "").trim() || d.id,
+        role: r,
+      });
+    }
+  });
+  return out;
+}
+
+function _buildExpiryMessage({ subjectStaffName, documentTitle, documentType, diffDays, expired }) {
+  const who = subjectStaffName || "A staff member";
+  const title = documentTitle || documentType || "Document";
+  if (expired) {
+    return `${who}'s ${title} is past expiration.`;
+  }
+  if (diffDays <= 0) {
+    return `${who}'s ${title} expires today.`;
+  }
+  if (diffDays === 1) {
+    return `${who}'s ${title} expires tomorrow.`;
+  }
+  return `${who}'s ${title} expires in ${diffDays} days.`;
+}
+
+/** Same fingerprint as public/staff-doc-expiry-inbox.js — dedupe Inbox when two doc rows share one file. */
+function _fingerprintStaffDocData(data) {
+  const d = data || {};
+  const p = String(d.storagePath || d.filePath || "").trim();
+  if (p) {
+    const base = p.split("/").pop() || p;
+    return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  }
+  const title = String(d.title || d.type || "doc").trim();
+  const m = title.match(/([a-f0-9]{8}-[a-f0-9-]{4,}[^.\s]*\.\w+)/i);
+  if (m) return m[1].replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  return title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+}
+
+function _expYmdUtcBucket(expirationMs) {
+  const d = new Date(expirationMs);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function _sanitizeInboxIdSegment(s) {
+  return String(s || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 200);
+}
+
+/** 30-day vs expired must use different id prefixes (same file + expiry date could otherwise collide). */
+function _buildStaffDocExpiryInboxDocId(alertType, forUid, staffId, expirationMs, docData) {
+  const expYmd = _expYmdUtcBucket(expirationMs);
+  const fp = _fingerprintStaffDocData(docData);
+  const tag = alertType === "document_expired" ? "docex" : "doc30";
+  const id = `auto_${tag}_${_sanitizeInboxIdSegment(forUid)}_${_sanitizeInboxIdSegment(staffId)}_${expYmd}_${_sanitizeInboxIdSegment(fp)}`;
+  return id.length > 1400 ? id.slice(0, 1400) : id;
+}
+
+/**
+ * One batch: N inbox rows + staff document flags/lifecycle (avoids orphan inbox if doc update fails).
+ */
+async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
+  const {
+    managers,
+    alertType,
+    message,
+    staffId,
+    documentId,
+    documentTitle,
+    documentType,
+    expirationMs,
+    subjectStaffName,
+    subjectLocationId,
+    creatorUid,
+    creatorStaffId,
+    creatorName,
+    creatorRole,
+    reminderField,
+    staffDocDataForFingerprint,
+  } = payload;
+  if (!managers || !managers.length) {
+    console.warn("[staffDocExpiry] no managers for salon", salonId);
+    return;
+  }
+  const expTs = admin.firestore.Timestamp.fromMillis(expirationMs);
+  const batch = admin.firestore().batch();
+  const creator = managers.find((m) => m.uid === creatorUid) || managers[0];
+  const cUid = creatorUid || creator.uid;
+  const cStaffId = creatorStaffId != null ? creatorStaffId : creator.staffId;
+  const cName = creatorName || creator.name;
+  const cRole = creatorRole || creator.role;
+
+  const fpSource = staffDocDataForFingerprint && typeof staffDocDataForFingerprint === "object" ? staffDocDataForFingerprint : {};
+
+  for (const m of managers) {
+    const itemId = _buildStaffDocExpiryInboxDocId(alertType, m.uid, staffId, expirationMs, fpSource);
+    const ref = admin.firestore().collection("salons").doc(salonId).collection("inboxItems").doc(itemId);
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await ref.get();
+    if (existing.exists) {
+      continue;
+    }
+    batch.set(ref, {
+      tenantId: salonId,
+      locationId: subjectLocationId || null,
+      type: alertType,
+      status: "open",
+      priority: "normal",
+      assignedTo: null,
+      sentToStaffIds: [],
+      sentToNames: [],
+      message,
+      source: "staff_documents",
+      staffId,
+      documentId,
+      documentTitle,
+      documentType,
+      expirationDate: expTs,
+      data: {
+        source: "staff_documents",
+        staffId,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationDate: expTs,
+        message,
+        subjectStaffName,
+        automated: true,
+      },
+      managerNotes: null,
+      responseNote: null,
+      decidedBy: null,
+      decidedAt: null,
+      needsInfoQuestion: null,
+      staffReply: null,
+      visibility: "managers_only",
+      unreadForManagers: true,
+      createdByUid: cUid,
+      createdByStaffId: cStaffId,
+      createdByName: cName,
+      createdByRole: cRole,
+      forUid: m.uid,
+      forStaffId: m.staffId || "",
+      forStaffName: m.name || "Manager",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: null,
+    });
+  }
+
+  const docUpdate = {
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lifecycleStatus: alertType === "document_expired" ? "expired" : "expiring_soon",
+  };
+  if (reminderField === "expired") {
+    docUpdate.expiredReminderSentAt = admin.firestore.FieldValue.serverTimestamp();
+  } else if (reminderField === "thirtyDay") {
+    docUpdate.thirtyDayReminderSentAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  batch.update(docRef, docUpdate);
+  await batch.commit();
+}
+
+async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache) {
+  const docRef = docSnap.ref;
+  const data = docSnap.data() || {};
+  const documentId = docSnap.id;
+
+  const life = String(data.lifecycleStatus || "").toLowerCase();
+  if (life === "archived") return;
+
+  const approval = String(data.approvalStatus || "").toLowerCase();
+  if (approval !== "approved") return;
+
+  const sid = String(staffId || "").trim();
+  if (!sid) return;
+
+  const expMs = _staffDocExpirationToMillis(data.expirationDate);
+  if (expMs == null) return;
+
+  const diffDays = _utcDayDiffFromToday(expMs);
+
+  let managers = managersCache[salonId];
+  if (!managers) {
+    managers = await _getSalonManagersForReminders(salonId);
+    managersCache[salonId] = managers;
+  }
+
+  let staffName = "";
+  let subjectLocationId = null;
+  try {
+    const st = await admin.firestore().doc(`salons/${salonId}/staff/${sid}`).get();
+    const sd = (st.exists && st.data()) || {};
+    staffName = String(sd.name || "").trim();
+    // Resolve the subject staff's location so each inbox reminder can be
+    // scoped to the correct branch. Prefer the primary location; fall back
+    // to the first allowed location; otherwise leave as null so the client
+    // can fall through to legacy staff-based location resolution.
+    if (typeof sd.primaryLocationId === "string" && sd.primaryLocationId.trim()) {
+      subjectLocationId = sd.primaryLocationId.trim();
+    } else if (Array.isArray(sd.allowedLocationIds) && sd.allowedLocationIds[0]) {
+      subjectLocationId = String(sd.allowedLocationIds[0]).trim() || null;
+    }
+  } catch (_) {
+    staffName = "";
+  }
+  const subjectStaffName = staffName || "Staff member";
+  const documentTitle = String(data.title || data.type || "Document").trim() || "Document";
+  const documentType = String(data.type || "").trim() || "Document";
+
+  const creator = managers[0];
+
+  if (diffDays < 0) {
+    if (!data.expiredReminderSentAt && creator) {
+      const message = _buildExpiryMessage({
+        subjectStaffName,
+        documentTitle,
+        documentType,
+        diffDays,
+        expired: true,
+      });
+      await _commitStaffDocAlertBatch(docRef, salonId, {
+        managers,
+        alertType: "document_expired",
+        reminderField: "expired",
+        message,
+        staffId: sid,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationMs: expMs,
+        subjectStaffName,
+        subjectLocationId,
+        creatorUid: creator.uid,
+        creatorStaffId: creator.staffId,
+        creatorName: creator.name,
+        creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
+      });
+    } else {
+      await docRef.update({
+        lifecycleStatus: "expired",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } else if (diffDays <= 30) {
+    if (!data.thirtyDayReminderSentAt && creator) {
+      const message = _buildExpiryMessage({
+        subjectStaffName,
+        documentTitle,
+        documentType,
+        diffDays,
+        expired: false,
+      });
+      await _commitStaffDocAlertBatch(docRef, salonId, {
+        managers,
+        alertType: "document_expiring_soon",
+        reminderField: "thirtyDay",
+        message,
+        staffId: sid,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationMs: expMs,
+        subjectStaffName,
+        subjectLocationId,
+        creatorUid: creator.uid,
+        creatorStaffId: creator.staffId,
+        creatorName: creator.name,
+        creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
+      });
+    } else {
+      await docRef.update({
+        lifecycleStatus: "expiring_soon",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } else {
+    await docRef.update({
+      lifecycleStatus: "active",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+exports.scheduledStaffDocumentExpirationReminders = functions
+  .region("us-central1")
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
+  .pubsub.schedule("0 8 * * *")
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const managersCache = Object.create(null);
+    let salonsProcessed = 0;
+    let docsSeen = 0;
+    let errors = 0;
+
+    try {
+      const salonsSnap = await admin.firestore().collection("salons").get();
+      for (const salonDoc of salonsSnap.docs) {
+        salonsProcessed += 1;
+        const salonId = salonDoc.id;
+        try {
+          const staffSnap = await salonDoc.ref.collection("staff").get();
+          for (const staffDoc of staffSnap.docs) {
+            const staffId = staffDoc.id;
+            let docsSnap;
+            try {
+              docsSnap = await staffDoc.ref.collection("documents").get();
+            } catch (e) {
+              console.warn("[staffDocExpiry] list documents failed", salonId, staffId, e && e.message);
+              errors += 1;
+              continue;
+            }
+            for (const d of docsSnap.docs) {
+              docsSeen += 1;
+              try {
+                await _processOneStaffDocument(salonId, staffId, d, managersCache);
+              } catch (e) {
+                errors += 1;
+                console.warn("[staffDocExpiry] doc failed", salonId, staffId, d.id, e && e.message);
+              }
+            }
+          }
+        } catch (e) {
+          errors += 1;
+          console.warn("[staffDocExpiry] salon failed", salonId, e && e.message);
+        }
+      }
+    } catch (e) {
+      console.error("[staffDocExpiry] fatal", e);
+      throw e;
+    }
+
+    console.log("[staffDocExpiry] done", { salonsProcessed, docsSeen, errors });
+    return null;
   });
 

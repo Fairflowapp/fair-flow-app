@@ -1,0 +1,90 @@
+apply plugin: 'com.android.application'
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localProperties.load(stream)
+    }
+}
+
+def fairflowReleaseStorePassword = localProperties.getProperty('fairflow.release.storePassword') ?: System.getenv('FAIRFLOW_RELEASE_STORE_PASSWORD')
+def fairflowReleaseKeyPassword = localProperties.getProperty('fairflow.release.keyPassword') ?: System.getenv('FAIRFLOW_RELEASE_KEY_PASSWORD')
+def fairflowReleaseKeyAlias = localProperties.getProperty('fairflow.release.keyAlias') ?: System.getenv('FAIRFLOW_RELEASE_KEY_ALIAS') ?: 'fairflowapp'
+def fairflowReleaseStoreFile = rootProject.file('../keystore/fairflowapp.jks')
+def fairflowReleaseSigningReady = fairflowReleaseStoreFile.exists() && fairflowReleaseStorePassword && fairflowReleaseKeyPassword && fairflowReleaseKeyAlias
+def fairflowReleaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    def normalized = taskName.toLowerCase()
+    normalized.contains('release') && (
+        normalized.contains('assemble') ||
+        normalized.contains('bundle') ||
+        normalized.contains('package')
+    )
+}
+
+android {
+    namespace = "com.fairflow.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.fairflow.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 2
+        versionName "1.0.1"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        release {
+            if (fairflowReleaseSigningReady) {
+                storeFile fairflowReleaseStoreFile
+                storePassword fairflowReleaseStorePassword
+                keyAlias fairflowReleaseKeyAlias
+                keyPassword fairflowReleaseKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (fairflowReleaseTaskRequested && !fairflowReleaseSigningReady) {
+                throw new GradleException("Release signing is not configured. Add fairflow.release.storePassword, fairflow.release.keyPassword, and fairflow.release.keyAlias to android/local.properties, or set FAIRFLOW_RELEASE_STORE_PASSWORD, FAIRFLOW_RELEASE_KEY_PASSWORD, and FAIRFLOW_RELEASE_KEY_ALIAS.")
+            }
+            signingConfig signingConfigs.release
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

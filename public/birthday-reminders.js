@@ -359,13 +359,15 @@ export async function diagnoseBirthdayReminders() {
       }
 
       const birthdayStaffIdStr = String(staff.id || "");
+      const senderIsBirthdayStaff =
+        createdByStaffId !== "" && birthdayStaffIdStr === createdByStaffId;
       let hasRecipient =
         memberRows.some(
           (m) =>
             ["admin", "owner", "manager"].includes(String(m.role || "").toLowerCase()) &&
             String(m.staffId || "") !== birthdayStaffIdStr
         ) ||
-        (["admin", "owner", "manager"].includes(role) && birthdayStaffIdStr !== createdByStaffId);
+        (["admin", "owner", "manager"].includes(role) && !senderIsBirthdayStaff);
 
       if (!hasRecipient) {
         row.skipReason = "no_inbox_recipient (you are the only manager / birthday staff)";
@@ -502,9 +504,42 @@ export async function runBirthdayChatRemindersOnce() {
     const createdByRole = role;
 
     let inboxItemsCreated = 0;
+    let inboxItemsForActiveLocation = 0;
     /** Per staff with a birthday: why Inbox was or was not created (see ffLastBirthdayRun.staffEval). */
     const staffEval = [];
     const evName = (s) => String(s.name || s.id || "?").slice(0, 48);
+
+    // Active location of the viewer running this sweep — used to filter
+    // toast/count so that Brickell managers don't see a toast about
+    // Key-Biscayne birthdays (and vice versa).
+    const viewerActiveLocationId =
+      typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function"
+        ? String(window.ffGetActiveLocationId() || "").trim()
+        : "";
+
+    // Build a staffId -> staff-doc lookup so each recipient manager's
+    // allowedLocationIds can be consulted when routing reminders by branch.
+    const staffRowsByIdLookup = {};
+    for (const s of staffList) {
+      if (s && s.id) staffRowsByIdLookup[String(s.id)] = s;
+    }
+
+    function filterBirthdayRecipientsForLocation(recipients, targetLocationId) {
+      if (!targetLocationId) return recipients;
+      return recipients.filter((rec) => {
+        const recRole = String(rec?.role || "").toLowerCase();
+        if (recRole === "owner") return true;
+        const recStaffId = String(rec?.staffId || "").trim();
+        if (!recStaffId) return true;
+        const recStaff = staffRowsByIdLookup[recStaffId];
+        if (!recStaff) return true;
+        const allowed = Array.isArray(recStaff.allowedLocationIds)
+          ? recStaff.allowedLocationIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : [];
+        if (!allowed.length) return true;
+        return allowed.includes(targetLocationId);
+      });
+    }
 
     console.info("[Birthday] run", {
       salonDate: `${ty}-${String(tm).padStart(2, "0")}-${String(td).padStart(2, "0")}`,
@@ -578,6 +613,36 @@ export async function runBirthdayChatRemindersOnce() {
         seenRecipientUids.add(u);
         return true;
       });
+
+      // Route birthday reminders only to managers who cover the birthday
+      // staff member's primary branch — a Brickell manager shouldn't get
+      // an Inbox row (and later toast) for a Key-Biscayne-only employee.
+      const subjectBirthdayLocationId =
+        (staff && typeof staff.primaryLocationId === "string" && staff.primaryLocationId.trim())
+          ? staff.primaryLocationId.trim()
+          : (Array.isArray(staff && staff.allowedLocationIds) && staff.allowedLocationIds[0]
+              ? String(staff.allowedLocationIds[0]).trim() || null
+              : null);
+      recipients = filterBirthdayRecipientsForLocation(recipients, subjectBirthdayLocationId);
+      // Signed-in owner/admin/manager must get a "To handle" row when they are not the birthday
+      // staff member — even if they are missing from salons/{id}/members (only other admins listed).
+      const rlSender = String(role).toLowerCase();
+      const senderIsBirthdayStaff =
+        createdByStaffId !== "" && birthdayStaffIdStr === createdByStaffId;
+      if (
+        ["admin", "owner", "manager"].includes(rlSender) &&
+        !senderIsBirthdayStaff &&
+        senderUid &&
+        !seenRecipientUids.has(senderUid)
+      ) {
+        recipients.push({
+          uid: senderUid,
+          staffId: createdByStaffId,
+          name: senderName,
+          role: rlSender,
+        });
+        seenRecipientUids.add(senderUid);
+      }
       if (recipients.length === 0) {
         const rl = String(role).toLowerCase();
         if (["admin", "owner", "manager"].includes(rl) && birthdayStaffIdStr !== createdByStaffId) {
@@ -600,7 +665,11 @@ export async function runBirthdayChatRemindersOnce() {
           "[Birthday] No inbox recipients (only the birthday person is management, or session is not manager-level).",
           staff.name || staff.id
         );
-        if (typeof window.showToast === "function") {
+        const matchesViewerLocationForSummary =
+          !viewerActiveLocationId ||
+          !subjectBirthdayLocationId ||
+          subjectBirthdayLocationId === viewerActiveLocationId;
+        if (matchesViewerLocationForSummary && typeof window.showToast === "function") {
           window.showToast(`🎂 ${summaryLine} (add managers/admins in Members to receive Inbox reminders.)`, 12000);
         }
         await setDoc(
@@ -643,13 +712,22 @@ export async function runBirthdayChatRemindersOnce() {
             { birthdayReminderSentForYear: nextBirthdayYear, updatedAtMs: Date.now() },
             { merge: true }
           );
+          // Stamp the subject staff's primary location on the inbox item so
+          // the UI can scope it to the correct branch without having to look
+          // up staff allowedLocationIds at render time.
+          const subjectLocationId =
+            (staff && typeof staff.primaryLocationId === 'string' && staff.primaryLocationId.trim())
+              ? staff.primaryLocationId.trim()
+              : (Array.isArray(staff && staff.allowedLocationIds) && staff.allowedLocationIds[0]
+                  ? String(staff.allowedLocationIds[0])
+                  : null);
           for (const rec of recipients) {
             const forUid = rec.uid;
             const forStaffId = String(rec.staffId || "");
             const forStaffName = String(rec.name || "Manager").trim() || forUid;
             const requestDoc = {
               tenantId: salonId,
-              locationId: null,
+              locationId: subjectLocationId,
               type: "staff_birthday_reminder",
               status: "open",
               priority: "normal",
@@ -702,14 +780,25 @@ export async function runBirthdayChatRemindersOnce() {
 
       if (didCreate) {
         inboxItemsCreated += recipients.length;
+        // Only toast when the birthday belongs to the viewer's active branch.
+        // Single-location mode and legacy staff (no primary location) pass
+        // through so existing behavior is preserved.
+        const matchesViewerLocation =
+          !viewerActiveLocationId ||
+          !subjectBirthdayLocationId ||
+          subjectBirthdayLocationId === viewerActiveLocationId;
+        if (matchesViewerLocation) {
+          inboxItemsForActiveLocation += recipients.length;
+        }
         staffEval.push({
           name: evName(staff),
           untilDays: until,
           outcome: "inbox_created",
           inboxRows: recipients.length,
+          matchesViewerLocation,
         });
         console.info("[Birthday] Inbox reminders created (transaction)", recipients.length, "recipients for", name);
-        if (typeof window.showToast === "function") {
+        if (matchesViewerLocation && typeof window.showToast === "function") {
           window.showToast(`🎂 Birthday reminder added to Inbox for management (${recipients.length}).`, 8000);
         }
       } else {
@@ -823,9 +912,24 @@ export async function sendBirthdayInboxTestPing() {
     automated: true,
   };
 
+  // Scope the test ping to the currently active branch so it only shows
+  // in the location the manager is viewing. Falls back to null (visible
+  // everywhere) for single-location salons.
+  let testPingLocationId = null;
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === "string" && v.trim()) testPingLocationId = v.trim();
+    }
+    if (!testPingLocationId && typeof window !== "undefined"
+        && typeof window.__ff_active_location_id === "string"
+        && window.__ff_active_location_id.trim()) {
+      testPingLocationId = window.__ff_active_location_id.trim();
+    }
+  } catch (_) {}
   const ref = await addDoc(collection(db, `salons/${salonId}/inboxItems`), {
     tenantId: salonId,
-    locationId: null,
+    locationId: testPingLocationId,
     type: "staff_birthday_reminder",
     status: "open",
     priority: "normal",

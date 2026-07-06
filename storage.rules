@@ -15,6 +15,17 @@ service firebase.storage {
       return doc == null ? null : doc.data;
     }
 
+    function userRoleLower() {
+      return userDoc() != null && userDoc().role is string ? userDoc().role.lower() : '';
+    }
+
+    function isManagerSalonStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && userRoleLower() in ['manager', 'admin', 'owner'];
+    }
+
     // User private files
     match /users/{userId}/{allFiles=**} {
       allow read, write: if signedIn() && uid() == userId;
@@ -26,10 +37,11 @@ service firebase.storage {
       allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
     }
 
-    // Training module images (same salon as authenticated user)
+    // Training images/videos — same as mediaWorks: any signed-in user can read/write.
+    // PIN / multi-salon flows often lack users.salonId or role on members; strict checks caused storage/unauthorized.
+    // Who may edit training *content* is enforced in Firestore (trainingItems), not here.
     match /salons/{salonId}/training/{allPaths=**} {
-      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
-      allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow read, write: if signedIn();
     }
 
     // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)
@@ -40,6 +52,18 @@ service firebase.storage {
     // Inbox response documents (manager uploads response file for document requests)
     match /salons/{salonId}/inboxDocuments/{allPaths=**} {
       allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // Inventory order receipts / invoices (managers upload; salon members read)
+    match /salons/{salonId}/inventory-order-documents/{docId}/{fileName} {
+      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow write: if isManagerSalonStorage(salonId);
+    }
+
+    // Per-order receipts (multiple files under each order). Loose rule: any signed-in user of the salon
+    // can upload; if userDoc is missing (PIN sessions etc.), signedIn is enough (matches staff-docs pattern).
+    match /salons/{salonId}/inventoryOrders/{orderId}/receipts/{receiptId}/{fileName} {
+      allow read, write: if signedIn();
     }
 
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...
