@@ -37,12 +37,16 @@ export function initTicketsList(deps) {
   populateTicketsEmployeeSelect = deps.populateTicketsEmployeeSelect;
   syncTicketsTimePeriodSelectOptions = deps.syncTicketsTimePeriodSelectOptions;
   ensureTicketsSummaryDefaultTimePeriod = deps.ensureTicketsSummaryDefaultTimePeriod;
+  window.ffRenderTicketCardHTML = function (t) {
+    try { return t ? ffBuildTicketCardHTML(t) : ''; } catch (_) { return ''; }
+  };
 }
 
 // =====================
 // UI: List
 // =====================
 function formatLineForList(l) {
+  if (!l) return '';
   const name = escapeHtml(l.serviceName || '');
   const base = Number(l.catalogPrice) || 0;
   const adj = Number(l.ticketPrice) || 0;
@@ -388,9 +392,6 @@ function ffBuildTicketCardHTML(t) {
     </div>
   `;
 }
-window.ffRenderTicketCardHTML = function (t) {
-  try { return t ? ffBuildTicketCardHTML(t) : ''; } catch (_) { return ''; }
-};
 
 function renderTicketsList() {
   // Keep the Live Desk tickets card in sync in real time (it reads from ffGetCurrentTickets).
