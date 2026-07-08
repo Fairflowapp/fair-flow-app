@@ -456,36 +456,36 @@ async function closeTicket(ticketId, preCloseFields = null) {
   await appendTicketSummaryOnClose(salonId, ticketId);
 }
 
+/** Mark ticketSummaries rows reversed (delete disallowed by rules). */
+async function _markTicketSummariesReversed(ticketId) {
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId || !ticketId) return;
+  try {
+    const sumQ = query(
+      collection(db, `salons/${salonId}/ticketSummaries`),
+      where('ticketId', '==', ticketId)
+    );
+    const sumSnap = await getDocs(sumQ);
+    await Promise.all(
+      sumSnap.docs.map((d) =>
+        updateDoc(d.ref, {
+          reopenedReversed: true,
+          reopenedAt: serverTimestamp(),
+          reopenedByUid: ticketsState.currentUserProfile?.uid ?? null,
+          reopenedByName: ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || null
+        }).catch(() => {})
+      )
+    );
+  } catch (e) {
+    console.warn('[Tickets] markTicketSummariesReversed failed', e);
+  }
+}
+
 // Undo an accidental "Paid Ticket" (close). Returns the ticket to the
 // Ready-for-checkout state and removes the revenue summary entry created at
 // close so the ticket isn't counted twice in analytics.
 async function reopenTicket(ticketId) {
-  const salonId = getActiveTicketsSalonId();
-  if (salonId) {
-    // ticketSummaries delete is disallowed by rules; mark the close entry as
-    // reversed instead (best-effort; permitted for admin/owner). The dedup in
-    // appendTicketSummaryOnClose ignores reversed rows so a later re-close
-    // writes a fresh, correct summary.
-    try {
-      const sumQ = query(
-        collection(db, `salons/${salonId}/ticketSummaries`),
-        where('ticketId', '==', ticketId)
-      );
-      const sumSnap = await getDocs(sumQ);
-      await Promise.all(
-        sumSnap.docs.map((d) =>
-          updateDoc(d.ref, {
-            reopenedReversed: true,
-            reopenedAt: serverTimestamp(),
-            reopenedByUid: ticketsState.currentUserProfile?.uid ?? null,
-            reopenedByName: ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || null
-          }).catch(() => {})
-        )
-      );
-    } catch (e) {
-      console.warn('[Tickets] reopenTicket: summary reversal failed', e);
-    }
-  }
+  await _markTicketSummariesReversed(ticketId);
   await updateTicket(ticketId, {
     status: 'READY_FOR_CHECKOUT',
     closedByUid: deleteField(),
@@ -498,7 +498,33 @@ async function reopenTicket(ticketId) {
 }
 
 async function voidTicket(ticketId) {
-  await updateTicket(ticketId, { status: 'VOID', _action: 'voided' });
+  const salonId = getActiveTicketsSalonId();
+  if (!salonId || !ticketId) throw new Error('Missing salon or ticket');
+  const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
+  let snap;
+  try {
+    snap = await getDocFromServer(ticketRef);
+  } catch (_) {
+    snap = await getDoc(ticketRef);
+  }
+  if (!snap.exists()) throw new Error('Ticket not found');
+  const data = snap.data() || {};
+  const statusNow = String(data.status || '').toUpperCase();
+  if (statusNow === 'VOID' || statusNow === 'ARCHIVED') {
+    throw new Error('Ticket is already voided or archived.');
+  }
+  if (statusNow === 'CLOSED') {
+    await _markTicketSummariesReversed(ticketId);
+  }
+  const voidedByName =
+    ticketsState.currentUserProfile?.name || ticketsState.currentUserProfile?.email || 'Manager';
+  await updateTicket(ticketId, {
+    status: 'VOID',
+    voidedByUid: ticketsState.currentUserProfile?.uid ?? null,
+    voidedByName,
+    voidedAt: serverTimestamp(),
+    _action: 'voided'
+  });
 }
 
 async function archiveTicket(ticketId) {

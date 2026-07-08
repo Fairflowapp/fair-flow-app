@@ -9,7 +9,7 @@
  */
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, reopenTicket, archiveTicket, deleteTicketPermanently } from "./tickets-crud.js?v=20260630_tickets_crud_split";
+import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, reopenTicket, archiveTicket, deleteTicketPermanently, voidTicket } from "./tickets-crud.js?v=20260708_ticket_void";
 import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
 import { ffTicketMoney, formatTicketDisplayDateTime } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
 import { canSeeTicket, canCurrentUserCloseTickets, getTicketVisibility } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
@@ -30,6 +30,44 @@ export function initModalView(deps) {
   paintTicketServiceUpgradeButton = deps.paintTicketServiceUpgradeButton;
   updateTicketDiff = deps.updateTicketDiff;
   setupTicketFormToggles = deps.setupTicketFormToggles;
+}
+
+/** Guards concurrent Void Ticket submissions from the admin view. */
+let _ticketVoidInFlight = false;
+
+async function doVoidTicket(ticketId) {
+  if (_ticketVoidInFlight) return;
+  const ok = await ticketConfirm(
+    'Void this ticket? It will not count toward sales or commission.',
+    'Void Ticket'
+  );
+  if (!ok) return;
+  _ticketVoidInFlight = true;
+  const btn = document.getElementById('ticketVoidBtn');
+  const prevText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Voiding...';
+  }
+  try {
+    await voidTicket(ticketId);
+    showToast('Ticket voided', 'success');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Void Ticket';
+    }
+    closeTicketModal();
+    renderTicketsList();
+    updateTicketsNavBadge();
+  } catch (err) {
+    showToast(err?.message || 'Failed to void ticket', 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Void Ticket';
+    }
+  } finally {
+    _ticketVoidInFlight = false;
+  }
 }
 
 function openTicketModal(ticketId, appointmentData = null) {
@@ -296,6 +334,35 @@ function openAdminTicketView(t) {
       };
     } else {
       editBtn.style.display = 'none';
+    }
+  }
+
+  // Void Ticket — same permission gate as Paid Ticket; does not count toward Summary.
+  let voidBtn = document.getElementById('ticketVoidBtn');
+  if (!voidBtn && closeBtn && closeBtn.parentNode) {
+    voidBtn = document.createElement('button');
+    voidBtn.type = 'button';
+    voidBtn.id = 'ticketVoidBtn';
+    closeBtn.parentNode.insertBefore(voidBtn, closeBtn);
+  }
+  if (voidBtn) {
+    if (canCurrentUserCloseTickets()) {
+      voidBtn.style.display = 'inline-block';
+      voidBtn.style.width = '100%';
+      voidBtn.style.padding = '12px';
+      voidBtn.style.fontSize = '15px';
+      voidBtn.style.fontWeight = '700';
+      voidBtn.style.borderRadius = '10px';
+      voidBtn.style.marginBottom = '8px';
+      voidBtn.style.background = '#fff';
+      voidBtn.style.color = '#b91c1c';
+      voidBtn.style.border = '1px solid #fca5a5';
+      voidBtn.style.cursor = 'pointer';
+      voidBtn.disabled = false;
+      voidBtn.textContent = 'Void Ticket';
+      voidBtn.onclick = () => doVoidTicket(t.id);
+    } else {
+      voidBtn.style.display = 'none';
     }
   }
 

@@ -10,7 +10,7 @@
  */
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, archiveTicket, deleteTicketPermanently, setTicketServiceUpgrade, awardTicketUpgradePoints, createTicket, finalizeTicket, getTicketCustomerPriceApprovedFromForm, closeTicket } from "./tickets-crud.js?v=20260630_tickets_crud_split";
+import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, archiveTicket, deleteTicketPermanently, setTicketServiceUpgrade, awardTicketUpgradePoints, createTicket, finalizeTicket, getTicketCustomerPriceApprovedFromForm, closeTicket } from "./tickets-crud.js?v=20260708_ticket_void";
 import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
 import { ffTicketMoney, ffTicketCurSym } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
 import { computeTicketTotalsFromLines } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
@@ -18,6 +18,8 @@ import { canSeeTicket, canCurrentUserCloseTickets, getTicketVisibility, getAutoF
 import { loadServiceCategories, loadServices } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 
 let showToast, ticketConfirm, ffTicketLinesChanged, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, setupTicketsUI, getTicketPriceForServiceAndCurrentStaff, getTicketPriceForProductAndActiveLocation, closeTicketModal, openTicketDetailsModal, ffTicketRequiresCustomerName, ffApplyTicketCustomerRequiredUI;
+/** Guards concurrent Send-to-Front-Desk submissions (new + finalize flows). */
+let _ticketSendInFlight = false;
 export function initModalEdit(deps) {
   showToast = deps.showToast;
   ticketConfirm = deps.ticketConfirm;
@@ -488,15 +490,26 @@ async function doSendNewTicket() {
     if (customerNameEl) customerNameEl.focus();
     return;
   }
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
   const linesEl = document.getElementById('ticketLinesData');
   const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
   if (lines.length === 0) {
     showToast('Add at least one service or product to send a ticket.', 'error');
     return;
   }
-  const total = computeTicketTotalsFromLines(lines);
+
+  if (_ticketSendInFlight) return;
+  _ticketSendInFlight = true;
+
+  const btn = document.getElementById('ticketSendNewBtn');
+  const prevText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+  }
+
   try {
+    const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
+    const total = computeTicketTotalsFromLines(lines);
     await createTicket({
       customerName,
       performedLines: lines,
@@ -511,9 +524,19 @@ async function doSendNewTicket() {
       customerApprovedPrice: getTicketCustomerPriceApprovedFromForm()
     });
     showToast('Ticket sent to Front Desk', 'success');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Send to Front Desk';
+    }
     closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed to send', 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Send to Front Desk';
+    }
+  } finally {
+    _ticketSendInFlight = false;
   }
 }
 
@@ -526,15 +549,42 @@ async function doFinalizeTicket(ticketId) {
     if (customerNameEl) customerNameEl.focus();
     return;
   }
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  const ok = await ticketConfirm('Send this ticket to Front Desk?', 'Send to Front Desk');
-  if (!ok) return;
+
+  if (_ticketSendInFlight) return;
+  _ticketSendInFlight = true;
+
+  const btn = document.getElementById('ticketFinalizeBtn');
+  const prevText = btn ? btn.textContent : '';
+  const unlockBtn = () => {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Send to Front Desk';
+    }
+  };
+
   try {
+    const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
+    const ok = await ticketConfirm('Send this ticket to Front Desk?', 'Send to Front Desk');
+    if (!ok) {
+      unlockBtn();
+      return;
+    }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+    }
     await finalizeTicket(ticketId, forUids, forNames, { customerName });
     showToast('Ticket sent to Front Desk', 'success');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevText || 'Send to Front Desk';
+    }
     closeTicketModal();
   } catch (err) {
     showToast(err?.message || 'Failed', 'error');
+    unlockBtn();
+  } finally {
+    _ticketSendInFlight = false;
   }
 }
 
