@@ -3794,6 +3794,8 @@ window.__historyWorkerFilter = 'all';
 window.__historyActionFilters = [];
 
 let reorderMode=false;
+/** Blocks concurrent reorder ↑/↓ while queue save() is in flight. */
+let _queueReorderMoveInFlight = false;
 
 
 
@@ -8523,8 +8525,16 @@ function renderQueue(){
       del.style.background = "#fee2e2";
       del.style.color = "#991b1b";
       del.title = "Remove from queue";
-      up.onclick = () => move(qi, -1);
-      down.onclick = () => move(qi, 1);
+      up.onclick = () => void move(qi, -1);
+      down.onclick = () => void move(qi, 1);
+      if (_queueReorderMoveInFlight) {
+        up.disabled = true;
+        down.disabled = true;
+        up.style.opacity = '0.5';
+        down.style.opacity = '0.5';
+        up.style.pointerEvents = 'none';
+        down.style.pointerEvents = 'none';
+      }
       del.onclick = () => guardHold(() => removeFromQueue(qi));
       ctrls.append(up, down, del);
     }
@@ -9607,13 +9617,26 @@ function finish(i){
 
 }
 
-function move(i,d){
+async function move(i,d){
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
     ffQueueLockedViewToast();
     return;
   }
   if (reorderMode && !ffCurrentUserHasQueueReorderPermission()) return;
-  const j=i+d; if(j<0||j>=queue.length) return; const t=queue[j]; queue[j]=queue[i]; queue[i]=t; save(); renderQueue(); 
+  if (_queueReorderMoveInFlight) return;
+  const j=i+d;
+  if(j<0||j>=queue.length) return;
+  _queueReorderMoveInFlight = true;
+  const t=queue[j];
+  queue[j]=queue[i];
+  queue[i]=t;
+  renderQueue();
+  try {
+    await save();
+  } finally {
+    _queueReorderMoveInFlight = false;
+    renderQueue();
+  }
 
   // Reorder is done in reorder mode which requires manager/admin code
   const lastValidated = window.__ff_lastValidatedCode;
@@ -16801,6 +16824,8 @@ async function handleReorderClick() {
   }
 
   if (reorderMode) {
+    // Wait for an in-flight reorder save before exiting (avoids snapshot race).
+    if (_queueReorderMoveInFlight) return;
     // Currently in reorder mode - exiting without auth
     exitReorderMode();
     return;
@@ -46592,6 +46617,10 @@ window.__ffQueueCloudInit = function() {
       // write would resurrect the list we never actually cleared.
       const forceApply = meta && meta.force === true;
       const isRemote = meta && meta.remote === true;
+      // While reorder UI is active, defer non-remote snapshots (echo/cache) so
+      // Firestore cannot clobber the in-progress local order. Genuine remote
+      // changes (another device, higher rev) still apply. Explicit force still wins.
+      if (!forceApply && !isRemote && typeof reorderMode !== 'undefined' && reorderMode) return false;
       if (!forceApply && !isRemote && Date.now() - window.__ff_lastSaveTime < 6000) return false;
       // Boot anti-flicker: before the queue-cloud has confirmed an authoritative
       // SERVER snapshot, never clobber a non-empty in-memory queue with an empty
