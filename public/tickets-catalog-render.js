@@ -16,7 +16,7 @@
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { ffCanManageServices, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
-import { escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
+import { escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
 import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260630_catalog_ui_split3";
 import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260630_catalog_ui_split3";
 

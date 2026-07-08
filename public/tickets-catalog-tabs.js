@@ -12,7 +12,7 @@
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
-import { escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
+import { escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { serverTimestamp, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
