@@ -11,7 +11,7 @@ import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split"
 import { getTicketsSelfEmployeeFilterId, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
 import { getTicketTaxConfig } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
 import { fetchClosedTicketsForSummary, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, formatSummaryMoney, formatSummaryInt, getSummaryFilterDateRangeFromDom, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
-import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
+import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
 import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {

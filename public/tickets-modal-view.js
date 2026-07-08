@@ -10,7 +10,7 @@
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, reopenTicket, archiveTicket, deleteTicketPermanently, voidTicket } from "./tickets-crud.js?v=20260708_ticket_void";
-import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260630_tickets_list_split";
+import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
 import { ffTicketMoney, formatTicketDisplayDateTime } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
 import { canSeeTicket, canCurrentUserCloseTickets, getTicketVisibility } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
 
