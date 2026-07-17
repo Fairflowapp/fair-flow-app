@@ -661,6 +661,28 @@ function buildMergedWritePayload(state, server, reason, baseRevOverride) {
       // lv > sv: this device just reset this tab — local clean lists win.
     });
     out.resetStamps = mergedStamps;
+
+    // Never let a stale local autoResetState clobber a newer server lastRunDate
+    // (scheduledTasksAutoReset stamps opening/closing on the server).
+    const serverARS = (server.autoResetState && typeof server.autoResetState === "object")
+      ? server.autoResetState
+      : {};
+    const localARS = (out.autoResetState && typeof out.autoResetState === "object")
+      ? out.autoResetState
+      : {};
+    const mergedARS = { ...localARS };
+    const arsTabs = new Set([...Object.keys(localARS), ...Object.keys(serverARS), ...TABS]);
+    arsTabs.forEach((tab) => {
+      const lDate = (localARS[tab] && localARS[tab].lastRunDate) ? String(localARS[tab].lastRunDate) : "";
+      const sDate = (serverARS[tab] && serverARS[tab].lastRunDate) ? String(serverARS[tab].lastRunDate) : "";
+      const keepDate = (!lDate && sDate) ? sDate
+        : (!sDate && lDate) ? lDate
+        : (sDate >= lDate ? sDate : lDate);
+      if (!keepDate && !localARS[tab] && !serverARS[tab]) return;
+      mergedARS[tab] = { ...(localARS[tab] || {}), ...(serverARS[tab] || {}) };
+      if (keepDate) mergedARS[tab].lastRunDate = keepDate;
+    });
+    out.autoResetState = mergedARS;
   }
 
   out.rev = baseRev + 1;

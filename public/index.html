@@ -19414,6 +19414,10 @@ function openTasks() {
     
     // Periodic auto-reset check for ALL tabs (every 60 seconds when Tasks screen is visible)
     if (!window.__ffAutoResetInterval) {
+      // Default ON until app.js loads; Opening/Closing client auto-reset stays off.
+      if (typeof window.FF_TASKS_CLIENT_AUTORESET_DISABLED === 'undefined') {
+        window.FF_TASKS_CLIENT_AUTORESET_DISABLED = true;
+      }
       window.__ffAutoResetInterval = setInterval(() => {
         try {
           const tasksScreen = document.getElementById('tasksScreen');
@@ -19425,6 +19429,11 @@ function openTasks() {
 
           _TABS.forEach(function(_tab) {
             try {
+              // Opening/Closing auto-reset is cloud-authoritative when this flag is set.
+              if (window.FF_TASKS_CLIENT_AUTORESET_DISABLED === true &&
+                  (_tab === 'opening' || _tab === 'closing')) {
+                return;
+              }
               const _cfg = _aw[_tab] || {};
               if (_cfg.autoResetEnabled !== true || !_cfg.autoResetTime) return;
 
@@ -25175,6 +25184,7 @@ console.log('[EXPOSE] ffMaybeAutoResetQueue', typeof window.ffMaybeAutoResetQueu
 // skipSigCheck=false (default) when called from openTasks/interval (passive check - block if same cycle)
 function ffMaybeAutoResetOpening(now = new Date(), skipSigCheck = false) {
   try {
+    if (window.FF_TASKS_CLIENT_AUTORESET_DISABLED === true) return;
     if (window.__ffOpeningResetRunning) return;
 
     // Must be enabled
@@ -25254,6 +25264,7 @@ console.log('[EXPOSE] ffMaybeAutoResetOpening', typeof window.ffMaybeAutoResetOp
 // Opening tasks auto-reset at configured time function
 function ffMaybeAutoResetOpeningAtTime(now = new Date(), skipSigCheck = false) {
   try {
+    if (window.FF_TASKS_CLIENT_AUTORESET_DISABLED === true) return;
     if (window.__ffOpeningResetRunning) return;
 
     const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');

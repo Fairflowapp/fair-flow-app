@@ -30,6 +30,11 @@ const _queueAutoReset = require("./queue-auto-reset");
 exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
 exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
 
+// Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
+const _tasksAutoReset = require("./tasks-auto-reset");
+exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;
+exports.debugRunTasksAutoReset = _tasksAutoReset.debugRunTasksAutoReset;
+
 
 /**
  * Simple test callable – use to verify IAM/CORS/region work.

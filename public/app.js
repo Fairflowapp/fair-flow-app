@@ -7130,6 +7130,11 @@ function ffParseHHMMToMinutes(timeStr) {
   return hour * 60 + minute;
 }
 
+// When true, Opening/Closing automatic reset is cloud-only (scheduledTasksAutoReset).
+// Flip to false to restore legacy client-side Opening/Closing auto-reset.
+// Weekly / monthly / yearly are unaffected.
+window.FF_TASKS_CLIENT_AUTORESET_DISABLED = true;
+
 // Get auto-reset config for a tab (with defaults)
 function ffGetAutoResetConfig(tab) {
   if (tab !== 'opening' && tab !== 'closing' && tab !== 'weekly' && tab !== 'monthly' && tab !== 'yearly') return null;
@@ -7185,6 +7190,7 @@ function ffSetAutoResetLastRun(tab, todayISO) {
 // Main auto-reset function for Opening tab
 window.ffMaybeAutoResetOpening = function(nowDate) {
   try {
+    if (window.FF_TASKS_CLIENT_AUTORESET_DISABLED === true) return;
     const tab = 'opening';
     const now = nowDate || new Date();
     
@@ -7247,6 +7253,7 @@ window.ffMaybeAutoResetOpening = function(nowDate) {
 // Main auto-reset function for Closing tab
 window.ffMaybeAutoResetClosing = function(nowDate) {
   try {
+    if (window.FF_TASKS_CLIENT_AUTORESET_DISABLED === true) return;
     const tab = 'closing';
     const now = nowDate || new Date();
     
