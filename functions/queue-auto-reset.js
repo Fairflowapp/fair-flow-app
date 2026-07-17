@@ -8,23 +8,22 @@
 // open. Admin SDK writes bypass security rules, so there is no rev/permission
 // contention (and at 04:00 there are no concurrent client writes anyway).
 //
-// It mirrors the client semantics exactly (see resetQueueState / ffMaybeAutoResetQueue):
+// Cloud is the sole authority for automatic queue reset (clients no longer wipe
+// on a timer). Semantics:
 //   - queue is always cleared
 //   - service is cleared only when resetWhileInService (force) is true
 //   - history log is preserved
 //   - runtime.lastAutoResetDate is stamped so it runs once per local day
 //   - rev is bumped so live clients pick up the cleared state
+//
+// Catch-up: once the scheduled local time has passed today, any sweep until end
+// of that local day will still reset if lastAutoResetDate !== today. The stamp
+// prevents a second wipe later the same day (e.g. after a mid-day deploy).
 
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
 
-// Reset only fires within this many minutes AFTER the scheduled time. This stops a
-// mid-day deploy or a reset-time that already passed from retroactively wiping a
-// live queue built later in the day (mirrors the client's grace window).
-const RESET_WINDOW_MIN = 120;
-
-// Fallback timezone when a salon has no `timezone` field yet. The current pilot is
-// in Miami; salons can override by storing an IANA tz string on the salon doc.
+// Fallback timezone when a salon has no timezone / preferences.salonTimeZone yet.
 const DEFAULT_TZ = "America/New_York";
 
 /** Local wall-clock parts {y,m,d,minutes,dateKey} for `date` in IANA `tz`. */
@@ -81,6 +80,53 @@ function arrLen(v) {
 }
 
 /**
+ * Resolve salon IANA timezone for a queueState location.
+ * Prefer: salon.timezone → locationPreferences[loc].salonTimeZone →
+ * preferences.salonTimeZone (salon root or settings/main) → default.
+ */
+async function resolveSalonTimezone(salonDoc, locationId) {
+  const top = salonDoc.get("timezone");
+  if (top && String(top).trim()) return String(top).trim();
+
+  const rootPrefs = salonDoc.get("preferences");
+  if (rootPrefs && typeof rootPrefs === "object") {
+    const fromPrefs = rootPrefs.salonTimeZone;
+    if (fromPrefs && String(fromPrefs).trim()) return String(fromPrefs).trim();
+  }
+
+  try {
+    const mainSnap = await salonDoc.ref.collection("settings").doc("main").get();
+    if (mainSnap.exists()) {
+      const data = mainSnap.data() || {};
+      const locPrefs = data.locationPreferences;
+      if (locationId && locPrefs && typeof locPrefs === "object") {
+        const loc = locPrefs[locationId];
+        if (loc && loc.salonTimeZone && String(loc.salonTimeZone).trim()) {
+          return String(loc.salonTimeZone).trim();
+        }
+      }
+      if (data.preferences && data.preferences.salonTimeZone &&
+          String(data.preferences.salonTimeZone).trim()) {
+        return String(data.preferences.salonTimeZone).trim();
+      }
+      // Any location preference as last fallback before default.
+      if (locPrefs && typeof locPrefs === "object") {
+        for (const key of Object.keys(locPrefs)) {
+          const loc = locPrefs[key];
+          if (loc && loc.salonTimeZone && String(loc.salonTimeZone).trim()) {
+            return String(loc.salonTimeZone).trim();
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("[queueAutoReset] timezone settings/main read failed", salonDoc.id, e && e.message);
+  }
+
+  return DEFAULT_TZ;
+}
+
+/**
  * Run the reset sweep across all salons/locations.
  * @param {Date} now
  * @param {{dryRun?: boolean}} opts
@@ -103,8 +149,6 @@ async function runQueueAutoResetSweep(now, opts = {}) {
   for (const salonDoc of salonsSnap.docs) {
     summary.salons += 1;
     const salonId = salonDoc.id;
-    const tz = (salonDoc.get("timezone") && String(salonDoc.get("timezone")).trim()) || DEFAULT_TZ;
-    const lp = localParts(now, tz);
 
     let qsSnap;
     try {
@@ -119,6 +163,8 @@ async function runQueueAutoResetSweep(now, opts = {}) {
       summary.docsChecked += 1;
       const docId = qDoc.id; // location id, or "default"
       try {
+        const tz = await resolveSalonTimezone(salonDoc, docId);
+        const lp = localParts(now, tz);
         const data = qDoc.data() || {};
         const settingsBlob = data.queueSettings || {};
         // Per-location bucket inside the settings blob; fall back to "default".
@@ -130,11 +176,10 @@ async function runQueueAutoResetSweep(now, opts = {}) {
         const resetMin = parseResetTimeToMinutes(autoReset.time || "04:00");
         if (resetMin === null) { summary.skipped += 1; continue; }
 
-        // Not yet the scheduled time today, or too long past it (avoid surprise wipes).
-        if (lp.minutes < resetMin || lp.minutes > resetMin + RESET_WINDOW_MIN) {
-          // Diagnostic: a doc that is enabled but currently OUTSIDE its window.
-          // Helps explain "why didn't it reset" without guessing (time/tz/AM-PM).
-          console.log("[queueAutoReset] skip out-of-window", JSON.stringify({
+        // Catch-up until end of local day: fire once after scheduled time if not
+        // already stamped for today. Stamp prevents repeat wipes later the same day.
+        if (lp.minutes < resetMin) {
+          console.log("[queueAutoReset] skip before-reset-time", JSON.stringify({
             salonId, docId, tz, nowLocalMin: lp.minutes, resetMin, rawTime: autoReset.time || null, dateKey: lp.dateKey,
           }));
           summary.skipped += 1;
@@ -150,18 +195,10 @@ async function runQueueAutoResetSweep(now, opts = {}) {
           continue;
         } // already reset today (local)
 
-        // NOTE (2026-06): the previous "skip a queue a client modified today
-        // at/after the reset time" guard was removed. Repeat-reset protection now
-        // relies on the once-per-day stamp (lastAutoResetDate), which is reliable
-        // again: the scheduled reset stamps it and clients strip queueSettings
-        // .runtime on every write so they can no longer clobber it. That broad
-        // guard also blocked the FIRST, legitimate reset of any queue that was
-        // touched earlier the same day (and made near-future testing impossible),
-        // which is the opposite of what the auto-reset is supposed to do.
         const force = autoReset.resetWhileInService === true;
         const serviceLen = arrLen(data.service);
 
-        // Force off + someone in service → don't wipe; retry on a later run (mirrors client).
+        // Force off + someone in service → don't wipe; retry on a later run.
         if (!force && serviceLen > 0) {
           console.log("[queueAutoReset] skip in-service (force off)", JSON.stringify({
             salonId, docId, serviceLen, resetMin, nowLocalMin: lp.minutes, dateKey: lp.dateKey,
@@ -177,19 +214,22 @@ async function runQueueAutoResetSweep(now, opts = {}) {
 
         if (dryRun) { summary.actions.push({ ...action, dryRun: true }); summary.reset += 1; continue; }
 
-        const curRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
-        const update = {
-          queue: [],
-          rev: curRev + 1,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-          lastUpdateReason: "auto-reset",
-          lastUpdatedByUid: "server:queueAutoReset",
-        };
-        if (force) update.service = [];
-        // Stamp lastAutoResetDate inside the same per-location settings bucket.
-        update[`queueSettings.${docId}.runtime.lastAutoResetDate`] = lp.dateKey;
-
-        await qDoc.ref.update(update);
+        await db.runTransaction(async (tx) => {
+          const freshSnap = await tx.get(qDoc.ref);
+          const freshData = freshSnap.exists ? (freshSnap.data() || {}) : {};
+          const serverRev = (typeof freshData.rev === "number" && freshData.rev >= 0) ? freshData.rev : 0;
+          const update = {
+            queue: [],
+            rev: serverRev + 1,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            lastUpdateReason: "auto-reset",
+            lastUpdatedByUid: "server:queueAutoReset",
+          };
+          if (force) update.service = [];
+          // Stamp lastAutoResetDate inside the same per-location settings bucket.
+          update[`queueSettings.${docId}.runtime.lastAutoResetDate`] = lp.dateKey;
+          tx.update(qDoc.ref, update);
+        });
         summary.reset += 1;
         summary.actions.push(action);
         console.log("[queueAutoReset] reset", JSON.stringify(action));
@@ -207,8 +247,8 @@ async function runQueueAutoResetSweep(now, opts = {}) {
   return summary;
 }
 
-// Scheduled sweep — every 15 minutes catches each salon's local reset time within
-// its grace window, in every timezone, without any device being open.
+// Scheduled sweep — every 15 minutes; catch-up until end of local day after
+// the configured reset time, in every timezone, without any device being open.
 exports.scheduledQueueAutoReset = functions
   .region("us-central1")
   .runWith({ timeoutSeconds: 300, memory: "256MB" })
@@ -240,3 +280,4 @@ exports.debugRunQueueAutoReset = functions
 module.exports.runQueueAutoResetSweep = runQueueAutoResetSweep;
 module.exports.parseResetTimeToMinutes = parseResetTimeToMinutes;
 module.exports.localParts = localParts;
+module.exports.resolveSalonTimezone = resolveSalonTimezone;
