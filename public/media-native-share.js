@@ -223,6 +223,39 @@ async function fetchBlobViaHttpProxy(storagePath) {
   return blob;
 }
 
+/* Capacitor Android helpers — present since b7681a7, dropped from the M5 extract into this file. */
+function _isCapacitorAndroid() {
+  return !!(
+    window.Capacitor &&
+    window.Capacitor.isNativePlatform &&
+    window.Capacitor.isNativePlatform() &&
+    /Android/i.test(navigator.userAgent)
+  );
+}
+
+async function _capDownloadToDevice(blob, fileName) {
+  const Cap = ffGetCapacitor();
+  const Filesystem = Cap && Cap.Plugins && Cap.Plugins.Filesystem;
+  if (!Filesystem) throw new Error("Filesystem plugin not available");
+  const base64 = await ffBlobToBase64(blob);
+  try {
+    await Filesystem.writeFile({
+      path: "Download/" + fileName,
+      data: base64,
+      directory: "EXTERNAL_STORAGE",
+      recursive: true,
+    });
+    return true;
+  } catch (_) {
+    await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: "DOCUMENTS",
+    });
+    return true;
+  }
+}
+
 /**
  * Saves a blob as a file. iOS Safari often ignores <a download>; uses Share sheet or assigns blob URL to a tab
  * opened synchronously on click (async window.open is usually blocked).
