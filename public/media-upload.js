@@ -16,7 +16,7 @@ import {
   deleteMediaCategory,
 } from "./media-cloud.js?v=20260623_mediafix";
 import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260701_media_profile_split";
-import { initMediaNativeShare } from "./media-native-share.js?v=20260701_media_native_split";
+import { initMediaNativeShare } from "./media-native-share.js?v=20260718_media_dl_name";
 import {
   initMediaUploadForm,
   populateWorksDropdown,
@@ -34,7 +34,7 @@ import {
   closeMarkPostedModal,
   setupWorkDetailsListeners,
   setupMarkPostedListeners,
-} from "./media-work-details.js?v=20260701_media_work_details_split";
+} from "./media-work-details.js?v=20260718_media_dl_name";
 import {
   setMediaTab,
   renderMediaFilters,

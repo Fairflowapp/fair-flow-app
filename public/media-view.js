@@ -13,7 +13,7 @@ import {
 import { canHandleMediaWork } from "./media-profile.js?v=20260701_media_profile_split";
 import { resolveWorkCardPreviewUrl } from "./media-cloud.js?v=20260623_mediafix";
 import { openUploadModal } from "./media-upload-form.js?v=20260701_media_upload_form_split";
-import { openWorkDetails } from "./media-work-details.js?v=20260701_media_work_details_split";
+import { openWorkDetails } from "./media-work-details.js?v=20260718_media_dl_name";
 
 // =====================
 // Tab switching

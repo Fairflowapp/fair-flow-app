@@ -30,7 +30,7 @@ import {
   ffShareBlobNative,
   fetchBlobViaHttpProxy,
   triggerMediaFileDownload,
-} from "./media-native-share.js?v=20260701_media_native_split";
+} from "./media-native-share.js?v=20260718_media_dl_name";
 
 // Injected from media-upload.js (main UI slab) to avoid import cycles.
 let showMediaMessage = () => {};
@@ -81,6 +81,207 @@ function normalizeStoragePath(p) {
   return s.replace(/^\/+/, "") || null;
 }
 
+/**
+ * Download file name for a mediaItem.
+ * Storage object: `{mediaId}-{originalFileName}` → download as `originalFileName` only.
+ * Fallback: `media-{mediaId}.{ext}` (never the raw `{mediaId}-…` storage basename).
+ */
+function downloadFileNameForMediaItem(media, safeExt) {
+  const id = media?.id != null ? String(media.id) : (media?.mediaId != null ? String(media.mediaId) : "");
+  const sp =
+    normalizeStoragePath(media?.storagePath || "")
+    || extractStoragePathFromMediaUrl(media?.mediaUrl || "")
+    || "";
+  let base = (sp.split("/").pop() || "").trim();
+  try {
+    base = decodeURIComponent(base);
+  } catch (_) {}
+
+  if (base && id && base.startsWith(id + "-")) {
+    const original = base.slice(id.length + 1).trim();
+    if (original) return original;
+  }
+
+  if (id) return `media-${id}.${safeExt}`;
+  return `media-file.${safeExt}`;
+}
+
+function buildMediaItemMeta(media, workId) {
+  const sp =
+    normalizeStoragePath(media?.storagePath || "")
+    || extractStoragePathFromMediaUrl(media?.mediaUrl || "");
+  const ext = (
+    (sp || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf|heic|heif)$/i)?.[1]
+    || (media?.mediaUrl || "").match(/\.(jpe?g|png|gif|webp|mp4|webm|mov|pdf)(?:\?|$)/i)?.[1]
+    || "jpg"
+  ).toLowerCase();
+  const mime =
+    ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+    : ext === "png" ? "image/png"
+    : ext === "gif" ? "image/gif"
+    : ext === "webp" ? "image/webp"
+    : ext === "heic" || ext === "heif" ? "image/heic"
+    : ext === "mp4" ? "video/mp4"
+    : ext === "webm" ? "video/webm"
+    : ext === "mov" ? "video/quicktime"
+    : ext === "pdf" ? "application/pdf"
+    : "image/jpeg";
+  const safeExt = ext === "jpeg" ? "jpg" : ext;
+  const fileName = downloadFileNameForMediaItem(media, safeExt);
+  return { storagePath: sp, ext: safeExt, mime, fileName };
+}
+
+async function fetchBlobForMediaItem(media, meta, preferDirect = true) {
+  const mediaUrl = media?.mediaUrl || "";
+  const storagePath = meta?.storagePath || "";
+  let blob = null;
+  if (preferDirect && mediaUrl) {
+    let timer = null;
+    try {
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      timer = ctrl ? setTimeout(() => ctrl.abort(), 4500) : null;
+      const r = await fetch(mediaUrl, {
+        credentials: "omit",
+        mode: "cors",
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
+      if (r.ok) blob = await r.blob();
+    } catch (e) {
+      console.warn("[Media] item download: direct fetch failed", e);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (blob && blob.size > 0) return blob;
+  }
+  try {
+    if (storagePath && auth.currentUser) {
+      blob = await fetchBlobViaHttpProxy(storagePath);
+    }
+  } catch (e) {
+    console.warn("[Media] item download: proxy failed", e);
+  }
+  if ((!blob || blob.size === 0) && mediaUrl) {
+    let timer = null;
+    try {
+      const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      timer = ctrl ? setTimeout(() => ctrl.abort(), 9000) : null;
+      const r = await fetch(mediaUrl, {
+        credentials: "omit",
+        mode: "cors",
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+      });
+      if (r.ok) blob = await r.blob();
+    } catch (e) {
+      console.warn("[Media] item download: direct fetch retry failed", e);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  return blob;
+}
+
+/**
+ * Download one mediaItem via the shared platform path (fast URL / native share / web <a download>).
+ * @param {object} media
+ * @param {string} workId
+ * @param {{ button?: HTMLElement, idleLabel?: string, loadingLabel?: string } } [ui]
+ */
+async function downloadMediaItem(media, workId, ui = {}) {
+  if (!media?.mediaUrl && !media?.storagePath) {
+    alert("No media to download");
+    return;
+  }
+  const button = ui.button || null;
+  const idleLabel = ui.idleLabel != null ? ui.idleLabel : (button ? button.textContent : "");
+  const loadingLabel = ui.loadingLabel != null ? ui.loadingLabel : "Loading…";
+  const meta = buildMediaItemMeta(media, workId);
+  const { fileName, mime: mimeFromExt } = meta;
+
+  const isNative = ffIsNativeCapacitor();
+  const isIOSDevice =
+    /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  let iosDownloadTab = null;
+  if (!isNative && isIOSDevice) {
+    try {
+      iosDownloadTab = window.open("about:blank", "_blank");
+    } catch (_) {}
+  }
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = loadingLabel;
+  }
+
+  const dlOpts = { iosTab: iosDownloadTab };
+  try {
+    if (ffMediaFastUrlMode() && media?.mediaUrl) {
+      try {
+        if (button) button.textContent = "Opening…";
+        await ffShareMediaUrlFast(media.mediaUrl, fileName, "", "Download image");
+        return;
+      } catch (fastErr) {
+        if (ffIsShareCancel(fastErr)) return;
+        console.warn("[Media] download: fast URL share failed, falling back to file", fastErr);
+      }
+    }
+
+    let blob = null;
+    try {
+      blob = await ffWithTimeout(fetchBlobForMediaItem(media, meta, true), "media item download", 8000);
+    } catch (e2) {
+      console.warn("[Media] download: fetch rejected", e2);
+    }
+    if ((!blob || blob.size === 0) && meta.storagePath && auth.currentUser) {
+      try {
+        blob = await fetchBlobViaHttpProxy(meta.storagePath);
+      } catch (e3) {
+        console.warn("[Media] download: proxy fetch failed", e3);
+      }
+    }
+    if (!blob || blob.size === 0) {
+      if (media?.mediaUrl) {
+        showMediaMessage("Could not prepare file download. Use Share or try again.");
+      } else {
+        showMediaMessage("Download failed");
+      }
+      return;
+    }
+
+    const fixedBlob = blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt });
+
+    if (isNative && ffGetCapShare() && ffNativeBridge()) {
+      try {
+        await ffWithTimeout(ffSaveBlobToDeviceViaShare(fixedBlob, fileName), "native media download share", 12000);
+        return;
+      } catch (e4) {
+        if (ffIsShareCancel(e4)) return;
+        console.warn("[Media] download: native share failed, falling back to web", e4);
+      }
+    }
+
+    await triggerMediaFileDownload(fixedBlob, fileName, undefined, dlOpts);
+  } catch (err) {
+    console.warn("[Media] download", err);
+    showMediaMessage("Download failed");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = idleLabel;
+    }
+    try {
+      if (iosDownloadTab && !iosDownloadTab.closed) {
+        const h = iosDownloadTab.location.href;
+        if (h === "about:blank" || h === "") iosDownloadTab.close();
+      }
+    } catch (_) {
+      try {
+        if (iosDownloadTab && !iosDownloadTab.closed) iosDownloadTab.close();
+      } catch (__) {}
+    }
+  }
+}
 
 async function openWorkDetails(workId) {
   mediaState.selectedWorkId = workId;
@@ -160,16 +361,23 @@ async function openWorkDetails(workId) {
     }
   };
 
+  const thumbBtnCss =
+    "position:absolute;top:4px;font-size:12px;line-height:1;padding:2px 6px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:4px;cursor:pointer;";
   const previewsHtml = items
     .map((m) => {
       const isVideo = (m.mediaType || "").includes("video");
+      const mid = String(m.id || "").replace(/"/g, "");
+      // Download for everyone; delete (×) stays admin-only on To handle.
+      const dlBtn =
+        `<button type="button" title="Download" aria-label="Download" style="${thumbBtnCss}${showAdminRow ? "right:28px;" : "right:4px;"}" data-media-download-id="${mid}">↓</button>`;
       const delBtn = showAdminRow
-        ? `<button type="button" style="position:absolute;top:4px;right:4px;font-size:12px;padding:2px 6px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:4px;cursor:pointer;" data-media-id="${m.id}">×</button>`
+        ? `<button type="button" title="Delete" aria-label="Delete" style="${thumbBtnCss}right:4px;" data-media-delete-id="${mid}">×</button>`
         : "";
+      const overlays = `${dlBtn}${delBtn}`;
       if (isVideo) {
-        return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><video src="${m.mediaUrl}" style="width:100%;height:100%;object-fit:cover;" muted playsinline></video>${delBtn}</div>`;
+        return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><video src="${m.mediaUrl}" style="width:100%;height:100%;object-fit:cover;" muted playsinline></video>${overlays}</div>`;
       }
-      return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><img src="${m.mediaUrl}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af>📷</div>'">${delBtn}</div>`;
+      return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><img src="${m.mediaUrl}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af>📷</div>'">${overlays}</div>`;
     })
     .join("");
 
@@ -288,105 +496,15 @@ async function openWorkDetails(workId) {
   downloadBtn.addEventListener("touchstart", warmDownload, { passive: true });
   downloadBtn.addEventListener("mouseenter", warmDownload);
 
+  // Work-level Download still targets the first media item (same as before).
   downloadBtn.onclick = async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!firstMedia?.mediaUrl && !firstMedia?.storagePath) {
-      alert("No media to download");
-      return;
-    }
-
-    const isNative = ffIsNativeCapacitor();
-    const isIOSDevice =
-      /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-
-    /** Web/iOS Safari: must open before any await — iOS blocks async window.open (lost user activation). */
-    let iosDownloadTab = null;
-    if (!isNative && isIOSDevice) {
-      try {
-        iosDownloadTab = window.open("about:blank", "_blank");
-      } catch (_) {}
-    }
-
-    downloadBtn.disabled = true;
-    downloadBtn.textContent = "Loading…";
-
-    const { fileName, mime: mimeFromExt } = shareMeta;
-    const dlOpts = { iosTab: iosDownloadTab };
-
-    try {
-      if (ffMediaFastUrlMode() && firstMedia?.mediaUrl) {
-        try {
-          downloadBtn.textContent = "Opening…";
-          await ffShareMediaUrlFast(firstMedia.mediaUrl, fileName, "", "Download image");
-          return;
-        } catch (fastErr) {
-          if (ffIsShareCancel(fastErr)) return;
-          console.warn("[Media] download: fast URL share failed, falling back to file", fastErr);
-        }
-      }
-
-      // Get the blob (reuses the share prefetch if it's already in flight / done).
-      let blob = null;
-      try {
-        blob = await ffWithTimeout(startShareBlobPrefetch(true), "media download prefetch", 8000);
-      } catch (e2) {
-        console.warn("[Media] download: prefetch promise rejected", e2);
-      }
-
-      // Last-chance direct proxy fetch if prefetch returned nothing.
-      if ((!blob || blob.size === 0) && shareMeta.storagePath && auth.currentUser) {
-        try {
-          blob = await fetchBlobViaHttpProxy(shareMeta.storagePath);
-        } catch (e3) {
-          console.warn("[Media] download: proxy fetch failed", e3);
-        }
-      }
-
-      if (!blob || blob.size === 0) {
-        if (firstMedia?.mediaUrl) {
-          showMediaMessage("Could not prepare file download. Use Share or try again.");
-        } else {
-          showMediaMessage("Download failed");
-        }
-        return;
-      }
-
-      const fixedBlob = blob.type === mimeFromExt ? blob : new Blob([blob], { type: mimeFromExt });
-
-      // ---- Native (Capacitor iOS / Android): open the system share sheet so the
-      // user can save the image to Photos / Files / Downloads. This is the
-      // expected native UX in lieu of a hidden browser "download".
-      if (isNative && ffGetCapShare() && ffNativeBridge()) {
-        try {
-          await ffWithTimeout(ffSaveBlobToDeviceViaShare(fixedBlob, fileName), "native media download share", 12000);
-          return;
-        } catch (e4) {
-          if (ffIsShareCancel(e4)) return;
-          console.warn("[Media] download: native share failed, falling back to web", e4);
-        }
-      }
-
-      // ---- Web / browser fallback: existing <a download> or iOS-tab blob URL.
-      await triggerMediaFileDownload(fixedBlob, fileName, undefined, dlOpts);
-    } catch (err) {
-      console.warn("[Media] download", err);
-      showMediaMessage("Download failed");
-    } finally {
-      downloadBtn.disabled = false;
-      downloadBtn.textContent = "Download";
-      try {
-        if (iosDownloadTab && !iosDownloadTab.closed) {
-          const h = iosDownloadTab.location.href;
-          if (h === "about:blank" || h === "") iosDownloadTab.close();
-        }
-      } catch (_) {
-        try {
-          if (iosDownloadTab && !iosDownloadTab.closed) iosDownloadTab.close();
-        } catch (__) {}
-      }
-    }
+    await downloadMediaItem(firstMedia, workId, {
+      button: downloadBtn,
+      idleLabel: "Download",
+      loadingLabel: "Loading…",
+    });
   };
   addActionBtn(downloadBtn);
 
@@ -674,7 +792,26 @@ async function openWorkDetails(workId) {
   flushWorkDetailActions();
 
   content.onclick = async (e) => {
-    const mediaId = e.target?.closest?.("[data-media-id]")?.dataset?.mediaId;
+    const dlEl = e.target?.closest?.("[data-media-download-id]");
+    if (dlEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      const mediaId = dlEl.dataset.mediaDownloadId;
+      const media = items.find((m) => String(m.id) === String(mediaId));
+      if (!media) {
+        showMediaMessage("Media item not found");
+        return;
+      }
+      await downloadMediaItem(media, workId, {
+        button: dlEl,
+        idleLabel: "↓",
+        loadingLabel: "…",
+      });
+      return;
+    }
+
+    const delEl = e.target?.closest?.("[data-media-delete-id]");
+    const mediaId = delEl?.dataset?.mediaDeleteId;
     if (mediaId && showAdminRow && confirm("Delete this media item?")) {
       try {
         await deleteMediaItem(workId, mediaId);

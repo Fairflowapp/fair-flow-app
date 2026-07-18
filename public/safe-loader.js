@@ -17,7 +17,7 @@
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
         { src: "/inbox.js?v=20260630_inbox_cleanup", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260701_media_view_split", type: "module", delay: 2780 },
+        { src: "/media-upload.js?v=20260718_media_dl_name", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260701_chat_compose_split", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
         { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 3120 },
