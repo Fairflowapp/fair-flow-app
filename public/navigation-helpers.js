@@ -5050,16 +5050,17 @@ function ffOnAutoResetEnabledChange() {
 }
 window.ffOnAutoResetEnabledChange = ffOnAutoResetEnabledChange;
 
-/** Parse HH:mm 24h → { hour12: 1-12, minute: 0-59, ampm: 'AM'|'PM' }. */
+/** Parse HH:mm 24h → { hour12: 1-12, minute: 0-59, ampm: 'AM'|'PM', hour24 }. */
 function ffParseHHMMToAmPmParts(hhmm) {
   const m = String(hhmm || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return { hour12: 12, minute: 0, ampm: 'AM' };
+  if (!m) return { hour12: 12, minute: 0, ampm: 'AM', hour24: 0 };
   let h = parseInt(m[1], 10);
   const minute = parseInt(m[2], 10);
-  if (!Number.isFinite(h) || !Number.isFinite(minute)) return { hour12: 12, minute: 0, ampm: 'AM' };
+  if (!Number.isFinite(h) || !Number.isFinite(minute)) return { hour12: 12, minute: 0, ampm: 'AM', hour24: 0 };
+  h = Math.min(23, Math.max(0, h));
   const ampm = h >= 12 ? 'PM' : 'AM';
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return { hour12, minute: Math.min(59, Math.max(0, minute)), ampm };
+  return { hour12, minute: Math.min(59, Math.max(0, minute)), ampm, hour24: h };
 }
 
 /** Build HH:mm 24h from 12h parts. */
@@ -5076,23 +5077,51 @@ function ffAmPmPartsToHHMM(hour12, minute, ampm) {
   return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
 
+/** Respect Preferences → Business Format → Time format (12h / 24h). */
+function ffPrefers24HourTime() {
+  try {
+    if (typeof window.ffGetDisplayTimeFormat === 'function') {
+      return window.ffGetDisplayTimeFormat() === '24h';
+    }
+  } catch (_) {}
+  try {
+    const tf = window.settings && window.settings.preferences && window.settings.preferences.timeFormat;
+    return tf === '24h' || tf === '24hour' || tf === 24;
+  } catch (_) {
+    return false;
+  }
+}
+window.ffPrefers24HourTime = ffPrefers24HourTime;
+
 const _ffAmPmSelectCss =
   'height:32px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;color:#111827;cursor:pointer;';
 
 /**
- * Mount hour + minute + AM/PM selects for a hidden/time input that stores HH:mm 24h.
- * Host: <span data-ff-ampm-for="inputId"></span> next to the input.
+ * Mount hour + minute (+ AM/PM only in 12h mode) for a hidden input that stores HH:mm 24h.
+ * Follows Preferences time format. Host: <span data-ff-ampm-for="inputId"></span>
  */
 function ffMountAmPmTimePicker(inputOrId) {
   const input = typeof inputOrId === 'string' ? document.getElementById(inputOrId) : inputOrId;
   if (!input || !input.id) return null;
   const host = document.querySelector(`[data-ff-ampm-for="${input.id}"]`);
   if (!host) return null;
+
+  const prefers24h = ffPrefers24HourTime();
+  const mode = prefers24h ? '24h' : '12h';
+
   if (host.__ffAmPmMounted) {
-    if (typeof host.__ffAmPmPull === 'function') host.__ffAmPmPull();
-    return host;
+    if (host.__ffAmPmMode === mode) {
+      if (typeof host.__ffAmPmPull === 'function') host.__ffAmPmPull();
+      return host;
+    }
+    // Time-format preference changed — rebuild controls.
+    host.innerHTML = '';
+    host.__ffAmPmMounted = false;
+    host.__ffAmPmPull = null;
   }
+
   host.__ffAmPmMounted = true;
+  host.__ffAmPmMode = mode;
   if (input.type !== 'hidden') {
     input.type = 'hidden';
   }
@@ -5101,11 +5130,20 @@ function ffMountAmPmTimePicker(inputOrId) {
   const hourSel = document.createElement('select');
   hourSel.setAttribute('aria-label', 'Hour');
   hourSel.style.cssText = _ffAmPmSelectCss;
-  for (let h = 1; h <= 12; h++) {
-    const opt = document.createElement('option');
-    opt.value = String(h);
-    opt.textContent = String(h);
-    hourSel.appendChild(opt);
+  if (prefers24h) {
+    for (let h = 0; h <= 23; h++) {
+      const opt = document.createElement('option');
+      opt.value = String(h);
+      opt.textContent = String(h).padStart(2, '0');
+      hourSel.appendChild(opt);
+    }
+  } else {
+    for (let h = 1; h <= 12; h++) {
+      const opt = document.createElement('option');
+      opt.value = String(h);
+      opt.textContent = String(h);
+      hourSel.appendChild(opt);
+    }
   }
 
   const colon = document.createElement('span');
@@ -5122,25 +5160,41 @@ function ffMountAmPmTimePicker(inputOrId) {
     minSel.appendChild(opt);
   }
 
-  const ampmSel = document.createElement('select');
-  ampmSel.setAttribute('aria-label', 'AM or PM');
-  ampmSel.style.cssText = _ffAmPmSelectCss + 'font-weight:600;min-width:4.5em;';
-  ['AM', 'PM'].forEach((label) => {
-    const opt = document.createElement('option');
-    opt.value = label;
-    opt.textContent = label;
-    ampmSel.appendChild(opt);
-  });
+  let ampmSel = null;
+  if (!prefers24h) {
+    ampmSel = document.createElement('select');
+    ampmSel.setAttribute('aria-label', 'AM or PM');
+    ampmSel.style.cssText = _ffAmPmSelectCss + 'font-weight:600;min-width:4.5em;';
+    ['AM', 'PM'].forEach((label) => {
+      const opt = document.createElement('option');
+      opt.value = label;
+      opt.textContent = label;
+      ampmSel.appendChild(opt);
+    });
+  }
 
   function pull() {
     const parts = ffParseHHMMToAmPmParts(input.value || '04:00');
-    hourSel.value = String(parts.hour12);
     minSel.value = String(parts.minute);
-    ampmSel.value = parts.ampm;
+    if (prefers24h) {
+      hourSel.value = String(parts.hour24);
+    } else {
+      hourSel.value = String(parts.hour12);
+      if (ampmSel) ampmSel.value = parts.ampm;
+    }
   }
 
   function push() {
-    const next = ffAmPmPartsToHHMM(hourSel.value, minSel.value, ampmSel.value);
+    let next;
+    if (prefers24h) {
+      let h = parseInt(hourSel.value, 10);
+      let min = parseInt(minSel.value, 10);
+      if (!Number.isFinite(h) || h < 0 || h > 23) h = 0;
+      if (!Number.isFinite(min) || min < 0 || min > 59) min = 0;
+      next = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+    } else {
+      next = ffAmPmPartsToHHMM(hourSel.value, minSel.value, ampmSel ? ampmSel.value : 'AM');
+    }
     if (input.value === next) return;
     input.value = next;
     try {
@@ -5151,12 +5205,12 @@ function ffMountAmPmTimePicker(inputOrId) {
 
   hourSel.addEventListener('change', push);
   minSel.addEventListener('change', push);
-  ampmSel.addEventListener('change', push);
+  if (ampmSel) ampmSel.addEventListener('change', push);
 
   host.appendChild(hourSel);
   host.appendChild(colon);
   host.appendChild(minSel);
-  host.appendChild(ampmSel);
+  if (ampmSel) host.appendChild(ampmSel);
   host.__ffAmPmPull = pull;
   pull();
   return host;
