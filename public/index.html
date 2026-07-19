@@ -20225,6 +20225,7 @@ function setSettingsModalTab(tabName, options) {
             // Apply to UI
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
+            if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             bindAutoResetForce('opening', autoResetForceCheckbox, enabled);
             
@@ -20336,6 +20337,7 @@ function setSettingsModalTab(tabName, options) {
             // Apply to UI
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
+            if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             bindAutoResetForce('closing', autoResetForceCheckbox, enabled);
             
