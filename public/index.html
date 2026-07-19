@@ -20523,6 +20523,7 @@ function setSettingsModalTab(tabName, options) {
           // Apply to UI
           autoResetEnabledCheckbox.checked = enabled;
           autoResetTimeInput.value = time;
+          if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
           autoResetTimeRow.style.display = enabled ? 'block' : 'none';
           bindAutoResetForce('weekly', autoResetForceCheckbox, enabled);
           
@@ -20669,6 +20670,7 @@ function setSettingsModalTab(tabName, options) {
           
           tasksMonthlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
           tasksMonthlyAutoResetTime.value = cfg.autoResetTime || '21:00';
+          if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(tasksMonthlyAutoResetTime);
           tasksMonthlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
           bindAutoResetForce('monthly', tasksMonthlyAutoResetForce, !!cfg.autoResetEnabled);
           
@@ -20752,6 +20754,7 @@ function setSettingsModalTab(tabName, options) {
         
         tasksYearlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
         tasksYearlyAutoResetTime.value = cfg.autoResetTime || '21:00';
+        if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(tasksYearlyAutoResetTime);
         tasksYearlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
         bindAutoResetForce('yearly', tasksYearlyAutoResetForce, !!cfg.autoResetEnabled);
         
