@@ -96,7 +96,7 @@ async function resolveSalonTimezone(salonDoc, locationId) {
 
   try {
     const mainSnap = await salonDoc.ref.collection("settings").doc("main").get();
-    if (mainSnap.exists()) {
+    if (mainSnap.exists) {
       const data = mainSnap.data() || {};
       const locPrefs = data.locationPreferences;
       if (locationId && locPrefs && typeof locPrefs === "object") {
