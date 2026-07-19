@@ -625,10 +625,12 @@ function ffSavePreferencesSettings(preferences) {
     updatedAt: serverTimestamp(),
     [`${basePath}.weekStartsOn`]: wk
   };
+  let salonRootTimezone = null;
   if (Object.prototype.hasOwnProperty.call(nextPreferences, "salonTimeZone")) {
     const tz = normalizeSalonTimeZone(nextPreferences.salonTimeZone);
     if (tz) {
       payload[`${basePath}.salonTimeZone`] = tz;
+      salonRootTimezone = tz;
     } else {
       payload[`${basePath}.salonTimeZone`] = deleteField();
     }
@@ -692,6 +694,16 @@ function ffSavePreferencesSettings(preferences) {
     }
     console.warn("[SettingsCloud] save preferences settings failed", e);
   });
+
+  // Mirror IANA zone onto salons/{salonId}.timezone for scheduled queue auto-reset.
+  if (salonRootTimezone) {
+    setDoc(doc(db, "salons", _salonId), {
+      timezone: salonRootTimezone,
+      updatedAt: serverTimestamp(),
+    }, { merge: true }).catch((e) => {
+      console.warn("[SettingsCloud] mirror salon timezone failed", e);
+    });
+  }
 }
 
 /**

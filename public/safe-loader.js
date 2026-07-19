@@ -5,7 +5,7 @@
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260609_merge_base_consistency", type: "module", delay: 1350 },
+        { src: "/queue-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260708_ticket_list_fix", type: "module", delay: 1400 },
         { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 1650 },
@@ -24,7 +24,7 @@
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
-        { src: "/settings-cloud.js?v=20260618_ticket_customer_required_fix", type: "module", delay: 3600 },
+        { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },

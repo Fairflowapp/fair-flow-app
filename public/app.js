@@ -3978,25 +3978,8 @@ function ffWireUiAfterDomReady() {
   // Enforce history retention policy on app load
   enforceHistoryRetention();
   
-  // Queue Auto Reset: call on startup and set up interval
-  try {
-    if (typeof window.ffMaybeAutoResetQueue === 'function') {
-      window.ffMaybeAutoResetQueue(new Date());
-    }
-    
-    // Set up interval timer (30 seconds) - guard with window flag
-    if (!window.__queueAutoResetIntervalStarted) {
-      window.__queueAutoResetIntervalStarted = true;
-      setInterval(() => {
-        if (typeof window.ffMaybeAutoResetQueue === 'function') {
-          window.ffMaybeAutoResetQueue(new Date());
-        }
-      }, 30 * 1000);
-      console.log('[AUTO_RESET][QUEUE] Interval timer started (30s)');
-    }
-  } catch (e) {
-    console.error('[AUTO_RESET][QUEUE] Error initializing:', e);
-  }
+  // Queue Auto Reset is cloud-authoritative (scheduledQueueAutoReset).
+  // Do not start a client wipe interval — it caused thrashing / old-list resurrection.
 }
 
 if (document.readyState === "loading") {

@@ -484,6 +484,16 @@ function subscribe(salonId, locationId, opts = {}) {
     const service = Array.isArray(data.service) ? data.service : [];
     const log = Array.isArray(data.log) ? data.log : [];
     const cloudHasData = (queue.length + service.length + log.length) > 0;
+    const cloudUpdateReason = typeof data.lastUpdateReason === "string" ? data.lastUpdateReason : "";
+    const cloudFromServerAutoReset =
+      cloudUpdateReason === "auto-reset" ||
+      data.lastUpdatedByUid === "server:queueAutoReset";
+    if (typeof window !== "undefined") {
+      window.__ff_queueLastCloudUpdateReason = cloudUpdateReason || "";
+      if (cloudFromServerAutoReset) {
+        window.__ff_queueLastCloudWasAutoReset = true;
+      }
+    }
 
     if (shouldDeferBootSnapshot(snap, locationId, cloudHasData, localHasAnyData)) {
       console.log("[QueueCloud] Defer empty boot snapshot until server data", logTag, {
@@ -495,21 +505,27 @@ function subscribe(salonId, locationId, opts = {}) {
     // On first snapshot for an existing but empty cloud doc, do not seed from
     // localStorage unless this tab just performed a local queue write. Otherwise
     // an old mobile cache can resurrect an employee after the 4 AM cloud reset.
+    // NEVER push local over a server auto-reset (even if queue+service empty but
+    // log preserved — cloudHasData may be true via log; this path is for fully empty).
     if (_firstSnapshot && !cloudHasData && preserveRecentLocalWrite && localHasAnyData) {
-      console.log("[QueueCloud] Cloud empty but local has data, pushing local", logTag);
-      // Base the new rev on THIS snapshot's rev (the doc already exists), so the
-      // compare-and-swap rule accepts the write.
-      const baseRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
-      setDoc(ref, {
-        queue: localState.queue || [],
-        service: localState.service || [],
-        log: localState.log || [],
-        rev: baseRev + 1,
-        updatedAt: serverTimestamp()
-      }).then(() => { _lastCloudRev = baseRev + 1; })
-        .catch((e) => console.warn("[QueueCloud] Push local failed", e));
-      _firstSnapshot = false;
-      return;
+      if (cloudFromServerAutoReset) {
+        console.warn("[QueueCloud] skip push-local after server auto-reset", logTag);
+      } else {
+        console.log("[QueueCloud] Cloud empty but local has data, pushing local", logTag);
+        // Base the new rev on THIS snapshot's rev (the doc already exists), so the
+        // compare-and-swap rule accepts the write.
+        const baseRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+        setDoc(ref, {
+          queue: localState.queue || [],
+          service: localState.service || [],
+          log: localState.log || [],
+          rev: baseRev + 1,
+          updatedAt: serverTimestamp()
+        }).then(() => { _lastCloudRev = baseRev + 1; })
+          .catch((e) => console.warn("[QueueCloud] Push local failed", e));
+        _firstSnapshot = false;
+        return;
+      }
     }
 
     _firstSnapshot = false;
@@ -525,7 +541,8 @@ function subscribe(salonId, locationId, opts = {}) {
     // post-save grace window — otherwise two active devices ignore each other
     // for several seconds after every save and the queue "flaps" forever
     // (names jump/disappear) without ever converging.
-    const isGenuineRemote = isAuthoritative && snapRev > _lastCloudRev;
+    // Server auto-reset must always win over local grace / stale cache.
+    const isGenuineRemote = isAuthoritative && (snapRev > _lastCloudRev || cloudFromServerAutoReset);
     // Expose when the cloud queue was last modified so the morning auto-reset
     // can tell "yesterday's leftover queue" (safe to clear on fresh open) from
     // "a queue already used today" (must never be wiped).
@@ -543,7 +560,10 @@ function subscribe(salonId, locationId, opts = {}) {
     // base / rev / log markers below. Advancing them while the screen still
     // shows the OLD list is exactly what made the next write re-add
     // ("resurrect") a list the server had already cleared.
-    const applied = _applyState(queue, service, log, null, { remote: isGenuineRemote });
+    const applyOpts = cloudFromServerAutoReset && isAuthoritative
+      ? { remote: true, force: true, reason: "server-auto-reset" }
+      : { remote: isGenuineRemote };
+    const applied = _applyState(queue, service, log, null, applyOpts);
     if (applied !== false) {
       console.log("[QueueCloud] snapshot applied", {
         salonId,
@@ -555,6 +575,7 @@ function subscribe(salonId, locationId, opts = {}) {
         logLen: log.length,
         fromCache: snapshotFromCache(snap),
         remote: isGenuineRemote,
+        updateReason: cloudUpdateReason || null,
       });
     }
     if (isAuthoritative && applied !== false) {
@@ -828,6 +849,42 @@ function writeState() {
   // overwriting. Only enforced once we have a server-confirmed snapshot, so a
   // freshly-opened device with no cloud knowledge is unaffected.
   const serverConfirmed = typeof window !== "undefined" && window.__ff_queueCloudServerConfirmed === true;
+  const lastWasAutoReset = typeof window !== "undefined" && (
+    window.__ff_queueLastCloudWasAutoReset === true ||
+    window.__ff_queueLastCloudUpdateReason === "auto-reset"
+  );
+  // After a known server auto-reset, never push a non-empty queue unless this
+  // tab has an explicit empty-overwrite window (manual/local reset) — the
+  // resurrection check below still covers the general case.
+  if (!localEmpty && serverConfirmed && lastWasAutoReset && !isExplicitIntent && ffWriteResurrectsRemoved(state)) {
+    console.warn("[QueueCloud] blocked write after server auto-reset (stale local queue)", {
+      salonId: _salonId,
+      locationId: _locationId || QUEUE_STATE_DEFAULT,
+      reason,
+      localQueueLen: localCounts.queue,
+    });
+    return getDocFromServer(ref).then((snap) => {
+      if (!snap.exists()) return queueWriteResult(false, "auto-reset-resurrection-blocked");
+      const data = snap.data() || {};
+      _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
+      const sq = Array.isArray(data.queue) ? data.queue : [];
+      const ss = Array.isArray(data.service) ? data.service : [];
+      const sl = Array.isArray(data.log) ? data.log : [];
+      _lastCloudLogLen = sl.length;
+      setLastServerState(sq, ss, sl);
+      if (typeof _applyState === "function") {
+        _applyState(sq, ss, sl, null, { force: true, reason: "server-auto-reset" });
+        if (typeof _onLogChange === "function") _onLogChange();
+      }
+      return queueWriteResult(false, "auto-reset-resurrection-blocked", {
+        localQueueLen: localCounts.queue,
+        serverQueueLen: sq.length,
+      });
+    }).catch((e) => {
+      console.warn("[QueueCloud] auto-reset resurrection guard read failed", e);
+      return queueWriteResult(false, "auto-reset-guard-read-failed", { error: queueErrorMessage(e) });
+    });
+  }
   if (!localEmpty && serverConfirmed && ffWriteResurrectsRemoved(state)) {
     return getDocFromServer(ref).then((snap) => {
       if (!snap.exists()) return commit();

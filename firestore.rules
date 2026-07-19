@@ -359,7 +359,12 @@ service cloud.firestore {
     // Basic salon doc: any signed-in user can read
     match /salons/{salonId} {
       allow read: if request.auth != null;
-      allow write: if false;
+      // Owners/admins may mirror Preferences salonTimeZone → timezone for
+      // scheduled queue auto-reset (and other server jobs). No other client writes.
+      allow update: if isAdminOrOwner(salonId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['timezone', 'updatedAt']);
+      allow create, delete: if false;
     }
 
     // Stripe billing state — written by Cloud Functions (Admin SDK) only.
