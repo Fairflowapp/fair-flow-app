@@ -9,15 +9,15 @@ import {
   mediaState,
   MEDIA_UPLOAD_POINTS_DAILY_CAP,
   MEDIA_MAX_IMAGES_PER_UPLOAD,
-} from "./media-state.js?v=20260719_media_esm_unify";
-import { loadUserProfile } from "./media-profile.js?v=20260719_media_esm_unify";
+} from "./media-state.js?v=20260719_media_lightbox";
+import { loadUserProfile } from "./media-profile.js?v=20260719_media_lightbox";
 import {
   createWorkWithMedia,
   createWorkWithMediaBestEffort,
   addMediaToExistingWork,
   addMediaToExistingWorkBestEffort,
   getContentWork,
-} from "./media-cloud.js?v=20260719_media_esm_unify";
+} from "./media-cloud.js?v=20260719_media_lightbox";
 
 // Injected from media-upload.js (setupModalBackdrops closes sibling modals).
 let closeWorkDetails = () => {};

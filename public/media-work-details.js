@@ -3,8 +3,8 @@
  * and Mark as Posted flow for the Media module. Extracted verbatim from media-upload.js (M6).
  */
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260719_media_esm_unify";
-import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260719_media_esm_unify";
+import { mediaState } from "./media-state.js?v=20260719_media_lightbox";
+import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260719_media_lightbox";
 import {
   getContentWork,
   getMediaItems,
@@ -16,7 +16,7 @@ import {
   deleteContentWork,
   deleteMediaItem,
   selfDeleteContentWork,
-} from "./media-cloud.js?v=20260719_media_esm_unify";
+} from "./media-cloud.js?v=20260719_media_lightbox";
 import {
   ffGetCapacitor,
   ffWithTimeout,
@@ -30,7 +30,7 @@ import {
   ffShareBlobNative,
   fetchBlobViaHttpProxy,
   triggerMediaFileDownload,
-} from "./media-native-share.js?v=20260719_media_esm_unify";
+} from "./media-native-share.js?v=20260719_media_lightbox";
 
 // Injected from media-upload.js (main UI slab) to avoid import cycles.
 let showMediaMessage = () => {};
@@ -283,6 +283,232 @@ async function downloadMediaItem(media, workId, ui = {}) {
   }
 }
 
+// =====================
+// Fullscreen media lightbox (preview before download)
+// =====================
+
+let _lightboxKeyHandler = null;
+
+function isMediaItemVideo(media) {
+  return String(media?.mediaType || "").toLowerCase().includes("video");
+}
+
+function closeMediaLightbox() {
+  const el = document.getElementById("mediaLightboxOverlay");
+  if (el) el.remove();
+  if (_lightboxKeyHandler) {
+    document.removeEventListener("keydown", _lightboxKeyHandler);
+    _lightboxKeyHandler = null;
+  }
+}
+
+/**
+ * Fullscreen preview for one media item in a work group.
+ * Download uses the same downloadMediaItem path as thumb ↓.
+ * @param {object[]} items
+ * @param {number} startIndex
+ * @param {string} workId
+ */
+function openMediaLightbox(items, startIndex, workId) {
+  if (!Array.isArray(items) || !items.length) return;
+  closeMediaLightbox();
+
+  let index = Math.max(0, Math.min(startIndex | 0, items.length - 1));
+  const multi = items.length > 1;
+
+  const overlay = document.createElement("div");
+  overlay.id = "mediaLightboxOverlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Media preview");
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,0.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;touch-action:pan-y;";
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.textContent = "×";
+  closeBtn.style.cssText =
+    "position:absolute;top:12px;right:12px;z-index:2;width:40px;height:40px;border:none;border-radius:999px;background:rgba(255,255,255,0.14);color:#fff;font-size:28px;line-height:1;cursor:pointer;";
+  closeBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeMediaLightbox();
+  };
+
+  const stage = document.createElement("div");
+  stage.style.cssText =
+    "flex:1;min-height:0;width:100%;max-width:960px;display:flex;align-items:center;justify-content:center;position:relative;";
+
+  const mediaWrap = document.createElement("div");
+  mediaWrap.style.cssText =
+    "max-width:100%;max-height:min(72vh,720px);display:flex;align-items:center;justify-content:center;";
+
+  const counter = document.createElement("div");
+  counter.style.cssText =
+    "position:absolute;top:14px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.85);font-size:13px;letter-spacing:0.02em;";
+
+  const footer = document.createElement("div");
+  footer.style.cssText =
+    "flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:12px;padding-top:14px;width:100%;";
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.type = "button";
+  downloadBtn.textContent = "↓ Download";
+  downloadBtn.style.cssText =
+    "min-width:140px;padding:10px 18px;border:none;border-radius:999px;background:#fff;color:#111827;font-size:14px;font-weight:600;cursor:pointer;";
+
+  let prevBtn = null;
+  let nextBtn = null;
+  if (multi) {
+    const navBtnCss =
+      "position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:44px;height:44px;border:none;border-radius:999px;background:rgba(255,255,255,0.16);color:#fff;font-size:28px;line-height:1;cursor:pointer;";
+    prevBtn = document.createElement("button");
+    prevBtn.type = "button";
+    prevBtn.setAttribute("aria-label", "Previous");
+    prevBtn.textContent = "‹";
+    prevBtn.style.cssText = navBtnCss + "left:8px;";
+    nextBtn = document.createElement("button");
+    nextBtn.type = "button";
+    nextBtn.setAttribute("aria-label", "Next");
+    nextBtn.textContent = "›";
+    nextBtn.style.cssText = navBtnCss + "right:8px;";
+  }
+
+  function renderSlide() {
+    const media = items[index];
+    mediaWrap.innerHTML = "";
+    const url = media?.mediaUrl || "";
+    if (isMediaItemVideo(media)) {
+      if (url) {
+        const video = document.createElement("video");
+        video.src = url;
+        video.controls = true;
+        video.playsInline = true;
+        video.setAttribute("playsinline", "");
+        video.style.cssText = "max-width:100%;max-height:min(72vh,720px);border-radius:8px;background:#000;";
+        mediaWrap.appendChild(video);
+      } else {
+        const msg = document.createElement("div");
+        msg.style.cssText = "color:#fff;font-size:15px;text-align:center;padding:24px;";
+        msg.textContent = "This is a video — preview unavailable.";
+        mediaWrap.appendChild(msg);
+      }
+    } else if (url) {
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "";
+      img.style.cssText = "max-width:100%;max-height:min(72vh,720px);object-fit:contain;border-radius:8px;";
+      mediaWrap.appendChild(img);
+    } else {
+      const msg = document.createElement("div");
+      msg.style.cssText = "color:#fff;font-size:15px;text-align:center;padding:24px;";
+      msg.textContent = "Preview unavailable.";
+      mediaWrap.appendChild(msg);
+    }
+    counter.textContent = multi ? `${index + 1} / ${items.length}` : "";
+    counter.style.display = multi ? "block" : "none";
+    if (prevBtn) prevBtn.style.visibility = index > 0 ? "visible" : "hidden";
+    if (nextBtn) nextBtn.style.visibility = index < items.length - 1 ? "visible" : "hidden";
+  }
+
+  function go(delta) {
+    const next = index + delta;
+    if (next < 0 || next >= items.length) return;
+    index = next;
+    renderSlide();
+  }
+
+  downloadBtn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const media = items[index];
+    if (!media) return;
+    await downloadMediaItem(media, workId, {
+      button: downloadBtn,
+      idleLabel: "↓ Download",
+      loadingLabel: "…",
+    });
+  };
+
+  if (prevBtn) {
+    prevBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      go(-1);
+    };
+  }
+  if (nextBtn) {
+    nextBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      go(1);
+    };
+  }
+
+  // Backdrop click closes; clicks on media/controls do not.
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeMediaLightbox();
+  });
+  stage.addEventListener("click", (e) => {
+    if (e.target === stage || e.target === mediaWrap) closeMediaLightbox();
+  });
+  mediaWrap.addEventListener("click", (e) => e.stopPropagation());
+
+  // Swipe between items (mobile).
+  let touchStartX = 0;
+  let touchStartY = 0;
+  overlay.addEventListener(
+    "touchstart",
+    (e) => {
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+    },
+    { passive: true }
+  );
+  overlay.addEventListener(
+    "touchend",
+    (e) => {
+      if (!multi) return;
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      if (Math.abs(dx) < 48 || Math.abs(dx) < Math.abs(dy)) return;
+      if (dx < 0) go(1);
+      else go(-1);
+    },
+    { passive: true }
+  );
+
+  _lightboxKeyHandler = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeMediaLightbox();
+    } else if (multi && e.key === "ArrowLeft") {
+      e.preventDefault();
+      go(-1);
+    } else if (multi && e.key === "ArrowRight") {
+      e.preventDefault();
+      go(1);
+    }
+  };
+  document.addEventListener("keydown", _lightboxKeyHandler);
+
+  stage.appendChild(mediaWrap);
+  if (prevBtn) stage.appendChild(prevBtn);
+  if (nextBtn) stage.appendChild(nextBtn);
+  footer.appendChild(downloadBtn);
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(counter);
+  overlay.appendChild(stage);
+  overlay.appendChild(footer);
+  document.body.appendChild(overlay);
+  renderSlide();
+}
+
 async function openWorkDetails(workId) {
   mediaState.selectedWorkId = workId;
   const modal = document.getElementById("workDetailsModal");
@@ -362,10 +588,12 @@ async function openWorkDetails(workId) {
   };
 
   const thumbBtnCss =
-    "position:absolute;top:4px;font-size:12px;line-height:1;padding:2px 6px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:4px;cursor:pointer;";
+    "position:absolute;top:4px;font-size:12px;line-height:1;padding:2px 6px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:4px;cursor:pointer;z-index:1;";
+  const thumbWrapCss =
+    "flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;cursor:pointer;";
   const previewsHtml = items
     .map((m) => {
-      const isVideo = (m.mediaType || "").includes("video");
+      const isVideo = isMediaItemVideo(m);
       const mid = String(m.id || "").replace(/"/g, "");
       // Download for everyone; delete (×) stays admin-only on To handle.
       const dlBtn =
@@ -375,9 +603,9 @@ async function openWorkDetails(workId) {
         : "";
       const overlays = `${dlBtn}${delBtn}`;
       if (isVideo) {
-        return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><video src="${m.mediaUrl}" style="width:100%;height:100%;object-fit:cover;" muted playsinline></video>${overlays}</div>`;
+        return `<div data-media-preview-id="${mid}" style="${thumbWrapCss}"><video src="${m.mediaUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;" muted playsinline></video>${overlays}</div>`;
       }
-      return `<div style="flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;"><img src="${m.mediaUrl}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af>📷</div>'">${overlays}</div>`;
+      return `<div data-media-preview-id="${mid}" style="${thumbWrapCss}"><img src="${m.mediaUrl}" alt="" style="width:100%;height:100%;object-fit:cover;pointer-events:none;" onerror="this.parentElement.innerHTML='<div style=width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af>📷</div>'">${overlays}</div>`;
     })
     .join("");
 
@@ -812,15 +1040,29 @@ async function openWorkDetails(workId) {
     }
 
     const delEl = e.target?.closest?.("[data-media-delete-id]");
-    const mediaId = delEl?.dataset?.mediaDeleteId;
-    if (mediaId && showAdminRow && confirm("Delete this media item?")) {
-      try {
-        await deleteMediaItem(workId, mediaId);
-        openWorkDetails(workId);
-        renderMediaList();
-      } catch (err) {
-        alert("Failed to delete: " + (err.message || "Unknown error"));
+    if (delEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      const mediaId = delEl.dataset.mediaDeleteId;
+      if (mediaId && showAdminRow && confirm("Delete this media item?")) {
+        try {
+          await deleteMediaItem(workId, mediaId);
+          openWorkDetails(workId);
+          renderMediaList();
+        } catch (err) {
+          alert("Failed to delete: " + (err.message || "Unknown error"));
+        }
       }
+      return;
+    }
+
+    const previewEl = e.target?.closest?.("[data-media-preview-id]");
+    if (previewEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      const mediaId = previewEl.dataset.mediaPreviewId;
+      const idx = items.findIndex((m) => String(m.id) === String(mediaId));
+      if (idx >= 0) openMediaLightbox(items, idx, workId);
     }
   };
 
@@ -828,6 +1070,7 @@ async function openWorkDetails(workId) {
 }
 
 function closeWorkDetails() {
+  closeMediaLightbox();
   const modal = document.getElementById("workDetailsModal");
   if (modal) modal.style.display = "none";
   mediaState.selectedWorkId = null;
