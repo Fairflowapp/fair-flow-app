@@ -5,7 +5,7 @@
 
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260701_media_state_split";
+import { mediaState } from "./media-state.js?v=20260719_media_esm_unify";
 import {
   subscribeContentWorks,
   updateContentWork,
@@ -14,9 +14,9 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260623_mediafix";
-import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260701_media_profile_split";
-import { initMediaNativeShare } from "./media-native-share.js?v=20260718_media_dl_name";
+} from "./media-cloud.js?v=20260719_media_esm_unify";
+import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260719_media_esm_unify";
+import { initMediaNativeShare } from "./media-native-share.js?v=20260719_media_esm_unify";
 import {
   initMediaUploadForm,
   populateWorksDropdown,
@@ -27,14 +27,14 @@ import {
   setupModalBackdrops,
   toggleFileInputs,
   toggleNewFieldsAndExisting,
-} from "./media-upload-form.js?v=20260701_media_upload_form_split";
+} from "./media-upload-form.js?v=20260719_media_esm_unify";
 import {
   initMediaWorkDetails,
   closeWorkDetails,
   closeMarkPostedModal,
   setupWorkDetailsListeners,
   setupMarkPostedListeners,
-} from "./media-work-details.js?v=20260718_media_dl_name";
+} from "./media-work-details.js?v=20260719_media_esm_unify";
 import {
   setMediaTab,
   renderMediaFilters,
@@ -50,7 +50,7 @@ import {
   updateMediaUploadWorkButtonVisibility,
   closeMediaDropdowns,
   _positionMediaDropdownPanel,
-} from "./media-view.js?v=20260701_media_view_split";
+} from "./media-view.js?v=20260719_media_esm_unify";
 
 
 

@@ -3,8 +3,8 @@
  * and Mark as Posted flow for the Media module. Extracted verbatim from media-upload.js (M6).
  */
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260701_media_state_split";
-import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260701_media_profile_split";
+import { mediaState } from "./media-state.js?v=20260719_media_esm_unify";
+import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260719_media_esm_unify";
 import {
   getContentWork,
   getMediaItems,
@@ -16,7 +16,7 @@ import {
   deleteContentWork,
   deleteMediaItem,
   selfDeleteContentWork,
-} from "./media-cloud.js?v=20260623_mediafix";
+} from "./media-cloud.js?v=20260719_media_esm_unify";
 import {
   ffGetCapacitor,
   ffWithTimeout,
@@ -30,7 +30,7 @@ import {
   ffShareBlobNative,
   fetchBlobViaHttpProxy,
   triggerMediaFileDownload,
-} from "./media-native-share.js?v=20260718_media_dl_name";
+} from "./media-native-share.js?v=20260719_media_esm_unify";
 
 // Injected from media-upload.js (main UI slab) to avoid import cycles.
 let showMediaMessage = () => {};
@@ -38,7 +38,7 @@ let showMediaConfirm = () => {};
 let renderMediaList = () => {};
 let enrichWorkWithPreview = async (_work) => {};
 let formatDate = (_ts) => "";
-let getStatusLabels = (_work) => "";
+let getStatusLabels = (_work) => [];
 let isSelfDeleteEligible = (_work) => false;
 let canShowSelfDeleteButton = () => false;
 export function initMediaWorkDetails(deps) {
@@ -381,7 +381,8 @@ async function openWorkDetails(workId) {
     })
     .join("");
 
-  const statusLabels = getStatusLabels(work);
+  const statusLabelsRaw = getStatusLabels(work);
+  const statusLabels = Array.isArray(statusLabelsRaw) ? statusLabelsRaw : [];
   const statusBadges = statusLabels.map((l) => `<span style="font-size:10px;padding:2px 6px;background:#f3f4f6;border-radius:4px;color:#6b7280;">${l}</span>`).join(" ");
 
   content.innerHTML = `
