@@ -5050,36 +5050,132 @@ function ffOnAutoResetEnabledChange() {
 }
 window.ffOnAutoResetEnabledChange = ffOnAutoResetEnabledChange;
 
-/** HH:mm (24h) → "8:05 AM" / "8:05 PM" for clarifying native <input type="time"> UIs. */
-function ffFormatHHMMAs12h(hhmm) {
+/** Parse HH:mm 24h → { hour12: 1-12, minute: 0-59, ampm: 'AM'|'PM' }. */
+function ffParseHHMMToAmPmParts(hhmm) {
   const m = String(hhmm || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return '';
+  if (!m) return { hour12: 12, minute: 0, ampm: 'AM' };
   let h = parseInt(m[1], 10);
-  const min = parseInt(m[2], 10);
-  if (!Number.isFinite(h) || !Number.isFinite(min) || h < 0 || h > 23 || min < 0 || min > 59) return '';
+  const minute = parseInt(m[2], 10);
+  if (!Number.isFinite(h) || !Number.isFinite(minute)) return { hour12: 12, minute: 0, ampm: 'AM' };
   const ampm = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${String(min).padStart(2, '0')} ${ampm}`;
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return { hour12, minute: Math.min(59, Math.max(0, minute)), ampm };
 }
-window.ffFormatHHMMAs12h = ffFormatHHMMAs12h;
 
-/** Update a 12h readout next to a time input (data-ff-time12h-label or sibling .ff-auto-reset-time-12h). */
-function ffSyncAutoResetTime12hFromInput(input) {
-  if (!input) return;
-  const labelId = input.getAttribute('data-ff-time12h-label');
-  const label = (labelId && document.getElementById(labelId))
-    || (input.parentElement && input.parentElement.querySelector('.ff-auto-reset-time-12h'))
-    || null;
-  if (!label) return;
-  const pretty = ffFormatHHMMAs12h(input.value);
-  label.textContent = pretty ? `(${pretty})` : '';
+/** Build HH:mm 24h from 12h parts. */
+function ffAmPmPartsToHHMM(hour12, minute, ampm) {
+  let h = parseInt(hour12, 10);
+  let min = parseInt(minute, 10);
+  if (!Number.isFinite(h) || h < 1 || h > 12) h = 12;
+  if (!Number.isFinite(min) || min < 0 || min > 59) min = 0;
+  if (String(ampm).toUpperCase() === 'PM') {
+    h = h === 12 ? 12 : h + 12;
+  } else {
+    h = h === 12 ? 0 : h;
+  }
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
-window.ffSyncAutoResetTime12hFromInput = ffSyncAutoResetTime12hFromInput;
+
+const _ffAmPmSelectCss =
+  'height:32px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;color:#111827;cursor:pointer;';
+
+/**
+ * Mount hour + minute + AM/PM selects for a hidden/time input that stores HH:mm 24h.
+ * Host: <span data-ff-ampm-for="inputId"></span> next to the input.
+ */
+function ffMountAmPmTimePicker(inputOrId) {
+  const input = typeof inputOrId === 'string' ? document.getElementById(inputOrId) : inputOrId;
+  if (!input || !input.id) return null;
+  const host = document.querySelector(`[data-ff-ampm-for="${input.id}"]`);
+  if (!host) return null;
+  if (host.__ffAmPmMounted) {
+    if (typeof host.__ffAmPmPull === 'function') host.__ffAmPmPull();
+    return host;
+  }
+  host.__ffAmPmMounted = true;
+  if (input.type !== 'hidden') {
+    input.type = 'hidden';
+  }
+  host.style.cssText = 'display:inline-flex;align-items:center;gap:6px;';
+
+  const hourSel = document.createElement('select');
+  hourSel.setAttribute('aria-label', 'Hour');
+  hourSel.style.cssText = _ffAmPmSelectCss;
+  for (let h = 1; h <= 12; h++) {
+    const opt = document.createElement('option');
+    opt.value = String(h);
+    opt.textContent = String(h);
+    hourSel.appendChild(opt);
+  }
+
+  const colon = document.createElement('span');
+  colon.textContent = ':';
+  colon.style.cssText = 'font-size:14px;font-weight:600;color:#374151;';
+
+  const minSel = document.createElement('select');
+  minSel.setAttribute('aria-label', 'Minute');
+  minSel.style.cssText = _ffAmPmSelectCss;
+  for (let m = 0; m < 60; m++) {
+    const opt = document.createElement('option');
+    opt.value = String(m);
+    opt.textContent = String(m).padStart(2, '0');
+    minSel.appendChild(opt);
+  }
+
+  const ampmSel = document.createElement('select');
+  ampmSel.setAttribute('aria-label', 'AM or PM');
+  ampmSel.style.cssText = _ffAmPmSelectCss + 'font-weight:600;min-width:4.5em;';
+  ['AM', 'PM'].forEach((label) => {
+    const opt = document.createElement('option');
+    opt.value = label;
+    opt.textContent = label;
+    ampmSel.appendChild(opt);
+  });
+
+  function pull() {
+    const parts = ffParseHHMMToAmPmParts(input.value || '04:00');
+    hourSel.value = String(parts.hour12);
+    minSel.value = String(parts.minute);
+    ampmSel.value = parts.ampm;
+  }
+
+  function push() {
+    const next = ffAmPmPartsToHHMM(hourSel.value, minSel.value, ampmSel.value);
+    if (input.value === next) return;
+    input.value = next;
+    try {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (_) {}
+  }
+
+  hourSel.addEventListener('change', push);
+  minSel.addEventListener('change', push);
+  ampmSel.addEventListener('change', push);
+
+  host.appendChild(hourSel);
+  host.appendChild(colon);
+  host.appendChild(minSel);
+  host.appendChild(ampmSel);
+  host.__ffAmPmPull = pull;
+  pull();
+  return host;
+}
+window.ffMountAmPmTimePicker = ffMountAmPmTimePicker;
+
+function ffMountAllAmPmTimePickers(root) {
+  const scope = root && root.querySelectorAll ? root : document;
+  const hosts = scope.querySelectorAll ? scope.querySelectorAll('[data-ff-ampm-for]') : [];
+  hosts.forEach((host) => {
+    const id = host.getAttribute('data-ff-ampm-for');
+    if (id) ffMountAmPmTimePicker(id);
+  });
+}
+window.ffMountAllAmPmTimePickers = ffMountAllAmPmTimePickers;
 
 function ffOnAutoResetTimeChange() {
   const el = document.getElementById('manageQueueAutoResetTime');
   if (!el) return;
-  ffSyncAutoResetTime12hFromInput(el);
   const autoReset = getQueueAutoResetSettings();
   autoReset.time = el.value || '04:00';
   saveQueueAutoResetSettings(autoReset);
@@ -5312,7 +5408,12 @@ function renderManageQueueAutoResetSettings() {
   }
   if (timeEl) {
     timeEl.disabled = !enabled;
-    ffSyncAutoResetTime12hFromInput(timeEl);
+    ffMountAmPmTimePicker(timeEl);
+    const host = document.querySelector('[data-ff-ampm-for="manageQueueAutoResetTime"]');
+    if (host) {
+      host.style.opacity = enabled ? '1' : '0.5';
+      host.querySelectorAll('select').forEach((sel) => { sel.disabled = !enabled; });
+    }
   }
   if (forceEl) forceEl.disabled = !enabled;
 }

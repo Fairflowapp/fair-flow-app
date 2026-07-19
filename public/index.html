@@ -2591,14 +2591,11 @@
             </label>
 
             <div id="manageQueueAutoResetOptions" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-              <!-- Reset time: native type=time stores HH:mm 24h; Mac often hides AM/PM — show 12h next to it -->
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                  <label for="manageQueueAutoResetTime" style="font-size:12px;font-weight:400;color:#111827;">Reset time:</label>
-                  <input type="time" id="manageQueueAutoResetTime" value="04:00" step="60" data-ff-time12h-label="manageQueueAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" onchange="if(typeof ffOnAutoResetTimeChange==='function'){ffOnAutoResetTimeChange();}" style="height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;background:#fff;cursor:pointer;">
-                  <span id="manageQueueAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:12px;font-weight:600;color:#5b21b6;min-width:4.5em;">(4:00 AM)</span>
-                </div>
-                <div style="font-size:11px;color:#6b7280;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
+              <!-- Hidden HH:mm 24h store; UI is hour + minute + AM/PM (ffMountAmPmTimePicker). -->
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <label style="font-size:12px;font-weight:400;color:#111827;">Reset time:</label>
+                <input type="hidden" id="manageQueueAutoResetTime" value="04:00" onchange="if(typeof ffOnAutoResetTimeChange==='function'){ffOnAutoResetTimeChange();}">
+                <span data-ff-ampm-for="manageQueueAutoResetTime"></span>
               </div>
 
               <!-- Reset even if people are In Service switch -->
@@ -11896,7 +11893,7 @@ document.addEventListener('ff-locations-updated', () => {
 });
 
 </script>
-<script src="/navigation-helpers.js?v=20260719_autoreset_time_12h_hint"></script>
+<script src="/navigation-helpers.js?v=20260719_autoreset_ampm_picker"></script>
 <script>
 
 function goToUserProfile(section) {
@@ -20225,7 +20222,7 @@ function setSettingsModalTab(tabName, options) {
             // Apply to UI
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
-            if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
+            if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(autoResetTimeInput);
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             bindAutoResetForce('opening', autoResetForceCheckbox, enabled);
             
@@ -20337,7 +20334,7 @@ function setSettingsModalTab(tabName, options) {
             // Apply to UI
             autoResetEnabledCheckbox.checked = enabled;
             autoResetTimeInput.value = time;
-            if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
+            if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(autoResetTimeInput);
             autoResetTimeRow.style.display = enabled ? 'block' : 'none';
             bindAutoResetForce('closing', autoResetForceCheckbox, enabled);
             
@@ -20523,7 +20520,7 @@ function setSettingsModalTab(tabName, options) {
           // Apply to UI
           autoResetEnabledCheckbox.checked = enabled;
           autoResetTimeInput.value = time;
-          if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(autoResetTimeInput);
+          if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(autoResetTimeInput);
           autoResetTimeRow.style.display = enabled ? 'block' : 'none';
           bindAutoResetForce('weekly', autoResetForceCheckbox, enabled);
           
@@ -20670,7 +20667,7 @@ function setSettingsModalTab(tabName, options) {
           
           tasksMonthlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
           tasksMonthlyAutoResetTime.value = cfg.autoResetTime || '21:00';
-          if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(tasksMonthlyAutoResetTime);
+          if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(tasksMonthlyAutoResetTime);
           tasksMonthlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
           bindAutoResetForce('monthly', tasksMonthlyAutoResetForce, !!cfg.autoResetEnabled);
           
@@ -20688,6 +20685,7 @@ function setSettingsModalTab(tabName, options) {
               if (!alertWindows.monthly.autoResetTime) {
                 alertWindows.monthly.autoResetTime = '21:00';
                 tasksMonthlyAutoResetTime.value = '21:00';
+                if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(tasksMonthlyAutoResetTime);
               }
               
               tasksMonthlyAutoResetTimeRow.style.display = tasksMonthlyAutoResetEnabled.checked ? 'block' : 'none';
@@ -20754,7 +20752,7 @@ function setSettingsModalTab(tabName, options) {
         
         tasksYearlyAutoResetEnabled.checked = !!cfg.autoResetEnabled;
         tasksYearlyAutoResetTime.value = cfg.autoResetTime || '21:00';
-        if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(tasksYearlyAutoResetTime);
+        if (typeof ffMountAmPmTimePicker === 'function') ffMountAmPmTimePicker(tasksYearlyAutoResetTime);
         tasksYearlyAutoResetTimeRow.style.display = cfg.autoResetEnabled ? 'block' : 'none';
         bindAutoResetForce('yearly', tasksYearlyAutoResetForce, !!cfg.autoResetEnabled);
         
@@ -32629,7 +32627,6 @@ function initializeAppsPanel() {
         if (enabledEl) enabledEl.checked = autoReset.enabled === true;
         if (timeEl) {
           timeEl.value = autoReset.time || '04:00';
-          if (typeof ffSyncAutoResetTime12hFromInput === 'function') ffSyncAutoResetTime12hFromInput(timeEl);
         }
         if (forceEl) forceEl.checked = autoReset.resetWhileInService === true;
         if (typeof renderManageQueueAutoResetSettings === 'function') {
@@ -49456,12 +49453,11 @@ function hookSettingsGuard_DISABLED(){
                   <span>Auto-reset when all Opening tasks are completed</span>
                 </label>
                 <div id="tasksOpeningAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;flex-wrap:wrap;">
-                  <span>Auto-reset time:</span>
-                  <input type="time" id="tasksOpeningAutoResetTime" step="60" data-ff-time12h-label="tasksOpeningAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-                  <span id="tasksOpeningAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:10px;font-weight:600;color:#5b21b6;"></span>
-                </label>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10px;color:#374151;">
+                    <span>Auto-reset time:</span>
+                    <input type="hidden" id="tasksOpeningAutoResetTime" value="21:00">
+                    <span data-ff-ampm-for="tasksOpeningAutoResetTime"></span>
+                  </div>
                 </div>
                 <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                   <span class="staff-permission-toggle" style="flex:0 0 auto;">
@@ -49492,12 +49488,11 @@ function hookSettingsGuard_DISABLED(){
                   <span>Auto-reset when all Closing tasks are completed</span>
                 </label>
                 <div id="tasksClosingAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10px;color:#374151;">
                     <span>Auto-reset time:</span>
-                    <input type="time" id="tasksClosingAutoResetTime" step="60" data-ff-time12h-label="tasksClosingAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-                    <span id="tasksClosingAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:10px;font-weight:600;color:#5b21b6;"></span>
-                  </label>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
+                    <input type="hidden" id="tasksClosingAutoResetTime" value="21:00">
+                    <span data-ff-ampm-for="tasksClosingAutoResetTime"></span>
+                  </div>
                 </div>
                 <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                   <span class="staff-permission-toggle" style="flex:0 0 auto;">
@@ -49547,12 +49542,11 @@ function hookSettingsGuard_DISABLED(){
                   <span>Auto-reset when all Weekly tasks for today are completed</span>
                 </label>
                 <div id="tasksWeeklyAutoResetTimeRow" style="display:none;">
-                  <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10px;color:#374151;">
                     <span>Auto-reset time:</span>
-                    <input type="time" id="tasksWeeklyAutoResetTime" step="60" data-ff-time12h-label="tasksWeeklyAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-                    <span id="tasksWeeklyAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:10px;font-weight:600;color:#5b21b6;"></span>
-                  </label>
-                  <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
+                    <input type="hidden" id="tasksWeeklyAutoResetTime" value="21:00">
+                    <span data-ff-ampm-for="tasksWeeklyAutoResetTime"></span>
+                  </div>
                 </div>
                 <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                   <span class="staff-permission-toggle" style="flex:0 0 auto;">
@@ -49595,13 +49589,12 @@ function hookSettingsGuard_DISABLED(){
                 <span>Auto-reset when all Monthly tasks for today are completed</span>
               </label>
               <div id="tasksMonthlyAutoResetTimeRow" style="display:none;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;flex-wrap:wrap;">
-                  <span>Auto-reset time:</span>
-                  <input type="time" id="tasksMonthlyAutoResetTime" step="60" data-ff-time12h-label="tasksMonthlyAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-                  <span id="tasksMonthlyAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:10px;font-weight:600;color:#5b21b6;"></span>
-                </label>
-                <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
-              </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10px;color:#374151;">
+                    <span>Auto-reset time:</span>
+                    <input type="hidden" id="tasksMonthlyAutoResetTime" value="21:00">
+                    <span data-ff-ampm-for="tasksMonthlyAutoResetTime"></span>
+                  </div>
+                </div>
               <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                 <span class="staff-permission-toggle" style="flex:0 0 auto;">
                   <input type="checkbox" id="tasksMonthlyAutoResetForce">
@@ -49642,13 +49635,12 @@ function hookSettingsGuard_DISABLED(){
                 <span>Auto-reset when all Yearly tasks for today are completed</span>
               </label>
               <div id="tasksYearlyAutoResetTimeRow" style="display:none;">
-                <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;flex-wrap:wrap;">
-                  <span>Auto-reset time:</span>
-                  <input type="time" id="tasksYearlyAutoResetTime" step="60" data-ff-time12h-label="tasksYearlyAutoResetTime12h" oninput="if(typeof ffSyncAutoResetTime12hFromInput==='function'){ffSyncAutoResetTime12hFromInput(this);}" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:10px;font-family:inherit;">
-                  <span id="tasksYearlyAutoResetTime12h" class="ff-auto-reset-time-12h" style="font-size:10px;font-weight:600;color:#5b21b6;"></span>
-                </label>
-                <div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.35;">24-hour clock · salon time zone (20:00 = 8:00 PM)</div>
-              </div>
+                  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10px;color:#374151;">
+                    <span>Auto-reset time:</span>
+                    <input type="hidden" id="tasksYearlyAutoResetTime" value="21:00">
+                    <span data-ff-ampm-for="tasksYearlyAutoResetTime"></span>
+                  </div>
+                </div>
               <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:#374151;cursor:pointer;">
                 <span class="staff-permission-toggle" style="flex:0 0 auto;">
                   <input type="checkbox" id="tasksYearlyAutoResetForce">
