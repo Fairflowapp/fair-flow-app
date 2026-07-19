@@ -2518,7 +2518,7 @@
       <span style="flex:1"></span>
 
       <div id="queueControls" style="display:flex;gap:8px;align-items:center;">
-        <button id="reorderBtn" class="queue-action-btn queue-action-btn--black" style="display:inline-flex;align-items:center;height:36px;padding:0 14px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='#fff'">Reorder</button>
+        <button id="reorderBtn" class="queue-action-btn queue-action-btn--black" style="display:inline-flex;align-items:center;height:36px;padding:0 14px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;" onmouseover="if(!window.reorderMode)this.style.background='#f9fafb'" onmouseout="if(!window.reorderMode){this.style.background='#fff';this.style.color='#374151';}">Reorder</button>
 
         <button id="manageQueueBtn" style="display:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;border:1px solid #e5e7eb;border-radius:50%;background:#fff;cursor:pointer;padding:0;" title="Manage Queue" onclick="if(typeof openManageQueue==='function'){openManageQueue();}" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='#fff'">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -8535,7 +8535,15 @@ function renderQueue(){
         up.style.pointerEvents = 'none';
         down.style.pointerEvents = 'none';
       }
-      del.onclick = () => guardHold(() => removeFromQueue(qi));
+      // Authorized reorder users already passed the Reorder gate — skip HOLD/PIN on remove.
+      // Shared station / kiosk / tech without permission still go through guardHold.
+      del.onclick = () => {
+        if (typeof ffCurrentUserHasQueueReorderPermission === 'function' && ffCurrentUserHasQueueReorderPermission()) {
+          removeFromQueue(qi);
+        } else {
+          guardHold(() => removeFromQueue(qi));
+        }
+      };
       ctrls.append(up, down, del);
     }
 
@@ -8751,11 +8759,12 @@ function removeFromQueue(i){
 
   const rem = queue.splice(i,1)[0];
 
-  // Remove from queue is always done by manager/admin (guardHold ensures this)
-  // Use the last validated code or current actor state
+  // Prefer staff-based actor set when entering Reorder (or after PIN); legacy code strings still work.
   const lastCode = window.__ff_lastValidatedCode;
   let actor;
-  if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
+  if (lastCode && typeof lastCode === 'object' && lastCode.role && lastCode.name) {
+    actor = { role: lastCode.role, name: lastCode.name };
+  } else if (lastCode && (isAdminCode(lastCode) || isManagerCode(lastCode))) {
     if (isAdminCode(lastCode)) {
       actor = getActorForAction({ adminCode: lastCode });
     } else {
@@ -16773,16 +16782,16 @@ function exitReorderMode() {
     // Add back default class
     btn.classList.add('btn-pill');
     
-    // Clear ALL inline styles that could cause bold/active look
-    btn.style.fontWeight = '';
+    // Restore idle pill look (white bg + dark text) — matches HTML defaults
+    btn.style.fontWeight = '500';
     btn.style.outline = '';
     btn.style.boxShadow = '';
-    btn.style.border = '';
-    btn.style.background = '';
-    btn.style.backgroundImage = '';
-    btn.style.color = '';
+    btn.style.border = '1px solid #e5e7eb';
+    btn.style.background = '#fff';
+    btn.style.backgroundImage = 'none';
+    btn.style.color = '#374151';
     btn.style.opacity = '';
-    btn.style.cursor = '';
+    btn.style.cursor = 'pointer';
     btn.style.pointerEvents = '';
     
     // Reset ARIA attributes
@@ -16814,15 +16823,6 @@ async function handleReorderClick() {
   }
   ensureTasksScreenHidden();
 
-  if (!reorderMode && !ffCurrentUserHasQueueReorderPermission()) {
-    if (typeof window.ffStyledAlert === 'function') {
-      await window.ffStyledAlert('You don\u2019t have permission to reorder the queue. Ask an Admin or Manager.', 'Not authorized');
-    } else {
-      alert("You don't have permission to reorder the queue.");
-    }
-    return;
-  }
-
   if (reorderMode) {
     // Wait for an in-flight reorder save before exiting (avoids snapshot race).
     if (_queueReorderMoveInFlight) return;
@@ -16831,14 +16831,33 @@ async function handleReorderClick() {
     return;
   }
 
-  // Secure prompt just for REORDER (no changes elsewhere)
-
   let ok = false;
   let code = null;
   let authResult = null;
 
-  if (window.securePromptOnce) {
+  // Logged-in user already has reorder permission — enter without PIN.
+  // Shared station / kiosk / tech without permission still use the PIN flow below.
+  if (ffCurrentUserHasQueueReorderPermission()) {
+    const staff = (typeof ffResolveCurrentStaffRowFromFfStaffV1 === 'function')
+      ? ffResolveCurrentStaffRowFromFfStaffV1()
+      : null;
+    if (staff) {
+      authResult = { ok: true, staff: staff };
+      ok = true;
+    } else {
+      // Owner bypass (or equivalent) with no staff row — still attribute the action.
+      let ownerName = 'Owner';
+      try {
+        if (typeof settings !== 'undefined' && settings) {
+          ownerName = settings.ownerName || settings.adminName || ownerName;
+        }
+      } catch (_) {}
+      authResult = { ok: true, staff: { name: ownerName, isAdmin: true } };
+      ok = true;
+    }
+  } else if (window.securePromptOnce) {
 
+    // Secure prompt just for REORDER (no changes elsewhere)
     code = await window.securePromptOnce("Enter admin/manager code to REORDER");
 
     if (code == null) return;
@@ -16866,23 +16885,17 @@ async function handleReorderClick() {
       authResult.staff.isManager === true ||
       ffStaffHasQueueReorderPermission(authResult.staff)
     );
-    
-    // If using prompt, set actor info manually
-    if (ok && authResult.staff) {
-      const s = authResult.staff;
-      const role = s.isAdmin === true ? 'Admin' : (s.isManager === true ? 'Manager' : 'Tech');
-      const name = s.name || '';
-      window.__ff_actorRole = role;
-      window.__ff_actorName = name;
-    }
 
   }
 
   if (ok) {
-    // Store the validated staff info for later use in addHistoryEntry
+    // Store actor for history (Reorder list / remove / add tech) — both object + globals
     const staff = authResult.staff;
     const role = staff.isAdmin === true ? 'Admin' : (staff.isManager === true ? 'Manager' : 'Tech');
-    window.__ff_lastValidatedCode = { role: role, name: staff.name || '' };
+    const name = staff.name || '';
+    window.__ff_lastValidatedCode = { role: role, name: name };
+    window.__ff_actorRole = role;
+    window.__ff_actorName = name;
 
     // Check current state and toggle accordingly
     if (!reorderMode) {
@@ -16895,16 +16908,20 @@ async function handleReorderClick() {
       renderQueue();
       
       // Update button appearance for reorder mode
+      // Note: do NOT use white text — onmouseout used to reset bg to #fff and
+      // left white-on-white (invisible "Reorder mode" label).
       const btn = document.getElementById('reorderBtn');
       const header = document.getElementById('reorderHeader');
       if (btn) {
         btn.textContent = 'Reorder mode';
         btn.classList.remove('btn-pill');
         btn.classList.remove('btn-primary');
-        btn.style.background = '#a78bfa';
+        btn.style.background = '#ede9fe';
         btn.style.backgroundImage = 'none';
-        btn.style.color = '#fff';
+        btn.style.color = '#5b21b6';
         btn.style.border = '1px solid #a78bfa';
+        btn.style.fontWeight = '600';
+        btn.setAttribute('aria-pressed', 'true');
         if (header) header.style.display = 'block';
         
         // Ensure "+ Add technician" button handler is properly attached when entering reorder mode
