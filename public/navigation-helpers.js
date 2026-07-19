@@ -5050,9 +5050,36 @@ function ffOnAutoResetEnabledChange() {
 }
 window.ffOnAutoResetEnabledChange = ffOnAutoResetEnabledChange;
 
+/** HH:mm (24h) → "8:05 AM" / "8:05 PM" for clarifying native <input type="time"> UIs. */
+function ffFormatHHMMAs12h(hhmm) {
+  const m = String(hhmm || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return '';
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  if (!Number.isFinite(h) || !Number.isFinite(min) || h < 0 || h > 23 || min < 0 || min > 59) return '';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(min).padStart(2, '0')} ${ampm}`;
+}
+window.ffFormatHHMMAs12h = ffFormatHHMMAs12h;
+
+/** Update a 12h readout next to a time input (data-ff-time12h-label or sibling .ff-auto-reset-time-12h). */
+function ffSyncAutoResetTime12hFromInput(input) {
+  if (!input) return;
+  const labelId = input.getAttribute('data-ff-time12h-label');
+  const label = (labelId && document.getElementById(labelId))
+    || (input.parentElement && input.parentElement.querySelector('.ff-auto-reset-time-12h'))
+    || null;
+  if (!label) return;
+  const pretty = ffFormatHHMMAs12h(input.value);
+  label.textContent = pretty ? `(${pretty})` : '';
+}
+window.ffSyncAutoResetTime12hFromInput = ffSyncAutoResetTime12hFromInput;
+
 function ffOnAutoResetTimeChange() {
   const el = document.getElementById('manageQueueAutoResetTime');
   if (!el) return;
+  ffSyncAutoResetTime12hFromInput(el);
   const autoReset = getQueueAutoResetSettings();
   autoReset.time = el.value || '04:00';
   saveQueueAutoResetSettings(autoReset);
@@ -5283,7 +5310,10 @@ function renderManageQueueAutoResetSettings() {
     optionsEl.style.display = enabled ? 'flex' : 'none';
     optionsEl.style.opacity = '1';
   }
-  if (timeEl) timeEl.disabled = !enabled;
+  if (timeEl) {
+    timeEl.disabled = !enabled;
+    ffSyncAutoResetTime12hFromInput(timeEl);
+  }
   if (forceEl) forceEl.disabled = !enabled;
 }
 
