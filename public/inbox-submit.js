@@ -45,6 +45,9 @@ export function initInboxSubmit(deps = {}) {
   if (typeof deps.loadInboxItems === "function") loadInboxItems = deps.loadInboxItems;
 }
 
+/** Prevents duplicate inboxItem creates from rapid Submit clicks. */
+let submitRequestInFlight = false;
+
 /**
  * Match `salons/{salonId}/staff/{docId}` by firebaseUid or email (same id as Staff modal).
  * Kept in inbox.js so a stale cached staff-documents.js cannot break the whole app.
@@ -118,6 +121,16 @@ async function resolveSubmittingStaffIdForDocumentUpload(salonId) {
 
 
 export async function submitRequest(type) {
+  if (submitRequestInFlight) return;
+
+  submitRequestInFlight = true;
+  const submitBtn = Array.from(document.querySelectorAll("#createRequestModal button")).find(
+    (b) => (b.textContent || "").trim() === "Submit Request"
+  );
+  if (submitBtn) submitBtn.disabled = true;
+
+  let submitSucceeded = false;
+  try {
   console.log('[Inbox] Submitting request:', type);
 
   await loadCurrentUserProfile();
@@ -153,7 +166,6 @@ export async function submitRequest(type) {
     return;
   }
 
-  try {
     // Collect form data
     let data = {};
     
@@ -589,8 +601,11 @@ export async function submitRequest(type) {
     }
     
     // Close modal
-    closeCreateRequestModal();
-    
+    if (typeof window.closeCreateRequestModal === "function") {
+      window.closeCreateRequestModal();
+    }
+    submitSucceeded = true;
+
     // Show success toast
     showToast('Request submitted successfully!', 'success');
     
@@ -607,5 +622,13 @@ export async function submitRequest(type) {
       msg = 'The selected recipient has not signed in yet. They need to accept their invite and create an account first.';
     }
     showToast(msg, 'error');
+    submitRequestInFlight = false;
+    if (submitBtn) submitBtn.disabled = false;
+  } finally {
+    // Early validation returns skip catch; release so the user can retry.
+    if (!submitSucceeded) {
+      submitRequestInFlight = false;
+      if (submitBtn) submitBtn.disabled = false;
+    }
   }
 }
