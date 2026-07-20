@@ -7,7 +7,7 @@
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
         { src: "/queue-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 1350 },
         { src: "/tickets.js?v=20260708_ticket_list_fix", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260610_tasks_rules_direct_sync", type: "module", delay: 1500 },
+        { src: "/tasks-cloud.js?v=20260720_catalog_protect", type: "module", delay: 1500 },
         { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 1650 },
         { src: "/schedule-helpers.js?v=20260625_loc_fallback", type: "module", delay: 1800 },
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },

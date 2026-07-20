@@ -662,6 +662,25 @@ function buildMergedWritePayload(state, server, reason, baseRevOverride) {
     });
     out.resetStamps = mergedStamps;
 
+    // Never let an empty local catalog clobber a non-empty server catalog.
+    // Day-to-day list merges can succeed while catalog was wiped on one device;
+    // without this guard every subsequent write re-empties catalog in the cloud.
+    const serverCatalog = (server.catalog && typeof server.catalog === "object") ? server.catalog : {};
+    const localCatalog = (out.catalog && typeof out.catalog === "object") ? out.catalog : {};
+    const mergedCatalog = { ...localCatalog };
+    TABS.forEach((tab) => {
+      const localList = Array.isArray(localCatalog[tab]) ? localCatalog[tab] : [];
+      const serverList = Array.isArray(serverCatalog[tab]) ? serverCatalog[tab] : [];
+      if (serverList.length > 0 && localList.length === 0) {
+        mergedCatalog[tab] = serverList;
+      } else if (localList.length > 0) {
+        mergedCatalog[tab] = localList;
+      } else {
+        mergedCatalog[tab] = serverList;
+      }
+    });
+    out.catalog = mergedCatalog;
+
     // Never let a stale local autoResetState clobber a newer server lastRunDate
     // (scheduledTasksAutoReset stamps opening/closing on the server).
     const serverARS = (server.autoResetState && typeof server.autoResetState === "object")

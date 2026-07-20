@@ -46317,8 +46317,27 @@ window.__ffTasksCloudInit = function() {
       try {
         var TABS = ['opening','closing','weekly','monthly','yearly'];
         if (data.catalog && typeof data.catalog === 'object') {
-          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(data.catalog));
-          window.ff_tasks_catalog_v1 = data.catalog;
+          // Never clobber a non-empty local catalog tab with empty arrays from
+          // the cloud (same wipe path that emptied neo nails catalog while
+          // leaving active/pending/done intact).
+          var localCatalog = {};
+          try { localCatalog = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1') || '{}') || {}; }
+          catch (e) { localCatalog = {}; }
+          var remoteCatalog = data.catalog;
+          var mergedCatalog = {};
+          TABS.forEach(function(tab) {
+            var localList = Array.isArray(localCatalog[tab]) ? localCatalog[tab] : [];
+            var remoteList = Array.isArray(remoteCatalog[tab]) ? remoteCatalog[tab] : [];
+            if (localList.length > 0 && remoteList.length === 0) {
+              mergedCatalog[tab] = localList;
+            } else if (remoteList.length > 0) {
+              mergedCatalog[tab] = remoteList;
+            } else {
+              mergedCatalog[tab] = localList;
+            }
+          });
+          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(mergedCatalog));
+          window.ff_tasks_catalog_v1 = mergedCatalog;
         }
         if (data.tombstone) localStorage.setItem('ff_tasks_active_deleted_v1', JSON.stringify(data.tombstone));
         if (data.alertWindows) localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(data.alertWindows));
@@ -50787,7 +50806,7 @@ function hookSettingsGuard_DISABLED(){
 
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260704_bootstrap_js_extract"></script>
-  <script src="/safe-loader.js?v=20260704_bootstrap_js_extract"></script>
+  <script src="/safe-loader.js?v=20260720_catalog_protect"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
