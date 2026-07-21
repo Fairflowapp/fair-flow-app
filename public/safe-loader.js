@@ -16,7 +16,7 @@
         { src: "/schedule-ui.js?v=20260704_schedule_nav_runtime_viewtabs_fix", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
-        { src: "/inbox.js?v=20260630_inbox_cleanup", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260721_inbox_tech_fix", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260701_chat_compose_split", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },

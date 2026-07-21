@@ -73,7 +73,7 @@ initInboxListRender({ showRequestDetails, inboxTechnicianNoiseFilter });
 import { showRequestDetails } from "./inbox-details.js?v=20260630_inbox_details_split";
 
 // ── Submit request (create) — extracted to inbox-submit.js
-import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260630_inbox_submit_split";
+import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260721_inbox_tech_fix";
 initInboxSubmit({ loadInboxItems });
 
 // ── Manager action handlers — extracted to inbox-actions.js

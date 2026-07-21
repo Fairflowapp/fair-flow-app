@@ -523,7 +523,7 @@ export async function submitRequest(type) {
       tenantId: salonId,
       locationId: activeLocationIdForCreate,
       type: ffInboxRuleString(type),
-      status: type === "supplies" ? "pending" : "open",
+      status: "open",
       priority: 'normal',
       assignedTo: null,
       sentToStaffIds: Array.isArray(sentToStaffIds) ? sentToStaffIds : [],

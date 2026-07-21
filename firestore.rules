@@ -432,7 +432,7 @@ service cloud.firestore {
 
     // Custom Request Types - per-salon (Admin/Owner only)
     match /salons/{salonId}/requestTypes/{typeId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
@@ -444,7 +444,7 @@ service cloud.firestore {
 
     // Inbox visibility settings (which request types are hidden from staff)
     match /salons/{salonId}/inboxSettings/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow write: if isAdminOrOwner(salonId);
     }
 
@@ -577,7 +577,7 @@ service cloud.firestore {
     // ===== STAFF MEMBERS (cloud sync) =====
     // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
     match /salons/{salonId}/staff/{staffId} {
-      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
       allow create, update, delete: if belongsToSalon(salonId)
         && isManager(salonId);
 
@@ -950,10 +950,10 @@ service cloud.firestore {
     // Operational salon data — readable/writable by salon members (UI gates
     // structural edits to managers). Mirrors queueState/tasksState model.
     match /salons/{salonId}/inventoryCategories/{catId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow write: if belongsToSalon(salonId);
       match /inventorySubcategories/{subId} {
-        allow read: if belongsToSalon(salonId);
+        allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
         allow write: if belongsToSalon(salonId);
       }
     }
