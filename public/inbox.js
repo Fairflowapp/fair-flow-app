@@ -59,7 +59,7 @@ import {
 } from "./inbox-data.js?v=20260630_inbox_data_split";
 
 // ── Modals + settings UI — extracted to inbox-modals-ui.js
-import "./inbox-modals-ui.js?v=20260630_inbox_modals_ui_split";
+import "./inbox-modals-ui.js?v=20260721_inbox_modal_stack";
 
 // ── List rendering — extracted to inbox-list-render.js
 import {

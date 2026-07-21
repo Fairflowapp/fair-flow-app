@@ -32,12 +32,19 @@ import { inboxUserRoleLc, inboxCanSendRequests } from "./inbox-data.js?v=2026063
 // =====================
 // Create Request Modal
 // =====================
+function removeAllCreateRequestModals() {
+  document.querySelectorAll("#createRequestModal").forEach((el) => el.remove());
+}
+
 window.openCreateRequestModal = function() {
   if (!inboxCanSendRequests()) {
     if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
     return;
   }
   console.log('[Inbox] Opening create request modal');
+
+  // Prevent stacking: drop any leftover overlays (and their onclick handlers) first.
+  removeAllCreateRequestModals();
   
   // Create modal
   const modal = document.createElement('div');
@@ -114,17 +121,16 @@ window.openCreateRequestModal = function() {
   modal.appendChild(content);
   document.body.appendChild(modal);
   
-  // Click outside to close
+  // Click outside to close — bound on this element only; remove() drops the handler with the node.
   modal.onclick = (e) => {
     if (e.target === modal) {
-      closeCreateRequestModal();
+      window.closeCreateRequestModal();
     }
   };
 };
 
 window.closeCreateRequestModal = function() {
-  const modal = document.getElementById('createRequestModal');
-  if (modal) modal.remove();
+  removeAllCreateRequestModals();
 };
 
 window.toggleRequestCategory = function(cat) {
