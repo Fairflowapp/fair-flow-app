@@ -10,9 +10,9 @@
  */
 import { serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, archiveTicket, deleteTicketPermanently, setTicketServiceUpgrade, awardTicketUpgradePoints, createTicket, finalizeTicket, getTicketCustomerPriceApprovedFromForm, closeTicket } from "./tickets-crud.js?v=20260708_ticket_void";
-import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
-import { ffTicketMoney, ffTicketCurSym } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
+import { updateTicketsNavBadge, markTicketSeenByFrontDesk, updateTicket, archiveTicket, deleteTicketPermanently, setTicketServiceUpgrade, awardTicketUpgradePoints, createTicket, finalizeTicket, getTicketCustomerPriceApprovedFromForm, closeTicket } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
+import { ffTicketMoney, ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { computeTicketTotalsFromLines } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
 import { canSeeTicket, canCurrentUserCloseTickets, getTicketVisibility, getAutoFrontDeskRecipients } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
 import { loadServiceCategories, loadServices } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";

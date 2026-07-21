@@ -10,8 +10,8 @@ import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getTicketsSelfEmployeeFilterId, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
 import { getTicketTaxConfig } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
-import { fetchClosedTicketsForSummary, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, formatSummaryMoney, formatSummaryInt, getSummaryFilterDateRangeFromDom, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
-import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
+import { fetchClosedTicketsForSummary, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, formatSummaryMoney, formatSummaryInt, getSummaryFilterDateRangeFromDom, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
+import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
@@ -86,8 +86,9 @@ function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, tot
 
 
 /**
- * Summary tab: aggregate from all CLOSED tickets in Firestore (same date rules as Closed tab: createdAt).
- * Rows in ticketSummaries are still written on close for optional analytics; the UI does not depend on them.
+ * Summary tab: aggregate CLOSED + ARCHIVED tickets in Firestore (includes soft-deleted).
+ * Date rules match Closed tab: createdAt. ticketSummaries rows are still written on close
+ * for optional analytics; the UI does not depend on them.
  */
 async function loadAndRenderTicketsSummary() {
   const seq = ++ticketsState._ticketsSummaryFetchSeq;

@@ -14,8 +14,8 @@
  *   loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260708_ticket_void";
-import { renderTicketsList } from "./tickets-list.js?v=20260708_ticket_void_fix";
+import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { renderTicketsList } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
 import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260630_tickets_catalog_ui_split3";
 

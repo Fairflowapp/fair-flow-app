@@ -20,8 +20,8 @@
 import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffTicketsPatchLocalTicket, _rebuildCurrentTicketsMerged, updateTicketsLoadMoreUi, deleteTicketPermanently } from "./tickets-crud.js?v=20260708_ticket_void";
-import { ffTicketMoney, formatDate, passesTicketsDateFilter, ticketMatchesEmployeeFilter } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
+import { ffTicketsPatchLocalTicket, _rebuildCurrentTicketsMerged, updateTicketsLoadMoreUi, deleteTicketPermanently } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { ffTicketMoney, formatDate, passesTicketsDateFilter, ticketMatchesEmployeeFilter } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { canSeeTicket, updateTicketsTabsVisibility, canViewTicketsSummaryTab, canViewTicketsArchivedTab, ffTicketsSetTimePeriodFiltersVisible, updateTicketsEmployeeFilterVisibility, ffTicketsHideFrontDeskFiltersOnThisView, isTicketsTechnicianRestrictedRole, isStaffRecordManagerOrAdmin, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
 
 let getTicketTechnicianAvatarUrl, ticketHasRealPostSendEdit, ffFormatReviewedAt, openTicketModal, showToast, ticketConfirm, getActiveTicketsSalonId, loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod;
@@ -234,9 +234,9 @@ async function ffTicketsArchiveSelected() {
 }
 
 /**
- * Permanently delete every selected ARCHIVED ticket in chunked Firestore batches
+ * Soft-delete every selected ARCHIVED ticket in chunked Firestore batches
  * (handles hundreds at once). Mirrors deleteTicketPermanently: matching
- * ticketSummaries rows are marked source-deleted before the tickets are removed.
+ * ticketSummaries rows are marked source-deleted; ticket docs stay with deleted:true.
  */
 async function ffTicketsDeleteSelected() {
   if (!ffTicketsCanBulkArchive()) { showToast('Not allowed', 'error'); return; }
@@ -251,10 +251,10 @@ async function ffTicketsDeleteSelected() {
   if (!salonId) { showToast('No salon selected', 'error'); return; }
   const actionBtn = document.getElementById('ticketsBulkArchiveBtn');
   if (actionBtn) { actionBtn.disabled = true; actionBtn.textContent = 'Deleting\u2026'; }
-  // Defensive: only ever bulk-delete ARCHIVED tickets.
+  // Defensive: only ever bulk-delete ARCHIVED tickets that are not already soft-deleted.
   const delIds = ids.filter((id) => {
     const t = ticketsState.currentTickets.find((x) => x.id === id);
-    return !!t && t.status === 'ARCHIVED';
+    return !!t && t.status === 'ARCHIVED' && t.deleted !== true;
   });
   try {
     // 1) Mark matching Summary rows as source-deleted (same as single permanent delete).
@@ -286,20 +286,25 @@ async function ffTicketsDeleteSelected() {
       console.warn('[Tickets] bulk delete: ticketSummaries markers failed', e);
     }
 
-    // 2) Delete the tickets themselves in chunked batches.
+    // 2) Soft-delete the tickets themselves in chunked batches (no deleteDoc).
     let done = 0;
     const CHUNK = 400; // Firestore batch limit is 500; stay safely below.
+    const uid = ticketsState.currentUserProfile?.uid ?? null;
     for (let i = 0; i < delIds.length; i += CHUNK) {
       const slice = delIds.slice(i, i + CHUNK);
       const batch = writeBatch(db);
-      slice.forEach((id) => batch.delete(doc(db, `salons/${salonId}/tickets`, id)));
+      slice.forEach((id) => {
+        batch.update(doc(db, `salons/${salonId}/tickets`, id), {
+          deleted: true,
+          deletedAt: serverTimestamp(),
+          deletedByUid: uid,
+        });
+      });
       await batch.commit();
       done += slice.length;
-      // Remove from the local pagination caches — "Load more" rows are not in the
-      // live snapshot and would otherwise keep rendering until a full reload.
-      const gone = new Set(slice);
-      ticketsState._ticketsExtraTickets = ticketsState._ticketsExtraTickets.filter((t) => !gone.has(t.id));
-      ticketsState._ticketsFirstPageTickets = ticketsState._ticketsFirstPageTickets.filter((t) => !gone.has(t.id));
+      slice.forEach((id) => {
+        ffTicketsPatchLocalTicket(id, { deleted: true, deletedByUid: uid });
+      });
       if (actionBtn) actionBtn.textContent = `Deleting\u2026 (${done}/${delIds.length})`;
     }
     _rebuildCurrentTicketsMerged();
@@ -447,10 +452,10 @@ function renderTicketsList() {
 
   const statusFilter = { ready: 'READY_FOR_CHECKOUT', closed: 'CLOSED', archived: 'ARCHIVED' }[ticketsState.currentTicketsTab] || 'READY_FOR_CHECKOUT';
   let toShow = ticketsState.currentTicketsTab === 'archived'
-    ? ticketsState.currentTickets.filter(t => t.status === 'ARCHIVED')
+    ? ticketsState.currentTickets.filter(t => t.status === 'ARCHIVED' && t.deleted !== true)
     : ticketsState.currentTicketsTab === 'closed'
-    ? ticketsState.currentTickets.filter(t => t.status === 'CLOSED' || t.status === 'VOID')
-    : ticketsState.currentTickets.filter(t => t.status === statusFilter);
+    ? ticketsState.currentTickets.filter(t => (t.status === 'CLOSED' || t.status === 'VOID') && t.deleted !== true)
+    : ticketsState.currentTickets.filter(t => t.status === statusFilter && t.deleted !== true);
   toShow = toShow.filter(t => canSeeTicket(t));
 
   const showDateFilters = ticketsState.currentTicketsTab === 'closed' || ticketsState.currentTicketsTab === 'archived';

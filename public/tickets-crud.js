@@ -16,7 +16,7 @@
  */
 import {
   collection, query, where, orderBy, limit, startAfter,
-  doc, getDoc, getDocFromServer, getDocs, addDoc, updateDoc, deleteDoc, deleteField, onSnapshot,
+  doc, getDoc, getDocFromServer, getDocs, addDoc, updateDoc, deleteField, onSnapshot,
   serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
@@ -200,6 +200,7 @@ function updateTicketsNavBadge() {
     return;
   }
   const readyVisible = (ticketsState.currentTickets || []).filter(t => {
+    if (t && t.deleted === true) return false;
     return String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT' && canSeeTicket(t);
   });
   badge.textContent = readyVisible.length > 0 ? String(readyVisible.length) : '';
@@ -645,9 +646,17 @@ async function deleteTicketPermanently(ticketId) {
   if (!salonId || !ticketId) return;
   await markTicketSummariesSourceDeleted(salonId, ticketId);
   const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
-  await deleteDoc(ticketRef);
-  ticketsState._ticketsExtraTickets = ticketsState._ticketsExtraTickets.filter((t) => t.id !== ticketId);
-  ticketsState._ticketsFirstPageTickets = ticketsState._ticketsFirstPageTickets.filter((t) => t.id !== ticketId);
+  const deletedByUid = ticketsState.currentUserProfile?.uid ?? null;
+  // Soft delete — keep the doc so Summary can still aggregate CLOSED/ARCHIVED history.
+  await updateDoc(ticketRef, {
+    deleted: true,
+    deletedAt: serverTimestamp(),
+    deletedByUid,
+  });
+  ffTicketsPatchLocalTicket(ticketId, {
+    deleted: true,
+    deletedByUid,
+  });
   _rebuildCurrentTicketsMerged();
 }
 

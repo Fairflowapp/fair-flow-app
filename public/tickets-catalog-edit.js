@@ -10,8 +10,8 @@
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
-import { ffTicketCurSym } from "./tickets-helpers.js?v=20260630_tickets_helpers_split";
-import { escapeHtml } from "./tickets-list.js?v=20260708_ticket_void_fix";
+import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
+import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 
 let showToast, ticketConfirm, setupTicketsUI, renderServicesCatalogV2, _ffIsServicesScreenRoot;
 export function initCatalogEdit(deps) {

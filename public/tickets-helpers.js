@@ -109,12 +109,17 @@ function _summaryRangeToTimestampBounds(fromStr, toStr) {
 /**
  * Indexed path: status + createdAt (needs composite index on collection group "tickets").
  */
+/** Statuses that count toward Tickets Summary (soft-deleted docs stay included). */
+const SUMMARY_TICKET_STATUSES = ['CLOSED', 'ARCHIVED'];
+
 async function _fetchClosedTicketsForSummaryIndexed(salonId, fromStr, toStr) {
   const colRef = collection(db, `salons/${salonId}/tickets`);
   const { minTs, maxTs } = _summaryRangeToTimestampBounds(fromStr, toStr);
   const out = [];
   const PAGE = _ticketSummaryPageSize;
-  const constraints = [where('status', '==', 'CLOSED')];
+  // status IN uses the same status+createdAt composite index as equality; no deleted filter —
+  // soft-deleted tickets must remain in Summary.
+  const constraints = [where('status', 'in', SUMMARY_TICKET_STATUSES)];
   if (minTs && maxTs) {
     constraints.push(where('createdAt', '>=', minTs));
     constraints.push(where('createdAt', '<=', maxTs));
@@ -165,7 +170,8 @@ async function _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr) 
         const tms = ts.toDate().getTime();
         if (!isNaN(tms) && tms < oldestInPageMs) oldestInPageMs = tms;
       }
-      if (String(data.status || '').toUpperCase() !== 'CLOSED') continue;
+      const st = String(data.status || '').toUpperCase();
+      if (st !== 'CLOSED' && st !== 'ARCHIVED') continue;
       if (!passesTicketsDateFilter(row, fromStr, toStr)) continue;
       out.push(row);
     }
@@ -177,8 +183,8 @@ async function _fetchClosedTicketsForSummaryClientScan(salonId, fromStr, toStr) 
 }
 
 /**
- * Load all CLOSED tickets for Summary (not the paged list snapshot).
- * Uses the same date semantics as the Closed tab: submitted time (createdAt).
+ * Load CLOSED + ARCHIVED tickets for Summary (not the paged list snapshot).
+ * Soft-deleted tickets are included. Date semantics: submitted time (createdAt).
  */
 async function fetchClosedTicketsForSummary(salonId, fromStr, toStr) {
   try {
@@ -510,7 +516,8 @@ function buildSummaryRowsFromClosedTicketList(ticketList, fromStr, toStr, employ
   const staffList = getSummaryStaffList();
   const filtered = (ticketList || []).filter((t) => {
     if (!canSeeTicket(t)) return false;
-    if (String(t.status || '').toUpperCase() !== 'CLOSED') return false;
+    const st = String(t.status || '').toUpperCase();
+    if (st !== 'CLOSED' && st !== 'ARCHIVED') return false;
     if (!passesTicketsDateFilter(t, fromStr, toStr)) return false;
     if (techSelfOnly) return ticketBelongsToTicketsTechnician(t);
     return ticketMatchesEmployeeFilter(t, employeeId);
