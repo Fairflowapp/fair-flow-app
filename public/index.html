@@ -46215,12 +46215,12 @@ function addTechnicianToQueue(){
 
   queue.push({name, held: false});
 
-  save();
-
-  renderQueue();
-
-  addTechDlg.close();
-
+  // Log the add BEFORE save() — exactly like the regular Join flow — so the
+  // new person and the history row that justifies them persist in ONE cloud
+  // write. Logging after save() made the resurrection guard block the write
+  // ("stale-cache-resurrection-blocked"): it saw a new person with no new
+  // history row, which is indistinguishable from a stale phone re-adding
+  // people. skipCloudWrite avoids a duplicate write; save() carries it all.
   // Add technician is done in reorder mode which requires manager/admin code
   const lastCode = window.__ff_lastValidatedCode;
   let actor;
@@ -46236,7 +46236,13 @@ function addTechnicianToQueue(){
     const actorName = window.__ff_actorName || 'Manager';
     actor = { role, name: actorName };
   }
-  addHistoryEntry('Add technician to queue', actor.role, actor.name, name, 'queue');
+  addHistoryEntry('Add technician to queue', actor.role, actor.name, name, 'queue', { skipCloudWrite: true });
+
+  save();
+
+  renderQueue();
+
+  addTechDlg.close();
 
 }
 
