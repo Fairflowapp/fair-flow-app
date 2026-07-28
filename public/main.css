@@ -7902,9 +7902,99 @@ dialog footer button, .code-dialog footer button {
     #liveScreen .floor-demo-badge--closed { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
     #liveScreen .floor-demo-line { font-size: 12px; color: #374151; line-height: 1.35; padding: 2px 0; }
     #liveScreen .floor-demo-line strong { color: #111827; font-weight: 800; }
+    /* 4th Live column: sticky notes (shift handover) on top, chat below. */
+    #liveScreen .live-col-split { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+    #liveScreen .live-col-split .live-card { flex: 1 1 50%; min-height: 0; }
+    #liveScreen .live-card--notes { background: #fffdf2; }
+    #liveScreen .live-card--notes .live-card-head { border-bottom-color: #f3ecc9; }
+    #liveScreen .live-card--notes .live-card-count { background: #fef3c7; color: #b45309; }
+    #liveScreen .live-notes-composer {
+      display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border-top: 1px solid #f3ecc9; background: #fffdf2; flex-shrink: 0;
+    }
+    #liveScreen .live-notes-composer-row { display: flex; align-items: center; gap: 7px; }
+    #liveScreen .live-notes-composer input {
+      flex: 1; min-width: 0; border: 1px solid #e7dfae; border-radius: 10px; background: #fff;
+      padding: 8px 11px; font-size: 13px; color: #111827; outline: none;
+    }
+    #liveScreen .live-notes-composer input:focus { border-color: #d9c85e; box-shadow: 0 0 0 3px rgba(234,207,86,0.18); }
+    #liveScreen .live-notes-add {
+      border: 0; background: #7c3aed; color: #fff; border-radius: 10px; padding: 8px 14px;
+      font-size: 12.5px; font-weight: 800; cursor: pointer; white-space: nowrap; line-height: 1; flex-shrink: 0;
+    }
+    #liveScreen .live-notes-add:hover { background: #6d28d9; }
+    /* Color picker: small swatch + chevron next to Add; opens a popover with the palette. */
+    #liveScreen .live-note-color-picker { position: relative; flex-shrink: 0; }
+    #liveScreen .live-note-color-btn {
+      display: inline-flex; align-items: center; gap: 4px; padding: 6px 7px;
+      border: 1px solid #e7dfae; border-radius: 10px; background: #fff; color: #a16207; cursor: pointer; line-height: 1;
+    }
+    #liveScreen .live-note-color-btn:hover { border-color: #d9c85e; background: #fffbeb; }
+    #liveScreen .live-note-color-current {
+      width: 16px; height: 16px; border-radius: 999px; border: 1px solid rgba(0,0,0,0.14); display: inline-block;
+    }
+    #liveScreen .live-note-color-pop {
+      display: none; position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 30;
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 8px 9px;
+      box-shadow: 0 10px 30px rgba(15,23,42,0.18); white-space: nowrap;
+    }
+    #liveScreen .live-note-color-pop.is-open { display: flex; align-items: center; gap: 8px; }
+    #liveScreen .live-note-color {
+      width: 20px; height: 20px; border-radius: 999px; padding: 0; cursor: pointer;
+      border: 1px solid rgba(0,0,0,0.14); flex-shrink: 0;
+    }
+    #liveScreen .live-note-color.is-selected { box-shadow: 0 0 0 2px #fff, 0 0 0 3px #7c3aed; }
+    #liveScreen .live-note-color--yellow, #liveScreen .live-note-swatch--yellow { background: #fde047; }
+    #liveScreen .live-note-color--red, #liveScreen .live-note-swatch--red { background: #f87171; }
+    #liveScreen .live-note-color--lightred, #liveScreen .live-note-swatch--lightred { background: #fecaca; }
+    #liveScreen .live-note-color--lightyellow, #liveScreen .live-note-swatch--lightyellow { background: #fef9c3; }
+    #liveScreen .live-note-color--sky, #liveScreen .live-note-swatch--sky { background: #67e8f9; }
+    #liveScreen .live-note-color--green, #liveScreen .live-note-swatch--green { background: #4ade80; }
+    #liveScreen .live-note-color--purple, #liveScreen .live-note-swatch--purple { background: #c4b5fd; }
+    /* Individual sticky note: pastel paper card with a folded corner.
+       Colors come from per-note CSS variables (default = yellow). */
+    #liveScreen .live-note {
+      --nbg: #fef9c3; --nbd: #fde68a; --nfold: #fde047; --ntext: #422006; --nmeta: #a16207;
+      position: relative; display: flex; align-items: flex-start; gap: 9px;
+      background: var(--nbg); border: 1px solid var(--nbd); border-radius: 10px 10px 10px 2px;
+      padding: 10px 26px 9px 11px; box-shadow: 0 2px 6px rgba(87,83,78,0.16);
+    }
+    #liveScreen .live-note--red { --nbg: #fca5a5; --nbd: #f87171; --nfold: #ef4444; --ntext: #450a0a; --nmeta: #991b1b; }
+    #liveScreen .live-note--lightred { --nbg: #fee2e2; --nbd: #fecaca; --nfold: #fca5a5; --ntext: #450a0a; --nmeta: #b91c1c; }
+    #liveScreen .live-note--lightyellow { --nbg: #fefce8; --nbd: #fde68a; --nfold: #fde047; --ntext: #422006; --nmeta: #a16207; }
+    #liveScreen .live-note--sky { --nbg: #cffafe; --nbd: #67e8f9; --nfold: #22d3ee; --ntext: #083344; --nmeta: #0e7490; }
+    #liveScreen .live-note--green { --nbg: #bbf7d0; --nbd: #4ade80; --nfold: #22c55e; --ntext: #052e16; --nmeta: #15803d; }
+    #liveScreen .live-note--purple { --nbg: #ede9fe; --nbd: #c4b5fd; --nfold: #a78bfa; --ntext: #2e1065; --nmeta: #6d28d9; }
+    #liveScreen .live-note::after {
+      content: ""; position: absolute; top: 0; right: 0; width: 14px; height: 14px;
+      background: linear-gradient(225deg, #fff 0%, #fff 48%, var(--nfold) 50%, var(--nbd) 100%);
+      border-radius: 0 10px 0 6px; pointer-events: none;
+    }
+    #liveScreen .live-note-check {
+      flex-shrink: 0; width: 21px; height: 21px; margin-top: 1px; border-radius: 999px;
+      border: 2px solid var(--nmeta); background: rgba(255,255,255,0.75); color: #15803d;
+      font-size: 13px; font-weight: 900; line-height: 1; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; padding: 0;
+    }
+    #liveScreen .live-note.is-done .live-note-check { background: #dcfce7; border-color: #16a34a; }
+    #liveScreen .live-note-main { min-width: 0; flex: 1; }
+    #liveScreen .live-note-text {
+      font-size: 13px; font-weight: 600; color: var(--ntext); line-height: 1.35;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #liveScreen .live-note.is-done .live-note-text { text-decoration: line-through; color: var(--nmeta); opacity: 0.75; }
+    #liveScreen .live-note-meta { margin-top: 4px; font-size: 10.5px; font-weight: 700; color: var(--nmeta); }
+    #liveScreen .live-note-donemeta { margin-top: 2px; font-size: 10.5px; font-weight: 800; color: #15803d; }
+    #liveScreen .live-note-del {
+      position: absolute; right: 3px; bottom: 3px; width: 20px; height: 20px; border: 0; padding: 0;
+      background: transparent; color: var(--nmeta); font-size: 15px; line-height: 1; cursor: pointer;
+      border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; opacity: 0.65;
+    }
+    #liveScreen .live-note-del:hover { opacity: 1; background: rgba(0,0,0,0.08); }
     @media (max-width: 767px) {
       #liveScreen .live-body { grid-template-columns: 1fr; grid-auto-rows: auto; align-content: start; padding: 12px; gap: 12px; }
       #liveScreen .live-list { flex: 0 1 auto; max-height: 60vh; }
+      #liveScreen .live-col-split { gap: 12px; }
+      #liveScreen .live-card--notes .live-list { min-height: 90px; }
     }
     @media (min-width: 768px) and (max-width: 1099px) {
       #liveScreen .live-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }

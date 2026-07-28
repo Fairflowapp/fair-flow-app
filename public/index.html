@@ -150,7 +150,7 @@
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260704_main_css_extract">
+<link rel="stylesheet" href="/main.css?v=20260727_note_color_picker">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -50096,9 +50096,38 @@ function hookSettingsGuard_DISABLED(){
         <div class="live-card-head"><span class="live-card-title">Floor Requests</span><span class="live-card-count" id="liveFloorCount">0</span></div>
         <div class="live-list" id="liveFloorList"></div>
       </div>
-      <div class="live-card">
-        <div class="live-card-head"><span class="live-card-title">Chat</span><span class="live-card-count" id="liveChatCount">0</span></div>
-        <div class="live-list" id="liveChatList"></div>
+      <!-- 4th column split: shift-handover sticky notes on top (first thing an
+           incoming shift should see), chat below. -->
+      <div class="live-col-split">
+        <div class="live-card live-card--notes">
+          <div class="live-card-head"><span class="live-card-title">Notes</span><span class="live-card-count" id="liveNotesCount">0</span></div>
+          <div class="live-list" id="liveNotesList"></div>
+          <div class="live-notes-composer">
+            <div class="live-notes-composer-row">
+              <input type="text" id="liveNoteInput" maxlength="500" placeholder="Note for the next shift..." autocomplete="off">
+              <div class="live-note-color-picker">
+                <button type="button" class="live-note-color-btn" id="liveNoteColorBtn" title="Note color" aria-label="Choose note color" aria-expanded="false">
+                  <span class="live-note-color-current" id="liveNoteColorCurrent"></span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+                <div class="live-note-color-pop" id="liveNoteColors" role="radiogroup" aria-label="Note color">
+                  <button type="button" class="live-note-color live-note-color--yellow is-selected" data-note-color="yellow" title="Yellow" aria-label="Yellow"></button>
+                  <button type="button" class="live-note-color live-note-color--red" data-note-color="red" title="Red" aria-label="Red"></button>
+                  <button type="button" class="live-note-color live-note-color--lightred" data-note-color="lightred" title="Light red" aria-label="Light red"></button>
+                  <button type="button" class="live-note-color live-note-color--lightyellow" data-note-color="lightyellow" title="Light yellow" aria-label="Light yellow"></button>
+                  <button type="button" class="live-note-color live-note-color--sky" data-note-color="sky" title="Sky blue" aria-label="Sky blue"></button>
+                  <button type="button" class="live-note-color live-note-color--green" data-note-color="green" title="Green" aria-label="Green"></button>
+                  <button type="button" class="live-note-color live-note-color--purple" data-note-color="purple" title="Light purple" aria-label="Light purple"></button>
+                </div>
+              </div>
+              <button type="button" class="live-notes-add" id="liveNoteAddBtn" title="Add note">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="live-card">
+          <div class="live-card-head"><span class="live-card-title">Chat</span><span class="live-card-count" id="liveChatCount">0</span></div>
+          <div class="live-list" id="liveChatList"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -50338,11 +50367,105 @@ function hookSettingsGuard_DISABLED(){
         if (screen && screen.style.display === "flex") renderChat();
       };
 
+      function liveNoteWhen(ms) {
+        if (!ms) return "";
+        var d = new Date(Number(ms));
+        if (isNaN(d.getTime())) return "";
+        try {
+          return d.toLocaleString([], { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+        } catch (_) { return ""; }
+      }
+      function renderNotes() {
+        var list = document.getElementById("liveNotesList");
+        if (!list) return;
+        var notes = [];
+        try { if (typeof window.ffGetStickyNotes === "function") notes = window.ffGetStickyNotes() || []; } catch (_) {}
+        notes = Array.isArray(notes) ? notes : [];
+        // Open notes first (newest on top); done notes sink to the bottom of the
+        // list (most recently checked first) so the board stays scannable.
+        notes = notes.slice().sort(function (a, b) {
+          var aDone = a.done ? 1 : 0;
+          var bDone = b.done ? 1 : 0;
+          if (aDone !== bDone) return aDone - bDone;
+          if (aDone) return (Number(b.doneAtMs) || 0) - (Number(a.doneAtMs) || 0);
+          return (Number(b.createdAtMs) || 0) - (Number(a.createdAtMs) || 0);
+        });
+        // The badge counts what still needs attention: open (not done) notes.
+        var openCount = notes.filter(function (n) { return !n.done; }).length;
+        setCount("liveNotesCount", openCount);
+        if (!notes.length) { list.innerHTML = emptyHtml("No notes for the next shift. Leave one below."); return; }
+        var validColors = ["yellow", "red", "lightred", "lightyellow", "sky", "green", "purple"];
+        list.innerHTML = notes.map(function (n) {
+          var id = liveEsc(n.id || "");
+          var done = !!n.done;
+          var colorClass = validColors.indexOf(n.color) > 0 ? " live-note--" + n.color : "";
+          var meta = liveEsc((n.createdByName || "Team")) + (n.createdAtMs ? " \u00B7 " + liveEsc(liveNoteWhen(n.createdAtMs)) : "");
+          var doneMeta = done
+            ? '<div class="live-note-donemeta">\u2713 ' + liveEsc(n.doneByName || "Done") + (n.doneAtMs ? " \u00B7 " + liveEsc(liveNoteWhen(n.doneAtMs)) : "") + '</div>'
+            : "";
+          return '<div class="live-note' + colorClass + (done ? ' is-done' : '') + '">' +
+              '<button type="button" class="live-note-check" data-live-note-toggle="' + id + '" title="' + (done ? 'Mark as not done' : 'Mark as done') + '" aria-label="Toggle done">' + (done ? '\u2713' : '') + '</button>' +
+              '<div class="live-note-main">' +
+                '<div class="live-note-text">' + liveEsc(n.text || "") + '</div>' +
+                '<div class="live-note-meta">' + meta + '</div>' +
+                doneMeta +
+              '</div>' +
+              '<button type="button" class="live-note-del" data-live-note-del="' + id + '" title="Delete note" aria-label="Delete note">&times;</button>' +
+            '</div>';
+        }).join("");
+      }
+      window.ffLiveRefreshNotesCard = function () {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") renderNotes();
+      };
+
+      // Confirm dialog before deleting a sticky note (matches the Floor
+      // delete-confirm modal style; sits above the Live screen overlay).
+      function ensureLiveNoteDeleteConfirmModal() {
+        var modal = document.getElementById("liveNoteDeleteConfirmModal");
+        if (modal) return modal;
+        modal = document.createElement("div");
+        modal.id = "liveNoteDeleteConfirmModal";
+        modal.style.cssText = "display:none;position:fixed;inset:0;z-index:9896;background:rgba(15,23,42,0.55);align-items:center;justify-content:center;padding:18px;";
+        modal.innerHTML = '<div style="width:min(380px,94vw);background:#fff;border-radius:16px;box-shadow:0 18px 60px rgba(15,23,42,0.28);overflow:hidden;">'
+          + '<div style="padding:18px 20px 10px;">'
+          + '<h3 style="margin:0;color:#111827;font-size:16px;font-weight:800;">Delete this sticky note?</h3>'
+          + '<p style="margin:8px 0 0;color:#6b7280;font-size:13px;line-height:1.45;">This action cannot be undone.</p>'
+          + '</div>'
+          + '<div style="padding:14px 20px 18px;display:flex;justify-content:flex-end;gap:10px;">'
+          + '<button type="button" id="liveNoteCancelDeleteBtn" style="border:1px solid #e5e7eb;background:#fff;color:#374151;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>'
+          + '<button type="button" id="liveNoteConfirmDeleteBtn" style="border:0;background:#dc2626;color:#fff;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:600;cursor:pointer;">Delete</button>'
+          + '</div>'
+          + '</div>';
+        document.body.appendChild(modal);
+        function closeModal() {
+          modal.style.display = "none";
+          modal.removeAttribute("data-note-id");
+        }
+        modal.addEventListener("click", function (ev) {
+          if (ev.target === modal) closeModal();
+        });
+        modal.querySelector("#liveNoteCancelDeleteBtn").addEventListener("click", closeModal);
+        modal.querySelector("#liveNoteConfirmDeleteBtn").addEventListener("click", function () {
+          var noteId = modal.getAttribute("data-note-id") || "";
+          closeModal();
+          if (noteId && typeof window.ffStickyNoteDelete === "function") window.ffStickyNoteDelete(noteId);
+        });
+        return modal;
+      }
+      function promptDeleteLiveNote(noteId) {
+        if (!noteId) return;
+        var modal = ensureLiveNoteDeleteConfirmModal();
+        modal.setAttribute("data-note-id", noteId);
+        modal.style.display = "flex";
+      }
+
       function renderLiveScreen() {
         renderQueue();
         renderTickets();
         renderFloor();
         renderChat();
+        renderNotes();
       }
       function ffSetLiveFabState(isOpen) {
         var fab = document.querySelector(".ff-live-desk-fab");
@@ -50405,6 +50528,77 @@ function hookSettingsGuard_DISABLED(){
             closeLiveScreen();
             if (typeof window.ffOpenChatConversation === "function") window.ffOpenChatConversation(id);
             else if (typeof window.goToChat === "function") window.goToChat();
+          });
+        }
+        var notesList = document.getElementById("liveNotesList");
+        if (notesList) {
+          notesList.addEventListener("click", function (ev) {
+            var t = ev.target && ev.target.closest
+              ? ev.target.closest("[data-live-note-toggle],[data-live-note-del]")
+              : null;
+            if (!t) return;
+            ev.preventDefault();
+            var toggleId = t.getAttribute("data-live-note-toggle");
+            var delId = t.getAttribute("data-live-note-del");
+            if (toggleId && typeof window.ffStickyNoteToggleDone === "function") window.ffStickyNoteToggleDone(toggleId);
+            else if (delId) promptDeleteLiveNote(delId);
+          });
+        }
+        var noteAddBtn = document.getElementById("liveNoteAddBtn");
+        var noteInput = document.getElementById("liveNoteInput");
+        var noteColorPop = document.getElementById("liveNoteColors");
+        var noteColorBtn = document.getElementById("liveNoteColorBtn");
+        var noteColorCurrent = document.getElementById("liveNoteColorCurrent");
+        var liveNoteSelectedColor = "yellow";
+        function setLiveNoteColorPopOpen(open) {
+          if (noteColorPop) noteColorPop.classList.toggle("is-open", !!open);
+          if (noteColorBtn) noteColorBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+        function selectLiveNoteColor(color) {
+          liveNoteSelectedColor = color;
+          if (noteColorCurrent) noteColorCurrent.className = "live-note-color-current live-note-swatch--" + color;
+          if (!noteColorPop) return;
+          noteColorPop.querySelectorAll("[data-note-color]").forEach(function (b) {
+            b.classList.toggle("is-selected", b.getAttribute("data-note-color") === color);
+          });
+        }
+        if (noteColorBtn) {
+          noteColorBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            setLiveNoteColorPopOpen(!(noteColorPop && noteColorPop.classList.contains("is-open")));
+          });
+        }
+        if (noteColorPop) {
+          noteColorPop.addEventListener("click", function (ev) {
+            var dot = ev.target && ev.target.closest ? ev.target.closest("[data-note-color]") : null;
+            if (!dot) return;
+            selectLiveNoteColor(dot.getAttribute("data-note-color"));
+            setLiveNoteColorPopOpen(false);
+          });
+        }
+        // Clicking anywhere else closes the color popover.
+        document.addEventListener("click", function (ev) {
+          if (!noteColorPop || !noteColorPop.classList.contains("is-open")) return;
+          var t = ev.target;
+          if (t && typeof t.closest === "function" && t.closest(".live-note-color-picker")) return;
+          setLiveNoteColorPopOpen(false);
+        });
+        selectLiveNoteColor("yellow");
+        function submitLiveNote() {
+          if (!noteInput) return;
+          var text = String(noteInput.value || "").trim();
+          if (!text) return;
+          if (typeof window.ffStickyNoteAdd !== "function") return;
+          noteInput.value = "";
+          window.ffStickyNoteAdd(text, liveNoteSelectedColor);
+          // Back to the yellow default so the next note doesn't inherit the color by accident.
+          selectLiveNoteColor("yellow");
+          setLiveNoteColorPopOpen(false);
+        }
+        if (noteAddBtn) noteAddBtn.addEventListener("click", submitLiveNote);
+        if (noteInput) {
+          noteInput.addEventListener("keydown", function (ev) {
+            if (ev.key === "Enter") { ev.preventDefault(); submitLiveNote(); }
           });
         }
         var queueModeToggle = document.getElementById("liveQueueModeToggle");
@@ -50806,7 +51000,7 @@ function hookSettingsGuard_DISABLED(){
 
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260704_bootstrap_js_extract"></script>
-  <script src="/safe-loader.js?v=20260721_ticket_soft_delete"></script>
+  <script src="/safe-loader.js?v=20260727_note_colors"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

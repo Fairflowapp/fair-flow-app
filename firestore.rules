@@ -928,6 +928,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Per-device queue sync diagnostics (rolling client trace). Written by the
+    // device itself on every save attempt; read for debugging sync issues.
+    match /salons/{salonId}/queueDiag/{deviceId} {
+      allow read, write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+    }
+
     match /salons/{salonId}/tasksState/{docId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
       allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
@@ -989,6 +995,13 @@ service cloud.firestore {
       }
     }
     match /salons/{salonId}/floorOrders/{orderId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // ===== STICKY NOTES (Live screen shift-handover notes) =====
+    // Reception staff leave notes for the next shift; anyone in the salon can
+    // add, check off, and delete. Mirrors the floorOrders access model.
+    match /salons/{salonId}/stickyNotes/{noteId} {
       allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
     }
 

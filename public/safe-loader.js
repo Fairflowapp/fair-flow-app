@@ -21,6 +21,7 @@
         { src: "/chat.js?v=20260701_chat_compose_split", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
         { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 3120 },
+        { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module", delay: 3150 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
