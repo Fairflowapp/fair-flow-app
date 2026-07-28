@@ -354,6 +354,7 @@ onAuthStateChanged(auth, async user => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
             if (m.subscribeToChatToastNotifications) m.subscribeToChatToastNotifications(uid, sid);
+            if (m.bootChatConversationList) m.bootChatConversationList();
           })
           .catch(() => {});
       }
@@ -2716,6 +2717,7 @@ function ffApplyActiveMembership(membership, legacyUserData) {
               try {
                 if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
                 if (m && typeof m.subscribeToChatToastNotifications === "function") m.subscribeToChatToastNotifications(window.ffAuth?.currentUser?.uid, salonId);
+                if (m && typeof m.bootChatConversationList === "function") m.bootChatConversationList();
               } catch (_) {}
             })
             .catch(() => {});

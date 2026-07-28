@@ -531,6 +531,7 @@ onAuthStateChanged(auth, async user => {
         if (targetSalonId) {
           subscribeToChatBadge(user.uid, targetSalonId);
           subscribeToChatToastNotifications(user.uid, targetSalonId);
+          void bootChatConversationList();
         }
       }
     } catch(e) {}
@@ -662,6 +663,24 @@ window.ffSendTrainingReminderChat = async function (payload = {}) {
 
   await _sendFreeTextDirect(rUid, recipientName, null, body);
 };
+
+// Boot the conversation-list listener at app load — not only when the Chat tab
+// is opened. The Live Desk CHAT card reads chatState.allConversations; before
+// this boot it stayed empty after a page refresh until the user visited the
+// Chat tab once ("No recent messages" on Live). Safe to call repeatedly: it
+// no-ops when the listener is already attached. Privacy unchanged — the
+// listener only returns conversations the signed-in user participates in.
+export async function bootChatConversationList() {
+  try {
+    if (chatState.chatConvsUnsub) return;
+    if (!chatState.chatUserProfile) await loadChatUserProfile();
+    if (chatState.chatUserProfile?.salonId && !chatState.chatConvsUnsub) {
+      subscribeToConversationList();
+    }
+  } catch (e) {
+    console.warn('[Chat] bootChatConversationList failed', e);
+  }
+}
 
 // ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
 window.goToChat = goToChat;
