@@ -676,6 +676,17 @@ export async function bootChatConversationList() {
     if (!chatState.chatUserProfile) await loadChatUserProfile();
     if (chatState.chatUserProfile?.salonId && !chatState.chatConvsUnsub) {
       subscribeToConversationList();
+      // Names resolve via the salon members list (chatState.chatSalonUsers).
+      // Without this, every card on the Live CHAT panel shows "Loading..."
+      // until the user opens the Chat tab once (which is what loads members).
+      if (!chatState._chatMembersLoaded) {
+        loadChatSalonUsers()
+          .then(() => {
+            if (chatState.allConversations.length) renderThreadList();
+            else if (typeof window.ffLiveRefreshChatCard === 'function') window.ffLiveRefreshChatCard();
+          })
+          .catch((err) => console.warn('[Chat] boot salon-users load failed', err));
+      }
     }
   } catch (e) {
     console.warn('[Chat] bootChatConversationList failed', e);
