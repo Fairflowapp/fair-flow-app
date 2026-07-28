@@ -631,6 +631,30 @@ function serverRev(server) {
   return (server && typeof server.rev === "number" && server.rev >= 0) ? server.rev : 0;
 }
 
+// Retention (business rule): "done" rows in the SHORT-cycle tabs older than
+// 60 days are dead weight — opening/closing reset daily and weekly resets
+// weekly, so a done marker that old can no longer affect anything shown.
+// Monthly/yearly are NOT pruned: they must remember completions for their
+// whole period. This keeps the doc from slowly accumulating stale rows (the
+// queue history log hit Firestore's 1MiB doc limit exactly this way and every
+// write started failing). FairFlow Points live in separate pointsEvents docs
+// written at completion time — pruning these display rows never touches them.
+const TASKS_DONE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+const TASKS_DONE_PRUNE_TABS = ["opening", "closing", "weekly"];
+function ffPruneOldDoneRows(out) {
+  const cutoff = Date.now() - TASKS_DONE_MAX_AGE_MS;
+  TASKS_DONE_PRUNE_TABS.forEach((tab) => {
+    const t = out && out[tab];
+    if (!t || !Array.isArray(t.done)) return;
+    t.done = t.done.filter((row) => {
+      const raw = row && (row.completedAt || row.ts);
+      const ts = typeof raw === "number" ? raw
+        : (typeof raw === "string" ? (Date.parse(raw) || 0) : 0);
+      return !ts || ts >= cutoff;
+    });
+  });
+}
+
 function buildMergedWritePayload(state, server, reason, baseRevOverride) {
   const out = buildFirestoreState(state);
   const baseRev = typeof baseRevOverride === "number" && baseRevOverride >= 0
@@ -704,6 +728,7 @@ function buildMergedWritePayload(state, server, reason, baseRevOverride) {
     out.autoResetState = mergedARS;
   }
 
+  ffPruneOldDoneRows(out);
   out.rev = baseRev + 1;
   out.lastUpdateReason = typeof reason === "string" && reason ? reason : "task-update";
   out.lastUpdatedByUid = (auth.currentUser && auth.currentUser.uid) || null;

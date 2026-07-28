@@ -30,6 +30,10 @@ const _queueAutoReset = require("./queue-auto-reset");
 exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
 exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
 
+const _docSizeMonitor = require("./doc-size-monitor");
+exports.scheduledDocSizeMonitor = _docSizeMonitor.scheduledDocSizeMonitor;
+exports.debugRunDocSizeMonitor = _docSizeMonitor.debugRunDocSizeMonitor;
+
 // Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
 const _tasksAutoReset = require("./tasks-auto-reset");
 exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;

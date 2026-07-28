@@ -9545,8 +9545,6 @@ function startSpecific(idx){
     staffId: it.staffId || resolveStaffNameToId(moveName || it.name)
   });
 
-  save(); renderQueue(); renderService();
-
   // Actor info: check if set by caller (for row buttons, may be set by guardStart)
   const lastCode = window.__ff_lastValidatedCode;
   let actor;
@@ -9564,7 +9562,11 @@ function startSpecific(idx){
     // Worker PIN was used - tech action
     actor = getActorForAction({ workerName: it.name });
   }
-  addHistoryEntry('Start (Available - In service)', actor.role, actor.name, it.name, 'queue');
+  // History before save so move + log land in one cloud write (avoids jump-back).
+  addHistoryEntry('Start (Available - In service)', actor.role, actor.name, it.name, 'queue', { skipCloudWrite: true });
+  save();
+  renderQueue();
+  renderService();
 
 }
 
@@ -9573,7 +9575,7 @@ function toggleHold(i){
     ffQueueLockedViewToast();
     return;
   }
-  queue[i].held=!queue[i].held; save(); renderQueue(); 
+  queue[i].held=!queue[i].held;
 
   // Actor info is already set by guardHold (manager/admin code)
   const lastCode = window.__ff_lastValidatedCode;
@@ -9590,7 +9592,9 @@ function toggleHold(i){
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry(queue[i].held ? 'Hold' : 'Release', actor.role, actor.name, queue[i].name, 'queue');
+  addHistoryEntry(queue[i].held ? 'Hold' : 'Release', actor.role, actor.name, queue[i].name, 'queue', { skipCloudWrite: true });
+  save();
+  renderQueue();
 
 }
 
@@ -9611,8 +9615,6 @@ function finish(i){
     held: false
   }); // back to end
 
-  save(); renderQueue(); renderService();
-
   // Actor info is already set by guardFinish (staff-based auth)
   const lastValidated = window.__ff_lastValidatedCode;
   let actor;
@@ -9623,7 +9625,11 @@ function finish(i){
     // Fallback to target technician (should not happen if guardFinish is correct)
     actor = { role: 'Tech', name: it.name };
   }
-  addHistoryEntry('Finish (In service - Available)', actor.role, actor.name, it.name, 'queue');
+  // History before save so move + log land in one cloud write (avoids jump-back).
+  addHistoryEntry('Finish (In service - Available)', actor.role, actor.name, it.name, 'queue', { skipCloudWrite: true });
+  save();
+  renderQueue();
+  renderService();
 
 }
 
@@ -9641,12 +9647,6 @@ async function move(i,d){
   queue[j]=queue[i];
   queue[i]=t;
   renderQueue();
-  try {
-    await save();
-  } finally {
-    _queueReorderMoveInFlight = false;
-    renderQueue();
-  }
 
   // Reorder is done in reorder mode which requires manager/admin code
   const lastValidated = window.__ff_lastValidatedCode;
@@ -9667,7 +9667,13 @@ async function move(i,d){
     const name = window.__ff_actorName || 'Manager';
     actor = { role, name };
   }
-  addHistoryEntry('Reorder list', actor.role, actor.name, '', 'queue');
+  addHistoryEntry('Reorder list', actor.role, actor.name, '', 'queue', { skipCloudWrite: true });
+  try {
+    await save();
+  } finally {
+    _queueReorderMoveInFlight = false;
+    renderQueue();
+  }
 
 }
 
@@ -10338,18 +10344,87 @@ async function guardHold(fn){
   }
 }
 
+/** Install queue PIN auth helpers even if Apps Panel init returned early.
+ *  (ffAuthByPin used to live only inside initializeAppsPanel — a missing apps
+ *  DOM node or mid-init error left START/FINISH permanently "still loading".) */
+function ffEnsureStaffAuthHelpers() {
+  function readStaffList() {
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        if (store && Array.isArray(store.staff)) return store.staff;
+      }
+    } catch (_) {}
+    try {
+      const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+      return Array.isArray(store.staff) ? store.staff : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  function staffIsOwnerRow(staff) {
+    if (!staff) return false;
+    if (typeof window.ffStaffRowIsSalonOwner === 'function') {
+      try { if (window.ffStaffRowIsSalonOwner(staff)) return true; } catch (_) {}
+    }
+    const roleLc = String(staff.role || '').toLowerCase().trim();
+    return staff.isOwner === true || roleLc === 'owner';
+  }
+  function staffIsAdminManagerOrOwner(staff) {
+    if (!staff) return false;
+    if (staffIsOwnerRow(staff)) return true;
+    if (staff.isAdmin === true || staff.isManager === true) return true;
+    const roleLc = String(staff.role || '').toLowerCase().trim();
+    return roleLc === 'admin' || roleLc === 'manager' || roleLc === 'owner';
+  }
+  if (typeof window.ffAuthByPin !== 'function') {
+    window.ffAuthByPin = function ffAuthByPin(pin) {
+      try {
+        const normalizedPin = String(pin || '').trim();
+        if (!normalizedPin) return { ok: false };
+        const staff = readStaffList().find((s) =>
+          s && s.isArchived !== true && s.pin && String(s.pin).trim() === normalizedPin
+        );
+        return staff ? { ok: true, staff: staff } : { ok: false };
+      } catch (e) {
+        console.error('[ffAuthByPin] Error authenticating by PIN:', e);
+        return { ok: false };
+      }
+    };
+  }
+  if (typeof window.ffIsAdminOrManagerPin !== 'function') {
+    window.ffIsAdminOrManagerPin = function ffIsAdminOrManagerPin(pin) {
+      try {
+        const normalizedPin = String(pin || '').trim();
+        if (!normalizedPin) return false;
+        const auth = typeof window.ffAuthByPin === 'function' ? window.ffAuthByPin(normalizedPin) : { ok: false };
+        return !!(auth && auth.ok && staffIsAdminManagerOrOwner(auth.staff));
+      } catch (e) {
+        console.error('[ffIsAdminOrManagerPin] Error checking PIN:', e);
+        return false;
+      }
+    };
+  }
+  window.ffStaffIsAdminManagerOrOwner = staffIsAdminManagerOrOwner;
+  window.ffEnsureStaffAuthHelpers = ffEnsureStaffAuthHelpers;
+}
+window.ffEnsureStaffAuthHelpers = ffEnsureStaffAuthHelpers;
+ffEnsureStaffAuthHelpers();
+
 async function guardStart(workerName, idx, fn){
   if (typeof ffCurrentUserHasQueueLockedViewPermission === 'function' && ffCurrentUserHasQueueLockedViewPermission()) {
     ffQueueLockedViewToast();
     return;
   }
 
+  ffEnsureStaffAuthHelpers();
+
   const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to START') : prompt('Enter PIN to START');
 
   if(entry==null) return;
 
   // Use staff-based PIN authentication
-  if (!window.ffAuthByPin) {
+  if (typeof window.ffAuthByPin !== 'function') {
     if (typeof window.ffStyledAlert === 'function') {
       await window.ffStyledAlert('Staff authentication is still loading. Please wait a moment and try again.', 'Not authorized');
     } else {
@@ -10391,7 +10466,7 @@ async function guardStart(workerName, idx, fn){
     console.error('[guardStart] Error finding target staff:', e);
   }
 
-  // Check authorization: allow if PIN matches target technician OR Admin/Manager
+  // Check authorization: allow if PIN matches target technician OR Admin/Manager/Owner
   const targetResolvedId = String((targetStaff && (targetStaff.id || targetStaff.staffId)) || targetStaffId || '').trim();
   const targetResolvedName = String((targetStaff && targetStaff.name) || targetName || '').trim();
   const isTargetTechnician =
@@ -10399,7 +10474,10 @@ async function guardStart(workerName, idx, fn){
       (authStaffId && targetResolvedId && authStaffId === targetResolvedId) ||
       (authStaffName && targetResolvedName && normalizeName(authStaffName) === normalizeName(targetResolvedName))
     );
-  const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
+  const isAdminOrManager = typeof window.ffStaffIsAdminManagerOrOwner === 'function'
+    ? window.ffStaffIsAdminManagerOrOwner(authenticatedStaff)
+    : (authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true ||
+       authenticatedStaff.isOwner === true || String(authenticatedStaff.role || '').toLowerCase() === 'owner');
 
   if (!isTargetTechnician && !isAdminOrManager) {
     if (typeof window.ffStyledAlert === 'function') {
@@ -10417,8 +10495,11 @@ async function guardStart(workerName, idx, fn){
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
   } else {
-    // Admin or Manager starting the target technician
-    const role = authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager';
+    // Owner / Admin / Manager starting the target technician
+    const roleLc = String(authenticatedStaff.role || '').toLowerCase();
+    const role = (authenticatedStaff.isOwner === true || roleLc === 'owner')
+      ? 'Owner'
+      : (authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager');
     const name = authenticatedStaff.name || '';
     window.__ff_lastValidatedCode = { role: role, name: name };
     window.__ff_actorRole = role;
@@ -10435,12 +10516,14 @@ async function guardFinish(workerName, fn){
     return;
   }
 
+  ffEnsureStaffAuthHelpers();
+
   const entry = window.securePromptOnce ? await window.securePromptOnce('Enter PIN to FINISH') : prompt('Enter PIN to FINISH');
 
   if(entry==null) return;
 
   // Use staff-based PIN authentication
-  if (!window.ffAuthByPin) {
+  if (typeof window.ffAuthByPin !== 'function') {
     if (typeof window.ffStyledAlert === 'function') {
       await window.ffStyledAlert('Staff authentication is still loading. Please wait a moment and try again.', 'Not authorized');
     } else {
@@ -10471,9 +10554,12 @@ async function guardFinish(workerName, fn){
     console.error('[guardFinish] Error finding target staff:', e);
   }
 
-  // Check authorization: allow if PIN matches target technician OR Admin/Manager
+  // Check authorization: allow if PIN matches target technician OR Admin/Manager/Owner
   const isTargetTechnician = targetStaff && authenticatedStaff.id === targetStaff.id;
-  const isAdminOrManager = authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true;
+  const isAdminOrManager = typeof window.ffStaffIsAdminManagerOrOwner === 'function'
+    ? window.ffStaffIsAdminManagerOrOwner(authenticatedStaff)
+    : (authenticatedStaff.isAdmin === true || authenticatedStaff.isManager === true ||
+       authenticatedStaff.isOwner === true || String(authenticatedStaff.role || '').toLowerCase() === 'owner');
 
   if (!isTargetTechnician && !isAdminOrManager) {
     if (typeof window.ffStyledAlert === 'function') {
@@ -10491,8 +10577,11 @@ async function guardFinish(workerName, fn){
     window.__ff_actorRole = 'Tech';
     window.__ff_actorName = workerName;
   } else {
-    // Admin or Manager finishing the target technician
-    const role = authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager';
+    // Owner / Admin / Manager finishing the target technician
+    const roleLc = String(authenticatedStaff.role || '').toLowerCase();
+    const role = (authenticatedStaff.isOwner === true || roleLc === 'owner')
+      ? 'Owner'
+      : (authenticatedStaff.isAdmin === true ? 'Admin' : 'Manager');
     const name = authenticatedStaff.name || '';
     window.__ff_lastValidatedCode = { role: role, name: name };
     window.__ff_actorRole = role;
@@ -46212,15 +46301,36 @@ eye.addEventListener("mouseup",hide); eye.addEventListener("mouseleave",hide); e
 
 window.__ff_lastSaveTime = 0;
 
+// Rolling client event trace — rides along on every cloud write (debugTrace)
+// so bad writes can be traced to the exact UI sequence that produced them.
+window.__ffQTrace = function (ev) {
+  try {
+    var arr = (window.__ff_queueTrace = window.__ff_queueTrace || []);
+    arr.push(new Date().toISOString().slice(11, 23) + ' ' + ev);
+    if (arr.length > 30) arr.splice(0, arr.length - 30);
+  } catch (_) {}
+};
+
 async function save(){
   window.__ff_lastSaveTime = Date.now();
+  window.__ffQTrace('ui:save q=' + (Array.isArray(queue) ? queue.length : '?') + ' s=' + (Array.isArray(service) ? service.length : '?'));
   ls("ffv24_settings",settings); ls("ffv24_queue",queue); ls("ffv24_service",service); ls("ffv24_log",log); syncWorkersToUsers();
   if(typeof window.ffSyncPresenceFromQueueState==='function') window.ffSyncPresenceFromQueueState(queue, service);
   if(typeof window.queueCloudWrite==='function') {
     try {
-      return await window.queueCloudWrite();
+      const result = await window.queueCloudWrite();
+      // A silently blocked/failed cloud write is how queue moves "jump back":
+      // the UI shows the move but the cloud never got it, and the next server
+      // pull reverts the screen. Surface it instead of failing silently.
+      if (result && result.ok === false && window.ffToast && typeof window.ffToast.warning === 'function') {
+        window.ffToast.warning('Queue sync failed: ' + (result.reason || 'unknown'), 6000);
+      }
+      return result;
     } catch (err) {
       console.warn('[Queue] queueCloudWrite failed from save()', err);
+      if (window.ffToast && typeof window.ffToast.error === 'function') {
+        window.ffToast.error('Queue sync error: ' + (err?.message || err), 6000);
+      }
       return { ok: false, reason: 'queue-cloud-write-threw', error: err?.message || String(err) };
     }
   }
@@ -46545,20 +46655,30 @@ window.__ffQueueCloudInit = function() {
   window.initQueueCloud({
     applyState: function(q, s, l, qd, meta) {
       // After a local save, ignore Firestore updates briefly to avoid a race
-      // with our own slow write / its echo snapshot. BUT a genuine remote
-      // change (meta.remote === true: a higher rev written by ANOTHER device)
-      // must always be applied so two active devices converge instead of
-      // ignoring each other for seconds (the "names flap every second" bug).
-      // Returning false signals queue-cloud that we did NOT reconcile with the
-      // server, so it must not advance the merge base — otherwise the next
-      // write would resurrect the list we never actually cleared.
+      // with our own slow write / its echo snapshot. Returning false signals
+      // queue-cloud that we did NOT reconcile with the server, so it must not
+      // advance the merge base — otherwise the next write would resurrect the
+      // list we never actually cleared.
       const forceApply = meta && meta.force === true;
       const isRemote = meta && meta.remote === true;
+      const applyReason = meta && meta.reason ? String(meta.reason) : '';
+      const withinLocalSaveGrace = Date.now() - window.__ff_lastSaveTime < 6000;
+      const isAutoResetApply = applyReason === 'server-auto-reset' || applyReason === 'auto-reset';
       // While reorder UI is active, defer non-remote snapshots (echo/cache) so
-      // Firestore cannot clobber the in-progress local order. Genuine remote
-      // changes (another device, higher rev) still apply. Explicit force still wins.
-      if (!forceApply && !isRemote && typeof reorderMode !== 'undefined' && reorderMode) return false;
-      if (!forceApply && !isRemote && Date.now() - window.__ff_lastSaveTime < 6000) return false;
+      // Firestore cannot clobber the in-progress local order.
+      if (!forceApply && !isRemote && typeof reorderMode !== 'undefined' && reorderMode) {
+        window.__ffQTrace('ui:defer-reorder ' + applyReason);
+        return false;
+      }
+      // CRITICAL: during local-save grace, defer ALL cloud applies (including
+      // remote/force). Allowing remote:true through here was the Available→
+      // Service jump-back: a stale higher-rev snapshot overwrote the move
+      // before our write/merge finished. Auto-reset is the only exception.
+      // Multi-device convergence continues via queue-cloud merge-on-write.
+      if (withinLocalSaveGrace && !isAutoResetApply) {
+        window.__ffQTrace('ui:defer-grace ' + applyReason + (isRemote ? ' remote' : ''));
+        return false;
+      }
       // Boot anti-flicker: before the queue-cloud has confirmed an authoritative
       // SERVER snapshot, never clobber a non-empty in-memory queue with an empty
       // cloud payload (e.g. an empty cached snapshot). The list would blink away
@@ -46568,8 +46688,20 @@ window.__ffQueueCloudInit = function() {
       const haveLocal = (Array.isArray(queue) && queue.length > 0) ||
                         (Array.isArray(service) && service.length > 0);
       if (!forceApply && incomingEmpty && haveLocal && !window.__ff_queueCloudServerConfirmed) {
+        window.__ffQTrace('ui:defer-empty-boot');
         return false;
       }
+      // Trace only applies that actually CHANGE the visible lists (the 2s
+      // refresh re-applies an identical state constantly — not interesting).
+      try {
+        var _sig = (Array.isArray(q) ? q.map(function (x) { return x && x.name; }).join('|') : '') +
+          '~' + (Array.isArray(s) ? s.map(function (x) { return x && x.name; }).join('|') : '');
+        if (_sig !== window.__ff_lastApplySig) {
+          window.__ff_lastApplySig = _sig;
+          window.__ffQTrace('ui:apply ' + (applyReason || (isRemote ? 'remote' : 'snap')) +
+            ' q=' + (Array.isArray(q) ? q.length : 0) + ' s=' + (Array.isArray(s) ? s.length : 0));
+        }
+      } catch (_) {}
       queue = Array.isArray(q) ? q : [];
       service = Array.isArray(s) ? s : [];
       log = l;

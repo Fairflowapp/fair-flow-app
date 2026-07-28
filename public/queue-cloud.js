@@ -49,6 +49,53 @@ let _lastCloudRev = 0;
 let _lastServerState = { queue: [], service: [], log: [] };
 let _writeChain = Promise.resolve();
 
+// Version marker + rolling client-side event trace. The trace rides along on
+// every queueState write (payload.debugTrace) so a bad write observed in the
+// cloud can be traced back to the exact client-side sequence that produced it.
+const QUEUE_CLIENT_VER = "20260728_cloud_wins_guard";
+function ffQueueTrace(ev, info) {
+  try {
+    if (typeof window === "undefined") return;
+    const arr = (window.__ff_queueTrace = window.__ff_queueTrace || []);
+    arr.push(new Date().toISOString().slice(11, 23) + " " + ev + (info ? " " + JSON.stringify(info) : ""));
+    if (arr.length > 30) arr.splice(0, arr.length - 30);
+  } catch (_) {}
+}
+
+// ── Remote diagnostics (salons/{id}/queueDiag/{device}) ─────────────────────
+// The queue "jump back" has been a SILENT failure: the device's cloud write
+// never reaches the server, so nothing shows up in the queueState doc to
+// debug with. This side-channel reports each save attempt + the rolling trace
+// on a SEPARATE doc with a direct setDoc (not chained on _writeChain), so a
+// stuck/blocked write pipeline is itself observable from the cloud.
+function ffDiagDeviceId() {
+  try {
+    let id = localStorage.getItem("ff_queue_diag_device");
+    if (!id) {
+      id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      localStorage.setItem("ff_queue_diag_device", id);
+    }
+    return id;
+  } catch (_) { return "unknown"; }
+}
+let _pendingWrites = 0;
+function writeQueueDiag(event, extra) {
+  try {
+    if (!_salonId) return;
+    const ref = doc(db, "salons", _salonId, "queueDiag", ffDiagDeviceId());
+    const body = Object.assign({
+      updatedAt: serverTimestamp(),
+      event,
+      uid: (auth.currentUser && auth.currentUser.uid) || null,
+      clientVer: QUEUE_CLIENT_VER,
+      pendingWrites: _pendingWrites,
+      docId: queueStateDocIdFor(_locationId),
+      trace: (typeof window !== "undefined" && Array.isArray(window.__ff_queueTrace)) ? window.__ff_queueTrace.slice(-30) : [],
+    }, extra || {});
+    setDoc(ref, body, { merge: true }).catch(() => {});
+  } catch (_) {}
+}
+
 function queueWriteResult(ok, reason, extra = {}) {
   return Object.assign({
     ok: ok === true,
@@ -138,6 +185,22 @@ function setLastServerState(queue, service, log) {
     service: ffCloneArray(service),
     log: ffCloneArray(log),
   };
+  setAuthServerState(queue, service, log);
+}
+
+// Freshest AUTHORITATIVE cloud state this device has seen. Unlike
+// _lastServerState (the 3-way merge base, which only advances when the UI
+// actually reconciled a snapshot), this advances on EVERY server-confirmed
+// snapshot — even ones the UI deferred — and on every fresh server read. It is
+// the reference for the data-loss guard below: "what is in the cloud right
+// now" must never be silently deleted by a write from this device.
+let _lastAuthServerState = null;
+function setAuthServerState(queue, service, log) {
+  _lastAuthServerState = {
+    queue: ffCloneArray(queue),
+    service: ffCloneArray(service),
+    log: ffCloneArray(log),
+  };
 }
 
 // Identity of a queue/service entry: prefer staffId, fall back to name, then a
@@ -151,30 +214,71 @@ function ffQueueItemKey(it) {
   try { return "j:" + JSON.stringify(it); } catch (_) { return "?"; }
 }
 
+// All identity keys for one entry. Available→Service often enriches a name-only
+// row with staffId; treating that as a brand-new person made the resurrection
+// guard block the write and force-apply the old server state (person jumps back
+// to Available).
+function ffQueueItemAllKeys(it) {
+  if (it == null) return ["∅"];
+  if (typeof it !== "object") return ["v:" + String(it)];
+  const keys = [];
+  if (it.staffId != null && String(it.staffId).trim() !== "") {
+    keys.push("s:" + String(it.staffId));
+  }
+  if (it.name != null && String(it.name).trim() !== "") {
+    keys.push("n:" + String(it.name).trim().toLowerCase());
+  }
+  if (!keys.length) {
+    try { keys.push("j:" + JSON.stringify(it)); } catch (_) { keys.push("?"); }
+  }
+  return keys;
+}
+
+function ffKeysOverlap(aKeys, bKeySet) {
+  for (const k of aKeys) {
+    if (bKeySet.has(k)) return true;
+  }
+  return false;
+}
+
+function ffCollectAllKeys(items) {
+  const keys = new Set();
+  (Array.isArray(items) ? items : []).forEach((it) => {
+    ffQueueItemAllKeys(it).forEach((k) => keys.add(k));
+  });
+  return keys;
+}
+
 /**
  * 3-way merge of one list (queue or service). base = common ancestor (last
  * server state we held), local = our current list (with our pending change),
  * server = fresh authoritative list. Returns server with OUR additions added
  * and OUR removals removed, so concurrent changes from both devices survive.
+ *
+ * Uses all identity keys (staffId + name) so a name-only Available row that is
+ * moved to In Service with a staffId still counts as the same person.
  */
 function ffMergeList(base, local, server) {
   base = Array.isArray(base) ? base : [];
   local = Array.isArray(local) ? local : [];
   server = Array.isArray(server) ? server : [];
-  const baseKeys = new Set(base.map(ffQueueItemKey));
-  const localKeys = new Set(local.map(ffQueueItemKey));
+  const baseKeys = ffCollectAllKeys(base);
+  const localKeys = ffCollectAllKeys(local);
   // What WE added (in local, not in base) and removed (in base, not in local).
-  const localAdded = local.filter((it) => !baseKeys.has(ffQueueItemKey(it)));
-  const weRemoved = new Set(
-    base.filter((it) => !localKeys.has(ffQueueItemKey(it))).map(ffQueueItemKey)
+  const localAdded = local.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), baseKeys));
+  const weRemoved = ffCollectAllKeys(
+    base.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), localKeys))
   );
   // Start from server, drop the entries we intentionally removed, then append
   // our additions that aren't already present.
-  const result = server.filter((it) => !weRemoved.has(ffQueueItemKey(it)));
-  const present = new Set(result.map(ffQueueItemKey));
+  const result = server.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), weRemoved));
+  const present = ffCollectAllKeys(result);
   for (const it of localAdded) {
-    const k = ffQueueItemKey(it);
-    if (!present.has(k)) { result.push(it); present.add(k); }
+    const keys = ffQueueItemAllKeys(it);
+    if (!ffKeysOverlap(keys, present)) {
+      result.push(it);
+      keys.forEach((k) => present.add(k));
+    }
   }
   return result;
 }
@@ -203,11 +307,59 @@ function ffMergeLog(server, local) {
   return out;
 }
 
+// RETENTION for the history log stored in the queueState doc. The log grew
+// unbounded (5,700+ entries ≈ 975KB) and pushed the doc against Firestore's
+// 1MiB limit — at that size the security-rules evaluation (diff of old vs new
+// doc) fails and EVERY write is rejected with permission-denied. That silent
+// rejection is what made queue moves "jump back".
+// Two limits, applied on every cloud write:
+//   1. Age: entries older than 60 days are dropped (business decision — no
+//      need to keep queue history longer than that).
+//   2. Count: hard cap as a size safety net for very busy salons.
+// Newest entries live at the END of the array, so we keep the tail. Entries
+// without a usable timestamp are kept (can't date them) and age out via the
+// count cap. Older history was archived server-side (queueLogArchive).
+const QUEUE_CLOUD_LOG_CAP = 1500;
+const QUEUE_CLOUD_LOG_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+function ffCapLog(list) {
+  if (!Array.isArray(list)) return [];
+  const cutoff = Date.now() - QUEUE_CLOUD_LOG_MAX_AGE_MS;
+  let out = list.filter((e) => {
+    const ts = e && typeof e.ts === "number" ? e.ts : 0;
+    return !ts || ts >= cutoff;
+  });
+  if (out.length > QUEUE_CLOUD_LOG_CAP) out = out.slice(-QUEUE_CLOUD_LOG_CAP);
+  return out;
+}
+
 function ffMerge3(base, local, server) {
+  let queue = ffMergeList(base.queue, local.queue, server.queue);
+  let service = ffMergeList(base.service, local.service, server.service);
+  // Cross-list move enforcement — ONLY for people THIS device moved since its
+  // last server sync (present in local list but not in base list). Using the
+  // full local lists here was the jump-back bug: a second device whose stale
+  // local queue still held the person stripped them out of In Service on its
+  // next merged write, undoing the move made on the first device.
+  const baseServiceKeys = ffCollectAllKeys(base && base.service);
+  const baseQueueKeys = ffCollectAllKeys(base && base.queue);
+  const weMovedToService = ffCollectAllKeys(
+    (Array.isArray(local && local.service) ? local.service : [])
+      .filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), baseServiceKeys))
+  );
+  const weMovedToQueue = ffCollectAllKeys(
+    (Array.isArray(local && local.queue) ? local.queue : [])
+      .filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), baseQueueKeys))
+  );
+  if (weMovedToService.size) {
+    queue = queue.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), weMovedToService));
+  }
+  if (weMovedToQueue.size) {
+    service = service.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), weMovedToQueue));
+  }
   return {
-    queue: ffMergeList(base.queue, local.queue, server.queue),
-    service: ffMergeList(base.service, local.service, server.service),
-    log: ffMergeLog(server.log, local.log),
+    queue,
+    service,
+    log: ffCapLog(ffMergeLog(server.log, local.log)),
   };
 }
 
@@ -223,24 +375,101 @@ function ffMerge3(base, local, server) {
 function ffWriteResurrectsRemoved(localState) {
   if (!localState) return false;
   const base = _lastServerState || { queue: [], service: [], log: [] };
-  const serverKeys = new Set(
-    []
-      .concat(Array.isArray(base.queue) ? base.queue : [])
-      .concat(Array.isArray(base.service) ? base.service : [])
-      .map(ffQueueItemKey)
-  );
+  const serverKeys = new Set();
+  []
+    .concat(Array.isArray(base.queue) ? base.queue : [])
+    .concat(Array.isArray(base.service) ? base.service : [])
+    .forEach((it) => {
+      ffQueueItemAllKeys(it).forEach((k) => serverKeys.add(k));
+    });
   const localItems = []
     .concat(Array.isArray(localState.queue) ? localState.queue : [])
     .concat(Array.isArray(localState.service) ? localState.service : []);
   const hasUnbackedNewPerson = localItems.some(
-    (it) => !serverKeys.has(ffQueueItemKey(it))
+    (it) => !ffQueueItemAllKeys(it).some((k) => serverKeys.has(k))
   );
   if (!hasUnbackedNewPerson) return false;
-  const localLogLen = Array.isArray(localState.log) ? localState.log.length : 0;
-  const baseLogLen = Array.isArray(base.log) ? base.log.length : 0;
-  // A genuine add/move grows the log; if ours did not, the "new" person is an
-  // unlogged stale-cache resurrection, not a real action.
-  return localLogLen <= baseLogLen;
+  // A genuine add/move writes a NEW history row. Detect by entry keys, not by
+  // array length: with the log capped, appending a row + dropping the oldest
+  // keeps the length equal, so length comparison would falsely flag real
+  // actions as resurrections.
+  const baseLogKeys = new Set((Array.isArray(base.log) ? base.log : []).map(ffLogEntryKey));
+  const hasNewLogRows = (Array.isArray(localState.log) ? localState.log : [])
+    .some((e) => !baseLogKeys.has(ffLogEntryKey(e)));
+  return !hasNewLogRows;
+}
+
+// ── Cloud data-loss guard (final funnel — the cloud always wins) ─────────────
+// Root cause of the 2026-07-28 queue wipe: a phone whose write was delayed
+// (backgrounded / offline / stuck for an hour) eventually pushed its OLD
+// snapshot with a valid rev, silently deleting 4 people who had joined in the
+// meantime AND their history rows. Every guard upstream can be bypassed by
+// some timing, so this is enforced at the single point every content write
+// passes through (writeAt):
+//   1. The history log is append-only: the authoritative cloud log is unioned
+//      into the outgoing write, so a stale payload can never roll history back.
+//   2. A person present in the cloud may only be REMOVED by a write that also
+//      carries a FRESH new history row (unknown to the cloud, stamped within
+//      the last few minutes) naming that worker — which every genuine
+//      remove/leave action creates. A stale payload has no such rows, so
+//      everyone it would have wiped is restored into the write.
+// Explicit replace flows (manual/auto reset, clear-history, retention-prune)
+// skip this guard — those intentionally shrink the doc.
+const QUEUE_REMOVAL_JUSTIFY_WINDOW_MS = 10 * 60 * 1000;
+function ffNormWorkerName(v) {
+  return String(v == null ? "" : v).trim().toLowerCase();
+}
+function ffProtectCloudData(body, allowExplicitReplace) {
+  try {
+    if (allowExplicitReplace) return body;
+    const srv = _lastAuthServerState;
+    if (!srv) return body;
+    const srvQueue = Array.isArray(srv.queue) ? srv.queue : [];
+    const srvService = Array.isArray(srv.service) ? srv.service : [];
+    const srvLog = Array.isArray(srv.log) ? srv.log : [];
+    if (!srvQueue.length && !srvService.length && !srvLog.length) return body;
+    const out = Object.assign({}, body, {
+      queue: Array.isArray(body.queue) ? body.queue.slice() : [],
+      service: Array.isArray(body.service) ? body.service.slice() : [],
+      log: Array.isArray(body.log) ? body.log.slice() : [],
+    });
+    // 1. History is append-only relative to the cloud.
+    out.log = ffCapLog(ffMergeLog(srvLog, out.log));
+    // 2. Removals must be justified by a fresh new log row naming the worker.
+    const srvLogKeys = new Set(srvLog.map(ffLogEntryKey));
+    const now = Date.now();
+    const justified = new Set();
+    (Array.isArray(body.log) ? body.log : []).forEach((e) => {
+      if (!e || typeof e !== "object") return;
+      if (srvLogKeys.has(ffLogEntryKey(e))) return;
+      const ts = typeof e.ts === "number" ? e.ts : 0;
+      if (!ts || Math.abs(now - ts) > QUEUE_REMOVAL_JUSTIFY_WINDOW_MS) return;
+      const w = ffNormWorkerName(e.worker);
+      if (w) justified.add(w);
+    });
+    const presentKeys = ffCollectAllKeys(out.queue.concat(out.service));
+    const restored = [];
+    const restoreMissing = (srvList, outList, tag) => {
+      srvList.forEach((it) => {
+        if (ffKeysOverlap(ffQueueItemAllKeys(it), presentKeys)) return;
+        if (justified.has(ffNormWorkerName(it && it.name))) return;
+        outList.push(it);
+        ffQueueItemAllKeys(it).forEach((k) => presentKeys.add(k));
+        restored.push(tag + ":" + ((it && it.name) || "?"));
+      });
+    };
+    restoreMissing(srvQueue, out.queue, "q");
+    restoreMissing(srvService, out.service, "s");
+    if (restored.length) {
+      ffQueueTrace("write:guard-restored", { n: restored.length });
+      console.warn("[QueueCloud] write would drop people present in cloud — restored them", restored);
+      writeQueueDiag("guard-restored", { restored: restored.slice(0, 12) });
+    }
+    return out;
+  } catch (e) {
+    console.warn("[QueueCloud] cloud data-loss guard failed; writing unguarded", e);
+    return body;
+  }
 }
 
 async function getSalonId() {
@@ -328,6 +557,31 @@ function hasRecentLocalQueueWrite() {
   return lastSave > 0 && (Date.now() - lastSave) < RECENT_LOCAL_WRITE_GRACE_MS;
 }
 
+/** During a fresh local save, do not force-clobber the on-screen queue with a
+ *  server pull — that is exactly the Available→Service jump-back. Auto-reset
+ *  may still force-apply. */
+function shouldProtectRecentLocalQueueUi(applyReason) {
+  if (applyReason === "server-auto-reset" || applyReason === "auto-reset") return false;
+  return hasRecentLocalQueueWrite();
+}
+
+function forceApplyCloudState(queue, service, log, applyOpts) {
+  const reason = applyOpts && applyOpts.reason;
+  if (shouldProtectRecentLocalQueueUi(reason)) {
+    console.warn("[QueueCloud] skipped force-apply during recent local save", { reason: reason || null });
+    ffQueueTrace("apply:skip-recent-save", { reason: reason || null });
+    return false;
+  }
+  if (reason !== "cloud-refresh") {
+    ffQueueTrace("apply:force", { reason: reason || null, q: Array.isArray(queue) ? queue.length : 0, s: Array.isArray(service) ? service.length : 0 });
+  }
+  if (typeof _applyState === "function") {
+    _applyState(queue, service, log, null, applyOpts || { force: true });
+    if (typeof _onLogChange === "function") _onLogChange();
+  }
+  return true;
+}
+
 function queueStateHasData(state) {
   return !!state &&
     ((state.queue?.length || 0) + (state.service?.length || 0) + (state.log?.length || 0)) > 0;
@@ -412,6 +666,7 @@ function subscribe(salonId, locationId, opts = {}) {
     _lastCloudLogLen = 0;
     _lastCloudRev = 0;
     _lastServerState = { queue: [], service: [], log: [] };
+    _lastAuthServerState = null;
     try {
       localStorage.removeItem('ff_queues_v1');
       if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
@@ -464,7 +719,7 @@ function subscribe(salonId, locationId, opts = {}) {
         setDoc(ref, {
           queue: localState.queue || [],
           service: localState.service || [],
-          log: localState.log || [],
+          log: ffCapLog(localState.log || []),
           rev: (_lastCloudRev || 0) + 1,
           updatedAt: serverTimestamp()
         }).then(() => { _lastCloudRev = (_lastCloudRev || 0) + 1; })
@@ -518,7 +773,7 @@ function subscribe(salonId, locationId, opts = {}) {
         setDoc(ref, {
           queue: localState.queue || [],
           service: localState.service || [],
-          log: localState.log || [],
+          log: ffCapLog(localState.log || []),
           rev: baseRev + 1,
           updatedAt: serverTimestamp()
         }).then(() => { _lastCloudRev = baseRev + 1; })
@@ -564,6 +819,12 @@ function subscribe(salonId, locationId, opts = {}) {
       ? { remote: true, force: true, reason: "server-auto-reset" }
       : { remote: isGenuineRemote };
     const applied = _applyState(queue, service, log, null, applyOpts);
+    ffQueueTrace(applied !== false ? "snap:applied" : "snap:deferred", {
+      rev: snapRev,
+      remote: isGenuineRemote,
+      q: queue.length,
+      s: service.length,
+    });
     if (applied !== false) {
       console.log("[QueueCloud] snapshot applied", {
         salonId,
@@ -589,6 +850,11 @@ function subscribe(salonId, locationId, opts = {}) {
       _lastCloudRev = snapRev;
       // Remember this authoritative state as the 3-way merge base (Phase B).
       setLastServerState(queue, service, log);
+    } else if (isAuthoritative) {
+      // Snapshot deferred by the UI: do NOT advance the merge base / rev (that
+      // caused the resurrection bug), but DO remember what the cloud holds so
+      // the data-loss guard measures every write against the freshest truth.
+      setAuthServerState(queue, service, log);
     }
     if (typeof _onLogChange === "function") _onLogChange();
     // Apply queue settings (ff_queues_v1) from cloud — each location has its
@@ -638,11 +904,12 @@ function subscribe(salonId, locationId, opts = {}) {
   });
 }
 
-function writeState() {
+function writeState(capturedState) {
   if (!_salonId || !_getState) return Promise.resolve();
   if (!queueCloudScopeStillCurrent(_salonId, queueStateDocIdFor(_locationId), _subscriptionSeq)) {
     const activeSalon = currentWindowSalonId();
     const kioskSalon = kioskClaimSalonId();
+    ffQueueTrace("write:blocked-stale-scope");
     console.warn("[QueueCloud] blocked write for stale scope", {
       salonId: _salonId,
       activeSalon,
@@ -652,20 +919,29 @@ function writeState() {
     });
     return Promise.resolve(queueWriteResult(false, "stale-scope", { activeSalon, kioskSalon }));
   }
-  const state = _getState();
+  // Prefer the state captured at action time over the live state: the live
+  // state may have been clobbered while this write waited in the chain.
+  const state = capturedState || _getState();
   if (!state) return Promise.resolve();
   const ref = queueStateRef(_salonId, _locationId);
   const localCounts = stateCounts(state);
   const localEmpty = localCounts.queue + localCounts.service + localCounts.log === 0;
   const reason = queueCloudWriteReason();
+  ffQueueTrace("write:start", { reason, q: localCounts.queue, s: localCounts.service, captured: !!capturedState });
   const payload = {
     queue: state.queue || [],
     service: state.service || [],
-    log: state.log || [],
+    log: ffCapLog(state.log || []),
     updatedAt: serverTimestamp(),
     lastUpdateReason: reason,
     lastUpdatedByUid: auth.currentUser?.uid || null,
+    clientVer: QUEUE_CLIENT_VER,
   };
+  try {
+    if (typeof window !== "undefined" && Array.isArray(window.__ff_queueTrace)) {
+      payload.debugTrace = window.__ff_queueTrace.slice(-25);
+    }
+  } catch (_) {}
   // Also sync ff_queues_v1 (auto-reset settings). runtime.* is server-owned and
   // is stripped so this write can never clobber the auto-reset once-per-day stamp.
   try {
@@ -693,16 +969,30 @@ function writeState() {
   // .runtime.lastAutoResetDate stamped by the scheduled reset) survive the write.
   // queue/service/log are arrays and are replaced wholesale by merge (Firestore
   // does not element-merge arrays), so add/remove/reset semantics are unchanged.
-  const writeAt = (body, baseRev) => setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }), { merge: true })
+  const writeAt = (rawBody, baseRev) => {
+    // Final safety net: never delete people/history the cloud currently has
+    // unless this write carries a fresh action justifying it (see guard docs).
+    const body = ffProtectCloudData(rawBody, isExplicitIntent);
+    return setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }), { merge: true })
     .then(() => {
       if (_lastCloudRev <= baseRev) _lastCloudRev = baseRev + 1;
       // Our write is now the authoritative state — make it the next merge base.
       setLastServerState(body.queue || [], body.service || [], body.log || []);
       _lastCloudLogLen = Array.isArray(body.log) ? body.log.length : _lastCloudLogLen;
+      // A successful user write means we are past the morning auto-reset window
+      // for this device — stop treating later moves/adds as post-reset resurrection.
+      if (typeof window !== "undefined" && reason !== "auto-reset") {
+        window.__ff_queueLastCloudWasAutoReset = false;
+        if (window.__ff_queueLastCloudUpdateReason === "auto-reset") {
+          window.__ff_queueLastCloudUpdateReason = body.lastUpdateReason || reason || "";
+        }
+      }
       const result = queueWriteResult(true, "ok", { rev: baseRev + 1, reason: body.lastUpdateReason || reason });
+      ffQueueTrace("write:ok", { rev: baseRev + 1, q: Array.isArray(body.queue) ? body.queue.length : 0, s: Array.isArray(body.service) ? body.service.length : 0 });
       logQueueWrite("write ok", result);
       return result;
     });
+  };
 
   const commit = (attempt) => {
     attempt = attempt || 0;
@@ -728,6 +1018,7 @@ function writeState() {
         };
         _lastCloudRev = serverRev;
         _lastCloudLogLen = serverState.log.length;
+        setAuthServerState(serverState.queue, serverState.service, serverState.log);
 
         // For explicit reset/clear/seed intent there is no "merge" — the intent
         // is to replace, so just retry on top of the fresh rev.
@@ -738,21 +1029,18 @@ function writeState() {
           });
         }
 
-        // Normal write that lost the race. Replay OUR intent on top of the
-        // fresh server state via a 3-way merge keyed by staffId: keep every
-        // person both devices have, honor the removals WE made since our last
-        // server sync, and append people WE added at the back of the queue
-        // (correct queue semantics). This means a concurrent "add me" from
-        // another device is never dropped (the lost-add bug), and because the
-        // identity key is the stable staffId there are no duplicates. The log
-        // is unioned so no history is rolled back. We do NOT push the merged
-        // result onto the local UI here — the authoritative snapshot that
-        // follows our write drives the display, which avoids the mid-merge
-        // flashing/“wrong order” churn under heavy concurrency.
-        const localNow = _getState
-          ? _getState()
-          : { queue: payload.queue, service: payload.service, log: payload.log };
+        // Normal write that lost the race. Replay OUR ORIGINAL WRITE INTENT
+        // (the payload captured at the start of writeState), NOT live getState().
+        // A concurrent snapshot can force-apply the old server list into the UI
+        // while this write is in flight; if we merged from getState() after that
+        // clobber, Available→Service moves were lost and the person jumped back.
+        const localNow = {
+          queue: Array.isArray(payload.queue) ? payload.queue : [],
+          service: Array.isArray(payload.service) ? payload.service : [],
+          log: Array.isArray(payload.log) ? payload.log : [],
+        };
         const merged = ffMerge3(_lastServerState, localNow, serverState);
+        ffQueueTrace("write:rev-conflict-merge", { attempt, serverRev, q: merged.queue.length, s: merged.service.length });
         const mergedBody = Object.assign({}, payload, {
           queue: merged.queue,
           service: merged.service,
@@ -779,10 +1067,7 @@ function writeState() {
       if (typeof rev === "number") _lastCloudRev = rev;
       _lastCloudLogLen = Array.isArray(st.log) ? st.log.length : _lastCloudLogLen;
       setLastServerState(st.queue || [], st.service || [], st.log || []);
-      if (typeof _applyState === "function") {
-        _applyState(st.queue || [], st.service || [], st.log || [], null, { force: true });
-        if (typeof _onLogChange === "function") _onLogChange();
-      }
+      forceApplyCloudState(st.queue || [], st.service || [], st.log || [], { force: true });
     };
     if (serverState) { apply(serverState, serverRev); return Promise.resolve(); }
     return getDocFromServer(ref).then((snap) => {
@@ -813,6 +1098,7 @@ function writeState() {
       const cloudHasData =
         cloudCounts.queue + cloudCounts.service + cloudCounts.log > 0;
       if (!cloudHasData) return commit();
+      ffQueueTrace("write:blocked-pre-sync");
       console.warn("[QueueCloud] blocked pre-sync overwrite of non-empty cloud state", {
         salonId: _salonId,
         locationId: _locationId || QUEUE_STATE_DEFAULT,
@@ -820,14 +1106,13 @@ function writeState() {
         localCounts,
         cloudCounts,
       });
-      if (typeof _applyState === "function") {
+      {
         const data = snap.data() || {};
         const sq = Array.isArray(data.queue) ? data.queue : [];
         const ss = Array.isArray(data.service) ? data.service : [];
         const sl = Array.isArray(data.log) ? data.log : [];
         setLastServerState(sq, ss, sl);
-        _applyState(sq, ss, sl, null, { force: true });
-        if (typeof _onLogChange === "function") _onLogChange();
+        forceApplyCloudState(sq, ss, sl, { force: true, reason: "pre-sync-overwrite-blocked" });
       }
       return queueWriteResult(false, "pre-sync-overwrite-blocked", { cloudCounts });
     }).catch((e) => {
@@ -857,6 +1142,7 @@ function writeState() {
   // tab has an explicit empty-overwrite window (manual/local reset) — the
   // resurrection check below still covers the general case.
   if (!localEmpty && serverConfirmed && lastWasAutoReset && !isExplicitIntent && ffWriteResurrectsRemoved(state)) {
+    ffQueueTrace("write:blocked-auto-reset-resurrection");
     console.warn("[QueueCloud] blocked write after server auto-reset (stale local queue)", {
       salonId: _salonId,
       locationId: _locationId || QUEUE_STATE_DEFAULT,
@@ -872,10 +1158,7 @@ function writeState() {
       const sl = Array.isArray(data.log) ? data.log : [];
       _lastCloudLogLen = sl.length;
       setLastServerState(sq, ss, sl);
-      if (typeof _applyState === "function") {
-        _applyState(sq, ss, sl, null, { force: true, reason: "server-auto-reset" });
-        if (typeof _onLogChange === "function") _onLogChange();
-      }
+      forceApplyCloudState(sq, ss, sl, { force: true, reason: "server-auto-reset" });
       return queueWriteResult(false, "auto-reset-resurrection-blocked", {
         localQueueLen: localCounts.queue,
         serverQueueLen: sq.length,
@@ -895,13 +1178,21 @@ function writeState() {
       const sl = Array.isArray(data.log) ? data.log : [];
       // Re-check against the FRESH server state (not just our cached baseline)
       // so a concurrent legitimate change elsewhere is respected.
-      const freshKeys = new Set(sq.concat(ss).map(ffQueueItemKey));
+      const freshKeys = new Set();
+      sq.concat(ss).forEach((it) => {
+        ffQueueItemAllKeys(it).forEach((k) => freshKeys.add(k));
+      });
       const localItems = []
         .concat(Array.isArray(state.queue) ? state.queue : [])
         .concat(Array.isArray(state.service) ? state.service : []);
-      const stillResurrecting = localItems.some((it) => !freshKeys.has(ffQueueItemKey(it)))
-        && (Array.isArray(state.log) ? state.log.length : 0) <= sl.length;
+      const freshLogKeys = new Set(sl.map(ffLogEntryKey));
+      const localHasNewLogRows = (Array.isArray(state.log) ? state.log : [])
+        .some((e) => !freshLogKeys.has(ffLogEntryKey(e)));
+      const stillResurrecting = localItems.some(
+        (it) => !ffQueueItemAllKeys(it).some((k) => freshKeys.has(k))
+      ) && !localHasNewLogRows;
       if (!stillResurrecting) return commit();
+      ffQueueTrace("write:blocked-stale-cache-resurrection");
       console.warn("[QueueCloud] blocked stale-cache resurrection after server reset", {
         salonId: _salonId,
         locationId: _locationId || QUEUE_STATE_DEFAULT,
@@ -911,10 +1202,9 @@ function writeState() {
       });
       _lastCloudLogLen = sl.length;
       setLastServerState(sq, ss, sl);
-      if (typeof _applyState === "function") {
-        _applyState(sq, ss, sl, null, { force: true });
-        if (typeof _onLogChange === "function") _onLogChange();
-      }
+      // During a fresh local move/save, keep the on-screen intent; only block the
+      // risky write. Force-applying here was snapping people back to Available.
+      forceApplyCloudState(sq, ss, sl, { force: true, reason: "stale-cache-resurrection-blocked" });
       return queueWriteResult(false, "stale-cache-resurrection-blocked", {
         localQueueLen: Array.isArray(state.queue) ? state.queue.length : 0,
         serverQueueLen: sq.length,
@@ -925,43 +1215,61 @@ function writeState() {
     });
   }
 
-  // ── Stale-overwrite guard (Option A, non-transactional) ───────────────────
-  // For a NON-empty local queue: if the last authoritative cloud snapshot we
-  // saw had MORE history than we currently hold, another device has already
-  // advanced this branch and our write would roll it back (an old/backgrounded
-  // phone clobbering the live queue). Confirm against the server and, if the
-  // cloud is genuinely ahead, pull it instead of overwriting. The common case
-  // (we are current or ahead) takes the fast path with NO extra read, so normal
-  // queue flow keeps full speed. No transaction is used, so there is no risk of
-  // the commit-400 failures the earlier transactional attempt caused.
+  // ── Stale-overwrite guard (merge, not block) ───────────────────────────────
+  // For a NON-empty local queue: if the cloud history is LONGER than what we
+  // hold locally, our raw write would roll the shared log back. This is NOT
+  // only the "old backgrounded phone" case — History retention pruning makes
+  // the LOCAL log legitimately shorter than the cloud log on healthy devices.
+  // Blocking here silently dropped every queue action from such a device (the
+  // Available→In Service move "jumped back" as other devices kept writing the
+  // old state). Instead of blocking, MERGE: keep the server's fuller history
+  // (union) and replay OUR queue/service intent on top of the fresh server
+  // state via the same 3-way merge used for rev conflicts. A truly stale
+  // device contributes no changes relative to its base, so its merged write
+  // degenerates to the server state — same safety as blocking, no data loss.
   if (!localEmpty) {
     const localLogLen = Array.isArray(state.log) ? state.log.length : 0;
     if (_lastCloudLogLen > localLogLen) {
       return getDocFromServer(ref).then((snap) => {
         if (!snap.exists()) return commit();
         const data = snap.data() || {};
-        _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
+        const serverRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : 0;
+        _lastCloudRev = serverRev;
         const cloudLogLen = Array.isArray(data.log) ? data.log.length : 0;
         const cc = stateCounts(data);
         const cloudHasData = cc.queue + cc.service + cc.log > 0;
         if (cloudHasData && cloudLogLen > localLogLen) {
-          console.warn("[QueueCloud] blocked stale overwrite (cloud history ahead)", {
+          const serverState = {
+            queue: Array.isArray(data.queue) ? data.queue : [],
+            service: Array.isArray(data.service) ? data.service : [],
+            log: Array.isArray(data.log) ? data.log : [],
+          };
+          _lastCloudLogLen = cloudLogLen;
+          setAuthServerState(serverState.queue, serverState.service, serverState.log);
+          const localNow = {
+            queue: Array.isArray(payload.queue) ? payload.queue : [],
+            service: Array.isArray(payload.service) ? payload.service : [],
+            log: Array.isArray(payload.log) ? payload.log : [],
+          };
+          const merged = ffMerge3(_lastServerState, localNow, serverState);
+          const mergedBody = Object.assign({}, payload, {
+            queue: merged.queue,
+            service: merged.service,
+            log: merged.log,
+          });
+          ffQueueTrace("write:history-ahead-merge", { localLogLen, cloudLogLen });
+          console.warn("[QueueCloud] cloud history ahead — merging local intent (was: blocked)", {
             salonId: _salonId,
             locationId: _locationId || QUEUE_STATE_DEFAULT,
             reason,
             localLogLen,
             cloudLogLen,
           });
-          _lastCloudLogLen = cloudLogLen;
-          if (typeof _applyState === "function") {
-            const sq = Array.isArray(data.queue) ? data.queue : [];
-            const ss = Array.isArray(data.service) ? data.service : [];
-            const sl = Array.isArray(data.log) ? data.log : [];
-            setLastServerState(sq, ss, sl);
-            _applyState(sq, ss, sl, null, { force: true });
-            if (typeof _onLogChange === "function") _onLogChange();
-          }
-          return queueWriteResult(false, "stale-overwrite-blocked", { localLogLen, cloudLogLen });
+          return writeAt(mergedBody, serverRev).catch((e2) => {
+            if (isPermissionDenied(e2)) return commit();
+            console.warn("[QueueCloud] history-ahead merged write failed", e2);
+            return queueWriteResult(false, "history-ahead-merge-failed", { error: queueErrorMessage(e2) });
+          });
         }
         return commit();
       }).catch((e) => {
@@ -990,13 +1298,12 @@ function writeState() {
       localCounts,
       cloudCounts,
     });
-    if (typeof _applyState === "function") {
+    {
       const sq = Array.isArray(emptyData.queue) ? emptyData.queue : [];
       const ss = Array.isArray(emptyData.service) ? emptyData.service : [];
       const sl = Array.isArray(emptyData.log) ? emptyData.log : [];
       setLastServerState(sq, ss, sl);
-      _applyState(sq, ss, sl, null, { force: true });
-      if (typeof _onLogChange === "function") _onLogChange();
+      forceApplyCloudState(sq, ss, sl, { force: true, reason: "empty-overwrite-blocked" });
     }
     return queueWriteResult(false, "empty-overwrite-blocked", { localCounts, cloudCounts });
   }).catch((e) => {
@@ -1061,13 +1368,53 @@ export function initQueueCloud(opts) {
  * Write current queue state to Firestore. Call from save() in index.html.
  */
 export function queueCloudWrite() {
+  // Capture the state SYNCHRONOUSLY, at the moment the user acted. The write
+  // chain may run this write seconds later (previous write still merging); by
+  // then the on-screen state can have been replaced by a cloud apply, and
+  // reading _getState() at that point would write the WRONG (reverted) state —
+  // the device itself then pushed its own move-undo to the cloud.
+  const captured = captureQueueIntent();
+  _pendingWrites++;
+  writeQueueDiag("save-queued", {
+    q: captured ? captured.queue.length : -1,
+    s: captured ? captured.service.length : -1,
+  });
+  // Race against a timeout so one hung Firestore call can never silently jam
+  // the write chain forever (every later queue action would then be dropped).
+  const step = () => Promise.race([
+    writeState(captured),
+    new Promise((resolve) => setTimeout(
+      () => resolve(queueWriteResult(false, "write-timeout")), 20000)),
+  ]);
   _writeChain = _writeChain
     .catch(() => {})
-    .then(() => writeState())
-    .then((result) => result && typeof result === "object" && "ok" in result
-      ? result
-      : queueWriteResult(true, "ok"));
+    .then(step)
+    .then((result) => {
+      const r = result && typeof result === "object" && "ok" in result
+        ? result
+        : queueWriteResult(true, "ok");
+      _pendingWrites = Math.max(0, _pendingWrites - 1);
+      writeQueueDiag("write-settled", { ok: r.ok === true, reason: r.reason || null });
+      return r;
+    });
   return _writeChain;
+}
+
+/** Deep-frozen snapshot of the app state at call time (user intent). */
+function captureQueueIntent() {
+  if (!_getState) return null;
+  try {
+    const st = _getState();
+    if (!st) return null;
+    return JSON.parse(JSON.stringify({
+      queue: Array.isArray(st.queue) ? st.queue : [],
+      service: Array.isArray(st.service) ? st.service : [],
+      log: Array.isArray(st.log) ? st.log : [],
+    }));
+  } catch (e) {
+    console.warn("[QueueCloud] captureQueueIntent failed", e);
+    return null;
+  }
 }
 
 /**
@@ -1135,8 +1482,11 @@ export function queueCloudReconnect() {
 /** Fetch current state from server (bypass cache) and apply so other computer sees updates. */
 export function queueCloudRefresh() {
   if (!_salonId || !_applyState) return Promise.resolve();
-  // Respect cooldown from local writes
-  if (typeof window !== "undefined" && (Date.now() - (window.__ff_lastSaveTime || 0)) < 6000) return Promise.resolve();
+  // Respect cooldown from local writes. Must be AT LEAST as long as the
+  // recent-local-write UI protection: this poll runs every 2s and used to
+  // force-apply the server state ~6s after a move, before the cloud write
+  // round-tripped — the Available→In Service jump-back.
+  if (hasRecentLocalQueueWrite()) return Promise.resolve();
   const expectedSalonId = _salonId;
   const expectedDocId = queueStateDocIdFor(_locationId);
   const expectedSeq = _subscriptionSeq;
@@ -1159,11 +1509,16 @@ export function queueCloudRefresh() {
       const queue = Array.isArray(data.queue) ? data.queue : [];
       const service = Array.isArray(data.service) ? data.service : [];
       const log = Array.isArray(data.log) ? data.log : [];
+      const prevRev = _lastCloudRev;
       _lastCloudRev = (typeof data.rev === "number" && data.rev >= 0) ? data.rev : _lastCloudRev;
+      if (_lastCloudRev !== prevRev) {
+        ffQueueTrace("refresh:new-rev", { from: prevRev, to: _lastCloudRev, q: queue.length, s: service.length });
+      }
       _lastCloudLogLen = log.length;
       setLastServerState(queue, service, log);
-      _applyState(queue, service, log, null, { force: true });
-      if (typeof _onLogChange === "function") _onLogChange();
+      // Protected apply: never clobber the on-screen queue during a fresh local
+      // save (the direct _applyState here bypassed that guard).
+      forceApplyCloudState(queue, service, log, { force: true, reason: "cloud-refresh" });
       // Apply queue settings from cloud — but never clobber a just-made local
       // edit (Auto Reset toggle) that hasn't round-tripped yet.
       const localSettingsEditActive = typeof window !== "undefined" &&
