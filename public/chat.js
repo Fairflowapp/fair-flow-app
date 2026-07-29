@@ -195,6 +195,192 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// ─── Live Desk: in-place conversation popup ─────────────────────────────────
+// Clicking a thread on the Live CHAT card opens the conversation in a small
+// popup ABOVE the Live screen (reply included) instead of leaving Live for the
+// Chat module. Own snapshot listener + state so the Chat tab is untouched.
+let _livePopupUnsub = null;
+let _livePopupConvId = null;
+let _livePopupMsgs = [];
+let _livePopupLoading = false;
+
+function _livePopupOtherUid() {
+  const uid = chatState.chatUserProfile?.uid || '';
+  const conv = _conversationById(_livePopupConvId);
+  return _otherUidFromParticipants(conv?.participants, uid) || '';
+}
+
+function _renderLivePopupMessages() {
+  const box = document.getElementById('liveChatPopupMessages');
+  if (!box) return;
+  const msgs = _livePopupMsgs;
+  if (!msgs.length) {
+    box.innerHTML = `<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">${_livePopupLoading ? 'Loading messages...' : 'No messages yet.'}</div>`;
+    return;
+  }
+  const uid = chatState.chatUserProfile?.uid || '';
+  const otherAvatarUrl = _avatarUrlForUid(_livePopupOtherUid());
+  // Bubble markup mirrors renderConversation() in chat-ui.js so the popup
+  // looks identical to the full Chat thread view.
+  let lastDayKey = '';
+  const parts = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const ev = msgs[i];
+    const dk = _chatDayKey(ev.sentAt);
+    if (dk && dk !== lastDayKey) {
+      lastDayKey = dk;
+      const lab = _chatDaySeparatorLabel(ev.sentAt);
+      if (lab) parts.push(`<div class="cb-day-sep" role="separator" aria-label="${escHtml(lab)}"><span>${escHtml(lab)}</span></div>`);
+    }
+    const mine = ev.senderUid === uid;
+    const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
+    const otherAvatarHtml = !mine && otherAvatarUrl
+      ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+      : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
+    parts.push(`
+      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
+        ${otherAvatarHtml}
+        <div class="cb-col">
+          ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
+          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
+            <div class="cb-title">${escHtml(ev.title||'')}</div>
+            ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
+          </div>
+          <span class="cb-time">${fmtTime(ev.sentAt)}</span>
+        </div>
+      </div>
+    `);
+  }
+  box.innerHTML = parts.join('');
+  setTimeout(() => { box.scrollTop = box.scrollHeight; }, 30);
+}
+
+async function _livePopupSend() {
+  if (!_chatFreeTextAllowed() || !chatState.chatUserProfile || !_livePopupConvId) return;
+  const ta = document.getElementById('liveChatPopupInput');
+  const body = String(ta?.value || '').trim();
+  if (!body) return;
+  const otherUid = _livePopupOtherUid();
+  if (!otherUid) return;
+  const btn = document.getElementById('liveChatPopupSend');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await _sendFreeTextDirect(otherUid, _nameForUidForSend(otherUid), _livePopupConvId, body);
+    if (ta) { ta.value = ''; ta.focus(); }
+  } catch (e) {
+    if (e && e.message === 'message_too_long') alert('Message is too long (max 8000 characters).');
+    else {
+      console.error('[Chat] live popup send failed', e);
+      alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+  }
+}
+
+function _ensureLiveChatPopupDom() {
+  let pop = document.getElementById('liveChatThreadPopup');
+  if (pop) return pop;
+  pop = document.createElement('div');
+  pop.id = 'liveChatThreadPopup';
+  // z-index: above the Live screen (9870), below full modals (100000+).
+  pop.style.cssText = 'display:none;position:fixed;right:24px;bottom:24px;width:400px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 130px);background:#fff;border-radius:16px;box-shadow:0 18px 50px rgba(15,23,42,0.35);z-index:9940;flex-direction:column;overflow:hidden;';
+  pop.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #eef0f4;background:#fafbfc;">
+      <span id="liveChatPopupAvatar" class="cb-avatar" style="flex:none;overflow:hidden;"></span>
+      <div style="flex:1;min-width:0;">
+        <div id="liveChatPopupName" style="font-weight:800;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Conversation</div>
+        <button type="button" id="liveChatPopupOpenFull" style="background:none;border:none;padding:0;font-size:11px;color:#7c3aed;cursor:pointer;font-weight:700;">Open full chat</button>
+      </div>
+      <button type="button" id="liveChatPopupClose" aria-label="Close conversation" style="flex:none;background:none;border:none;font-size:24px;line-height:1;color:#6b7280;cursor:pointer;padding:2px 6px;">&times;</button>
+    </div>
+    <div id="liveChatPopupMessages" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:12px;background:#fff;"></div>
+    <div id="liveChatPopupComposer" style="display:none;gap:8px;padding:10px 12px;border-top:1px solid #eef0f4;background:#fafbfc;align-items:flex-end;">
+      <textarea id="liveChatPopupInput" rows="1" placeholder="Type a reply..." style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px 10px;font-size:13px;font-family:inherit;min-height:38px;max-height:96px;"></textarea>
+      <button type="button" id="liveChatPopupSend" style="flex:none;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;">Send</button>
+    </div>
+    <div id="liveChatPopupNoPerm" style="display:none;padding:10px 12px;border-top:1px solid #eef0f4;background:#fafbfc;font-size:12px;color:#6b7280;text-align:center;">Replies use templates — tap "Open full chat" to reply.</div>
+  `;
+  document.body.appendChild(pop);
+  pop.querySelector('#liveChatPopupClose').addEventListener('click', () => window.ffCloseLiveChatThread());
+  pop.querySelector('#liveChatPopupOpenFull').addEventListener('click', () => {
+    const convId = _livePopupConvId;
+    window.ffCloseLiveChatThread();
+    if (typeof window.ffCloseLiveScreen === 'function') window.ffCloseLiveScreen();
+    if (convId && typeof window.ffOpenChatConversation === 'function') window.ffOpenChatConversation(convId);
+  });
+  pop.querySelector('#liveChatPopupSend').addEventListener('click', () => { void _livePopupSend(); });
+  pop.querySelector('#liveChatPopupInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void _livePopupSend(); }
+  });
+  return pop;
+}
+
+window.ffOpenLiveChatThread = async function (convId) {
+  if (!convId) return;
+  try {
+    if (!chatState.chatUserProfile) await loadChatUserProfile();
+    const salonId = chatState.chatUserProfile?.salonId;
+    if (!salonId) return;
+    const pop = _ensureLiveChatPopupDom();
+    if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
+    _livePopupConvId = convId;
+    _livePopupMsgs = [];
+    _livePopupLoading = true;
+
+    const otherUid = _livePopupOtherUid();
+    const nameEl = document.getElementById('liveChatPopupName');
+    if (nameEl) nameEl.textContent = _nameForUid(otherUid) || 'Conversation';
+    const avatarEl = document.getElementById('liveChatPopupAvatar');
+    if (avatarEl) {
+      const url = _avatarUrlForUid(otherUid);
+      avatarEl.innerHTML = url
+        ? `<img src="${String(url).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
+        : escHtml((_nameForUid(otherUid) || '?').charAt(0).toUpperCase());
+    }
+    const composer = document.getElementById('liveChatPopupComposer');
+    const noPerm = document.getElementById('liveChatPopupNoPerm');
+    const canType = _chatFreeTextAllowed();
+    if (composer) composer.style.display = canType ? 'flex' : 'none';
+    if (noPerm) noPerm.style.display = canType ? 'none' : 'block';
+
+    pop.style.display = 'flex';
+    _renderLivePopupMessages();
+
+    const msgQuery = query(
+      collection(db, `salons/${salonId}/conversations/${convId}/messages`),
+      orderBy('sentAt', 'asc'),
+      limit(300)
+    );
+    _livePopupUnsub = onSnapshot(
+      msgQuery,
+      snap => {
+        if (_livePopupConvId !== convId) return;
+        _livePopupMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _livePopupLoading = false;
+        _renderLivePopupMessages();
+        markThreadRead(convId).catch(() => {});
+      },
+      err => {
+        if (_livePopupConvId !== convId) return;
+        _livePopupLoading = false;
+        _renderLivePopupMessages();
+        console.error('[Chat] live popup messages snapshot error', err);
+      }
+    );
+  } catch (e) {
+    console.error('[Chat] ffOpenLiveChatThread failed', e);
+  }
+};
+
+window.ffCloseLiveChatThread = function () {
+  if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
+  _livePopupConvId = null;
+  _livePopupMsgs = [];
+  const pop = document.getElementById('liveChatThreadPopup');
+  if (pop) pop.style.display = 'none';
+};
+
 // Shared thread-card builder used by both the Chat module list and the Live Desk
 // so the two always look identical.
 

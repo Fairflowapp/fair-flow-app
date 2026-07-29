@@ -50621,6 +50621,11 @@ function hookSettingsGuard_DISABLED(){
         var screen = document.getElementById("liveScreen");
         if (screen) screen.style.display = "none";
         ffSetLiveFabState(false);
+        // The conversation popup lives on top of the Live screen — never leave
+        // it orphaned when Live closes.
+        if (typeof window.ffCloseLiveChatThread === "function") {
+          try { window.ffCloseLiveChatThread(); } catch (_) {}
+        }
       }
       window.ffRenderLiveScreen = renderLiveScreen;
       window.ffOpenLiveScreen = openLiveScreen;
@@ -50663,7 +50668,13 @@ function hookSettingsGuard_DISABLED(){
             if (!row) return;
             var id = row.getAttribute("data-live-chat");
             if (!id) return;
-            // Chat is a full screen (no modal): switch to Chat and open the conversation.
+            // Stay in Live: open the conversation in a reply popup ABOVE the
+            // Live screen instead of leaving for the Chat module.
+            if (typeof window.ffOpenLiveChatThread === "function") {
+              window.ffOpenLiveChatThread(id);
+              return;
+            }
+            // Fallback (chat module not loaded yet): legacy full-chat navigation.
             closeLiveScreen();
             if (typeof window.ffOpenChatConversation === "function") window.ffOpenChatConversation(id);
             else if (typeof window.goToChat === "function") window.goToChat();
