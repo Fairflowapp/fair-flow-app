@@ -98,7 +98,7 @@ import {
   _chatRenderFlowWizard,
   _updateChatSendBtn,
   _updateRecipientSummary,
-} from "./chat-ui.js?v=20260701_chat_ui_modal_split";
+} from "./chat-ui.js?v=20260728_title_dedup";
 initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
@@ -134,7 +134,7 @@ initChatAdmin({
 });
 
 // ─── Compose module (conversation view + send/reply/confirm flow) — extracted to chat-compose.js
-import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260701_chat_compose_split";
+import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260728_title_dedup";
 initChatCompose({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
@@ -237,13 +237,19 @@ function _renderLivePopupMessages() {
     const otherAvatarHtml = !mine && otherAvatarUrl
       ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
       : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
+    // Free-text messages store title = first line of the message; hide the
+    // title when the body repeats it (same rule as renderConversation).
+    const titleText = String(ev.title || '').trim();
+    const bodyText = String(ev.message || '').trim();
+    const titleIsDup = !!titleText && !!bodyText &&
+      (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
     parts.push(`
       <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
         ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
-            <div class="cb-title">${escHtml(ev.title||'')}</div>
+            ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
             ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>

@@ -391,13 +391,19 @@ function renderConversation(convId) {
     const otherAvatarHtml = !mine && otherAvatarUrl
       ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
       : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
+    // Free-text messages store title = first line of the message, so showing
+    // both prints the text twice. Hide the title when the body repeats it.
+    const titleText = String(ev.title || '').trim();
+    const bodyText = String(ev.message || '').trim();
+    const titleIsDup = !!titleText && !!bodyText &&
+      (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
     return `
       <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
         ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
-            <div class="cb-title">${escHtml(ev.title||'')}</div>
+            ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
             ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>
