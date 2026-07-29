@@ -16,7 +16,7 @@ import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
 import { isMgrPlus, buildConvId, _trimStr, _memberDisplayNameFromRow, _otherUidFromParticipants } from "./chat-helpers.js?v=20260626_chat_helpers_split";
 import { _chatEffectiveLocKey, loadChatUserProfile } from "./chat-data.js?v=20260628_chat_data_b0";
-import { renderThreadList, renderConversation, _conversationById, _nameForUid, _nameForUidForSend, _staffDisplayNameForUid, _rememberConversationForList, _openChatModal, _chatRenderFlowWizard, _updateChatSendBtn, _buildFlowRenderedText } from "./chat-ui.js?v=20260728_title_dedup";
+import { renderThreadList, renderConversation, _conversationById, _nameForUid, _nameForUidForSend, _staffDisplayNameForUid, _rememberConversationForList, _openChatModal, _chatRenderFlowWizard, _updateChatSendBtn, _buildFlowRenderedText } from "./chat-ui.js?v=20260728_reactions";
 import { _unreadCountForUid, _computeChatNavUnreadFromSnapDocs, _paintChatNavBadge } from "./chat-subscriptions.js?v=20260628_chat_subs_split";
 
 let _chatFreeTextAllowed, _getChatFreeTextTrimmed;

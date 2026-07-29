@@ -335,6 +335,30 @@ function _restoreVisibleThreadListHtml() {
   }
 }
 
+/**
+ * WhatsApp-style reaction chips under a message bubble. `reactions` on the
+ * message doc is a { uid: emoji } map (one reaction per user). Chip clicks are
+ * handled by the delegated listener in chat.js (data-ff-react-chip).
+ */
+function ffReactionChipsHtml(ev, uid, mine) {
+  const r = ev && ev.reactions && typeof ev.reactions === 'object' ? ev.reactions : null;
+  if (!r) return '';
+  const counts = {};
+  Object.keys(r).forEach(u => {
+    const e = String(r[u] || '').trim();
+    if (e) counts[e] = (counts[e] || 0) + 1;
+  });
+  const emojis = Object.keys(counts);
+  if (!emojis.length) return '';
+  const myEmoji = String(r[uid] || '').trim();
+  const chips = emojis.map(e => {
+    const isMine = e === myEmoji;
+    const style = `display:inline-flex;align-items:center;gap:3px;border:1px solid ${isMine ? '#7c3aed' : '#e5e7eb'};background:${isMine ? '#f5f3ff' : '#fff'};border-radius:999px;padding:1px 7px;font-size:12px;line-height:18px;cursor:pointer;`;
+    return `<button type="button" data-ff-react-chip="${escHtml(e)}" style="${style}">${escHtml(e)}${counts[e] > 1 ? `<span style="font-size:11px;color:#6b7280;">${counts[e]}</span>` : ''}</button>`;
+  }).join('');
+  return `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:2px;${mine ? 'justify-content:flex-end;' : ''}">${chips}</div>`;
+}
+
 function renderConversation(convId) {
   _setConversationHeader(convId);
   const msgs = Array.isArray(chatState.currentMessages) ? chatState.currentMessages.slice() : [];
@@ -398,14 +422,15 @@ function renderConversation(convId) {
     const titleIsDup = !!titleText && !!bodyText &&
       (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
     return `
-      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
+      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}" data-ff-msg="${escHtml(ev.id || '')}">
         ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
-          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
+          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}" style="cursor:pointer;">
             ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
             ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
+          ${ffReactionChipsHtml(ev, uid, mine)}
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>
         </div>
       </div>
@@ -470,6 +495,7 @@ function _bindChatConvFreeTextComposer() {
 }
 
 export {
+  ffReactionChipsHtml,
   ffBuildChatThreadCardHTML,
   _userAllowedInActiveLocation,
   _staffDisplayNameForUid,

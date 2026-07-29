@@ -675,9 +675,17 @@ service cloud.firestore {
                 && !request.resource.data.keys().hasAny(['templateId', 'flowId']))
           );
 
-        // Allow updating only readBy field (mark as read)
+        // Allow updating only readBy (mark as read) and reactions (WhatsApp-style
+        // emoji reactions). A user may only add/change/remove their OWN
+        // reactions.{uid} entry — never another user's.
         allow update: if isParticipant()
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy']);
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy', 'reactions'])
+          && (
+            !request.resource.data.diff(resource.data).changedKeys().hasAny(['reactions'])
+            || request.resource.data.get('reactions', {})
+                 .diff(resource.data.get('reactions', {}))
+                 .changedKeys().hasOnly([request.auth.uid])
+          );
 
         allow delete: if false;
       }

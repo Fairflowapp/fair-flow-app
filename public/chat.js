@@ -16,7 +16,7 @@
 import {
   collection, query, where, orderBy, limit,
   addDoc, setDoc, updateDoc, doc, getDoc, getDocs, deleteDoc, writeBatch, increment,
-  onSnapshot, serverTimestamp, arrayUnion
+  onSnapshot, serverTimestamp, arrayUnion, deleteField
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
@@ -74,6 +74,7 @@ import {
 // ─── UI module (presentation helpers + small renderers) — extracted to chat-ui.js
 import {
   initChatUi,
+  ffReactionChipsHtml,
   ffBuildChatThreadCardHTML,
   _userAllowedInActiveLocation,
   _staffDisplayNameForUid,
@@ -98,7 +99,7 @@ import {
   _chatRenderFlowWizard,
   _updateChatSendBtn,
   _updateRecipientSummary,
-} from "./chat-ui.js?v=20260728_title_dedup";
+} from "./chat-ui.js?v=20260728_reactions";
 initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
@@ -134,7 +135,7 @@ initChatAdmin({
 });
 
 // ─── Compose module (conversation view + send/reply/confirm flow) — extracted to chat-compose.js
-import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260728_title_dedup";
+import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260728_reactions";
 initChatCompose({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
@@ -285,6 +286,110 @@ function _ffEnsureChatComposerEmojiButton() {
   } catch (_) {}
 }
 
+// ─── WhatsApp-style message reactions ────────────────────────────────────────
+// Clicking a bubble (full Chat thread or the Live popup) opens a quick
+// reaction bar; the choice is stored on the message doc as reactions.{uid}
+// (one per user, click the same emoji again to remove). Firestore rules only
+// allow each user to touch their own reactions key.
+const FF_QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '💅'];
+let _ffReactPopEl = null;
+let _ffReactTarget = null; // { convId, msgId }
+
+function _ffCloseReactPop() {
+  if (_ffReactPopEl) _ffReactPopEl.style.display = 'none';
+  _ffReactTarget = null;
+}
+
+function _ffEnsureReactPop() {
+  if (_ffReactPopEl) return _ffReactPopEl;
+  const pop = document.createElement('div');
+  pop.id = 'ffChatReactPop';
+  pop.style.cssText = 'display:none;position:fixed;z-index:100210;background:#fff;border:1px solid #e5e7eb;border-radius:999px;box-shadow:0 10px 28px rgba(15,23,42,0.25);padding:5px 8px;gap:2px;align-items:center;';
+  pop.innerHTML = FF_QUICK_REACTIONS.map(e =>
+    `<button type="button" data-ff-react="${e}" style="border:none;background:none;font-size:22px;line-height:1;padding:4px 5px;cursor:pointer;border-radius:50%;">${e}</button>`
+  ).join('');
+  pop.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('[data-ff-react]') : null;
+    if (!b || !_ffReactTarget) return;
+    const t = _ffReactTarget;
+    _ffCloseReactPop();
+    void ffReactToChatMessage(t.convId, t.msgId, b.getAttribute('data-ff-react') || '');
+  });
+  document.body.appendChild(pop);
+  _ffReactPopEl = pop;
+  return pop;
+}
+
+function _ffOpenReactPop(anchorEl, target) {
+  const pop = _ffEnsureReactPop();
+  _ffReactTarget = target;
+  pop.style.display = 'flex';
+  const r = anchorEl.getBoundingClientRect();
+  const w = pop.offsetWidth || 300;
+  const h = pop.offsetHeight || 42;
+  const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+  let top = r.top - h - 6;
+  if (top < 8) top = r.bottom + 6;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+/** Which conversation a rendered message row belongs to (Live popup vs Chat). */
+function _ffMsgContextFor(row) {
+  if (!row) return null;
+  const msgId = row.getAttribute('data-ff-msg');
+  if (!msgId) return null;
+  if (row.closest('#liveChatPopupMessages')) return _livePopupConvId ? { convId: _livePopupConvId, msgId } : null;
+  if (row.closest('#chatConvMessages')) return chatState.currentConvId ? { convId: chatState.currentConvId, msgId } : null;
+  return null;
+}
+
+async function ffReactToChatMessage(convId, msgId, emoji) {
+  try {
+    const salonId = chatState.chatUserProfile?.salonId;
+    const uid = chatState.chatUserProfile?.uid;
+    if (!salonId || !uid || !convId || !msgId || !emoji) return;
+    const list = (_livePopupConvId === convId && Array.isArray(_livePopupMsgs) && _livePopupMsgs.length)
+      ? _livePopupMsgs
+      : (chatState.currentMessages || []);
+    const msg = list.find(m => m && m.id === msgId);
+    const mine = msg && msg.reactions ? String(msg.reactions[uid] || '') : '';
+    await updateDoc(doc(db, `salons/${salonId}/conversations/${convId}/messages`, msgId), {
+      ['reactions.' + uid]: mine === emoji ? deleteField() : emoji
+    });
+  } catch (e) {
+    console.error('[Chat] reaction failed', e);
+  }
+}
+
+if (typeof document !== 'undefined' && !window.__ff_chatReactionsBound) {
+  window.__ff_chatReactionsBound = true;
+  document.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t || typeof t.closest !== 'function') return;
+    // Close an open reaction bar on any click outside it (bubble clicks below
+    // just move/reopen it on the new message).
+    if (_ffReactPopEl && _ffReactPopEl.style.display !== 'none' && !t.closest('#ffChatReactPop')) {
+      _ffCloseReactPop();
+    }
+    // Chip click → toggle that reaction directly.
+    const chip = t.closest('[data-ff-react-chip]');
+    if (chip) {
+      ev.preventDefault();
+      const ctx = _ffMsgContextFor(chip.closest('[data-ff-msg]'));
+      if (ctx) void ffReactToChatMessage(ctx.convId, ctx.msgId, chip.getAttribute('data-ff-react-chip') || '');
+      return;
+    }
+    // Bubble click → open the quick reaction bar (links keep working).
+    if (t.closest('a')) return;
+    const bubble = t.closest('.cb-bubble');
+    if (!bubble) return;
+    const ctx = _ffMsgContextFor(bubble.closest('[data-ff-msg]'));
+    if (!ctx) return;
+    _ffOpenReactPop(bubble, ctx);
+  });
+}
+
 // ─── Live Desk: in-place conversation popup ─────────────────────────────────
 // Clicking a thread on the Live CHAT card opens the conversation in a small
 // popup ABOVE the Live screen (reply included) instead of leaving Live for the
@@ -334,14 +439,15 @@ function _renderLivePopupMessages() {
     const titleIsDup = !!titleText && !!bodyText &&
       (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
     parts.push(`
-      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
+      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}" data-ff-msg="${escHtml(ev.id || '')}">
         ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
-          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
+          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}" style="cursor:pointer;">
             ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
             ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
+          ${ffReactionChipsHtml(ev, uid, mine)}
           <span class="cb-time">${fmtTime(ev.sentAt)}</span>
         </div>
       </div>
@@ -473,6 +579,7 @@ window.ffOpenLiveChatThread = async function (convId) {
 
 window.ffCloseLiveChatThread = function () {
   _ffCloseEmojiPop();
+  _ffCloseReactPop();
   if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
   _livePopupConvId = null;
   _livePopupMsgs = [];
