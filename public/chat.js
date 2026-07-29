@@ -195,6 +195,96 @@ if (typeof window !== 'undefined') {
   };
 }
 
+// ─── Emoji picker (Live popup + full-chat free-text composer) ────────────────
+const FF_CHAT_EMOJIS = [
+  '😊','😀','😁','😂','🤣','😍','🥰','😘','😎','🤗','😉','😅',
+  '😢','😭','😮','😬','🙄','😴','🤒','😷','🙏','👍','👎','👏',
+  '🙌','💪','🤝','👌','✌️','👋','❤️','💜','💖','💕','💯','🔥',
+  '✨','🎉','🥳','🎂','💅','💇‍♀️','🌸','🌺','🌟','☕','🍰','🍕',
+  '⏰','📅','✅','❌','❓','❗','💬','🚗'
+];
+let _ffEmojiPopEl = null;
+let _ffEmojiTargetInput = null;
+
+function _ffCloseEmojiPop() {
+  if (_ffEmojiPopEl) _ffEmojiPopEl.style.display = 'none';
+  _ffEmojiTargetInput = null;
+}
+
+function _ffEnsureEmojiPop() {
+  if (_ffEmojiPopEl) return _ffEmojiPopEl;
+  const pop = document.createElement('div');
+  pop.id = 'ffChatEmojiPop';
+  pop.style.cssText = 'display:none;position:fixed;z-index:100200;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,0.25);padding:8px;width:248px;flex-wrap:wrap;gap:2px;max-height:220px;overflow-y:auto;';
+  pop.innerHTML = FF_CHAT_EMOJIS.map(e =>
+    `<button type="button" data-ff-emoji="${e}" style="border:none;background:none;font-size:20px;line-height:1;padding:5px;cursor:pointer;border-radius:6px;">${e}</button>`
+  ).join('');
+  pop.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('[data-ff-emoji]') : null;
+    if (!b || !_ffEmojiTargetInput) return;
+    const ta = _ffEmojiTargetInput;
+    const emoji = b.getAttribute('data-ff-emoji') || '';
+    const start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+    const end = ta.selectionEnd != null ? ta.selectionEnd : ta.value.length;
+    ta.value = ta.value.slice(0, start) + emoji + ta.value.slice(end);
+    const pos = start + emoji.length;
+    try { ta.setSelectionRange(pos, pos); } catch (_) {}
+    ta.focus();
+  });
+  document.addEventListener('click', ev => {
+    if (!_ffEmojiPopEl || _ffEmojiPopEl.style.display === 'none') return;
+    const t = ev.target;
+    if (t && t.closest && (t.closest('#ffChatEmojiPop') || t.closest('[data-ff-emoji-btn]'))) return;
+    _ffCloseEmojiPop();
+  }, true);
+  document.body.appendChild(pop);
+  _ffEmojiPopEl = pop;
+  return pop;
+}
+
+function _ffToggleEmojiPop(btn, inputEl) {
+  const pop = _ffEnsureEmojiPop();
+  if (pop.style.display !== 'none' && _ffEmojiTargetInput === inputEl) { _ffCloseEmojiPop(); return; }
+  _ffEmojiTargetInput = inputEl;
+  pop.style.display = 'flex';
+  const r = btn.getBoundingClientRect();
+  const w = 248;
+  const h = pop.offsetHeight || 200;
+  const left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+  let top = r.top - h - 8;
+  if (top < 8) top = r.bottom + 8;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+function _ffMakeEmojiBtn(inputId) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-ff-emoji-btn', '1');
+  btn.setAttribute('aria-label', 'Insert emoji');
+  btn.textContent = '😊';
+  btn.style.cssText = 'flex:none;background:none;border:1px solid #e5e7eb;border-radius:10px;font-size:17px;line-height:1;padding:8px 10px;cursor:pointer;align-self:flex-end;';
+  btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const input = document.getElementById(inputId);
+    if (input) _ffToggleEmojiPop(btn, input);
+  });
+  return btn;
+}
+
+// Add the emoji button to the full-chat inline composer (static markup in
+// index.html). Idempotent — safe to call on every chat init.
+function _ffEnsureChatComposerEmojiButton() {
+  try {
+    const row = document.querySelector('#chatConvFreeTextBar .chat-conv-free-row');
+    if (!row || row.__ffEmojiBtn) return;
+    row.__ffEmojiBtn = true;
+    const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
+    row.insertBefore(_ffMakeEmojiBtn('chatConvFreeTextInput'), sendBtn || null);
+  } catch (_) {}
+}
+
 // ─── Live Desk: in-place conversation popup ─────────────────────────────────
 // Clicking a thread on the Live CHAT card opens the conversation in a small
 // popup ABOVE the Live screen (reply included) instead of leaving Live for the
@@ -319,6 +409,8 @@ function _ensureLiveChatPopupDom() {
   pop.querySelector('#liveChatPopupInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void _livePopupSend(); }
   });
+  const composerRow = pop.querySelector('#liveChatPopupComposer');
+  if (composerRow) composerRow.insertBefore(_ffMakeEmojiBtn('liveChatPopupInput'), pop.querySelector('#liveChatPopupSend'));
   return pop;
 }
 
@@ -380,6 +472,7 @@ window.ffOpenLiveChatThread = async function (convId) {
 };
 
 window.ffCloseLiveChatThread = function () {
+  _ffCloseEmojiPop();
   if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
   _livePopupConvId = null;
   _livePopupMsgs = [];
@@ -583,6 +676,7 @@ async function goToChat() {
 }
 
 async function initChatScreen() {
+  _ffEnsureChatComposerEmojiButton();
   // Skip full re-init if already loaded — just re-render header & ensure listener
   if (chatState._chatInitialized && chatState.chatUserProfile) {
     renderChatHeaderForRole(chatState.chatUserProfile.role);
