@@ -2,19 +2,19 @@
 // Navigation entry point and lifecycle listeners (currency/location changes).
 // Extracted verbatim from inventory.js (Phase 15).
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
-import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
-import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
-import { loadInventoryTableForSub } from "./inventory-table.js?v=20260702_inventory_catalog_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260728_inv_mobile_unstick";
+import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
+import { loadInventoryTableForSub } from "./inventory-table.js?v=20260728_inv_mobile_unstick";
 import {
   loadInventoryOrdersList,
   loadInventoryOrderDraft,
-} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
+} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
 import {
   refreshInventoryInsightsAsync,
   scanInventorySuggestionsOnce,
   scanProductReorderAlertsOnce,
-} from "./inventory-insights.js?v=20260702_inventory_catalog_split";
+} from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
 
 /**
  * External hook: force-reload a subcategory's inventory data so live changes (e.g. approved supply
@@ -155,6 +155,18 @@ export async function goToInventory() {
   // Invalidate active-draft cache so the next Create Order entry reads fresh from Firestore.
   invState._invOrderDraftLoaded = false;
 
+  // Re-entry recovery: if a previous table load is still "in flight" it almost
+  // certainly hung (mobile backgrounding kills the Firestore stream and the
+  // pending getDoc never settles). Reset the flags and bump the sequence so
+  // this entry starts clean instead of showing a blank frozen screen.
+  if (invState._invTableLoading) {
+    invState._invTableLoadSeq++;
+    invState._invTableLoading = false;
+    invState._invTableLoadingKey = null;
+    invState._invTableLoadedForSubId = null;
+  }
+  invState._invCatLoadError = null;
+
   invState._invCategoriesLoading = true;
   mountOrRefreshMockUi();
 
@@ -175,13 +187,40 @@ export async function goToInventory() {
   void scanProductReorderAlertsOnce();
 
   void (async () => {
+    // A hung getDocs (dead mobile connection) must not leave the screen on
+    // "Loading categories…" forever: race with a timeout that surfaces a
+    // retry state. If the real load settles later, recover silently.
+    let _catLoadTimedOut = false;
     try {
-      await loadInventoryCategoriesFromFirestore();
+      const loadPromise = loadInventoryCategoriesFromFirestore();
+      loadPromise
+        .then(() => {
+          if (_catLoadTimedOut) {
+            invState._invCatLoadError = null;
+            mountOrRefreshMockUi();
+          }
+        })
+        .catch(() => {});
+      await Promise.race([
+        loadPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("__ff_inv_cat_timeout")), 12000)
+        ),
+      ]);
     } catch (e) {
-      console.error("[Inventory] category load failed", e);
-      invState._invCatLoadError = (e && e.message) || "Failed to load categories";
-      invState._categoryTree = [];
-      invState._persistedCategoryTree = [];
+      if (e && e.message === "__ff_inv_cat_timeout") {
+        _catLoadTimedOut = true;
+        console.warn("[Inventory] category load timed out");
+        // Keep any tree already in memory — showing stale categories beats a blank screen.
+        if (!(invState._categoryTree || []).length) {
+          invState._invCatLoadError = "Connection problem — tap Retry below.";
+        }
+      } else {
+        console.error("[Inventory] category load failed", e);
+        invState._invCatLoadError = (e && e.message) || "Failed to load categories";
+        invState._categoryTree = [];
+        invState._persistedCategoryTree = [];
+      }
     } finally {
       invState._invCategoriesLoading = false;
       // Drop the cached table so it rebuilds from freshly-loaded data. This is

@@ -4,7 +4,7 @@
 // Fix: imports sharedInvSort (was missing since the original catalog extraction,
 // causing a swallowed ReferenceError in shared-catalog load/import).
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   newRowId,
   cloneCategoryTree,
@@ -14,7 +14,7 @@ import {
   INV_PRODUCTS_GENERAL_SUB,
   SHARED_INV_DEFAULT_GROUP_ID,
   sharedInvSort,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   doc,

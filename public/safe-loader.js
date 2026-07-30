@@ -29,7 +29,7 @@
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
-        { src: "/inventory.js?v=20260702_inventory_catalog_split", type: "module", delay: 4900 },
+        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 4900 },
         { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 5400 }
       ];
       function wait(ms) {

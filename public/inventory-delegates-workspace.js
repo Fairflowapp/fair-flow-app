@@ -3,20 +3,20 @@
 // listeners (contextmenu, mousedown, focusout, keydown). Extracted verbatim from
 // ensureInventoryScreenDelegates in inventory.js (Phase 14).
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
-import { parseNum, invCellKey } from "./inventory-helpers.js?v=20260627_inventory_split";
-import { ffCanManageInventory } from "./inventory-spine.js?v=20260701_inventory_spine_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { parseNum, invCellKey } from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+import { ffCanManageInventory } from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
 import {
   handleInventoryCatalogDelegateClick,
   handleInventoryCatalogDelegateKeydownActivate,
   handleInventoryCatalogDelegateKeydownEscape,
-} from "./inventory-delegates-catalog.js?v=20260702_inventory_catalog_split";
+} from "./inventory-delegates-catalog.js?v=20260728_inv_mobile_unstick";
 import {
   handleInventoryOrdersDelegateClick,
   handleInventoryOrdersDelegateFocusout,
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_catalog_split";
+} from "./inventory-delegates-orders.js?v=20260728_inv_mobile_unstick";
 import {
   bindInvColumnResizeOnce,
   bindInvRowDnDOnce,
@@ -32,7 +32,7 @@ import {
   invMobileAnyOptionalColumnHidden,
   resetInvMobileOptionalColumns,
   ensureInvMobileColHeaderBindOnce,
-} from "./inventory-table.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table.js?v=20260728_inv_mobile_unstick";
 import {
   handleOrderBuilderSourceChange,
   commitInventoryOrderBuilderAddItem,
@@ -47,8 +47,8 @@ import {
   loadInventoryOrderDraft,
   loadInventoryOrdersList,
   refreshOrderBuilderPreviewAsync,
-} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
-import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
+} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
+import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
 
 let mountOrRefreshMockUi;
 

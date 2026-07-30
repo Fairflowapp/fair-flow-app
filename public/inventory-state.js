@@ -34,6 +34,11 @@ export const invState = {
   /** `${categoryId}:${subId}` when _groups/_rows match that sub; null if none loaded. */
   _invTableLoadedForSubId: null,
   _invTableLoadSeq: 0,
+  /** Key + start time of the in-flight table load, so a hung fetch (dead mobile
+   *  connection after backgrounding) can be detected and superseded instead of
+   *  blocking every future load. */
+  _invTableLoadingKey: null,
+  _invTableLoadStartedAt: 0,
 
   // ───────────────────────────── catalog ───────────────────────────────────
   _catSaveBusy: false,

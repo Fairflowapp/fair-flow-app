@@ -2,7 +2,7 @@
 // Cell edit helpers, row/group CRUD, row DnD, and order-cell DOM updates.
 // Extracted verbatim from inventory-table.js (Phase T3). Spine injected via init.
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 
 import {
   escapeHtml,
@@ -15,18 +15,18 @@ import {
   formatOrderDisplay,
   invCellKey,
   hrefForUrl,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 
-import { resetCatModalTransientState } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
+import { resetCatModalTransientState } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
 
 import {
   ensureTableReadyForEdits,
   flushInventoryTableToFirestore,
   commitPendingInventoryDeleteIfAny,
   startInventoryUndo,
-} from "./inventory-table-persist.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table-persist.js?v=20260728_inv_mobile_unstick";
 
-import { getInvColWidths } from "./inventory-table-layout.js?v=20260702_inventory_catalog_split";
+import { getInvColWidths } from "./inventory-table-layout.js?v=20260728_inv_mobile_unstick";
 
 let mountOrRefreshMockUi, ffCanManageInventory;
 

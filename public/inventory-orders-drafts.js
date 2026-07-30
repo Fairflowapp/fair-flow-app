@@ -15,16 +15,16 @@ import {
   where,
   deleteDoc,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   escapeHtml,
   parseNum,
   sanitizeManualItemForDraft,
   renderDraftsPickerRowHtml,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
-import { getCategoryTree } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_catalog_split";
-import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260701_inventory_spine_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
+import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
 
 // ── injected by initOrdersDrafts() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync;

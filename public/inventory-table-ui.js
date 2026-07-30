@@ -11,7 +11,7 @@ import {
   runTransaction,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 
 import {
   escapeHtml,
@@ -26,35 +26,35 @@ import {
   renderOrderCellTd,
   thResizeHandle,
   getItemOrderQty,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 
-import { getCategoryTree } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
 
 import {
   inventoryOrderDraftToast,
   scheduleInventoryOrderDraftSave,
-} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
+} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
 
-import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
+import { refreshInventoryInsightsAsync } from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
 
 import {
   scheduleInventoryTablePersist,
   ensureTableReadyForEdits,
   loadInventoryTableForSub,
-} from "./inventory-table-persist.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table-persist.js?v=20260728_inv_mobile_unstick";
 
 import {
   getInvColWidths,
   getInvMobileGroupSubColWidthsPx,
   renderColgroup,
-} from "./inventory-table-layout.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table-layout.js?v=20260728_inv_mobile_unstick";
 
 import {
   groupHasAnyValues,
   renderEditableCell,
   renderUrlCell,
   updateOrderCellEl,
-} from "./inventory-table-rows.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table-rows.js?v=20260728_inv_mobile_unstick";
 
 let mountOrRefreshMockUi, ffCanManageInventory, getSalonId;
 

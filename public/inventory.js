@@ -22,7 +22,7 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   escapeHtml,
   newRowId,
@@ -90,7 +90,7 @@ import {
   sortOrderDetailPairsOpenFirst,
   SHARED_INV_DEFAULT_GROUP_ID,
   INV_PRODUCTS_GENERAL_SUB,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 
 import {
   initInventoryCatalog,
@@ -109,7 +109,7 @@ import {
   renderSidebarHtml,
   renderManageCategoriesModal,
   renderCategoryDeleteConfirmModal,
-} from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
+} from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
 
 import {
   ffCanManageInventory,
@@ -120,18 +120,18 @@ import {
   getInventoryLocationStateId,
   sharedInvItemsRef,
   sharedInvStateDocRef,
-} from "./inventory-spine.js?v=20260701_inventory_spine_split";
-import { initInventoryShell, mountOrRefreshMockUi } from "./inventory-shell.js?v=20260701_inventory_shell_split";
-import { goToInventory } from "./inventory-nav.js?v=20260702_inventory_catalog_split";
+} from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
+import { initInventoryShell, mountOrRefreshMockUi } from "./inventory-shell.js?v=20260728_inv_mobile_unstick";
+import { goToInventory } from "./inventory-nav.js?v=20260728_inv_mobile_unstick";
 export { goToInventory };
-import "./inventory-devtools.js?v=20260701_inventory_devtools_split";
+import "./inventory-devtools.js?v=20260728_inv_mobile_unstick";
 import {
   initInventoryDelegatesCatalog,
   bindInventoryDelegatesCatalogOnce,
   handleInventoryCatalogDelegateClick,
   handleInventoryCatalogDelegateKeydownActivate,
   handleInventoryCatalogDelegateKeydownEscape,
-} from "./inventory-delegates-catalog.js?v=20260702_inventory_catalog_split";
+} from "./inventory-delegates-catalog.js?v=20260728_inv_mobile_unstick";
 import {
   initInventoryDelegatesOrders,
   bindInventoryDelegatesOrdersOnce,
@@ -140,11 +140,11 @@ import {
   handleInventoryOrdersDelegateKeydown,
   handleInventoryOrdersDelegateKeydownEscape,
   handleInventoryOrdersDelegateClick,
-} from "./inventory-delegates-orders.js?v=20260702_inventory_catalog_split";
+} from "./inventory-delegates-orders.js?v=20260728_inv_mobile_unstick";
 import {
   initInventoryDelegatesWorkspace,
   bindInventoryDelegatesWorkspaceOnce,
-} from "./inventory-delegates-workspace.js?v=20260702_inventory_catalog_split";
+} from "./inventory-delegates-workspace.js?v=20260728_inv_mobile_unstick";
 
 import {
   initInventoryInsights,
@@ -152,7 +152,7 @@ import {
   renderInventoryInsightsTabHtml,
   scanInventorySuggestionsOnce,
   scanProductReorderAlertsOnce,
-} from "./inventory-insights.js?v=20260702_inventory_catalog_split";
+} from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
 
 
 import {
@@ -200,7 +200,7 @@ import {
   toggleShoppingRowQty,
   triggerOrderDetailExportCsv,
   triggerOrderDetailPrint,
-} from "./inventory-orders.js?v=20260702_inventory_catalog_split";
+} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
 
 
 import {
@@ -239,7 +239,7 @@ import {
   renderRemoveGroupModal,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table.js?v=20260702_inventory_catalog_split";
+} from "./inventory-table.js?v=20260728_inv_mobile_unstick";
 
 initInventoryShell({
   ensureInventoryScreenDelegates,

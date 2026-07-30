@@ -3,17 +3,17 @@
 // HTML with sub-tabs). Extracted verbatim from inventory-insights.js.
 // Reads computed results from invState._invInsights*; no injected deps.
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   escapeHtml,
   formatOrderDisplay,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 import {
   INV_INSIGHTS_REORDER_DAYS,
   INV_INSIGHTS_LOW_DAYS,
   INV_INSIGHTS_LOW_THRESHOLD,
   INV_INSIGHTS_CHART_COLORS,
-} from "./inventory-insights-compute.js?v=20260702_inventory_catalog_split";
+} from "./inventory-insights-compute.js?v=20260728_inv_mobile_unstick";
 
 function renderInsightsDonutSvg(rows, totalSpend) {
   const sum = rows.reduce((acc, r) => acc + (Number(r.spend) || 0), 0);

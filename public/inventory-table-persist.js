@@ -14,7 +14,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 
 import {
   newRowId,
@@ -30,17 +30,17 @@ import {
   productToInvRow,
   SHARED_INV_DEFAULT_GROUP_ID,
   INV_PRODUCTS_GENERAL_SUB,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 
 import {
   sharedInvCategoriesRef,
   sharedInvSubcategoriesRef,
   getCategoryTree,
-} from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
+} from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
 
-import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260702_inventory_catalog_split";
+import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
 
-import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260702_inventory_catalog_split";
+import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
 
 let _ffInvActiveLocId,
   ffCanManageInventory,
@@ -537,6 +537,8 @@ function ensureTableReadyForEdits() {
 }
 
 async function loadInventoryTableForSub(catId, subId, seq, key) {
+  invState._invTableLoadingKey = key;
+  invState._invTableLoadStartedAt = Date.now();
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
@@ -600,6 +602,7 @@ async function loadInventoryTableForSub(catId, subId, seq, key) {
   } finally {
     if (seq === invState._invTableLoadSeq) {
       invState._invTableLoading = false;
+      invState._invTableLoadingKey = null;
       mountOrRefreshMockUi();
     }
   }
@@ -620,7 +623,17 @@ function prepareInventoryTableStateForMount() {
     ensureGroupCellsForRows();
     return;
   }
-  if (invState._invTableLoading) return;
+  if (invState._invTableLoading) {
+    // Only defer to the in-flight load when it targets THIS sub and is recent.
+    // A load for another sub, or one that has been "in flight" for a long time
+    // (a hung getDoc after mobile backgrounding kills the Firestore stream),
+    // must be superseded — otherwise the screen stays frozen on stale rows
+    // forever because every remount bails out here.
+    const sameKey = invState._invTableLoadingKey === key;
+    const startedAt = invState._invTableLoadStartedAt || 0;
+    const recent = Date.now() - startedAt < 10000;
+    if (sameKey && recent) return;
+  }
   clearInventoryTableSaveTimer();
   invState._invTableLoading = true;
   invState._invTableLoadedForSubId = null;

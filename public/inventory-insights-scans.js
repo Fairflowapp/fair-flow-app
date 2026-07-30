@@ -3,14 +3,14 @@
 // alerts into inboxItems. Extracted verbatim from inventory-insights.js.
 // Note: `auth` resolves via the window.auth global set by app.js (pre-existing).
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   parseNum,
   ffResolveItemEventDate,
   getProductStockForInventoryRow,
   getProductTargetStockForInventoryRow,
   parseSubcategoryDocToTable,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   doc,

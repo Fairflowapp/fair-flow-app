@@ -11,7 +11,7 @@ import {
   setDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   escapeHtml,
   parseNum,
@@ -20,12 +20,12 @@ import {
   sortOrderBuilderLines,
   seedOrderBuilderSelectionIfEmpty,
   sanitizeManualItemForDraft,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
-import { getCategoryTree } from "./inventory-catalog.js?v=20260702_inventory_catalog_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_catalog_split";
-import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260702_inventory_catalog_split";
-import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260702_inventory_catalog_split";
-import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260702_inventory_catalog_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
+import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260728_inv_mobile_unstick";
+import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260728_inv_mobile_unstick";
+import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260728_inv_mobile_unstick";
 
 // ── injected by initOrdersBuilder() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId, goToInventory;

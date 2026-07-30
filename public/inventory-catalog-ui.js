@@ -3,17 +3,17 @@
 // rendering. Extracted verbatim from inventory-catalog.js. Tree state and
 // getters live in inventory-catalog-data.js.
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   escapeHtml,
   renderInlineNewSub,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 import {
   getCategoryTree,
   getLegacyCategoryTreeForManage,
   getManageCategoryTree,
   ensureCatManageDraft,
-} from "./inventory-catalog-data.js?v=20260702_inventory_catalog_split";
+} from "./inventory-catalog-data.js?v=20260728_inv_mobile_unstick";
 
 // ── injected inventory.js internals (set once via initCatalogUi) ──
 let mountOrRefreshMockUi;
@@ -217,7 +217,9 @@ function renderSidebarHtml() {
     return `<p class="ff-inv2-aside-loading">Loading categories…</p>`;
   }
   if (invState._invCatLoadError) {
-    return `<p class="ff-inv2-aside-error">${escapeHtml(invState._invCatLoadError)}</p>`;
+    return `<p class="ff-inv2-aside-error">${escapeHtml(invState._invCatLoadError)}</p>
+      <button type="button" class="ff-inv2-aside-add" style="margin:4px 12px;"
+        onclick="window.goToInventory && window.goToInventory()">Retry</button>`;
   }
   function renderCatBlock(cat) {
     const open = invState._expandedCategoryIds.has(cat.id);

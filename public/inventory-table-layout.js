@@ -2,9 +2,20 @@
 // Mobile column hide, colgroup, width sync, and column resize for the inventory grid.
 // Extracted verbatim from inventory-table.js (Phase T2).
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 
-import { persistColumnWidthsToFirestore } from "./inventory-table-persist.js?v=20260702_inventory_catalog_split";
+import { persistColumnWidthsToFirestore } from "./inventory-table-persist.js?v=20260728_inv_mobile_unstick";
+
+// Used by the mobile column-width pass (getInvMobileGroupSubColWidthsPx).
+// These were never imported when this file was extracted from
+// inventory-table.js, so on phones every table render with rows crashed with
+// "getCellApprovedInfo is not defined" — the mobile-only Inventory freeze.
+import {
+  computeOrder,
+  formatOrderDisplay,
+  getCellApprovedInfo,
+  parseNum,
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
 
 const INV_MOBILE_COL_HIDE_SS_KEY = "ff_inv_mobile_col_hide_v1";
 

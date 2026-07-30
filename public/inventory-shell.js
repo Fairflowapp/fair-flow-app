@@ -3,15 +3,15 @@
 // and read-only UI affordances. Extracted verbatim from inventory.js (Phase 11).
 // Cross-module render/helpers are injected via initInventoryShell() from the orchestrator.
 
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
-import { escapeHtml } from "./inventory-helpers.js?v=20260627_inventory_split";
-import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260627_inv_css_quad";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { escapeHtml } from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260728_inv_mobile_unstick";
 import {
   STYLE_ID,
   ffCanManageInventory,
   _ffInvActiveLocId,
   _ffInvUserHasMultipleLocations,
-} from "./inventory-spine.js?v=20260701_inventory_spine_split";
+} from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
 
 // ── injected by initInventoryShell() (orchestrator spine + sub-app render fns) ──
 let ensureInventoryScreenDelegates;
@@ -327,7 +327,14 @@ ${renderInventoryDraftsPickerModal()}`;
       if (!id) return;
       clearInventoryTableSaveTimer();
       try {
-        await flushInventoryTableToFirestore();
+        // Never let a hung write block the category switch: on mobile a dead
+        // connection (app resumed from background) makes this await hang
+        // forever, which made taps on other subcategories do nothing. The SDK
+        // keeps the write queued, so proceeding after a short grace is safe.
+        await Promise.race([
+          flushInventoryTableToFirestore(),
+          new Promise((resolve) => setTimeout(resolve, 2500)),
+        ]);
       } catch (e) {
         console.error("[Inventory] table flush before sub change", e);
       }

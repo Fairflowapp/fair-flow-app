@@ -11,7 +11,7 @@ import {
   runTransaction,
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260627_inventory_split";
+import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
 import {
   normalizeRowFromFirestore,
   serializeInventoryRowForFirestore,
@@ -22,9 +22,9 @@ import {
   computeReceiveStatusFromItems,
   isItemPurchaseAppliedToInventory,
   formatOrderDisplay,
-} from "./inventory-helpers.js?v=20260627_inventory_split";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260702_inventory_catalog_split";
-import { loadInventoryOrdersList } from "./inventory-orders-list.js?v=20260702_inventory_catalog_split";
+} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
+import { loadInventoryOrdersList } from "./inventory-orders-list.js?v=20260728_inv_mobile_unstick";
 
 // ── injected by initOrdersDetailCommit() (orchestrator spine + back-edges) ──
 let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, loadInventoryTableForSub, findCategoryAndSubForSubId;
