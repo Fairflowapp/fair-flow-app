@@ -1183,6 +1183,19 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Forgot-password flow: anyone may queue a reset request (email only);
+    // the onPasswordResetRequestCreated trigger sends the branded reset email.
+    // Reads / updates / deletes are all denied to clients; only the Admin SDK
+    // (used by the trigger) can touch this collection.
+    match /passwordResetRequests/{requestId} {
+      allow create: if request.resource.data.keys().hasOnly(['email', 'createdAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() >= 3
+        && request.resource.data.email.size() <= 200
+        && request.resource.data.email.matches('.+@.+\\..+');
+      allow read, update, delete: if false;
+    }
+
     // Default deny
     match /{document=**} {
       allow read, write: if false;
