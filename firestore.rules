@@ -69,6 +69,27 @@ service cloud.firestore {
         );
     }
 
+    // ===== EMPLOYEE WRITE-UPS HELPERS =====
+    // Confidential HR data: owner / admin / explicit writeups_manage flag ONLY.
+    // Deliberately NOT isManager() — managers must not see write-ups by role.
+    function canManageWriteups(salonId) {
+      return isAdminOrOwner(salonId)
+        || isFirestoreSalonOwnerUid(salonId)
+        || (
+          belongsToSalon(salonId)
+          && mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.writeups_manage == true
+        );
+    }
+
+    /** Reads permissions.writeups_manage off a staff doc payload; missing = false. */
+    function writeupsManageFlag(d) {
+      return d.get('permissions', {}) is map
+        ? d.get('permissions', {}).get('writeups_manage', false)
+        : false;
+    }
+
     function memberExists(salonId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid));
@@ -578,7 +599,15 @@ service cloud.firestore {
     // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
     match /salons/{salonId}/staff/{staffId} {
       allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
-      allow create, update, delete: if belongsToSalon(salonId)
+      // Managers can manage staff, but only admin/owner may set or change the
+      // confidential permissions.writeups_manage flag (no self-granting).
+      allow create: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && (isAdminOrOwner(salonId) || writeupsManageFlag(request.resource.data) != true);
+      allow update: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && (isAdminOrOwner(salonId) || writeupsManageFlag(request.resource.data) == writeupsManageFlag(resource.data));
+      allow delete: if belongsToSalon(salonId)
         && isManager(salonId);
 
       // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
@@ -594,6 +623,47 @@ service cloud.firestore {
         allow create, update: if belongsToSalon(salonId) && isManager(salonId);
         allow delete: if belongsToSalon(salonId) && isManager(salonId)
           && staffDocumentLifecycleIsArchived();
+      }
+    }
+
+    // ===== EMPLOYEE WRITE-UPS (Phase 1: confidential incidents) =====
+    // Owner / admin / staff with permissions.writeups_manage ONLY. Managers
+    // and regular employees have NO access — the employee never sees these
+    // incident records (Phase 2 formal write-ups go to their Documents).
+    // No platform-admin read: this is confidential HR data.
+    match /salons/{salonId}/staff/{staffId}/writeupIncidents/{incidentId} {
+      allow read: if canManageWriteups(salonId);
+      // Creation: identity + tenancy fields must match the request context
+      // (path + auth uid) and timestamps must be server timestamps.
+      allow create: if canManageWriteups(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status in ['documented', 'excused', 'included_in_writeup']
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.recordedByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      // Edits keep ownership/origin fields immutable (salonId/employeeId are
+      // pinned to the path; createdBy/recordedBy/createdAt pinned to original)
+      // — corrections are tracked in the append-only auditEvents subcollection.
+      allow update: if canManageWriteups(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status in ['documented', 'excused', 'included_in_writeup']
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.recordedByUid == resource.data.recordedByUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+
+      // Append-only audit trail: client may create, never edit or delete.
+      // Identity and timestamp are validated server-side, never trusted.
+      match /auditEvents/{eventId} {
+        allow read: if canManageWriteups(salonId);
+        allow create: if canManageWriteups(salonId)
+          && request.resource.data.performedByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
       }
     }
 

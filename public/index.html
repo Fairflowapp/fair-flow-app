@@ -28292,6 +28292,9 @@ function initializeAppsPanel() {
         if (typeof window.ffStaffDocumentsUnmount === 'function') {
           window.ffStaffDocumentsUnmount();
         }
+        if (typeof window.ffStaffWriteupsUnmount === 'function') {
+          window.ffStaffWriteupsUnmount();
+        }
         if (placeholder) placeholder.style.display = 'block';
         if (detailsContainer) detailsContainer.style.display = 'none';
         return;
@@ -28306,6 +28309,9 @@ function initializeAppsPanel() {
       if (!staff) {
         if (typeof window.ffStaffDocumentsUnmount === 'function') {
           window.ffStaffDocumentsUnmount();
+        }
+        if (typeof window.ffStaffWriteupsUnmount === 'function') {
+          window.ffStaffWriteupsUnmount();
         }
         if (placeholder) placeholder.style.display = 'block';
         if (detailsContainer) detailsContainer.style.display = 'none';
@@ -28497,12 +28503,21 @@ function initializeAppsPanel() {
       const canSeeEarningsTab = (typeof window.ffCurrentUserCanSeeEarningsRules === 'function')
         ? window.ffCurrentUserCanSeeEarningsRules()
         : true;
+      // Write-Ups is confidential (owner / admin / writeups_manage permission
+      // only). Default to hidden if the gate helper is missing.
+      const canSeeWriteupsTab = (typeof window.ffCurrentUserCanSeeWriteupsTab === 'function')
+        ? window.ffCurrentUserCanSeeWriteupsTab()
+        : false;
       if (navEl) {
         const baseTabs = ['details', 'schedule', 'locations', 'permissions', 'services', 'products'];
         const baseLabels = ['Details', 'Schedule', 'Locations', 'Permissions', 'Services', 'Products'];
         if (canSeeEarningsTab) {
           baseTabs.push('earnings');
           baseLabels.push('Earnings Rules');
+        }
+        if (canSeeWriteupsTab) {
+          baseTabs.push('writeups');
+          baseLabels.push('Write-Ups');
         }
         baseTabs.push('documents');
         baseLabels.push('Documents');
@@ -28522,6 +28537,7 @@ function initializeAppsPanel() {
       
       const validTabs = ['details', 'schedule', 'locations', 'permissions', 'services', 'products', 'documents'];
       if (canSeeEarningsTab) validTabs.push('earnings');
+      if (canSeeWriteupsTab) validTabs.push('writeups');
       if (!validTabs.includes(currentTab)) currentTab = 'details';
       switchTab(currentTab);
       
@@ -28570,6 +28586,7 @@ function initializeAppsPanel() {
     const servicesContent = panel('staffServicesTabContent');
     const productsContent = panel('staffProductsTabContent');
     const earningsContent = panel('staffEarningsTabContent');
+    const writeupsContent = panel('staffWriteupsTabContent');
     const documentsContent = panel('staffDocumentsTabContent');
 
     if (detailsContent) detailsContent.style.display = tab === 'details' ? 'block' : 'none';
@@ -28636,6 +28653,25 @@ function initializeAppsPanel() {
       const staff = staffData.staff.find(s => s.id === selectedStaffId);
       if (staff && typeof renderStaffProductsTab === 'function') {
         renderStaffProductsTab(staff);
+      }
+    }
+    if (writeupsContent) {
+      // Confidential: re-check the gate at switch time, not just when the nav
+      // was rendered (mirrors the Earnings Rules pattern).
+      const canSeeWriteupsNow = (typeof window.ffCurrentUserCanSeeWriteupsTab === 'function')
+        ? window.ffCurrentUserCanSeeWriteupsTab()
+        : false;
+      const showWriteupsNow = tab === 'writeups' && canSeeWriteupsNow;
+      writeupsContent.style.display = showWriteupsNow ? 'block' : 'none';
+      if (showWriteupsNow && selectedStaffId) {
+        var salonIdWu = (typeof window.currentSalonId !== 'undefined' && window.currentSalonId) ? String(window.currentSalonId).trim() : '';
+        if (!salonIdWu) {
+          writeupsContent.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Salon not loaded yet.</p></div>';
+        } else if (typeof window.ffMountStaffWriteups === 'function') {
+          window.ffMountStaffWriteups(writeupsContent, salonIdWu, selectedStaffId);
+        } else {
+          writeupsContent.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#6b7280;">Loading write-ups…</p></div>';
+        }
       }
     }
     if (documentsContent) {
@@ -29949,6 +29985,28 @@ function initializeAppsPanel() {
       }
     ];
 
+    // Employee Write-Ups permission — confidential HR data. The card is only
+    // rendered when the VIEWER is owner/admin by ROLE (strict gate, same as
+    // Earnings Rules): managers must never see or grant this toggle, even
+    // managers who hold writeups_manage themselves. Firestore rules also
+    // block non-admin/owner writes of permissions.writeups_manage, so the UI
+    // gate is defense-in-depth, not the enforcement.
+    var viewerCanEditWriteupsToggle = (typeof window.ffCurrentUserCanSeeEarningsRules === 'function')
+      ? window.ffCurrentUserCanSeeEarningsRules()
+      : false;
+    if (viewerCanEditWriteupsToggle) {
+      permissionGroups.push({
+        title: 'Employee Write-Ups',
+        permissions: [
+          {
+            key: 'writeups_manage',
+            label: 'Manage Employee Write-Ups',
+            desc: 'View and manage confidential employee incidents and write-ups.'
+          }
+        ]
+      });
+    }
+
     var ownerRowLocked =
       typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff);
 
@@ -30696,6 +30754,46 @@ function initializeAppsPanel() {
             return id && (id === sid || id.toLowerCase() === sid.toLowerCase());
           });
           if (me && me.isAdmin === true) return true;
+        }
+      }
+      // 2) Fall back to the global user/actor role set at login / PIN time.
+      const roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
+      const roleFromActor = (typeof window !== 'undefined' && window.__ff_actorRole)
+        ? window.__ff_actorRole
+        : (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
+      const lower = String(roleFromUser || roleFromActor).toLowerCase();
+      if (lower === 'admin' || lower === 'owner') return true;
+      return false;
+    } catch (_) { return false; }
+  };
+
+  /**
+   * Write-Ups tab gate: owner / admin / explicit writeups_manage permission.
+   * Managers do NOT get access via role — this is confidential employee
+   * information. UI-only visibility; Firestore + Storage rules enforce the
+   * same access server-side regardless of this check.
+   */
+  window.ffCurrentUserCanSeeWriteupsTab = function() {
+    try {
+      // 1) Authed staff record: admin flag or explicit permission.
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        const list = store && Array.isArray(store.staff) ? store.staff : [];
+        const sid = (window.__ff_authedStaffId
+          || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null)
+          || '').toString().trim();
+        if (sid) {
+          const me = list.find(function(s) {
+            const id = String((s && (s.id || s.staffId)) || '').trim();
+            return id && (id === sid || id.toLowerCase() === sid.toLowerCase());
+          });
+          if (me) {
+            if (me.isAdmin === true) return true;
+            const perms = me.permissions && typeof me.permissions === 'object' ? me.permissions : null;
+            if (perms && (typeof ffStaffPermissionValueIsTrue === 'function'
+              ? ffStaffPermissionValueIsTrue(perms.writeups_manage)
+              : perms.writeups_manage === true)) return true;
+          }
         }
       }
       // 2) Fall back to the global user/actor role set at login / PIN time.
@@ -32774,7 +32872,7 @@ function initializeAppsPanel() {
       updateArchiveToggleUI();
 
       if (jumpToStaffId) {
-        currentTab = ['details', 'schedule', 'locations', 'permissions', 'earnings', 'documents'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
+        currentTab = ['details', 'schedule', 'locations', 'permissions', 'earnings', 'writeups', 'documents'].indexOf(jumpToTab) >= 0 ? jumpToTab : 'schedule';
       }
 
       const afterStaffListReady = function() {
@@ -32989,6 +33087,9 @@ function initializeAppsPanel() {
   function closeStaffMembersModal() {
     if (typeof window.ffStaffDocumentsUnmount === 'function') {
       window.ffStaffDocumentsUnmount();
+    }
+    if (typeof window.ffStaffWriteupsUnmount === 'function') {
+      window.ffStaffWriteupsUnmount();
     }
     if (staffMembersModal) {
       staffMembersModal.style.display = 'none';
@@ -50005,6 +50106,7 @@ function hookSettingsGuard_DISABLED(){
               <div id="staffServicesTabContent" style="display:none;min-width:0;"></div>
               <div id="staffProductsTabContent" style="display:none;min-width:0;"></div>
               <div id="staffEarningsTabContent" style="display:none;min-width:0;"></div>
+              <div id="staffWriteupsTabContent" style="display:none;min-width:0;"></div>
               <div id="staffDocumentsTabContent" style="display:none;min-width:0;"></div>
             </div>
           </div>
@@ -51151,7 +51253,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260704_bootstrap_js_extract"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260728_auto_update"></script>
+  <script src="/safe-loader.js?v=20260731_writeups_phase1"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

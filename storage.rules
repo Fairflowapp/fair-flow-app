@@ -81,6 +81,43 @@ service firebase.storage {
       allow read, write: if signedIn();
     }
 
+    // ===== EMPLOYEE WRITE-UPS (confidential incident attachments) =====
+    // Deliberately NOT under salons/{salonId}/staff/{staffId}/... — that path
+    // above allows ANY signed-in user read/write, which must never apply to
+    // write-up evidence. Access: owner / admin / permissions.writeups_manage
+    // only (checked against Firestore). Managers and employees: no access.
+    function writeupsStaffDocData(salonId) {
+      return firestore.get(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId)).data;
+    }
+
+    function canManageWriteupsStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && (
+          userRoleLower() in ['admin', 'owner']
+          || (
+            userDoc().staffId is string
+            && firestore.exists(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId))
+            && writeupsStaffDocData(salonId).get('permissions', {}) is map
+            && writeupsStaffDocData(salonId).get('permissions', {}).get('writeups_manage', false) == true
+          )
+        );
+    }
+
+    match /salons/{salonId}/staffWriteups/{staffId}/incidents/{incidentId}/{fileName} {
+      allow read: if canManageWriteupsStorage(salonId);
+      // Uploads only — no client deletes/overwrites of evidence (request.resource
+      // is null on delete, so deletes always fail). PDF or images, max 10 MB.
+      allow write: if canManageWriteupsStorage(salonId)
+        && request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && (
+          request.resource.contentType == 'application/pdf'
+          || request.resource.contentType.matches('image/(jpeg|png|webp|heic|heif)')
+        );
+    }
+
     // deny everything else
     match /{allPaths=**} {
       allow read, write: if false;
