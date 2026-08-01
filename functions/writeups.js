@@ -34,8 +34,11 @@
 const admin = require("firebase-admin");
 if (!admin.apps.length) admin.initializeApp();
 
-const functionsV1 = require("firebase-functions/v1");
-const { HttpsError } = functionsV1.https;
+// v2 callables (like billing.js / stripe.js): required on this project
+// because v1 function IAM cannot be opened to callable clients under the
+// org policy — v2 Cloud Run services use the invoker-check-disabled setting
+// while authentication stays enforced in-function via request.auth.
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 
 const REGION = "us-central1";
 
@@ -251,9 +254,11 @@ async function appendAuditEvent(parentRef, eventId, payload) {
 // approveAndSendWriteup
 // ---------------------------------------------------------------------------
 
-exports.approveAndSendWriteup = functionsV1
-  .region(REGION)
-  .https.onCall(async (data, context) => {
+exports.approveAndSendWriteup = onCall({ region: REGION }, async (req) =>
+  approveAndSendWriteupHandler(req.data || {}, { auth: req.auth }),
+);
+
+async function approveAndSendWriteupHandler(data, context) {
     if (!context.auth) throw new HttpsError("unauthenticated", "Must be signed in.");
     const uid = context.auth.uid;
     const { salonId, staffId, writeupId } = requireParams(data, [
@@ -504,7 +509,7 @@ exports.approveAndSendWriteup = functionsV1
     });
 
     return { ok: true, status: "sent", mailId };
-  });
+}
 
 /**
  * Queue the notification email via the Trigger Email extension (`mail`
@@ -562,9 +567,11 @@ async function queueWriteupEmail({ salonId, staffId, writeupId, draft, attempt, 
 
 const EMPLOYEE_ACTIONS = new Set(["open", "respond", "acknowledge"]);
 
-exports.writeupEmployeeAction = functionsV1
-  .region(REGION)
-  .https.onCall(async (data, context) => {
+exports.writeupEmployeeAction = onCall({ region: REGION }, async (req) =>
+  writeupEmployeeActionHandler(req.data || {}, { auth: req.auth }),
+);
+
+async function writeupEmployeeActionHandler(data, context) {
     if (!context.auth) throw new HttpsError("unauthenticated", "Must be signed in.");
     const uid = context.auth.uid;
     const { salonId, staffId, writeupId } = requireParams(data, [
@@ -643,4 +650,4 @@ exports.writeupEmployeeAction = functionsV1
         .catch(() => {}); // mirroring is cosmetic for the admin list
     }
     return { ok: true };
-  });
+}
