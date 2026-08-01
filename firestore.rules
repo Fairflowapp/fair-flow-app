@@ -439,7 +439,16 @@ service cloud.firestore {
         && userRole() in ['owner', 'admin', 'manager']
         && request.resource.data.to is string
         && request.resource.data.message is map;
-      allow read, update, delete: if false;
+      // Write-up emails only: the salon's owner/admin may read the delivery
+      // state (Queued / Send failed chip). The backend stamps salonId on
+      // these docs; every other mail doc stays completely unreadable.
+      allow read: if docId.matches('writeup_.*')
+        && resource.data.salonId is string
+        && (
+          isAdminOrOwner(resource.data.salonId)
+          || isFirestoreSalonOwnerUid(resource.data.salonId)
+        );
+      allow update, delete: if false;
     }
 
     // Finalize invite request
@@ -629,8 +638,8 @@ service cloud.firestore {
     // ===== EMPLOYEE WRITE-UPS (Phase 1: confidential incidents) =====
     // Owner / admin / staff with permissions.writeups_manage ONLY. Managers
     // and regular employees have NO access — the employee never sees these
-    // incident records (Phase 2 formal write-ups go to their Documents).
-    // No platform-admin read: this is confidential HR data.
+    // incident records (sent formal write-ups live in writeupDocuments below,
+    // which the employee can read). No platform-admin read: confidential HR data.
     match /salons/{salonId}/staff/{staffId}/writeupIncidents/{incidentId} {
       allow read: if canManageWriteups(salonId);
       // Creation: identity + tenancy fields must match the request context
@@ -665,6 +674,97 @@ service cloud.firestore {
           && request.resource.data.createdAt == request.time;
         allow update, delete: if false;
       }
+    }
+
+    // Formal write-ups — admin workflow doc (Phase 2). Client-editable ONLY
+    // while status == 'draft'; every send-time field (approvedAt, sentAt,
+    // acknowledgment, email attempts…) is written exclusively by the trusted
+    // approveAndSendWriteup backend. permissions.writeups_manage can draft;
+    // approving/sending is Owner/Admin only and enforced by that backend.
+    match /salons/{salonId}/staff/{staffId}/writeups/{writeupId} {
+      allow read: if canManageWriteups(salonId);
+      allow create: if canManageWriteups(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && !request.resource.data.keys().hasAny([
+          'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
+          'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
+          'emailAttempts', 'lastMailId', 'supersededBy',
+          'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
+          'declinedToAcknowledgeNote'
+        ]);
+      // Draft edits only: identity/tenancy pinned, still a draft, and clients
+      // can never smuggle in send/acknowledgment fields. Once sent, the
+      // workflow doc is fully client-immutable — every later change (email
+      // resends, declined-to-acknowledge, superseding, employee mirroring)
+      // is written exclusively by the trusted backend callables.
+      allow update: if canManageWriteups(salonId)
+        && resource.data.status == 'draft'
+        && request.resource.data.status == 'draft'
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && !request.resource.data.keys().hasAny([
+          'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
+          'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
+          'emailAttempts', 'lastMailId', 'supersededBy',
+          'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
+          'declinedToAcknowledgeNote'
+        ]);
+      // Only unsent drafts may be discarded; sent write-ups are permanent.
+      allow delete: if canManageWriteups(salonId) && resource.data.status == 'draft';
+
+      match /auditEvents/{eventId} {
+        allow read: if canManageWriteups(salonId);
+        allow create: if canManageWriteups(salonId)
+          && request.resource.data.performedByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Issued formal write-up documents (Phase 2) — the immutable snapshot the
+    // employee sees. Created ONLY by the approveAndSendWriteup backend (Admin
+    // SDK); no client may ever create, edit or delete one. Readable by
+    // write-ups managers and by the employee it was issued to — deliberately
+    // NOT the shared staff documents collection, which all managers can read.
+    match /salons/{salonId}/staff/{staffId}/writeupDocuments/{writeupId} {
+      allow read: if canManageWriteups(salonId) || matchesOwnStaffId(salonId, staffId);
+      allow create, update, delete: if false;
+    }
+
+    // Private per-staff notifications (Phase 2: type 'writeup_sent'). Separate
+    // from staffNotifications on purpose — managers can read those, but must
+    // not even learn that a write-up notification exists. Backend-created only.
+    match /salons/{salonId}/staffPrivateNotifications/{notifId} {
+      allow read: if canManageWriteups(salonId)
+        || (
+          resource.data.forStaffId is string
+          && resource.data.forStaffId != ''
+          && (
+            userStaffId() == resource.data.forStaffId
+            || memberStaffId(salonId) == resource.data.forStaffId
+            || membershipStaffId(salonId) == resource.data.forStaffId
+            || staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        );
+      // Recipient may mark their own notification read — nothing else.
+      allow update: if resource.data.forStaffId is string
+        && resource.data.forStaffId != ''
+        && (
+          userStaffId() == resource.data.forStaffId
+          || memberStaffId(salonId) == resource.data.forStaffId
+          || membershipStaffId(salonId) == resource.data.forStaffId
+          || staffDocUidMatches(salonId, resource.data.forStaffId)
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+      allow create, delete: if false;
     }
 
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====

@@ -8,21 +8,25 @@
  *
  * Data: salons/{salonId}/staff/{staffId}/writeupIncidents/{incidentId}
  */
-import { wuState } from "./staff-writeups-state.js?v=20260731_writeups_phase1";
+import { wuState } from "./staff-writeups-state.js?v=20260731_writeups_phase2";
 import {
   ensureIncidentsSubscription,
   unsubscribeIncidents,
   loadWriteupSettings,
-} from "./staff-writeups-cloud.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
+import {
+  ensureFormalSubscription,
+  unsubscribeFormal,
+} from "./staff-writeups-formal-cloud.js?v=20260731_writeups_phase2";
 import {
   renderWriteupsIntoContainer,
   renderLoadingHtml,
   renderPermissionDeniedHtml,
-} from "./staff-writeups-render.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-render.js?v=20260731_writeups_phase2";
 import {
   initStaffWriteupsUi,
   handleWriteupsActionClick,
-} from "./staff-writeups-ui.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-ui.js?v=20260731_writeups_phase2";
 
 initStaffWriteupsUi({ rerender: renderWriteupsIntoContainer });
 
@@ -42,6 +46,7 @@ export function ffCurrentUserCanManageWriteups() {
 
 export function ffStaffWriteupsUnmount() {
   unsubscribeIncidents();
+  unsubscribeFormal();
   wuState._mountCtx = { salonId: "", staffId: "" };
   wuState._lastIncidentList = null;
   wuState._loadError = "";
@@ -96,6 +101,10 @@ export function ffMountStaffWriteups(container, salonId, staffId) {
   if (wuState._mountedKey !== key) {
     container.innerHTML = renderLoadingHtml();
     ensureIncidentsSubscription(sid, stid, () => {
+      if (wuState._boundContainer) renderWriteupsIntoContainer(wuState._boundContainer);
+    });
+    // Phase 2: formal write-ups list (drafts + sent) for the same employee.
+    ensureFormalSubscription(sid, stid, () => {
       if (wuState._boundContainer) renderWriteupsIntoContainer(wuState._boundContainer);
     });
     return;

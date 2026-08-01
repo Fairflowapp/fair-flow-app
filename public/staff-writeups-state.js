@@ -22,6 +22,14 @@ export const wuState = {
   _settings: null,
   _settingsSalonId: "",
   _saveInFlight: false,
+  // ---- Phase 2: formal write-ups (admin side) ----
+  _formalUnsub: null,
+  /** @type {Array<Record<string, unknown>> | null} null = still loading */
+  _formalList: null,
+  _formalError: "",
+  /** mailId -> 'queued' | 'failed' (resolved lazily for email status chips). */
+  _mailStates: {},
+  _sendInFlight: false,
 };
 
 export const WRITEUP_INCIDENT_TYPES = [
@@ -71,3 +79,58 @@ export const WRITEUP_COUNTABLE_STATUSES = new Set([
 /** Attachment upload limits (same as the staff documents / inbox uploads). */
 export const WRITEUP_MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const WRITEUP_ACCEPT_FILE_TYPES = ".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif";
+
+// ---------------------------------------------------------------------------
+// Phase 2 — formal write-ups
+// ---------------------------------------------------------------------------
+
+export const WRITEUP_WARNING_LEVELS = [
+  { id: "coaching_verbal", label: "Coaching / Verbal Warning Documentation" },
+  { id: "written", label: "Written Warning" },
+  { id: "final_written", label: "Final Written Warning" },
+];
+
+export function writeupWarningLevelLabel(id) {
+  const w = WRITEUP_WARNING_LEVELS.find((x) => x.id === id);
+  return w ? w.label : id ? String(id) : "—";
+}
+
+/**
+ * Formal write-up lifecycle (admin workflow doc):
+ *   draft -> sending -> sent -> (superseded)
+ * "sending" is set by the backend when Approve & Send starts; a write-up stuck
+ * in "sending" after a partial failure is resumed by calling the same
+ * callable again (every send step is idempotent).
+ */
+export const WRITEUP_FORMAL_STATUSES = [
+  { id: "draft", label: "Draft" },
+  { id: "sending", label: "Sending…" },
+  { id: "sent", label: "Sent" },
+  { id: "superseded", label: "Superseded" },
+];
+
+export function writeupFormalStatusLabel(id) {
+  const s = WRITEUP_FORMAL_STATUSES.find((x) => x.id === id);
+  return s ? s.label : id ? String(id) : "—";
+}
+
+/** Exact employee acknowledgment wording — do not alter. */
+export const WRITEUP_ACK_TEXT =
+  "My acknowledgment confirms that I received and reviewed this write-up. It does not necessarily mean that I agree with it.";
+
+/** Default email draft — deliberately contains no incident details. */
+export function writeupDefaultEmailSubject(salonName) {
+  return `Important document from ${String(salonName || "").trim() || "your salon"}`;
+}
+
+export function writeupDefaultEmailBody(salonName, employeeFirstName) {
+  const salon = String(salonName || "").trim() || "your salon";
+  const hi = String(employeeFirstName || "").trim();
+  return (
+    `${hi ? `Hi ${hi},` : "Hello,"}\n\n` +
+    `You have received an important document from ${salon}.\n\n` +
+    `Please sign in to Fair Flow to review and acknowledge it. ` +
+    `The document is available in your profile under "My Write-Ups".\n\n` +
+    `Thank you,\n${salon}`
+  );
+}

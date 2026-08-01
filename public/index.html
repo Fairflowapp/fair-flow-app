@@ -1409,6 +1409,8 @@
         <nav class="my-profile-nav" style="display:flex;flex-direction:column;gap:4px;">
           <button type="button" class="my-profile-tab-btn user-profile-menu-item user-profile-menu-item--active" data-my-profile-tab="details" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Details</button>
           <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
+          <!-- Shown by my-writeups.js only when the employee has an issued formal write-up. -->
+          <button type="button" id="myProfileWriteupsTabBtn" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="writeups" style="display:none;width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">My Write-Ups</button>
           <button type="button" class="my-profile-tab-btn user-profile-menu-item" data-my-profile-tab="delete-account" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Delete Account</button>
         </nav>
       </div>
@@ -1455,6 +1457,9 @@
               <button type="button" id="myProfileChangePasswordSubmitBtn" class="ff-myp-btn">Update password</button>
             </div>
           </div>
+        </div>
+        <div id="myProfilePanelWriteups" style="display:none;">
+          <div class="ff-myp-card ff-myp-stack"><!-- populated by my-writeups.js --></div>
         </div>
         <div id="myProfilePanelDeleteAccount" style="display:none;">
           <div class="ff-myp-warning-card">
@@ -5391,6 +5396,24 @@ function ffCaptureTrainingReminderDeepLink() {
   } catch (eCapture) {}
 }
 ffCaptureTrainingReminderDeepLink();
+
+/** ?ff_writeup= — the "secure link" in write-up emails. Captured early and
+ *  stripped from the address bar; consumed by my-writeups.js after sign-in
+ *  (the document itself is only readable by the employee it was issued to). */
+function ffCaptureWriteupDeepLink() {
+  try {
+    var params = new URLSearchParams(window.location.search || '');
+    var id = String(params.get('ff_writeup') || '').trim();
+    if (!id || typeof window === 'undefined') return;
+    window.__ffPendingWriteupDeepLinkId = id;
+    var u = new URL(window.location.href);
+    if (u.searchParams.has('ff_writeup')) {
+      u.searchParams.delete('ff_writeup');
+      history.replaceState({}, '', u.pathname + u.search + u.hash);
+    }
+  } catch (eCaptureWu) {}
+}
+ffCaptureWriteupDeepLink();
 
 function ffQueueJoinKioskDeviceEnabled() {
   try {
@@ -12505,9 +12528,16 @@ window.ffSwitchMyProfileTab = function ffSwitchMyProfileTab(tab, options) {
   const d = document.getElementById('myProfilePanelDetails');
   const p = document.getElementById('myProfilePanelPassword');
   const del = document.getElementById('myProfilePanelDeleteAccount');
+  const wu = document.getElementById('myProfilePanelWriteups');
   if (d) d.style.display = tab === 'details' ? 'block' : 'none';
   if (p) p.style.display = tab === 'password' ? 'block' : 'none';
   if (del) del.style.display = tab === 'delete-account' ? 'block' : 'none';
+  if (wu) {
+    wu.style.display = tab === 'writeups' ? 'block' : 'none';
+    if (tab === 'writeups' && typeof window.ffMountMyWriteups === 'function') {
+      try { window.ffMountMyWriteups(wu); } catch (eWu) {}
+    }
+  }
   const screen = document.getElementById('myProfileScreen');
   const openMobilePanel = !(options && options.open === false);
   if (screen && window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
@@ -30804,6 +30834,35 @@ function initializeAppsPanel() {
       const lower = String(roleFromUser || roleFromActor).toLowerCase();
       if (lower === 'admin' || lower === 'owner') return true;
       return false;
+    } catch (_) { return false; }
+  };
+
+  // Owner/Admin ONLY — the stricter gate for Approve & Send / Resend Email /
+  // Mark Declined / Corrected Version on formal write-ups. A staff member
+  // with only permissions.writeups_manage can draft but never send. UI-only:
+  // the approveAndSendWriteup backend independently requires owner/admin.
+  window.ffCurrentUserIsWriteupsOwnerAdmin = function() {
+    try {
+      if (typeof window.ffGetStaffStore === 'function') {
+        const store = window.ffGetStaffStore();
+        const list = store && Array.isArray(store.staff) ? store.staff : [];
+        const sid = (window.__ff_authedStaffId
+          || (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : null)
+          || '').toString().trim();
+        if (sid) {
+          const me = list.find(function(s) {
+            const id = String((s && (s.id || s.staffId)) || '').trim();
+            return id && (id === sid || id.toLowerCase() === sid.toLowerCase());
+          });
+          if (me && me.isAdmin === true) return true;
+        }
+      }
+      const roleFromUser = (typeof window !== 'undefined' && window.__ff_user_role) ? window.__ff_user_role : '';
+      const roleFromActor = (typeof window !== 'undefined' && window.__ff_actorRole)
+        ? window.__ff_actorRole
+        : (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ff_actor_role') : null) || '';
+      const lower = String(roleFromUser || roleFromActor).toLowerCase();
+      return lower === 'admin' || lower === 'owner';
     } catch (_) { return false; }
   };
 
@@ -51253,7 +51312,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260704_bootstrap_js_extract"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260731_writeups_phase1"></script>
+  <script src="/safe-loader.js?v=20260731_writeups_phase2"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

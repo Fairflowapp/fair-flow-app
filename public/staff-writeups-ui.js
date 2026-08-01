@@ -1,15 +1,17 @@
 /**
- * staff-writeups-ui.js — interactions for the Employee Write-Ups tab
- * (Phase 1): Add / Edit incident modal, Mark-as-Excused confirm, attachment
- * viewing, and repeated-incident banner actions. "Review & Create Write-Up"
- * is a Phase 2 stub — nothing is ever sent to the employee from this tab.
+ * staff-writeups-ui.js — interactions for the Employee Write-Ups tab:
+ * Add / Edit incident modal, Mark-as-Excused confirm, attachment viewing,
+ * repeated-incident banner actions, and (Phase 2) the formal write-up
+ * actions: compose / edit / approve & send / view / print / resend email /
+ * mark declined / corrected version. Sending is Owner/Admin only — enforced
+ * by the approveAndSendWriteup backend, not just this UI.
  */
 import {
   wuState,
   WRITEUP_INCIDENT_TYPES,
   WRITEUP_ACCEPT_FILE_TYPES,
   writeupTypeLabel,
-} from "./staff-writeups-state.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-state.js?v=20260731_writeups_phase2";
 import {
   createIncident,
   updateIncident,
@@ -17,8 +19,8 @@ import {
   resolveAttachmentUrl,
   resolveActorStaff,
   toDateMaybe,
-} from "./staff-writeups-cloud.js?v=20260731_writeups_phase1";
-import { escapeHtml, dismissSuggestion } from "./staff-writeups-render.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
+import { escapeHtml, dismissSuggestion } from "./staff-writeups-render.js?v=20260731_writeups_phase2";
 
 function toast(msg, variant) {
   try {
@@ -362,6 +364,208 @@ async function viewAttachment(incidentId, idx) {
   }
 }
 
+// ---------- Phase 2: formal write-up actions ----------
+
+async function importCompose() {
+  return import("./staff-writeups-compose.js?v=20260731_writeups_phase2");
+}
+
+async function importFormalCloud() {
+  return import("./staff-writeups-formal-cloud.js?v=20260731_writeups_phase2");
+}
+
+async function importFormalRender() {
+  return import("./staff-writeups-formal-render.js?v=20260731_writeups_phase2");
+}
+
+function currentWriteup(writeupId) {
+  return (wuState._formalList || []).find((w) => w.id === writeupId) || null;
+}
+
+function viewerIsOwnerAdmin() {
+  try {
+    return (
+      typeof window.ffCurrentUserIsWriteupsOwnerAdmin === "function" &&
+      window.ffCurrentUserIsWriteupsOwnerAdmin() === true
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+async function openComposer(opts) {
+  const { openWriteupComposer } = await importCompose();
+  await openWriteupComposer(opts || {});
+}
+
+/** Approve & Send from the list (drafts) or Resume Send (stuck "sending"). */
+async function sendFromList(writeupId) {
+  if (!viewerIsOwnerAdmin()) {
+    return toast("Only the owner or an admin can approve and send a write-up.", "error");
+  }
+  const w = currentWriteup(writeupId);
+  if (!w) return;
+  const resume = String(w.status || "") === "sending";
+  const { overlay, finish } = openOverlay(
+    `<div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;">${resume ? "Resume sending?" : "Approve &amp; Send?"}</div>
+     <p style="margin:0 0 16px 0;font-size:13px;color:#374151;line-height:1.55;">${
+       resume
+         ? "A previous send did not finish. Resuming completes the remaining steps — nothing is duplicated."
+         : "Nothing will be sent until you review and approve this document. The employee will receive an email and an in-app notification."
+     }</p>
+     <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+       <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Cancel</button>
+       <button type="button" data-ff-confirm style="padding:10px 18px;border-radius:10px;border:none;background:#16a34a;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">${resume ? "Resume Send" : "Approve &amp; Send"}</button>
+     </div>`,
+    440,
+  );
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-confirm]").onclick = async () => {
+    const btn = overlay.querySelector("[data-ff-confirm]");
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    try {
+      const { approveAndSendWriteup } = await importFormalCloud();
+      await approveAndSendWriteup(wuState._mountCtx.salonId, wuState._mountCtx.staffId, writeupId);
+      toast("Write-up approved and sent.", "success");
+      finish();
+    } catch (err) {
+      console.warn("[staff-writeups] send failed", err);
+      toast(err && err.message ? err.message : "Sending failed — you can retry.", "error");
+      btn.disabled = false;
+      btn.textContent = resume ? "Resume Send" : "Approve & Send";
+    }
+  };
+}
+
+async function viewIssuedDocument(writeupId, printIt) {
+  const ctx = wuState._mountCtx;
+  const [{ loadIssuedDocument }, renderMod] = await Promise.all([
+    importFormalCloud(),
+    importFormalRender(),
+  ]);
+  const issued = await loadIssuedDocument(ctx.salonId, ctx.staffId, writeupId);
+  if (!issued) return toast("The issued document is not available yet.", "error");
+  if (printIt) {
+    if (!renderMod.openWriteupPrintWindow(issued)) {
+      toast("Allow pop-ups to print this document.", "error");
+    }
+    return;
+  }
+  const { overlay, finish } = openOverlay(
+    `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+       <div style="font-size:16px;font-weight:700;color:#111827;">Formal Write-Up (as issued)</div>
+       <button type="button" data-ff-print style="padding:8px 14px;border-radius:999px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;">Print / PDF</button>
+     </div>
+     <div style="max-height:64vh;overflow-y:auto;">${renderMod.renderIssuedDocumentHtml(issued, {})}</div>
+     <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+       <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Close</button>
+     </div>`,
+    760,
+  );
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-print]").onclick = () => {
+    renderMod.openWriteupPrintWindow(issued);
+  };
+}
+
+async function confirmDeleteDraft(writeupId) {
+  const { overlay, finish } = openOverlay(
+    `<div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;">Delete this draft?</div>
+     <p style="margin:0 0 16px 0;font-size:13px;color:#6b7280;line-height:1.5;">Only the draft is removed — the documented incidents stay in the timeline.</p>
+     <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+       <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Cancel</button>
+       <button type="button" data-ff-confirm style="padding:10px 18px;border-radius:10px;border:none;background:#b91c1c;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Delete Draft</button>
+     </div>`,
+    420,
+  );
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-confirm]").onclick = async () => {
+    try {
+      const { deleteWriteupDraft } = await importFormalCloud();
+      await deleteWriteupDraft(wuState._mountCtx.salonId, wuState._mountCtx.staffId, writeupId);
+      toast("Draft deleted.", "success");
+      finish();
+    } catch (err) {
+      console.warn("[staff-writeups] draft delete failed", err);
+      toast("Could not delete the draft.", "error");
+    }
+  };
+}
+
+async function confirmResendEmail(writeupId) {
+  if (!viewerIsOwnerAdmin()) {
+    return toast("Only the owner or an admin can resend the email.", "error");
+  }
+  const { overlay, finish } = openOverlay(
+    `<div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;">Resend the email?</div>
+     <p style="margin:0 0 16px 0;font-size:13px;color:#6b7280;line-height:1.5;">The in-app document is already issued and stays exactly as it is — only a new email attempt is queued.</p>
+     <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+       <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Cancel</button>
+       <button type="button" data-ff-confirm style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Resend Email</button>
+     </div>`,
+    420,
+  );
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-confirm]").onclick = async () => {
+    const btn = overlay.querySelector("[data-ff-confirm]");
+    btn.disabled = true;
+    btn.textContent = "Queuing…";
+    try {
+      const { resendWriteupEmail } = await importFormalCloud();
+      await resendWriteupEmail(wuState._mountCtx.salonId, wuState._mountCtx.staffId, writeupId);
+      toast("Email queued again.", "success");
+      finish();
+    } catch (err) {
+      console.warn("[staff-writeups] resend failed", err);
+      toast(err && err.message ? err.message : "Could not resend the email.", "error");
+      btn.disabled = false;
+      btn.textContent = "Resend Email";
+    }
+  };
+}
+
+async function confirmMarkDeclined(writeupId) {
+  if (!viewerIsOwnerAdmin()) {
+    return toast("Only the owner or an admin can record a declined acknowledgment.", "error");
+  }
+  const rid = `ffwud_${Date.now()}`;
+  const { overlay, finish } = openOverlay(
+    `<div style="font-size:17px;font-weight:700;color:#111827;margin-bottom:8px;">Mark as Declined to Acknowledge?</div>
+     <p style="margin:0 0 12px 0;font-size:13px;color:#6b7280;line-height:1.5;">Use this only when the employee refused to acknowledge outside the app. The issued document is not changed or deleted.</p>
+     <label style="${labelStyle}">Factual note (optional)</label>
+     <textarea id="${rid}_note" rows="2" placeholder="e.g. Presented in person on July 31; employee declined to sign." style="${inputStyle}resize:vertical;"></textarea>
+     <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+       <button type="button" data-ff-cancel style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Cancel</button>
+       <button type="button" data-ff-confirm style="padding:10px 18px;border-radius:10px;border:none;background:#b91c1c;color:#fff;font-weight:600;cursor:pointer;font-size:14px;font-family:inherit;">Mark as Declined</button>
+     </div>`,
+    440,
+  );
+  overlay.querySelector("[data-ff-cancel]").onclick = () => finish();
+  overlay.querySelector("[data-ff-confirm]").onclick = async () => {
+    const note = String(overlay.querySelector(`#${rid}_note`)?.value || "").trim();
+    try {
+      const { markDeclinedToAcknowledge } = await importFormalCloud();
+      await markDeclinedToAcknowledge(
+        wuState._mountCtx.salonId,
+        wuState._mountCtx.staffId,
+        writeupId,
+        note,
+      );
+      toast("Declined acknowledgment recorded.", "success");
+      finish();
+    } catch (err) {
+      console.warn("[staff-writeups] mark declined failed", err);
+      toast(
+        err && err.code === "permission-denied"
+          ? "Only the owner or an admin can record this."
+          : "Could not record the declined acknowledgment.",
+        "error",
+      );
+    }
+  };
+}
+
 // ---------- Delegated click handler ----------
 
 export function handleWriteupsActionClick(e) {
@@ -396,7 +600,41 @@ export function handleWriteupsActionClick(e) {
     dismissSuggestion(typeId, btn.getAttribute("data-wu-count"));
     rerender();
   } else if (action === "review_create") {
-    // Phase 2: incident selection + formal write-up draft. Recommendation only for now.
-    toast("Formal write-up creation is coming in Phase 2.", "info");
+    void openComposer({ typeId }).catch((err) => {
+      console.warn("[staff-writeups] composer failed", err);
+      toast("Could not open the write-up composer.", "error");
+    });
+  } else if (action === "formal_new") {
+    void openComposer({}).catch(() => toast("Could not open the write-up composer.", "error"));
+  } else if (action === "formal_edit") {
+    const writeupId = btn.getAttribute("data-wu-writeup-id") || "";
+    const w = currentWriteup(writeupId);
+    if (w) {
+      void openComposer({ existingDraft: w }).catch(() =>
+        toast("Could not open the write-up composer.", "error"),
+      );
+    }
+  } else if (action === "formal_send") {
+    void sendFromList(btn.getAttribute("data-wu-writeup-id") || "");
+  } else if (action === "formal_delete_draft") {
+    void confirmDeleteDraft(btn.getAttribute("data-wu-writeup-id") || "");
+  } else if (action === "formal_view") {
+    void viewIssuedDocument(btn.getAttribute("data-wu-writeup-id") || "", false);
+  } else if (action === "formal_print") {
+    void viewIssuedDocument(btn.getAttribute("data-wu-writeup-id") || "", true);
+  } else if (action === "formal_resend_email") {
+    void confirmResendEmail(btn.getAttribute("data-wu-writeup-id") || "");
+  } else if (action === "formal_mark_declined") {
+    void confirmMarkDeclined(btn.getAttribute("data-wu-writeup-id") || "");
+  } else if (action === "formal_correct") {
+    const writeupId = btn.getAttribute("data-wu-writeup-id") || "";
+    const w = currentWriteup(writeupId);
+    if (!viewerIsOwnerAdmin()) {
+      toast("Only the owner or an admin can create a corrected version.", "error");
+    } else if (w) {
+      void openComposer({ correctionOf: w }).catch(() =>
+        toast("Could not open the write-up composer.", "error"),
+      );
+    }
   }
 }

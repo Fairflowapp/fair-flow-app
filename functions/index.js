@@ -34,6 +34,13 @@ const _docSizeMonitor = require("./doc-size-monitor");
 exports.scheduledDocSizeMonitor = _docSizeMonitor.scheduledDocSizeMonitor;
 exports.debugRunDocSizeMonitor = _docSizeMonitor.debugRunDocSizeMonitor;
 
+// Employee Write-Ups Phase 2 (trusted approve/send + employee open/respond/
+// acknowledge). Deploy ONLY by name:
+//   firebase deploy --only "functions:approveAndSendWriteup,functions:writeupEmployeeAction"
+const _writeups = require("./writeups");
+exports.approveAndSendWriteup = _writeups.approveAndSendWriteup;
+exports.writeupEmployeeAction = _writeups.writeupEmployeeAction;
+
 // Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
 const _tasksAutoReset = require("./tasks-auto-reset");
 exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;

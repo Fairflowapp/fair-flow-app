@@ -11,11 +11,12 @@ import {
   writeupTypeLabel,
   writeupStatusLabel,
   WRITEUP_DEFAULT_SETTINGS,
-} from "./staff-writeups-state.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-state.js?v=20260731_writeups_phase2";
 import {
   toDateMaybe,
   computeRepeatSuggestions,
-} from "./staff-writeups-cloud.js?v=20260731_writeups_phase1";
+} from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
+import { renderFormalSectionHtml } from "./staff-writeups-formal-render.js?v=20260731_writeups_phase2";
 
 export function escapeHtml(v) {
   return String(v == null ? "" : v)
@@ -241,5 +242,18 @@ export function renderWriteupsIntoContainer(container) {
     body = filtered.map(incidentCardHtml).join("");
   }
 
-  container.innerHTML = `<div style="${shellStyle()}">${header}${suggestionBannerHtml(suggestions, settings)}${toolbar}${body}</div>`;
+  // Phase 2 — formal write-ups section. Approve/Send/Resend/Decline/Correct are
+  // owner/admin only (backend enforces this; the flag only shapes the UI).
+  let canApprove = false;
+  try {
+    canApprove =
+      typeof window.ffCurrentUserIsWriteupsOwnerAdmin === "function" &&
+      window.ffCurrentUserIsWriteupsOwnerAdmin() === true;
+  } catch (_) {}
+  const formal = renderFormalSectionHtml(wuState._formalList, {
+    canApprove,
+    mailStates: wuState._mailStates,
+  });
+
+  container.innerHTML = `<div style="${shellStyle()}">${header}${suggestionBannerHtml(suggestions, settings)}${toolbar}${body}${formal}</div>`;
 }
