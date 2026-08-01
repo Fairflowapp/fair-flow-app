@@ -51,6 +51,19 @@ function appBaseUrl() {
   return "https://app.fairflowapp.com";
 }
 
+/**
+ * Which collection the Trigger Email extension watches. Resolved ONLY from
+ * the actual Firebase project ID — never from anything the client sends.
+ * Staging uses a dedicated writeupMailStaging collection so installing the
+ * extension there can never process old test documents accumulated in the
+ * shared `mail` collection; production keeps `mail`.
+ */
+function writeupMailCollectionForProject(projectId) {
+  const p = trimStr(projectId != null ? projectId : process.env.GCLOUD_PROJECT);
+  return p === "fair-flow-staging" ? "writeupMailStaging" : "mail";
+}
+exports.writeupMailCollectionForProject = writeupMailCollectionForProject;
+
 function db() {
   return admin.firestore();
 }
@@ -330,6 +343,7 @@ exports.approveAndSendWriteup = functionsV1
       await draftRef.update({
         emailAttempts: attempt,
         lastMailId: mailId,
+        lastMailCollection: writeupMailCollectionForProject(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       await appendAuditEvent(draftRef, `email_resent_a${attempt}`, {
@@ -479,6 +493,7 @@ exports.approveAndSendWriteup = functionsV1
       sentAt: draft.sentAt || admin.firestore.FieldValue.serverTimestamp(),
       emailAttempts: Number(draft.emailAttempts) || 1,
       lastMailId: mailId,
+      lastMailCollection: writeupMailCollectionForProject(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
     await appendAuditEvent(draftRef, "sent_a1", {
@@ -516,7 +531,7 @@ async function queueWriteupEmail({ salonId, staffId, writeupId, draft, attempt, 
 
   try {
     await db()
-      .collection("mail")
+      .collection(writeupMailCollectionForProject())
       .doc(mailId)
       .create({
         to,
@@ -526,8 +541,9 @@ async function queueWriteupEmail({ salonId, staffId, writeupId, draft, attempt, 
           html: buildEmailHtml(bodyText, linkUrl, salonName),
         },
         // Scoping metadata so owner/admin clients may read delivery status
-        // (firestore.rules only opens writeup_* mail docs to that salon's
-        // owner/admin — nothing else in /mail is readable).
+        // (firestore.rules only opens writeup_* docs in mail /
+        // writeupMailStaging to that salon's owner/admin — nothing else in
+        // either collection is client-readable).
         salonId,
         staffId,
         writeupId,

@@ -101,11 +101,18 @@ export function unsubscribeFormal() {
 async function refreshMailStates(list, onChange) {
   const wanted = (list || [])
     .filter((w) => trimStr(w.status) === "sent" && trimStr(w.lastMailId))
-    .map((w) => trimStr(w.lastMailId));
+    .map((w) => ({
+      mailId: trimStr(w.lastMailId),
+      // Stamped by the backend (staging writes to writeupMailStaging so the
+      // extension there never touches old `mail` test docs). Only the two
+      // known collections are ever read — never a client-supplied name.
+      mailCol:
+        trimStr(w.lastMailCollection) === "writeupMailStaging" ? "writeupMailStaging" : "mail",
+    }));
   let changed = false;
-  for (const mailId of wanted) {
+  for (const { mailId, mailCol } of wanted) {
     try {
-      const snap = await getDoc(doc(db, "mail", mailId));
+      const snap = await getDoc(doc(db, mailCol, mailId));
       const state = trimStr(snap.exists() ? snap.data()?.delivery?.state : "").toUpperCase();
       const mapped = state === "ERROR" ? "failed" : "queued";
       if (wuState._mailStates[mailId] !== mapped) {

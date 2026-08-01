@@ -451,6 +451,21 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Staging-only write-up email queue. On fair-flow-staging the backend
+    // writes write-up emails here (never to `mail`) so the Trigger Email
+    // extension installed on this collection can never process old test
+    // documents from `mail`. Backend-only writes; the salon's owner/admin
+    // may read the delivery state of their own write-up emails.
+    match /writeupMailStaging/{docId} {
+      allow read: if docId.matches('writeup_.*')
+        && resource.data.salonId is string
+        && (
+          isAdminOrOwner(resource.data.salonId)
+          || isFirestoreSalonOwnerUid(resource.data.salonId)
+        );
+      allow create, update, delete: if false;
+    }
+
     // Finalize invite request
     match /finalizeInviteRequests/{requestId} {
       allow create: if request.auth != null
@@ -693,7 +708,7 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny([
           'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
           'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
-          'emailAttempts', 'lastMailId', 'supersededBy',
+          'emailAttempts', 'lastMailId', 'lastMailCollection', 'supersededBy',
           'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
           'declinedToAcknowledgeNote'
         ]);
@@ -713,7 +728,7 @@ service cloud.firestore {
         && !request.resource.data.keys().hasAny([
           'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
           'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
-          'emailAttempts', 'lastMailId', 'supersededBy',
+          'emailAttempts', 'lastMailId', 'lastMailCollection', 'supersededBy',
           'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
           'declinedToAcknowledgeNote'
         ]);
