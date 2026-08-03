@@ -12,7 +12,7 @@ import {
   writeupWarningLevelLabel,
   writeupFormalStatusLabel,
   WRITEUP_ACK_TEXT,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2d";
 
 export function wuEscapeHtml(v) {
   return String(v == null ? "" : v)
@@ -184,22 +184,39 @@ export function openWriteupPrintWindow(docData) {
 // Email preview (what the employee's inbox will show)
 // ---------------------------------------------------------------------------
 
-export function renderEmailPreviewHtml(subject, bodyText) {
+/** Same public, permanent logo asset the backend email (buildEmailHtml) uses. */
+export const WRITEUP_EMAIL_LOGO_URL =
+  "https://app.fairflowapp.com/fairflow-logo-transparent.png?v=1";
+
+/**
+ * Renders the email preview with EXACTLY the markup the backend builds in
+ * buildEmailHtml (functions/writeups.js) — logo header, body paragraphs,
+ * Review Document button, and the "sent by {salon} via Fair Flow" footer —
+ * so what the admin previews is what the employee receives.
+ */
+export function renderEmailPreviewHtml(subject, bodyText, salonName) {
   const paragraphs = String(bodyText || "")
     .split(/\n{2,}/)
-    .map((p) => `<p style="margin:0 0 12px 0;">${wuEscapeHtml(p).replace(/\n/g, "<br>")}</p>`)
+    .map((p) => `<p style="margin:0 0 14px 0;">${wuEscapeHtml(p).replace(/\n/g, "<br>")}</p>`)
     .join("");
+  const salon = String(salonName || "").trim() || "your salon";
   return `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
     <div style="background:#f9fafb;border-bottom:1px solid #e5e7eb;padding:10px 14px;">
       <div style="font-size:11px;color:#6b7280;">Subject</div>
       <div style="font-size:13px;font-weight:700;color:#111827;">${wuEscapeHtml(subject || "")}</div>
     </div>
-    <div style="padding:16px 14px;font-size:13px;color:#111827;line-height:1.6;">
+    <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;line-height:1.6;max-width:560px;margin:0 auto;padding:24px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+        <td align="center" style="padding:0 0 20px 0;">
+          <img src="${WRITEUP_EMAIL_LOGO_URL}" alt="Fair Flow" width="110" style="display:block;border:0;outline:none;height:auto;max-width:110px;" />
+        </td>
+      </tr></table>
       ${paragraphs}
-      <span style="display:inline-block;background:#7c3aed;color:#fff;border-radius:8px;padding:9px 18px;font-size:12px;font-weight:700;">Review Document</span>
-      <p style="margin:14px 0 0 0;font-size:11px;color:#9ca3af;">The button links to Fair Flow — the employee signs in to view the document. No incident details are included in the email.</p>
+      <p style="margin:22px 0;"><span style="background:#7c3aed;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;display:inline-block;">Review Document</span></p>
+      <p style="margin:18px 0 0 0;font-size:12px;color:#6b7280;">This message was sent by ${wuEscapeHtml(salon)} via Fair Flow. Please do not reply to this email.</p>
     </div>
-  </div>`;
+  </div>
+  <p style="margin:8px 0 0 0;font-size:11px;color:#9ca3af;">The button links to Fair Flow — the employee signs in to view the document. No incident details are included in the email.</p>`;
 }
 
 // ---------------------------------------------------------------------------

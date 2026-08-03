@@ -8,25 +8,25 @@
  *
  * Data: salons/{salonId}/staff/{staffId}/writeupIncidents/{incidentId}
  */
-import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
+import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2d";
 import {
   ensureIncidentsSubscription,
   unsubscribeIncidents,
   loadWriteupSettings,
-} from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-cloud.js?v=20260802_writeups_phase2d";
 import {
   ensureFormalSubscription,
   unsubscribeFormal,
-} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2d";
 import {
   renderWriteupsIntoContainer,
   renderLoadingHtml,
   renderPermissionDeniedHtml,
-} from "./staff-writeups-render.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-render.js?v=20260802_writeups_phase2d";
 import {
   initStaffWriteupsUi,
   handleWriteupsActionClick,
-} from "./staff-writeups-ui.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-ui.js?v=20260802_writeups_phase2d";
 
 initStaffWriteupsUi({ rerender: renderWriteupsIntoContainer });
 

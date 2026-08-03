@@ -259,6 +259,10 @@ function escapeHtml(v) {
     .replace(/'/g, "&#39;");
 }
 
+// Official Fair Flow logo — same public, permanent HTTPS asset the branded
+// invite emails use (process-pending-invites.js). Never a local file/base64.
+const WRITEUP_EMAIL_LOGO_URL = "https://app.fairflowapp.com/fairflow-logo-transparent.png?v=1";
+
 function buildEmailHtml(bodyText, linkUrl, salonName) {
   const paragraphs = String(bodyText || "")
     .split(/\n{2,}/)
@@ -266,7 +270,12 @@ function buildEmailHtml(bodyText, linkUrl, salonName) {
     .join("");
   return (
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#111827;line-height:1.6;max-width:560px;margin:0 auto;padding:24px;">` +
-    `<div style="font-size:18px;font-weight:bold;color:#7c3aed;margin-bottom:18px;">Fair Flow</div>` +
+    // Table-based centered header = reliable centering in email clients;
+    // alt text keeps the brand name visible when images are blocked.
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>` +
+    `<td align="center" style="padding:0 0 20px 0;">` +
+    `<img src="${WRITEUP_EMAIL_LOGO_URL}" alt="Fair Flow" width="110" style="display:block;border:0;outline:none;height:auto;max-width:110px;" />` +
+    `</td></tr></table>` +
     paragraphs +
     `<p style="margin:22px 0;"><a href="${escapeHtml(linkUrl)}" ` +
     `style="background:#7c3aed;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;display:inline-block;">` +

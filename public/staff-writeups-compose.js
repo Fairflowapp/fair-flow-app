@@ -18,21 +18,21 @@ import {
   writeupDefaultEmailSubject,
   writeupDefaultEmailBody,
   computeWriteupLocationChoice,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2d";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2d";
 import {
   createWriteupDraft,
   updateWriteupDraft,
   approveAndSendWriteup,
   loadActiveLocations,
   loadOptionalParentBrand,
-} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2d";
 import {
   wuEscapeHtml as escapeHtml,
   wuFormatWhen,
   renderIssuedDocumentHtml,
   renderEmailPreviewHtml,
-} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2d";
 
 function toast(msg, variant) {
   try {
@@ -542,7 +542,7 @@ export async function openWriteupComposer(opts) {
       <p style="margin:0 0 14px 0;font-size:12px;color:#6b7280;">Internal manager comments and private incident notes are never part of this document.</p>
       <div style="max-height:52vh;overflow-y:auto;margin-bottom:16px;">${renderIssuedDocumentHtml(docLike, {})}</div>
       <div style="font-size:13px;font-weight:700;color:#111827;margin:0 0 8px 0;">Email preview</div>
-      ${renderEmailPreviewHtml(f.emailSubject, f.emailBody)}
+      ${renderEmailPreviewHtml(f.emailSubject, f.emailBody, f.salonName)}
       <div style="display:flex;justify-content:flex-end;margin-top:16px;">
         <button type="button" data-wu-preview-close style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit;">Close Preview</button>
       </div>`;

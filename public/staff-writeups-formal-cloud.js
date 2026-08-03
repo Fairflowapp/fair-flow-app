@@ -29,8 +29,8 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
+import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2d";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2d";
 
 function trimStr(v) {
   return String(v == null ? "" : v).trim();

@@ -11,12 +11,12 @@ import {
   writeupTypeLabel,
   writeupStatusLabel,
   WRITEUP_DEFAULT_SETTINGS,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2d";
 import {
   toDateMaybe,
   computeRepeatSuggestions,
-} from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
-import { renderFormalSectionHtml } from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2c";
+} from "./staff-writeups-cloud.js?v=20260802_writeups_phase2d";
+import { renderFormalSectionHtml } from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2d";
 
 export function escapeHtml(v) {
   return String(v == null ? "" : v)
