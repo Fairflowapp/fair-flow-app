@@ -347,8 +347,10 @@ service cloud.firestore {
     }
 
     // User profile doc: each signed-in user can read/write ONLY their own doc
+    // Fair Flow Console (platform admin): read-only owner profile lookup for Customer 360.
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if (request.auth != null && request.auth.uid == uid) || isPlatformAdmin();
+      allow write: if request.auth != null && request.auth.uid == uid;
     }
 
     // Salon members directory: minimal public profile (name, role, staffId) for "Send to" lookup
@@ -391,7 +393,7 @@ service cloud.firestore {
     // Stripe billing state — written by Cloud Functions (Admin SDK) only.
     // Owner can read so the Settings UI can show subscription status.
     match /salons/{salonId}/billing/{docId} {
-      allow read: if isFirestoreSalonOwnerUid(salonId);
+      allow read: if isFirestoreSalonOwnerUid(salonId) || isPlatformAdmin();
       allow create, update, delete:
         if docId == 'override' && isPlatformAdmin();
       allow write: if false;
@@ -414,8 +416,46 @@ service cloud.firestore {
     }
 
     match /salons/{salonId}/locations/{locationId} {
-      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId);
+    }
+
+    // Platform admin allowlist - bootstrapped manually (Firebase Console /
+    // Admin SDK). Console reads own doc via get(); owner-role admins may list
+    // and manage team members; each admin may update own profile fields only.
+    match /platformAdmins/{uid} {
+      function isPlatformOwnerAdmin() {
+        return isPlatformAdmin()
+          && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.role == 'owner';
+      }
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list: if isPlatformOwnerAdmin();
+      allow create: if isPlatformOwnerAdmin();
+      allow update: if isPlatformOwnerAdmin()
+        || (
+          isPlatformAdmin()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['photoURL', 'name', 'updatedAt', 'updatedBy'])
+        );
+      allow delete: if false;
+    }
+
+    // Fair Flow Console: branded team-invite emails (Firestore trigger sends the mail).
+    match /consoleInviteRequests/{docId} {
+      allow create: if isPlatformAdmin();
+      allow read, update, delete: if false;
+    }
+
+    // Fair Flow Console support inbox: customers' support requests handled by
+    // platform admins (read threads, reply, mark read, resolve).
+    match /supportTickets/{ticketId} {
+      allow read, create, update: if isPlatformAdmin();
+      allow delete: if false;
+      match /messages/{messageId} {
+        allow read, create: if isPlatformAdmin();
+        allow update, delete: if false;
+      }
     }
 
     match /settings/{docId} {
@@ -542,15 +582,18 @@ service cloud.firestore {
           || isManager(salonId)
         );
 
-      // READ: manager sees all; technician sees requests they created OR are recipient of
-      allow read: if belongsToSalon(salonId)
+      // READ: manager sees all; technician sees requests they created OR are recipient of.
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        belongsToSalon(salonId)
         && (
           isManager(salonId)
           || (isTechnician(salonId) && (
             resource.data.createdByUid == request.auth.uid ||
             resource.data.forUid == request.auth.uid
           ))
-        );
+        )
+      ) || isPlatformAdmin();
 
       // UPDATE
       allow update: if belongsToSalon(salonId)
@@ -622,7 +665,7 @@ service cloud.firestore {
     // ===== STAFF MEMBERS (cloud sync) =====
     // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
     match /salons/{salonId}/staff/{staffId} {
-      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       // Managers can manage staff, but only admin/owner may set or change the
       // confidential permissions.writeups_manage flag (no self-granting).
       allow create: if belongsToSalon(salonId)
@@ -817,8 +860,11 @@ service cloud.firestore {
 
     // Conversations (PRIVATE) — only participants can read
     match /salons/{salonId}/conversations/{conversationId} {
-      allow read: if belongsToSalon(salonId)
-        && request.auth.uid in resource.data.participants;
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        belongsToSalon(salonId)
+        && request.auth.uid in resource.data.participants
+      ) || isPlatformAdmin();
 
       // Participant can create a 1:1 conversation doc
       allow create: if belongsToSalon(salonId)
@@ -912,7 +958,7 @@ service cloud.firestore {
     // Technicians: create + read their own
     // Manager/Admin/Owner: full read + update (close/archive) + delete
     match /salons/{salonId}/tickets/{ticketId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create: if belongsToSalon(salonId)
         && request.resource.data.createdByUid == request.auth.uid;
       allow update: if belongsToSalon(salonId)
@@ -922,6 +968,16 @@ service cloud.firestore {
         );
       allow delete: if belongsToSalon(salonId)
         && isAdminOrOwner(salonId);
+    }
+
+    // Historical rows when a ticket is closed (Summary layer; not deleted when
+    // live ticket is removed). Written by the app on ticket close.
+    // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+    match /salons/{salonId}/ticketSummaries/{summaryId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId);
+      allow update: if belongsToSalon(salonId) && isAdminOrOwner(salonId);
+      allow delete: if false;
     }
 
     // ===== SERVICE CATALOG =====
@@ -938,7 +994,7 @@ service cloud.firestore {
 
     // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
     match /salons/{salonId}/schedulePublish/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update: if belongsToSalon(salonId) && isManager(salonId);
       allow delete: if false;
     }
@@ -1037,7 +1093,7 @@ service cloud.firestore {
 
     // Legacy Media module (contentWorks, mediaItems, postedHistory)
     match /salons/{salonId}/contentWorks/{workId} {
-      allow read: if canAccessMedia(salonId);
+      allow read: if canAccessMedia(salonId) || isPlatformAdmin();
       allow create: if canAccessMedia(salonId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.salonId == salonId
@@ -1048,7 +1104,7 @@ service cloud.firestore {
       allow update, delete: if canAccessMedia(salonId);
 
       match /mediaItems/{mediaId} {
-        allow read: if canAccessMedia(salonId);
+        allow read: if canAccessMedia(salonId) || isPlatformAdmin();
         allow create: if canAccessMedia(salonId)
           && request.resource.data.mediaType is string
           && request.resource.data.mediaUrl is string
@@ -1120,7 +1176,7 @@ service cloud.firestore {
       function currentRev() {
         return ('rev' in resource.data) ? resource.data.rev : 0;
       }
-      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       allow create: if (belongsToSalon(salonId) || isKioskForSalon(salonId))
         && request.resource.data.rev is int
         && request.resource.data.rev >= 0;
@@ -1139,12 +1195,12 @@ service cloud.firestore {
     }
 
     match /salons/{salonId}/tasksState/{docId} {
-      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
     match /salons/{salonId}/timeEntries/{entryId} {
-      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
     }
 
@@ -1160,12 +1216,18 @@ service cloud.firestore {
     // Operational salon data — readable/writable by salon members (UI gates
     // structural edits to managers). Mirrors queueState/tasksState model.
     match /salons/{salonId}/inventoryCategories/{catId} {
-      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId);
       match /inventorySubcategories/{subId} {
-        allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+        allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
         allow write: if belongsToSalon(salonId);
       }
+    }
+
+    // Legacy flat inventory list (still read by the Fair Flow Console usage overview).
+    match /salons/{salonId}/inventoryItems/{itemId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
+      allow write: if belongsToSalon(salonId);
     }
     match /salons/{salonId}/inventoryOrders/{orderId} {
       allow read: if belongsToSalon(salonId);
@@ -1321,7 +1383,7 @@ service cloud.firestore {
 
     // Points ledger + per-staff summaries (Points engine writes these as staff act).
     match /accounts/{accountId}/pointsEvents/{eventId} {
-      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId) || isPlatformAdmin();
       allow create: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
       allow update: if isManager(accountId);
       allow delete: if false;
@@ -1335,8 +1397,11 @@ service cloud.firestore {
 
     // ===== TRAINING (root collections; each doc has salonId) =====
     match /trainingItems/{itemId} {
-      allow read: if userExists()
-        && resource.data.salonId == userDocData().salonId;
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        userExists()
+        && resource.data.salonId == userDocData().salonId
+      ) || isPlatformAdmin();
       allow create: if userExists()
         && request.resource.data.salonId == userDocData().salonId
         && request.resource.data.salonId is string
@@ -1353,12 +1418,15 @@ service cloud.firestore {
     }
 
     match /trainingProgress/{progressId} {
-      allow read: if userExists()
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        userExists()
         && resource.data.salonId == userDocData().salonId
         && (
           isManager(resource.data.salonId)
           || (userStaffId() != '' && resource.data.staffId == userStaffId())
-        );
+        )
+      ) || isPlatformAdmin();
       allow create: if userExists()
         && request.resource.data.salonId == userDocData().salonId
         && request.resource.data.salonId is string
