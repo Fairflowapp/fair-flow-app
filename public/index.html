@@ -39167,6 +39167,39 @@ function initializeUserProfileMenu() {
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // The punch API (ffCreateTimeEntry / ffCloseTimeEntry) lives in
+  // time-clock-entries.js, which the safe-loader appends sequentially after
+  // ~27 other modules — on a tablet that was just refreshed, a fast PIN flow
+  // can beat it and hit "is not loaded". Two guards:
+  //   1. Opening any Time Clock view proactively appends the module script.
+  //      Re-appending the SAME module URL is safe — browsers evaluate a
+  //      module URL only once, so this never double-runs the module.
+  //   2. The confirm action waits (below) instead of failing immediately.
+  const _FF_TC_ENTRIES_SRC = '/time-clock-entries.js?v=20260512_manage_wait';
+  function _ffTCEnsurePunchApiLoading() {
+    try {
+      if (typeof window.ffCreateTimeEntry === 'function') return;
+      if (document.querySelector('script[data-ff-tc-entries]')) return;
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = _FF_TC_ENTRIES_SRC;
+      s.setAttribute('data-ff-tc-entries', '1');
+      document.body.appendChild(s);
+    } catch (_) {}
+  }
+
+  async function _ffTCWaitForPunchApi(fnName, timeoutMs) {
+    _ffTCEnsurePunchApiLoading();
+    const deadline = Date.now() + (timeoutMs || 15000);
+    while (typeof window[fnName] !== 'function') {
+      if (Date.now() > deadline) {
+        throw new Error('The time clock is still loading. Please try again in a few seconds.');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return window[fnName];
+  }
+
   /**
    * Entry point. Rebuilds the current view into #timeClockScreenContent.
    */
@@ -39174,6 +39207,7 @@ function initializeUserProfileMenu() {
     try {
       const content = document.getElementById('timeClockScreenContent');
       if (!content) return;
+      _ffTCEnsurePunchApiLoading();
       const view = (window.__ffTCState && window.__ffTCState.view) || 'clock';
       if (view === 'manage') {
         _ffTCRenderManageView(content);
@@ -39949,16 +39983,16 @@ function initializeUserProfileMenu() {
 
       const doPunch = async (extraFields) => {
         if (isOut) {
-          if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
-          return window.ffCloseTimeEntry(Object.assign({
+          const closeFn = await _ffTCWaitForPunchApi('ffCloseTimeEntry');
+          return closeFn(Object.assign({
             entryId: openEntry.id,
             locationId: (openEntry && openEntry.locationId) || locId || 'default',
             expectedStaffId: staff.id,
             pin: kioskPin,
           }, extraFields || {}));
         }
-        if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
-        return window.ffCreateTimeEntry(Object.assign({
+        const createFn = await _ffTCWaitForPunchApi('ffCreateTimeEntry');
+        return createFn(Object.assign({
           staffId: staff.id,
           locationId: locId || 'default',
           pin: kioskPin,
