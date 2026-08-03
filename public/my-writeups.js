@@ -26,8 +26,8 @@ import {
   wuFormatWhen,
   renderIssuedDocumentHtml,
   openWriteupPrintWindow,
-} from "./staff-writeups-formal-render.js?v=20260731_writeups_phase2";
-import { writeupWarningLevelLabel } from "./staff-writeups-state.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2b";
+import { writeupWarningLevelLabel } from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
 
 function trimStr(v) {
   return String(v == null ? "" : v).trim();

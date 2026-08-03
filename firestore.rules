@@ -697,8 +697,16 @@ service cloud.firestore {
     // approveAndSendWriteup backend. permissions.writeups_manage can draft;
     // approving/sending is Owner/Admin only and enforced by that backend.
     match /salons/{salonId}/staff/{staffId}/writeups/{writeupId} {
+      // A formal write-up requires the salon's business name
+      // (settings/main.brandName) — drafts cannot be created without it.
+      function salonHasBrandName(salonId) {
+        return exists(/databases/$(database)/documents/salons/$(salonId)/settings/main)
+          && get(/databases/$(database)/documents/salons/$(salonId)/settings/main)
+               .data.get('brandName', '') != '';
+      }
       allow read: if canManageWriteups(salonId);
       allow create: if canManageWriteups(salonId)
+        && salonHasBrandName(salonId)
         && request.resource.data.salonId == salonId
         && request.resource.data.employeeId == staffId
         && request.resource.data.status == 'draft'

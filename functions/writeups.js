@@ -168,6 +168,17 @@ function sanitizeIncidentSummaries(raw) {
     .filter(Boolean);
 }
 
+/**
+ * Authoritative business name: salons/{salonId}/settings/main.brandName.
+ * The top-level salon doc `name` is NEVER used — it can hold the owner's
+ * personal name (stamped at signup) and must not appear on issued documents.
+ */
+async function fetchSalonBrandName(salonId) {
+  const snap = await db().doc(`salons/${salonId}/settings/main`).get();
+  return snap.exists ? trimStr((snap.data() || {}).brandName).slice(0, 200) : "";
+}
+exports.fetchSalonBrandName = fetchSalonBrandName;
+
 function buildIssuedSnapshot(draft, ctx) {
   return {
     salonId: ctx.salonId,
@@ -333,6 +344,20 @@ async function approveAndSendWriteupHandler(data, context) {
       });
       return { ok: true, status: "sent", declined: true };
     }
+
+    // ---- Authoritative business name (never trusted from the client) ----
+    // Fetched server-side for every path that issues a document or sends an
+    // email (send + resend). Overrides whatever salonName the client stored
+    // in the draft, so an injected name can never reach the issued snapshot
+    // or the email. markDeclined (above) does not need it.
+    const brandName = await fetchSalonBrandName(salonId);
+    if (!brandName) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Add your business name in Settings before creating a formal write-up.",
+      );
+    }
+    draft.salonName = brandName;
 
     // ---- Explicit email resend on an already-sent write-up ----
     if (status === "sent") {

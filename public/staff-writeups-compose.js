@@ -17,20 +17,20 @@ import {
   writeupTypeLabel,
   writeupDefaultEmailSubject,
   writeupDefaultEmailBody,
-} from "./staff-writeups-state.js?v=20260731_writeups_phase2";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2b";
 import {
   createWriteupDraft,
   updateWriteupDraft,
   approveAndSendWriteup,
   loadSalonName,
-} from "./staff-writeups-formal-cloud.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2b";
 import {
   wuEscapeHtml as escapeHtml,
   wuFormatWhen,
   renderIssuedDocumentHtml,
   renderEmailPreviewHtml,
-} from "./staff-writeups-formal-render.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2b";
 
 function toast(msg, variant) {
   try {
@@ -127,7 +127,10 @@ export async function openWriteupComposer(opts) {
 
   const staffRow = resolveStaffRow(ctx.staffId);
   const actor = resolveActorStaff();
-  const salonName = trimStr(base && base.salonName) || (await loadSalonName(ctx.salonId)) || "";
+  // Always resolved fresh from settings/main.brandName — never from the draft
+  // (an existing draft may hold an outdated or wrong name) and never from the
+  // top-level salon doc. Blank = missing business name = save/send blocked.
+  const salonName = trimStr(await loadSalonName(ctx.salonId));
 
   const incidents = (wuState._lastIncidentList || []).filter((i) => i && i.archived !== true);
   const preselected = new Set(
@@ -224,7 +227,12 @@ export async function openWriteupComposer(opts) {
     <div style="display:flex;gap:10px;">
       <div style="flex:1;min-width:0;">
         <label style="${labelStyle}">Salon</label>
-        <input type="text" id="${rid}_salon" value="${escapeHtml(fields.salonName)}" style="${inputStyle}" />
+        <input type="text" id="${rid}_salon" value="${escapeHtml(fields.salonName)}" readonly style="${inputStyle}background:#f9fafb;color:#6b7280;cursor:not-allowed;" />
+        ${
+          fields.salonName
+            ? ""
+            : `<div style="margin:-8px 0 12px 0;font-size:12px;font-weight:600;color:#b91c1c;">Add your business name in Settings before creating a formal write-up.</div>`
+        }
       </div>
       <div style="flex:1;min-width:0;">
         <label style="${labelStyle}">Location</label>
@@ -233,6 +241,7 @@ export async function openWriteupComposer(opts) {
     </div>
     <label style="${labelStyle}">Warning level</label>
     <select id="${rid}_level" style="${inputStyle}">${levelOptions}</select>
+    <div id="${rid}_level_err" style="display:none;margin:-8px 0 12px 0;font-size:12px;font-weight:600;color:#b91c1c;">Select a warning level before approving this write-up.</div>
 
     <label style="${labelStyle}">Selected incidents (employee-facing copies — editing here never changes the original incident)</label>
     <div id="${rid}_summaries" style="margin-bottom:12px;"></div>
@@ -394,7 +403,50 @@ export async function openWriteupComposer(opts) {
     };
   }
 
+  /**
+   * Approve & Send without a warning level: jump back to Step 2, highlight
+   * and focus the field, and show the inline message. Everything already
+   * typed in Steps 2 and 3 is preserved (steps are only hidden, never reset).
+   */
+  function showWarningLevelError() {
+    step = 2;
+    syncSteps();
+    const sel = overlay.querySelector(`#${rid}_level`);
+    const err = overlay.querySelector(`#${rid}_level_err`);
+    if (err) err.style.display = "block";
+    if (sel) {
+      sel.style.borderColor = "#dc2626";
+      sel.style.boxShadow = "0 0 0 3px rgba(220,38,38,0.12)";
+      try {
+        sel.scrollIntoView({ block: "center", behavior: "smooth" });
+      } catch (_) {}
+      try {
+        sel.focus({ preventScroll: true });
+      } catch (_) {
+        try {
+          sel.focus();
+        } catch (_) {}
+      }
+    }
+  }
+
+  function clearWarningLevelError() {
+    const sel = overlay.querySelector(`#${rid}_level`);
+    const err = overlay.querySelector(`#${rid}_level_err`);
+    if (err) err.style.display = "none";
+    if (sel) {
+      sel.style.borderColor = "#d1d5db";
+      sel.style.boxShadow = "";
+    }
+  }
+
   function validate(f, forSend) {
+    // Blocks BOTH Save as Draft and Approve & Send — the business name comes
+    // only from Settings (settings/main.brandName) and is enforced again
+    // server-side by approveAndSendWriteup.
+    if (!f.salonName) {
+      return "Add your business name in Settings before creating a formal write-up.";
+    }
     if (!f.selectedIncidentIds.length) return "Select at least one incident.";
     if (f.incidentSummaries.some((s) => !s.description)) {
       return "Every selected incident needs a description.";
@@ -402,7 +454,6 @@ export async function openWriteupComposer(opts) {
     if (forSend) {
       if (!f.warningLevel) return "Select a warning level.";
       if (!f.employeeName) return "Employee name is required.";
-      if (!f.salonName) return "Salon name is required.";
       if (!f.emailSubject) return "Email subject is required.";
     }
     return "";
@@ -469,6 +520,16 @@ export async function openWriteupComposer(opts) {
 
   function confirmAndSend() {
     const f = collectFields();
+    // Nothing is saved or sent while validation fails — the checks below run
+    // before the confirmation dialog, the draft save and the callable.
+    if (!f.salonName) {
+      toast("Add your business name in Settings before creating a formal write-up.", "error");
+      return;
+    }
+    if (!f.warningLevel) {
+      showWarningLevelError();
+      return;
+    }
     const err = validate(f, true);
     if (err) return toast(err, "error");
 
@@ -532,6 +593,8 @@ export async function openWriteupComposer(opts) {
   };
   const sendBtn = overlay.querySelector("[data-wu-send]");
   if (sendBtn) sendBtn.onclick = () => confirmAndSend();
+  const levelSel = overlay.querySelector(`#${rid}_level`);
+  if (levelSel) levelSel.addEventListener("change", clearWarningLevelError);
 
   syncSteps();
 }

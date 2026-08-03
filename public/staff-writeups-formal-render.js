@@ -12,7 +12,7 @@ import {
   writeupWarningLevelLabel,
   writeupFormalStatusLabel,
   WRITEUP_ACK_TEXT,
-} from "./staff-writeups-state.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
 
 export function wuEscapeHtml(v) {
   return String(v == null ? "" : v)

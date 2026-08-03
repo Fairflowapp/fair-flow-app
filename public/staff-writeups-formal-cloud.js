@@ -28,8 +28,8 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { wuState } from "./staff-writeups-state.js?v=20260731_writeups_phase2";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
+import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2b";
 
 function trimStr(v) {
   return String(v == null ? "" : v).trim();
@@ -139,20 +139,30 @@ export async function loadIssuedDocument(salonId, staffId, writeupId) {
   }
 }
 
-// ---------- Salon name (for prefills + default email subject) ----------
+// ---------- Salon business name (for prefills + default email subject) ----------
 
-let _salonNameCache = { salonId: "", name: "" };
-
+/**
+ * Authoritative business name: salons/{salonId}/settings/main.brandName.
+ * Always fetched fresh (no cache) so existing drafts pick up renames.
+ * The top-level salon doc `name` is NEVER used — it can hold the owner's
+ * personal name. Returns "" when brandName is missing/blank; the composer
+ * then blocks Save as Draft and Approve & Send (the backend enforces the
+ * same rule server-side regardless).
+ */
 export async function loadSalonName(salonId) {
   const sid = trimStr(salonId);
-  if (_salonNameCache.salonId === sid && _salonNameCache.name) return _salonNameCache.name;
-  let name = "";
   try {
-    const snap = await getDoc(doc(db, "salons", sid));
-    if (snap.exists()) name = trimStr(snap.data()?.name);
-  } catch (_) {}
-  _salonNameCache = { salonId: sid, name };
-  return name;
+    const snap = await getDoc(doc(db, "salons", sid, "settings", "main"));
+    return snap.exists() ? trimStr(snap.data()?.brandName) : "";
+  } catch (_) {
+    // Fetch failed (e.g. offline): fall back to the live mirror of the SAME
+    // field that settings-cloud.js keeps in window.settings.brand.name.
+    try {
+      return trimStr(window.settings && window.settings.brand && window.settings.brand.name);
+    } catch (_) {
+      return "";
+    }
+  }
 }
 
 // ---------- Draft audit (client-side, append-only per rules) ----------

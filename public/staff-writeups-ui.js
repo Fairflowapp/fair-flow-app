@@ -11,7 +11,7 @@ import {
   WRITEUP_INCIDENT_TYPES,
   WRITEUP_ACCEPT_FILE_TYPES,
   writeupTypeLabel,
-} from "./staff-writeups-state.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
 import {
   createIncident,
   updateIncident,
@@ -19,8 +19,8 @@ import {
   resolveAttachmentUrl,
   resolveActorStaff,
   toDateMaybe,
-} from "./staff-writeups-cloud.js?v=20260731_writeups_phase2";
-import { escapeHtml, dismissSuggestion } from "./staff-writeups-render.js?v=20260731_writeups_phase2";
+} from "./staff-writeups-cloud.js?v=20260802_writeups_phase2b";
+import { escapeHtml, dismissSuggestion } from "./staff-writeups-render.js?v=20260802_writeups_phase2b";
 
 function toast(msg, variant) {
   try {
@@ -367,15 +367,15 @@ async function viewAttachment(incidentId, idx) {
 // ---------- Phase 2: formal write-up actions ----------
 
 async function importCompose() {
-  return import("./staff-writeups-compose.js?v=20260731_writeups_phase2");
+  return import("./staff-writeups-compose.js?v=20260802_writeups_phase2b");
 }
 
 async function importFormalCloud() {
-  return import("./staff-writeups-formal-cloud.js?v=20260731_writeups_phase2");
+  return import("./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2b");
 }
 
 async function importFormalRender() {
-  return import("./staff-writeups-formal-render.js?v=20260731_writeups_phase2");
+  return import("./staff-writeups-formal-render.js?v=20260802_writeups_phase2b");
 }
 
 function currentWriteup(writeupId) {
