@@ -169,15 +169,49 @@ function sanitizeIncidentSummaries(raw) {
 }
 
 /**
- * Authoritative business name: salons/{salonId}/settings/main.brandName.
- * The top-level salon doc `name` is NEVER used — it can hold the owner's
- * personal name (stamped at signup) and must not appear on issued documents.
+ * Authoritative employee-facing salon name = the selected location's saved
+ * name (salons/{salonId}/locations/{locationId}.name). The path is scoped to
+ * the caller's salon, so a cross-salon locationId simply does not exist.
+ * The top-level salon doc `name` is NEVER used (it can hold the owner's
+ * personal name), and settings/main.brandName is only an optional parent
+ * brand that never blocks anything.
  */
-async function fetchSalonBrandName(salonId) {
-  const snap = await db().doc(`salons/${salonId}/settings/main`).get();
-  return snap.exists ? trimStr((snap.data() || {}).brandName).slice(0, 200) : "";
+async function fetchWriteupLocation(salonId, locationId) {
+  const locId = trimStr(locationId);
+  if (!locId) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Select a location for this write-up.",
+    );
+  }
+  const snap = await db().doc(`salons/${salonId}/locations/${locId}`).get();
+  if (!snap.exists) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The selected location does not exist in this salon.",
+    );
+  }
+  const data = snap.data() || {};
+  const name = trimStr(data.name).slice(0, 200);
+  if (!name) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The selected location has no saved name. Fix it in Settings first.",
+    );
+  }
+  return { id: locId, name, isActive: data.isActive !== false };
 }
-exports.fetchSalonBrandName = fetchSalonBrandName;
+exports.fetchWriteupLocation = fetchWriteupLocation;
+
+/** Optional parent brand — display-only, never required, never blocks. */
+async function fetchOptionalParentBrand(salonId) {
+  try {
+    const snap = await db().doc(`salons/${salonId}/settings/main`).get();
+    return snap.exists ? trimStr((snap.data() || {}).brandName).slice(0, 200) : "";
+  } catch (_) {
+    return "";
+  }
+}
 
 function buildIssuedSnapshot(draft, ctx) {
   return {
@@ -186,9 +220,12 @@ function buildIssuedSnapshot(draft, ctx) {
     writeupId: ctx.writeupId,
     version: Number(draft.version) || 1,
     previousWriteupId: trimStr(draft.previousWriteupId) || null,
-    // Header facts
+    // Header facts (salonName/locationName are the server-fetched saved name
+    // of the selected location — see fetchWriteupLocation)
+    locationId: trimStr(draft.locationId) || null,
     salonName: trimStr(draft.salonName).slice(0, 200),
     locationName: trimStr(draft.locationName).slice(0, 200) || null,
+    parentBrandName: trimStr(draft.parentBrandName).slice(0, 200) || null,
     employeeName: trimStr(draft.employeeName).slice(0, 200),
     employeePosition: trimStr(draft.employeePosition).slice(0, 120) || null,
     writeupDate: draft.writeupDate || null,
@@ -345,19 +382,17 @@ async function approveAndSendWriteupHandler(data, context) {
       return { ok: true, status: "sent", declined: true };
     }
 
-    // ---- Authoritative business name (never trusted from the client) ----
+    // ---- Authoritative location (never trusted from the client) ----
     // Fetched server-side for every path that issues a document or sends an
-    // email (send + resend). Overrides whatever salonName the client stored
-    // in the draft, so an injected name can never reach the issued snapshot
-    // or the email. markDeclined (above) does not need it.
-    const brandName = await fetchSalonBrandName(salonId);
-    if (!brandName) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Add your business name in Settings before creating a formal write-up.",
-      );
-    }
-    draft.salonName = brandName;
+    // email (send + resend). The location's SAVED name overrides whatever
+    // salonName/locationName the client stored in the draft, so an injected
+    // name can never reach the issued snapshot or the email. markDeclined
+    // (above) does not need it.
+    const location = await fetchWriteupLocation(salonId, draft.locationId);
+    draft.locationId = location.id;
+    draft.salonName = location.name;
+    draft.locationName = location.name;
+    draft.parentBrandName = await fetchOptionalParentBrand(salonId);
 
     // ---- Explicit email resend on an already-sent write-up ----
     if (status === "sent") {
@@ -551,12 +586,19 @@ async function queueWriteupEmail({ salonId, staffId, writeupId, draft, attempt, 
   if (!to || !to.includes("@")) {
     throw new HttpsError("failed-precondition", "The employee has no email address on file.");
   }
+  // draft.salonName was overridden by the caller with the server-fetched
+  // location name (fetchWriteupLocation) — never a client-supplied value.
   const salonName = trimStr(draft.salonName) || "your salon";
+  const firstName = trimStr(draft.employeeName).split(/\s+/)[0] || "";
   const subject =
     trimStr(draft.emailSubject).slice(0, 200) || `Important document from ${salonName}`;
   const bodyText =
     trimStr(draft.emailBody).slice(0, 6000) ||
-    `You have received an important document from ${salonName}. Please sign in to Fair Flow to review and acknowledge it.`;
+    `${firstName ? `Hi ${firstName},` : "Hello,"}\n\n` +
+      `You have received an important document from ${salonName} Management.\n\n` +
+      `Please sign in to Fair Flow to review and acknowledge it. ` +
+      `The document is available in your profile under "My Write-Ups."\n\n` +
+      `Thank you,\n${salonName} Management`;
   const linkUrl = `${appBaseUrl()}/?ff_writeup=${encodeURIComponent(writeupId)}`;
 
   try {

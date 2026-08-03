@@ -128,9 +128,73 @@ export function writeupDefaultEmailBody(salonName, employeeFirstName) {
   const hi = String(employeeFirstName || "").trim();
   return (
     `${hi ? `Hi ${hi},` : "Hello,"}\n\n` +
-    `You have received an important document from ${salon}.\n\n` +
+    `You have received an important document from ${salon} Management.\n\n` +
     `Please sign in to Fair Flow to review and acknowledge it. ` +
-    `The document is available in your profile under "My Write-Ups".\n\n` +
-    `Thank you,\n${salon}`
+    `The document is available in your profile under "My Write-Ups."\n\n` +
+    `Thank you,\n${salon} Management`
   );
+}
+
+/**
+ * Location auto-selection for the formal write-up composer (pure — testable).
+ *
+ * Order of precedence:
+ *   1. If every selected incident carries the same non-empty locationId and
+ *      that location exists in `locations`, select it.
+ *   2. If the employee is assigned to exactly one active location, select it.
+ *   3. Otherwise no auto-selection — the composer shows a required dropdown.
+ *
+ * `locations` = active location docs ({id, name}) offered in the dropdown:
+ * the employee's assigned active locations when any exist, else every active
+ * salon location (so Salon/Location are never left blank when a valid
+ * location exists).
+ *
+ * Returns { locations, autoSelectedId } — autoSelectedId is "" when the admin
+ * must choose.
+ */
+export function computeWriteupLocationChoice(opts) {
+  const trim = (v) => String(v == null ? "" : v).trim();
+  const o = opts || {};
+  const allActive = (Array.isArray(o.activeLocations) ? o.activeLocations : [])
+    .filter((l) => l && trim(l.id))
+    .map((l) => ({ id: trim(l.id), name: trim(l.name) || trim(l.id) }));
+  const byId = {};
+  allActive.forEach((l) => {
+    byId[l.id] = l;
+  });
+
+  const staff = o.staffRow && typeof o.staffRow === "object" ? o.staffRow : {};
+  const rawAssigned = Array.isArray(staff.allowedLocationIds)
+    ? staff.allowedLocationIds
+    : trim(staff.primaryLocationId)
+      ? [trim(staff.primaryLocationId)]
+      : [];
+  const assigned = [];
+  rawAssigned.forEach((id) => {
+    const t = trim(id);
+    if (t && byId[t] && !assigned.some((l) => l.id === t)) assigned.push(byId[t]);
+  });
+
+  const locations = assigned.length ? assigned : allActive;
+
+  // 1. All selected incidents agree on one existing location.
+  const selectedIds = new Set((Array.isArray(o.selectedIncidentIds) ? o.selectedIncidentIds : []).map(trim));
+  const incidentLocIds = new Set();
+  (Array.isArray(o.incidents) ? o.incidents : []).forEach((inc) => {
+    if (inc && selectedIds.has(trim(inc.id))) incidentLocIds.add(trim(inc.locationId));
+  });
+  if (incidentLocIds.size === 1) {
+    const only = incidentLocIds.values().next().value;
+    if (only && locations.some((l) => l.id === only)) {
+      return { locations, autoSelectedId: only };
+    }
+  }
+
+  // 2. Exactly one assigned active location.
+  if (assigned.length === 1) return { locations, autoSelectedId: assigned[0].id };
+
+  // 3. Single option overall (e.g. salon has one location) — still automatic.
+  if (locations.length === 1) return { locations, autoSelectedId: locations[0].id };
+
+  return { locations, autoSelectedId: "" };
 }

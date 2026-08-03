@@ -20,6 +20,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -28,8 +29,8 @@ import {
   Timestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2b";
+import { wuState } from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
 
 function trimStr(v) {
   return String(v == null ? "" : v).trim();
@@ -139,29 +140,46 @@ export async function loadIssuedDocument(salonId, staffId, writeupId) {
   }
 }
 
-// ---------- Salon business name (for prefills + default email subject) ----------
+// ---------- Locations (authoritative source of the employee-facing salon name) ----------
 
 /**
- * Authoritative business name: salons/{salonId}/settings/main.brandName.
- * Always fetched fresh (no cache) so existing drafts pick up renames.
- * The top-level salon doc `name` is NEVER used — it can hold the owner's
- * personal name. Returns "" when brandName is missing/blank; the composer
- * then blocks Save as Draft and Approve & Send (the backend enforces the
- * same rule server-side regardless).
+ * Active locations of the salon — salons/{salonId}/locations/{locationId},
+ * name field `name`, active = isActive !== false. Prefers the live list kept
+ * by locations-cloud.js (window.ffGetActiveLocations) and falls back to a
+ * direct Firestore read when it hasn't loaded. The employee-facing salon
+ * name on a formal write-up is ALWAYS the selected location's saved name —
+ * never the logged-in user's name and never the top-level salon doc name.
  */
-export async function loadSalonName(salonId) {
-  const sid = trimStr(salonId);
+export async function loadActiveLocations(salonId) {
   try {
-    const snap = await getDoc(doc(db, "salons", sid, "settings", "main"));
+    if (typeof window.ffGetActiveLocations === "function") {
+      const live = window.ffGetActiveLocations();
+      if (Array.isArray(live) && live.length) {
+        return live.map((l) => ({ id: trimStr(l.id), name: trimStr(l.name) || trimStr(l.id) }));
+      }
+    }
+  } catch (_) {}
+  try {
+    const snap = await getDocs(collection(db, "salons", trimStr(salonId), "locations"));
+    return snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+      .filter((l) => l.isActive !== false)
+      .map((l) => ({ id: trimStr(l.id), name: trimStr(l.name) || trimStr(l.id) }));
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Optional parent brand (settings/main.brandName). Display-only extra — it
+ * must NEVER be required and never blocks creating or sending a write-up.
+ */
+export async function loadOptionalParentBrand(salonId) {
+  try {
+    const snap = await getDoc(doc(db, "salons", trimStr(salonId), "settings", "main"));
     return snap.exists() ? trimStr(snap.data()?.brandName) : "";
   } catch (_) {
-    // Fetch failed (e.g. offline): fall back to the live mirror of the SAME
-    // field that settings-cloud.js keeps in window.settings.brand.name.
-    try {
-      return trimStr(window.settings && window.settings.brand && window.settings.brand.name);
-    } catch (_) {
-      return "";
-    }
+    return "";
   }
 }
 
@@ -189,6 +207,10 @@ function draftPayloadFromFields(fields) {
   return {
     employeeName: trimStr(fields.employeeName),
     employeePosition: trimStr(fields.employeePosition) || null,
+    // Required: which salon location this write-up belongs to. The backend
+    // re-fetches this location server-side and uses ITS saved name — the
+    // salonName/locationName stored here are display copies only.
+    locationId: trimStr(fields.locationId),
     salonName: trimStr(fields.salonName),
     locationName: trimStr(fields.locationName) || null,
     warningLevel: trimStr(fields.warningLevel),

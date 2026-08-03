@@ -12,7 +12,7 @@ import {
   writeupWarningLevelLabel,
   writeupFormalStatusLabel,
   WRITEUP_ACK_TEXT,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
 
 export function wuEscapeHtml(v) {
   return String(v == null ? "" : v)
@@ -136,7 +136,8 @@ export function renderIssuedDocumentHtml(docData, opts) {
     ${superseded}
     <div style="border-bottom:2px solid #7c3aed;padding-bottom:12px;margin-bottom:16px;">
       <div style="font-size:16px;font-weight:800;color:#111827;">${wuEscapeHtml(d.salonName || "")}</div>
-      ${d.locationName ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${wuEscapeHtml(d.locationName)}</div>` : ""}
+      ${d.parentBrandName && d.parentBrandName !== d.salonName ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;">Part of ${wuEscapeHtml(d.parentBrandName)}</div>` : ""}
+      ${d.locationName && d.locationName !== d.salonName ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">${wuEscapeHtml(d.locationName)}</div>` : ""}
       <div style="font-size:13px;font-weight:700;color:#7c3aed;margin-top:10px;">Employee Write-Up — ${wuEscapeHtml(writeupWarningLevelLabel(d.warningLevel))}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr;gap:5px;margin-bottom:18px;">

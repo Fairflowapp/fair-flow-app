@@ -36,7 +36,7 @@ import {
   WRITEUP_DEFAULT_SETTINGS,
   WRITEUP_COUNTABLE_STATUSES,
   WRITEUP_MAX_FILE_BYTES,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
 
 function trimStr(v) {
   return String(v == null ? "" : v).trim();

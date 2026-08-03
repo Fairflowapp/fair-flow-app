@@ -697,16 +697,18 @@ service cloud.firestore {
     // approveAndSendWriteup backend. permissions.writeups_manage can draft;
     // approving/sending is Owner/Admin only and enforced by that backend.
     match /salons/{salonId}/staff/{staffId}/writeups/{writeupId} {
-      // A formal write-up requires the salon's business name
-      // (settings/main.brandName) — drafts cannot be created without it.
-      function salonHasBrandName(salonId) {
-        return exists(/databases/$(database)/documents/salons/$(salonId)/settings/main)
-          && get(/databases/$(database)/documents/salons/$(salonId)/settings/main)
-               .data.get('brandName', '') != '';
+      // A formal write-up must reference an existing location of THIS salon —
+      // the location's saved name is the employee-facing salon name (the
+      // backend re-fetches it server-side; a cross-salon locationId cannot
+      // pass this path-scoped exists() check).
+      function writeupLocationValid(salonId) {
+        return request.resource.data.locationId is string
+          && request.resource.data.locationId != ''
+          && exists(/databases/$(database)/documents/salons/$(salonId)/locations/$(request.resource.data.locationId));
       }
       allow read: if canManageWriteups(salonId);
       allow create: if canManageWriteups(salonId)
-        && salonHasBrandName(salonId)
+        && writeupLocationValid(salonId)
         && request.resource.data.salonId == salonId
         && request.resource.data.employeeId == staffId
         && request.resource.data.status == 'draft'
@@ -726,6 +728,7 @@ service cloud.firestore {
       // resends, declined-to-acknowledge, superseding, employee mirroring)
       // is written exclusively by the trusted backend callables.
       allow update: if canManageWriteups(salonId)
+        && writeupLocationValid(salonId)
         && resource.data.status == 'draft'
         && request.resource.data.status == 'draft'
         && request.resource.data.salonId == salonId

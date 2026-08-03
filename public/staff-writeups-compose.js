@@ -17,20 +17,22 @@ import {
   writeupTypeLabel,
   writeupDefaultEmailSubject,
   writeupDefaultEmailBody,
-} from "./staff-writeups-state.js?v=20260802_writeups_phase2b";
-import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2b";
+  computeWriteupLocationChoice,
+} from "./staff-writeups-state.js?v=20260802_writeups_phase2c";
+import { resolveActorStaff, toDateMaybe } from "./staff-writeups-cloud.js?v=20260802_writeups_phase2c";
 import {
   createWriteupDraft,
   updateWriteupDraft,
   approveAndSendWriteup,
-  loadSalonName,
-} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2b";
+  loadActiveLocations,
+  loadOptionalParentBrand,
+} from "./staff-writeups-formal-cloud.js?v=20260802_writeups_phase2c";
 import {
   wuEscapeHtml as escapeHtml,
   wuFormatWhen,
   renderIssuedDocumentHtml,
   renderEmailPreviewHtml,
-} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2b";
+} from "./staff-writeups-formal-render.js?v=20260802_writeups_phase2c";
 
 function toast(msg, variant) {
   try {
@@ -127,10 +129,6 @@ export async function openWriteupComposer(opts) {
 
   const staffRow = resolveStaffRow(ctx.staffId);
   const actor = resolveActorStaff();
-  // Always resolved fresh from settings/main.brandName — never from the draft
-  // (an existing draft may hold an outdated or wrong name) and never from the
-  // top-level salon doc. Blank = missing business name = save/send blocked.
-  const salonName = trimStr(await loadSalonName(ctx.salonId));
 
   const incidents = (wuState._lastIncidentList || []).filter((i) => i && i.archived !== true);
   const preselected = new Set(
@@ -144,6 +142,34 @@ export async function openWriteupComposer(opts) {
           )
           .map((i) => trimStr(i.id)),
   );
+
+  // ---- Location (authoritative source of the employee-facing salon name) ----
+  // salons/{salonId}/locations — the selected location's saved name is used
+  // as the salon name. Never the logged-in user's name, never the top-level
+  // salon doc name, and settings/main.brandName is only an OPTIONAL parent
+  // brand that can never block anything.
+  const activeLocations = await loadActiveLocations(ctx.salonId);
+  const parentBrand = await loadOptionalParentBrand(ctx.salonId);
+  const staffForLoc =
+    typeof window.ffEnsureStaffLocationFields === "function" && staffRow
+      ? window.ffEnsureStaffLocationFields(staffRow)
+      : staffRow || {};
+  const locChoice = computeWriteupLocationChoice({
+    activeLocations,
+    staffRow: staffForLoc,
+    incidents,
+    selectedIncidentIds: Array.from(preselected),
+  });
+  const locNameById = {};
+  locChoice.locations.forEach((l) => {
+    locNameById[l.id] = l.name;
+  });
+  // Existing drafts keep their chosen location if it still exists, but the
+  // NAME is always refreshed from the current saved location record.
+  const draftLocId = trimStr(base && base.locationId);
+  const initialLocId =
+    draftLocId && locNameById[draftLocId] ? draftLocId : locChoice.autoSelectedId;
+  const salonName = initialLocId ? locNameById[initialLocId] : "";
   const savedDescriptions = {};
   if (base && Array.isArray(base.incidentSummaries)) {
     base.incidentSummaries.forEach((s) => {
@@ -156,11 +182,9 @@ export async function openWriteupComposer(opts) {
     employeeName: trimStr(base && base.employeeName) || trimStr(staffRow && staffRow.name),
     employeePosition:
       trimStr(base && base.employeePosition) || staffRoleLabel(staffRow) || "Service Provider",
+    locationId: initialLocId,
     salonName,
-    locationName:
-      trimStr(base && base.locationName) ||
-      trimStr(staffRow && (staffRow.locationName || staffRow.location)) ||
-      "",
+    locationName: salonName,
     warningLevel: trimStr(base && base.warningLevel),
     policyViolated: trimStr(base && base.policyViolated),
     requiredImprovement: trimStr(base && base.requiredImprovement),
@@ -228,15 +252,21 @@ export async function openWriteupComposer(opts) {
       <div style="flex:1;min-width:0;">
         <label style="${labelStyle}">Salon</label>
         <input type="text" id="${rid}_salon" value="${escapeHtml(fields.salonName)}" readonly style="${inputStyle}background:#f9fafb;color:#6b7280;cursor:not-allowed;" />
-        ${
-          fields.salonName
-            ? ""
-            : `<div style="margin:-8px 0 12px 0;font-size:12px;font-weight:600;color:#b91c1c;">Add your business name in Settings before creating a formal write-up.</div>`
-        }
+        ${parentBrand && parentBrand !== fields.salonName ? `<p style="${hintStyle}">Parent brand: ${escapeHtml(parentBrand)} (optional, display only)</p>` : ""}
       </div>
       <div style="flex:1;min-width:0;">
-        <label style="${labelStyle}">Location</label>
-        <input type="text" id="${rid}_loc" value="${escapeHtml(fields.locationName)}" style="${inputStyle}" />
+        <label style="${labelStyle}">Location${locChoice.locations.length > 1 ? " (required)" : ""}</label>
+        <select id="${rid}_loc" style="${inputStyle}">
+          ${fields.locationId ? "" : `<option value="">— Select location —</option>`}
+          ${locChoice.locations
+            .map(
+              (l) =>
+                `<option value="${escapeHtml(l.id)}"${l.id === fields.locationId ? " selected" : ""}>${escapeHtml(l.name)}</option>`,
+            )
+            .join("")}
+        </select>
+        <div id="${rid}_loc_err" style="display:none;margin:-8px 0 12px 0;font-size:12px;font-weight:600;color:#b91c1c;">Select a location before approving this write-up.</div>
+        ${locChoice.locations.length ? "" : `<div style="margin:-8px 0 12px 0;font-size:12px;font-weight:600;color:#b91c1c;">No active locations found. Add a location in Settings first.</div>`}
       </div>
     </div>
     <label style="${labelStyle}">Warning level</label>
@@ -385,8 +415,14 @@ export async function openWriteupComposer(opts) {
     return {
       employeeName: val("emp"),
       employeePosition: val("pos"),
-      salonName: val("salon"),
-      locationName: val("loc"),
+      ...(() => {
+        // Location select is the single source of the employee-facing salon
+        // name: both names come from the selected location's saved record.
+        const locSel = overlay.querySelector(`#${rid}_loc`);
+        const locationId = trimStr(locSel && locSel.value);
+        const locationName = locationId ? trimStr(locNameById[locationId]) : "";
+        return { locationId, salonName: locationName, locationName };
+      })(),
       warningLevel: val("level"),
       selectedIncidentIds: ids,
       incidentSummaries,
@@ -440,13 +476,44 @@ export async function openWriteupComposer(opts) {
     }
   }
 
-  function validate(f, forSend) {
-    // Blocks BOTH Save as Draft and Approve & Send — the business name comes
-    // only from Settings (settings/main.brandName) and is enforced again
-    // server-side by approveAndSendWriteup.
-    if (!f.salonName) {
-      return "Add your business name in Settings before creating a formal write-up.";
+  /** Same UX as the warning-level error, for the required Location field. */
+  function showLocationError() {
+    step = 2;
+    syncSteps();
+    const sel = overlay.querySelector(`#${rid}_loc`);
+    const err = overlay.querySelector(`#${rid}_loc_err`);
+    if (err) err.style.display = "block";
+    if (sel) {
+      sel.style.borderColor = "#dc2626";
+      sel.style.boxShadow = "0 0 0 3px rgba(220,38,38,0.12)";
+      try {
+        sel.scrollIntoView({ block: "center", behavior: "smooth" });
+      } catch (_) {}
+      try {
+        sel.focus({ preventScroll: true });
+      } catch (_) {
+        try {
+          sel.focus();
+        } catch (_) {}
+      }
     }
+  }
+
+  function clearLocationError() {
+    const sel = overlay.querySelector(`#${rid}_loc`);
+    const err = overlay.querySelector(`#${rid}_loc_err`);
+    if (err) err.style.display = "none";
+    if (sel) {
+      sel.style.borderColor = "#d1d5db";
+      sel.style.boxShadow = "";
+    }
+  }
+
+  function validate(f, forSend) {
+    // Location is required for BOTH Save as Draft and Approve & Send — the
+    // selected location's saved name is the employee-facing salon name, and
+    // the backend re-fetches it server-side regardless of what we store.
+    if (!f.locationId) return "Select a location for this write-up.";
     if (!f.selectedIncidentIds.length) return "Select at least one incident.";
     if (f.incidentSummaries.some((s) => !s.description)) {
       return "Every selected incident needs a description.";
@@ -464,6 +531,7 @@ export async function openWriteupComposer(opts) {
     const f = collectFields();
     const docLike = {
       ...f,
+      ...(parentBrand && parentBrand !== f.salonName ? { parentBrandName: parentBrand } : {}),
       status: "sent",
       version: Number(base && base.version) || (correctionOf ? (Number(correctionOf.version) || 1) + 1 : 1),
       acknowledgmentText: WRITEUP_ACK_TEXT,
@@ -522,8 +590,8 @@ export async function openWriteupComposer(opts) {
     const f = collectFields();
     // Nothing is saved or sent while validation fails — the checks below run
     // before the confirmation dialog, the draft save and the callable.
-    if (!f.salonName) {
-      toast("Add your business name in Settings before creating a formal write-up.", "error");
+    if (!f.locationId) {
+      showLocationError();
       return;
     }
     if (!f.warningLevel) {
@@ -595,6 +663,26 @@ export async function openWriteupComposer(opts) {
   if (sendBtn) sendBtn.onclick = () => confirmAndSend();
   const levelSel = overlay.querySelector(`#${rid}_level`);
   if (levelSel) levelSel.addEventListener("change", clearWarningLevelError);
+  const locSelEl = overlay.querySelector(`#${rid}_loc`);
+  if (locSelEl) {
+    locSelEl.addEventListener("change", () => {
+      clearLocationError();
+      const prevName = trimStr(overlay.querySelector(`#${rid}_salon`)?.value);
+      const newName = trimStr(locNameById[trimStr(locSelEl.value)]);
+      const salonInput = overlay.querySelector(`#${rid}_salon`);
+      if (salonInput) salonInput.value = newName;
+      // Refresh the email defaults only while the admin hasn't customized
+      // them (i.e. they still exactly match the previous auto-generated text).
+      const subjEl = overlay.querySelector(`#${rid}_subject`);
+      const bodyEl = overlay.querySelector(`#${rid}_body`);
+      if (subjEl && trimStr(subjEl.value) === writeupDefaultEmailSubject(prevName)) {
+        subjEl.value = writeupDefaultEmailSubject(newName);
+      }
+      if (bodyEl && trimStr(bodyEl.value) === writeupDefaultEmailBody(prevName, employeeFirstName)) {
+        bodyEl.value = writeupDefaultEmailBody(newName, employeeFirstName);
+      }
+    });
+  }
 
   syncSteps();
 }
