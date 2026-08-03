@@ -41,6 +41,14 @@ const _writeups = require("./writeups");
 exports.approveAndSendWriteup = _writeups.approveAndSendWriteup;
 exports.writeupEmployeeAction = _writeups.writeupEmployeeAction;
 
+// Time Clock Stage A — trusted server-side punch + manage (staffId is derived
+// server-side; kiosk PIN verified in-function; auditEvents per entry).
+// Deploy ONLY by name:
+//   firebase deploy --only "functions:timeClockPunch,functions:timeClockManageEntry" --project fair-flow-staging
+const _timeClock = require("./time-clock");
+exports.timeClockPunch = _timeClock.timeClockPunch;
+exports.timeClockManageEntry = _timeClock.timeClockManageEntry;
+
 // Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
 const _tasksAutoReset = require("./tasks-auto-reset");
 exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;
