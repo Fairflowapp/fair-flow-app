@@ -193,6 +193,75 @@ function _ffTimeClockPlatform() {
   }
 }
 
+// ─────────────────────── kiosk punch photo (Stage B) ───────────────────────
+
+/**
+ * Photo fields for a kiosk punch payload. Only attached on kiosk sessions
+ * AND only when the UI actually attempted a capture (photo or photoError
+ * present) — otherwise the payload stays field-free, which the server
+ * treats as a photo-exempt legacy punch. photoOverride carries the quick
+ * manager approval (manager PIN + reason); like the employee PIN it is
+ * forwarded as-is, never logged and never persisted.
+ */
+function _ffKioskPhotoFields(input) {
+  if (!_ffIsKioskSession()) return {};
+  const out = {};
+  if (typeof input.photo === "string" && input.photo) out.photo = input.photo;
+  else if (typeof input.photoError === "string" && input.photoError) out.photoError = input.photoError.slice(0, 200);
+  if (input.photoOverride && typeof input.photoOverride === "object" && input.photoOverride.managerPin) {
+    out.photoOverride = {
+      managerPin: String(input.photoOverride.managerPin),
+      reason: String(input.photoOverride.reason || ""),
+    };
+  }
+  return out;
+}
+
+/**
+ * Kiosk photo policy from salons/{salonId}/settings/timeClock — the same doc
+ * + explicit-true rule the timeClockPunch callable reads. Cached for 5
+ * minutes so the PIN pad render doesn't hammer Firestore.
+ */
+let _ffKioskPhotoPolicyCache = null; // { at, salonId, policy }
+export async function ffGetKioskPhotoPolicy(salonIdArg) {
+  const fallback = { enabled: false, onFailure: "fallback" };
+  try {
+    const salonId = (typeof salonIdArg === "string" && salonIdArg.trim())
+      ? salonIdArg.trim()
+      : await _ffGetSalonIdForTimeEntries();
+    if (!salonId) return fallback;
+    const c = _ffKioskPhotoPolicyCache;
+    if (c && c.salonId === salonId && Date.now() - c.at < 5 * 60 * 1000) return c.policy;
+    const snap = await getDoc(doc(db, `salons/${salonId}/settings`, "timeClock"));
+    const raw = snap.exists() ? (snap.data() || {}).kioskPhoto : null;
+    const policy = {
+      enabled: !!(raw && typeof raw === "object" && raw.enabled === true),
+      onFailure: raw && raw.onFailure === "block" ? "block" : "fallback",
+    };
+    _ffKioskPhotoPolicyCache = { at: Date.now(), salonId, policy };
+    return policy;
+  } catch (e) {
+    console.warn("[TimeClockEntries] ffGetKioskPhotoPolicy failed", e);
+    return fallback;
+  }
+}
+
+/**
+ * Download URL for a punch photo (Manage Time Cards viewer). Storage rules
+ * restrict reads to owner/admin/time_clock_manage, so this only resolves for
+ * managers.
+ */
+export async function ffGetTimeClockPhotoUrl(path) {
+  if (typeof path !== "string" || !path.startsWith("timeClockPhotos/")) {
+    throw new Error("ffGetTimeClockPhotoUrl: invalid path");
+  }
+  const { ref, getDownloadURL } = await import(
+    "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js"
+  );
+  const { storage } = await import("/app.js?v=20260610_force_lp_ios");
+  return getDownloadURL(ref(storage, path));
+}
+
 /**
  * Capture a fresh GPS fix for the punch, without nagging for the
  * geolocation permission when it isn't needed:
@@ -321,6 +390,7 @@ export async function ffCreateTimeEntry(input = {}) {
     platform: _ffTimeClockPlatform(),
     pin: _ffIsKioskSession() && typeof input.pin === "string" ? input.pin : null,
     expectedStaffId: staffId,
+    ..._ffKioskPhotoFields(input),
     override: (input.override && typeof input.override === "object" && input.override.staffId)
       ? { staffId: String(input.override.staffId), reason: String(input.override.reason || "") }
       : null,
@@ -401,6 +471,7 @@ export async function ffCloseTimeEntry(input = {}) {
     platform: _ffTimeClockPlatform(),
     pin: _ffIsKioskSession() && typeof input.pin === "string" ? input.pin : null,
     expectedStaffId: (typeof input.expectedStaffId === "string" && input.expectedStaffId.trim()) ? input.expectedStaffId.trim() : null,
+    ..._ffKioskPhotoFields(input),
     override: (input.override && typeof input.override === "object" && input.override.staffId)
       ? { staffId: String(input.override.staffId), reason: String(input.override.reason || "") }
       : null,
@@ -638,6 +709,8 @@ if (typeof window !== "undefined") {
   window.ffCreateTimeEntry = ffCreateTimeEntry;
   window.ffCloseTimeEntry = ffCloseTimeEntry;
   window.ffUpdateTimeEntry = ffUpdateTimeEntry;
+  window.ffGetKioskPhotoPolicy = ffGetKioskPhotoPolicy;
+  window.ffGetTimeClockPhotoUrl = ffGetTimeClockPhotoUrl;
   window.ffGetOpenTimeEntryForStaff = ffGetOpenTimeEntryForStaff;
   window.ffListTimeEntriesForSalon = ffListTimeEntriesForSalon;
   window.ffTimeEntriesCollectionRef = timeEntriesCollectionRef;

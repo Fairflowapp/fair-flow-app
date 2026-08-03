@@ -1159,7 +1159,11 @@ service cloud.firestore {
 
     // ===== UI SETTINGS (historyRange, etc.) =====
     match /salons/{salonId}/settings/{docId} {
-      allow read: if belongsToSalon(salonId);
+      // Kiosk sessions may read ONLY the timeClock doc — the kiosk camera
+      // gate needs kioskPhoto.enabled/onFailure (Time Clock Stage B). All
+      // other settings docs stay hidden from kiosks, and kiosks never write.
+      allow read: if belongsToSalon(salonId)
+        || (isKioskForSalon(salonId) && docId == 'timeClock');
       allow write: if belongsToSalon(salonId);
     }
 

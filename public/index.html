@@ -2362,6 +2362,30 @@
                 </div>
               </div>
             </div>
+
+            <!-- Kiosk punch photo (Stage B, opt-in per salon) -->
+            <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="display:flex;align-items:flex-start;gap:12px;">
+                <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;">
+                  <input type="checkbox" id="tcKioskPhotoEnabled" style="opacity:0;width:0;height:0;position:absolute;"/>
+                  <span id="tcKioskPhotoEnabledPill" style="width:36px;height:20px;border-radius:999px;background:#d1d5db;position:relative;transition:background 0.18s ease;display:inline-block;">
+                    <span id="tcKioskPhotoEnabledKnob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:left 0.18s ease;"></span>
+                  </span>
+                </label>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:#111827;">Photo on kiosk punches</div>
+                  <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-top:2px;">Capture one photo from the kiosk's front camera with every clock-in and clock-out. Employees see a disclosure and a live preview. Photos are visible to management only and are deleted automatically after 90 days.</div>
+                </div>
+              </div>
+              <div id="tcKioskPhotoFields" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #e5e7eb;">
+                <label for="tcKioskPhotoOnFailure" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">If the photo fails</label>
+                <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">What happens when the camera is unavailable or the capture fails on the kiosk.</div>
+                <select id="tcKioskPhotoOnFailure" style="padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;color:#111827;outline:none;max-width:100%;">
+                  <option value="fallback">Record the punch and alert managers (recommended)</option>
+                  <option value="block">Block the punch until a manager approves</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -38659,6 +38683,7 @@ function initializeUserProfileMenu() {
     workweekStartDay: 'monday',
     standardHours: { weekly: 40, daily: 8 },
     overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
+    kioskPhoto: { enabled: false, onFailure: 'fallback' },
   };
   function ffInitTimeClockSettingsUI() {
     try {
@@ -38694,6 +38719,11 @@ function initializeUserProfileMenu() {
       const dailyOtEl = card.querySelector('#tcDailyOvertimeThreshold');
       const multEl = card.querySelector('#tcOvertimeMultiplier');
       const workweekMirrorEl = card.querySelector('#tcWorkweekStartMirror');
+      const kpToggle = card.querySelector('#tcKioskPhotoEnabled');
+      const kpPill = card.querySelector('#tcKioskPhotoEnabledPill');
+      const kpKnob = card.querySelector('#tcKioskPhotoEnabledKnob');
+      const kpFields = card.querySelector('#tcKioskPhotoFields');
+      const kpOnFailureEl = card.querySelector('#tcKioskPhotoOnFailure');
       if (!toggle || !pill || !knob || !fields) return;
 
       // Single source of truth for "week starts on" lives in the salon
@@ -38718,6 +38748,14 @@ function initializeUserProfileMenu() {
         fields.style.display = on ? 'flex' : 'none';
         pill.style.background = on ? '#7c3aed' : '#d1d5db';
         knob.style.left = on ? '18px' : '2px';
+      };
+
+      const applyKioskPhotoVisibility = function () {
+        if (!kpToggle || !kpPill || !kpKnob || !kpFields) return;
+        const on = !!kpToggle.checked;
+        kpFields.style.display = on ? 'block' : 'none';
+        kpPill.style.background = on ? '#7c3aed' : '#d1d5db';
+        kpKnob.style.left = on ? '18px' : '2px';
       };
 
       // Drop any stale "not saved yet" hint left over from Stage 2.
@@ -38770,6 +38808,12 @@ function initializeUserProfileMenu() {
             dailyThreshold:  clampHours(dailyOtEl  && dailyOtEl.value,  FF_TC_UI_DEFAULTS.overtime.dailyThreshold),
             multiplier:      clampMultiplier(multEl && multEl.value,    FF_TC_UI_DEFAULTS.overtime.multiplier),
           },
+          // Hydrated from Firestore on load, so a save triggered by any other
+          // field never clobbers the kiosk photo policy.
+          kioskPhoto: {
+            enabled: !!(kpToggle && kpToggle.checked),
+            onFailure: (kpOnFailureEl && kpOnFailureEl.value === 'block') ? 'block' : 'fallback',
+          },
         };
       };
 
@@ -38784,6 +38828,9 @@ function initializeUserProfileMenu() {
         if (dailyOtEl)  dailyOtEl.value  = (s.overtime && s.overtime.dailyThreshold)  ?? FF_TC_UI_DEFAULTS.overtime.dailyThreshold;
         if (multEl)     multEl.value     = (s.overtime && s.overtime.multiplier)      ?? FF_TC_UI_DEFAULTS.overtime.multiplier;
         applyOvertimeVisibility();
+        if (kpToggle) kpToggle.checked = !!(s.kioskPhoto && s.kioskPhoto.enabled === true);
+        if (kpOnFailureEl) kpOnFailureEl.value = (s.kioskPhoto && s.kioskPhoto.onFailure === 'block') ? 'block' : 'fallback';
+        applyKioskPhotoVisibility();
       };
 
       // -- 4. 3-state save feedback (Saving.../Saved/Error) --------------
@@ -38853,6 +38900,25 @@ function initializeUserProfileMenu() {
           persist();
         });
       }
+      if (kpPill && kpToggle && !kpPill.__ffTCBound) {
+        kpPill.__ffTCBound = true;
+        kpPill.addEventListener('click', function (e) {
+          e.preventDefault();
+          kpToggle.checked = !kpToggle.checked;
+          kpToggle.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+      if (kpToggle && !kpToggle.__ffTCBound) {
+        kpToggle.__ffTCBound = true;
+        kpToggle.addEventListener('change', function () {
+          applyKioskPhotoVisibility();
+          persist();
+        });
+      }
+      if (kpOnFailureEl && !kpOnFailureEl.__ffTCBound) {
+        kpOnFailureEl.__ffTCBound = true;
+        kpOnFailureEl.addEventListener('change', persist);
+      }
       workweekRadios.forEach(function (r) {
         if (r.__ffTCBound) return;
         r.__ffTCBound = true;
@@ -38876,7 +38942,7 @@ function initializeUserProfileMenu() {
       });
 
       // -- 6. Load from Firestore (or seed defaults on first-ever open) --
-      if (card.__ffTCLoading) { applyOvertimeVisibility(); return; }
+      if (card.__ffTCLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); return; }
       card.__ffTCLoading = true;
       if (typeof window.ffLoadTimeClockSettings === 'function') {
         window.ffLoadTimeClockSettings().then(function (settings) {
@@ -38884,12 +38950,14 @@ function initializeUserProfileMenu() {
         }).catch(function (e) {
           console.warn('[Time Clock Settings] load failed, using UI defaults', e);
           applyOvertimeVisibility();
+          applyKioskPhotoVisibility();
           setHint('error');
         }).finally(function () {
           card.__ffTCLoading = false;
         });
       } else {
         applyOvertimeVisibility();
+        applyKioskPhotoVisibility();
         card.__ffTCLoading = false;
       }
     } catch (e) {
@@ -39147,6 +39215,150 @@ function initializeUserProfileMenu() {
       el.style.maxWidth = '520px';
       el.style.overflowY = 'hidden';
       el.style.padding = '8px 16px 12px';
+    }
+  }
+
+  // ------------------- Kiosk punch photo (Stage B) -------------------------
+  // One JPEG frame from the front camera per kiosk punch. The live preview on
+  // the confirm card is ALWAYS visible while the camera is on — there is
+  // deliberately no way to hide it, the employee sees exactly what will be
+  // captured. No video is recorded, no audio, no face recognition. The frame
+  // is sent inside the timeClockPunch call; the server uploads it (managers
+  // only can read, auto-deleted after 90 days).
+  const _FF_TC_PHOTO_ACK_KEY = 'ff_tc_photo_disclosure_ack_v1';
+
+  async function _ffTCPhotoPolicy() {
+    if (!window.__ff_kiosk_claims) return { enabled: false, onFailure: 'fallback' };
+    if (typeof window.ffGetKioskPhotoPolicy !== 'function') return { enabled: false, onFailure: 'fallback' };
+    try {
+      const salonId = (window.__ff_kiosk_claims && window.__ff_kiosk_claims.salonId) || null;
+      return await window.ffGetKioskPhotoPolicy(salonId);
+    } catch (_) {
+      return { enabled: false, onFailure: 'fallback' };
+    }
+  }
+
+  async function _ffTCPhotoPermissionState() {
+    try {
+      const st = await navigator.permissions.query({ name: 'camera' });
+      return (st && st.state) || 'unknown';
+    } catch (_) {
+      return 'unknown'; // Safari < 16.4 has no camera permission query
+    }
+  }
+
+  function _ffTCPhotoStop() {
+    try {
+      const s = window.__ffTCPhotoStream;
+      if (s && typeof s.getTracks === 'function') {
+        s.getTracks().forEach(function (t) { try { t.stop(); } catch (_) {} });
+      }
+    } catch (_) {}
+    window.__ffTCPhotoStream = null;
+  }
+
+  async function _ffTCPhotoStart(videoEl) {
+    _ffTCPhotoStop();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false,
+    });
+    window.__ffTCPhotoStream = stream;
+    if (videoEl) {
+      videoEl.srcObject = stream;
+      try { await videoEl.play(); } catch (_) {}
+    }
+    return stream;
+  }
+
+  function _ffTCPhotoCaptureFrame(videoEl) {
+    const v = videoEl;
+    if (!v || !v.videoWidth || !v.videoHeight) throw new Error('camera_not_ready');
+    const MAX = 640;
+    const scale = Math.min(1, MAX / Math.max(v.videoWidth, v.videoHeight));
+    const w = Math.max(1, Math.round(v.videoWidth * scale));
+    const h = Math.max(1, Math.round(v.videoHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(v, 0, 0, w, h);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    if (!dataUrl || dataUrl.indexOf('data:image/jpeg') !== 0) throw new Error('capture_failed');
+    return dataUrl;
+  }
+
+  /**
+   * One-time disclosure + camera permission request on the kiosk. Also
+   * re-shown when the browser forgot/revoked the camera permission since the
+   * acknowledgement (Safari does this) — the employee re-approves up front
+   * instead of every punch silently landing as photo_failed.
+   */
+  async function _ffTCPhotoMaybeShowDisclosure() {
+    try {
+      if (!window.__ff_kiosk_claims) return;
+      const policy = await _ffTCPhotoPolicy();
+      if (!policy.enabled) return;
+      let acked = false;
+      try { acked = localStorage.getItem(_FF_TC_PHOTO_ACK_KEY) === '1'; } catch (_) {}
+      const perm = await _ffTCPhotoPermissionState();
+      if (perm === 'granted' && acked) return;
+      if (perm === 'unknown' && acked) return; // cannot re-query — don't nag on every render
+      if (document.getElementById('tcPhotoDisclosure')) return;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'tcPhotoDisclosure';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(17,24,39,0.55);display:flex;align-items:center;justify-content:center;padding:20px;';
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-width:400px;width:100%;padding:28px 24px;text-align:center;box-sizing:border-box;">
+          <div style="margin:0 auto 14px;width:56px;height:56px;border-radius:50%;background:#f3e8ff;display:flex;align-items:center;justify-content:center;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#7b3fe4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+          </div>
+          <div style="font-size:18px;font-weight:800;color:#111827;">Photo on every punch</div>
+          <div style="margin-top:10px;font-size:13px;color:#4b5563;line-height:1.55;">
+            A photo is captured with every clock-in and clock-out on this kiosk.
+            Photos are visible to management only and are deleted automatically after 90 days.
+            No video or audio is recorded.
+          </div>
+          <div id="tcPhotoDisclosureErr" style="min-height:16px;margin-top:10px;font-size:12px;color:#b91c1c;line-height:1.4;"></div>
+          <button id="tcPhotoDisclosureContinue" type="button" style="margin-top:12px;width:100%;min-height:50px;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(123,63,228,0.35);">Continue &amp; allow camera</button>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      const btn = overlay.querySelector('#tcPhotoDisclosureContinue');
+      const errEl = overlay.querySelector('#tcPhotoDisclosureErr');
+      btn.addEventListener('click', async function () {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+          stream.getTracks().forEach(function (t) { try { t.stop(); } catch (_) {} });
+          try { localStorage.setItem(_FF_TC_PHOTO_ACK_KEY, '1'); } catch (_) {}
+          overlay.remove();
+        } catch (e) {
+          console.warn('[Time Clock] camera permission request failed', e && e.name);
+          if (errEl) {
+            errEl.textContent = 'Camera unavailable or blocked. You can keep punching — those punches will be flagged for manager review.';
+          }
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.textContent = 'Try again';
+          if (!overlay.querySelector('#tcPhotoDisclosureSkip')) {
+            const skip = document.createElement('button');
+            skip.id = 'tcPhotoDisclosureSkip';
+            skip.type = 'button';
+            skip.textContent = 'Continue without camera';
+            skip.style.cssText = 'margin-top:8px;width:100%;min-height:44px;background:transparent;color:#6b7280;border:none;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;';
+            skip.addEventListener('click', function () {
+              try { localStorage.setItem(_FF_TC_PHOTO_ACK_KEY, '1'); } catch (_) {}
+              overlay.remove();
+            });
+            btn.parentNode.appendChild(skip);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('[Time Clock] photo disclosure failed', e);
     }
   }
 
@@ -39436,6 +39648,12 @@ function initializeUserProfileMenu() {
     window.__ffTCKbHandler = kbHandler;
     document.addEventListener('keydown', kbHandler);
 
+    // Back on the PIN pad — any camera left running by the confirm view is
+    // stopped, and the kiosk photo disclosure shows when needed (first use,
+    // or the browser forgot the camera permission). Fire-and-forget.
+    _ffTCPhotoStop();
+    _ffTCPhotoMaybeShowDisclosure();
+
     // Manage link
     const manageLink = container.querySelector('#tcKioskManageLink');
     if (manageLink) {
@@ -39609,6 +39827,27 @@ function initializeUserProfileMenu() {
             ${_ffTCEscape(pillText)}
           </div>
 
+          <!-- Kiosk punch photo (Stage B): live preview, shown whenever the
+               camera is on. Deliberately NOT hideable — the employee always
+               sees what will be captured. -->
+          <div id="tcConfirmPhotoHost" style="display:none;flex-direction:column;align-items:center;gap:6px;margin-top:14px;">
+            <video id="tcConfirmPhotoVideo" autoplay playsinline muted style="width:96px;height:96px;border-radius:50%;object-fit:cover;background:#111827;border:2px solid #ede9fe;box-shadow:0 4px 12px rgba(123,63,228,0.25);transform:scaleX(-1);"></video>
+            <div id="tcConfirmPhotoNote" style="font-size:10.5px;color:#6b7280;line-height:1.35;max-width:290px;text-align:center;">A photo is captured with every clock-in and clock-out.</div>
+          </div>
+
+          <!-- Quick manager override (photo could not be captured, block policy) -->
+          <div id="tcPhotoOverrideForm" style="display:none;flex-direction:column;gap:8px;margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px;text-align:left;">
+            <div style="font-size:12px;font-weight:700;color:#92400e;">Manager approval needed</div>
+            <div style="font-size:11px;color:#92400e;line-height:1.4;">The photo could not be captured. A manager can approve this punch without a photo.</div>
+            <input id="tcPhotoOvrPin" type="password" inputmode="numeric" autocomplete="off" placeholder="Manager PIN" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;"/>
+            <input id="tcPhotoOvrReason" type="text" autocomplete="off" placeholder="Reason (required, recorded in audit log)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;outline:none;"/>
+            <div id="tcPhotoOvrErr" style="min-height:14px;font-size:11px;color:#b91c1c;"></div>
+            <div style="display:flex;gap:8px;">
+              <button id="tcPhotoOvrApprove" type="button" style="flex:1;min-height:44px;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;">Approve punch</button>
+              <button id="tcPhotoOvrCancel" type="button" style="flex:0 0 auto;min-height:44px;padding:0 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+            </div>
+          </div>
+
           <div id="tcConfirmMsg" style="min-height:18px;font-size:12px;color:#6b7280;margin:14px 0 0;"></div>
 
           <button id="tcConfirmAction" type="button" style="margin-top:16px;width:100%;min-height:58px;padding:16px 0;background:${primaryGrad};color:#fff;border:none;border-radius:16px;font-size:17px;font-weight:800;letter-spacing:0.02em;cursor:pointer;box-shadow:${primaryShadow};transition:transform 0.1s ease, opacity 0.15s ease;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;">${primaryLabel}</button>
@@ -39621,6 +39860,35 @@ function initializeUserProfileMenu() {
     const actionBtn = container.querySelector('#tcConfirmAction');
     const msg = container.querySelector('#tcConfirmMsg');
 
+    // Kiosk punch photo: start the always-visible preview when the salon has
+    // kioskPhoto enabled. A start failure is remembered — the punch is then
+    // sent with photoError and the server applies the salon's failure policy.
+    const photoCtx = { active: false, videoEl: null, startError: null };
+    (async () => {
+      try {
+        if (!window.__ff_kiosk_claims) return;
+        const policy = await _ffTCPhotoPolicy();
+        if (!policy || !policy.enabled) return;
+        photoCtx.active = true;
+        const host = container.querySelector('#tcConfirmPhotoHost');
+        const note = container.querySelector('#tcConfirmPhotoNote');
+        photoCtx.videoEl = container.querySelector('#tcConfirmPhotoVideo');
+        if (host) host.style.display = 'flex';
+        try {
+          await _ffTCPhotoStart(photoCtx.videoEl);
+        } catch (err) {
+          photoCtx.startError = 'camera_unavailable' + (err && err.name ? ':' + err.name : '');
+          if (photoCtx.videoEl) photoCtx.videoEl.style.display = 'none';
+          if (note) {
+            note.style.color = '#b45309';
+            note.textContent = 'Camera unavailable — this punch will be flagged for manager review.';
+          }
+        }
+      } catch (err) {
+        console.warn('[Time Clock] photo preview setup failed', err);
+      }
+    })();
+
     const cancelConfirm = (e) => {
       try {
         if (e) {
@@ -39628,6 +39896,7 @@ function initializeUserProfileMenu() {
           e.stopPropagation();
         }
       } catch (_) {}
+      _ffTCPhotoStop();
       window.__ffTCState.confirmStaff = null;
       window.__ffTCState.confirmPin = null;
       window.__ffTCState.confirmOpenEntry = null;
@@ -39656,39 +39925,130 @@ function initializeUserProfileMenu() {
       actionBtn.style.transform = 'scale(0.98)';
       actionBtn.style.opacity = '0.6';
       if (msg) { msg.style.color = '#6b7280'; msg.textContent = isOut ? 'Clocking out-' : 'Clocking in-'; }
-      try {
-        // Kiosk PIN: read once, and ALWAYS clear from state right after the
-        // call (success or failure). The server re-verifies it; it is never
-        // logged or persisted.
-        const kioskPin = (window.__ffTCState && typeof window.__ffTCState.confirmPin === 'string' && window.__ffTCState.confirmPin)
-          ? window.__ffTCState.confirmPin
-          : null;
+
+      // Kiosk PIN: read once into this closure and clear from state right
+      // away. The server re-verifies it; it is never logged or persisted.
+      // The local copy stays alive only for the quick photo-override retry.
+      const kioskPin = (window.__ffTCState && typeof window.__ffTCState.confirmPin === 'string' && window.__ffTCState.confirmPin)
+        ? window.__ffTCState.confirmPin
+        : null;
+      try { window.__ffTCState.confirmPin = null; } catch (_) {}
+
+      // Kiosk photo: one frame, captured at the moment of the punch. A
+      // capture failure never blocks here — the punch is sent with
+      // photoError and the SERVER applies the salon's failure policy.
+      const capturePhotoFields = () => {
+        if (!photoCtx.active) return {};
+        if (photoCtx.startError) return { photoError: photoCtx.startError };
         try {
-          if (isOut) {
-            if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
-            await window.ffCloseTimeEntry({
-              entryId: openEntry.id,
-              locationId: (openEntry && openEntry.locationId) || locId || 'default',
-              expectedStaffId: staff.id,
-              pin: kioskPin,
-            });
-          } else {
-            if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
-            await window.ffCreateTimeEntry({ staffId: staff.id, locationId: locId || 'default', pin: kioskPin });
-          }
-        } finally {
-          try { window.__ffTCState.confirmPin = null; } catch (_) {}
+          return { photo: _ffTCPhotoCaptureFrame(photoCtx.videoEl) };
+        } catch (err) {
+          return { photoError: (err && err.message) ? String(err.message) : 'capture_failed' };
         }
-        if (msg) { msg.style.color = '#047857'; msg.textContent = isOut ? 'Clocked out. See you next shift!' : 'Clocked in. Have a great shift!'; }
+      };
+
+      const doPunch = async (extraFields) => {
+        if (isOut) {
+          if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
+          return window.ffCloseTimeEntry(Object.assign({
+            entryId: openEntry.id,
+            locationId: (openEntry && openEntry.locationId) || locId || 'default',
+            expectedStaffId: staff.id,
+            pin: kioskPin,
+          }, extraFields || {}));
+        }
+        if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
+        return window.ffCreateTimeEntry(Object.assign({
+          staffId: staff.id,
+          locationId: locId || 'default',
+          pin: kioskPin,
+        }, extraFields || {}));
+      };
+
+      const finishSuccess = (overrideNote) => {
+        _ffTCPhotoStop();
+        if (msg) {
+          msg.style.color = '#047857';
+          msg.textContent = overrideNote
+            ? (isOut ? 'Clocked out (manager override).' : 'Clocked in (manager override).')
+            : (isOut ? 'Clocked out. See you next shift!' : 'Clocked in. Have a great shift!');
+        }
         setTimeout(() => {
           window.__ffTCState.confirmStaff = null;
           window.__ffTCState.confirmOpenEntry = null;
           window.__ffTCState.view = 'clock';
           ffInitTimeClockUI();
         }, 1400);
+      };
+
+      // Quick manager override form (photo_required, block policy). Shown in
+      // place; retries the SAME punch with photoOverride. The employee PIN
+      // and manager PIN live only in this closure.
+      const showPhotoOverrideForm = (photoErrorText) => {
+        const form = container.querySelector('#tcPhotoOverrideForm');
+        if (!form) return false;
+        form.style.display = 'flex';
+        if (msg) { msg.style.color = '#92400e'; msg.textContent = ''; }
+        const pinEl = form.querySelector('#tcPhotoOvrPin');
+        const reasonEl = form.querySelector('#tcPhotoOvrReason');
+        const errEl = form.querySelector('#tcPhotoOvrErr');
+        const approveBtn = form.querySelector('#tcPhotoOvrApprove');
+        const cancelOvr = form.querySelector('#tcPhotoOvrCancel');
+        if (pinEl) { try { pinEl.focus(); } catch (_) {} }
+        if (cancelOvr && !cancelOvr.__ffTCBound) {
+          cancelOvr.__ffTCBound = true;
+          cancelOvr.addEventListener('click', function () { cancelConfirm(); });
+        }
+        if (approveBtn && !approveBtn.__ffTCBound) {
+          approveBtn.__ffTCBound = true;
+          approveBtn.addEventListener('click', async function () {
+            const managerPin = pinEl ? String(pinEl.value || '').trim() : '';
+            const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
+            if (!managerPin) { if (errEl) errEl.textContent = 'Manager PIN is required.'; return; }
+            if (!reason) { if (errEl) errEl.textContent = 'A reason is required.'; return; }
+            approveBtn.disabled = true;
+            approveBtn.style.opacity = '0.6';
+            if (errEl) errEl.textContent = '';
+            try {
+              await doPunch({
+                photoError: photoErrorText || 'photo_unavailable',
+                photoOverride: { managerPin: managerPin, reason: reason },
+              });
+              try { if (pinEl) pinEl.value = ''; } catch (_) {}
+              form.style.display = 'none';
+              finishSuccess(true);
+            } catch (e2) {
+              console.warn('[Time Clock] photo override failed', e2 && e2.code);
+              if (errEl) errEl.textContent = (e2 && e2.message) ? e2.message : String(e2);
+              approveBtn.disabled = false;
+              approveBtn.style.opacity = '1';
+            }
+          });
+        }
+        return true;
+      };
+
+      try {
+        const photoFields = capturePhotoFields();
+        await doPunch(photoFields);
+        finishSuccess(false);
       } catch (e) {
         console.warn('[Time Clock] confirm action failed', e);
         let friendly = (e && e.message ? e.message : String(e));
+
+        // Photo required (block policy) on the kiosk: open the inline
+        // manager-PIN override form instead of bouncing to the PIN pad.
+        const errReason = (e && e.details && e.details.reason) || null;
+        if (window.__ff_kiosk_claims && errReason === 'photo_required') {
+          const capturedError = (capturePhotoFields() || {}).photoError || photoCtx.startError || 'photo_unavailable';
+          if (showPhotoOverrideForm(capturedError)) {
+            actionBtn.__ffTCConfirmBusy = false;
+            actionBtn.disabled = false;
+            actionBtn.style.transform = 'scale(1)';
+            actionBtn.style.opacity = '1';
+            return;
+          }
+        }
 
         // Manager Override: when the server refused because this is not the
         // caller's own profile / wrong device, a manager may retry with a
@@ -40673,6 +41033,17 @@ function initializeUserProfileMenu() {
       const durMobile = (dur && dur !== '-')
         ? `<span class="tc-m-m-dur"> · ${_ffTCEscape(dur)}</span>`
         : '';
+      // Kiosk punch photos (Stage B): camera chip opens the photo viewer;
+      // amber chip flags punches whose photo capture failed.
+      const hasPhotos = !!(r.photoInPath || r.photoOutPath);
+      const photoFailed = (r.photoInFailed === true) || (r.photoOutFailed === true);
+      const photoChips = `${hasPhotos ? `
+        <button type="button" class="tc-m-photo-btn" data-entry-id="${_ffTCEscape(r.id)}" title="View punch photos"
+          style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;font-size:9.5px;font-weight:700;cursor:pointer;vertical-align:middle;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+          Photo
+        </button>` : ''}${photoFailed ? `
+        <span title="Photo capture failed on this punch" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:9.5px;font-weight:700;vertical-align:middle;">Photo failed</span>` : ''}`;
       return `
         <tr data-entry-id="${_ffTCEscape(r.id)}" class="tc-row-clickable tc-manage-card-row" style="border-bottom:1px solid #f3f4f6;transition:background 0.12s ease;cursor:pointer;" onmouseover="this.style.background='#faf7ff'" onmouseout="this.style.background='transparent'">
           <td colspan="6" style="padding:0;vertical-align:top;">
@@ -40680,7 +41051,7 @@ function initializeUserProfileMenu() {
               <div class="tc-m-m-avatar">${avatarHtml}</div>
               <div class="tc-m-m-text">
                 <div class="tc-m-m-line1">${_ffTCEscape(staffName)} <span class="tc-m-m-branch">(${_ffTCEscape(locName)})</span></div>
-                <div class="tc-m-m-line2">${line2Mobile}${durMobile}</div>
+                <div class="tc-m-m-line2">${line2Mobile}${durMobile}${photoChips}</div>
               </div>
             </div>
             <div class="tc-manage-card-desktop">
@@ -40689,7 +41060,7 @@ function initializeUserProfileMenu() {
               <span class="tc-m-d-ci">${_ffTCEscape(ci)}</span>
               <span class="tc-m-d-co">${coDesktop}</span>
               <span class="tc-m-d-loc">${_ffTCEscape(locName)}</span>
-              <span class="tc-m-d-dur">${_ffTCEscape(dur)}</span>
+              <span class="tc-m-d-dur">${_ffTCEscape(dur)}${photoChips}</span>
             </div>
           </td>
         </tr>
@@ -40709,7 +41080,74 @@ function initializeUserProfileMenu() {
           if (entry) _ffTCOpenAddDrawer(entry);
         });
       });
+      // Photo chip opens the viewer instead of the edit drawer.
+      body.querySelectorAll('.tc-m-photo-btn').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const id = btn.getAttribute('data-entry-id');
+          const entry = id ? rowsById[String(id)] : null;
+          if (entry) _ffTCShowPunchPhotos(entry, staffById);
+        });
+      });
     } catch (_) {}
+  }
+
+  /**
+   * Punch photo viewer (Stage B). Loads the clock-in / clock-out photos via
+   * ffGetTimeClockPhotoUrl — Storage rules resolve them only for owner/admin
+   * or time_clock_manage holders, so a rules denial simply shows the error
+   * note. Photos older than 90 days are purged server-side; their slot shows
+   * a "deleted by retention" note instead.
+   */
+  function _ffTCShowPunchPhotos(entry, staffById) {
+    try {
+      const old = document.getElementById('tcPhotoViewer');
+      if (old) old.remove();
+      const staff = staffById && staffById[String(entry.staffId || '')];
+      const staffName = (staff && staff.name) ? staff.name : (entry.staffId || 'Staff');
+      const overlay = document.createElement('div');
+      overlay.id = 'tcPhotoViewer';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100500;background:rgba(17,24,39,0.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+      const slot = (label, path, failed, purgedAt) => `
+        <div style="flex:1;min-width:180px;max-width:260px;display:flex;flex-direction:column;gap:6px;align-items:center;">
+          <div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">${label}</div>
+          <div class="tc-photo-slot" data-path="${_ffTCEscape(path || '')}" style="width:100%;aspect-ratio:3/4;border-radius:12px;background:#f3f4f6;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#9ca3af;font-size:11px;text-align:center;padding:8px;box-sizing:border-box;">
+            ${path ? 'Loading…' : (failed ? 'Photo capture failed' : (purgedAt ? 'Deleted by 90-day retention' : 'No photo'))}
+          </div>
+        </div>`;
+      overlay.innerHTML = `
+        <div style="background:#fff;border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,0.35);max-width:600px;width:100%;padding:20px;box-sizing:border-box;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;">
+            <div style="font-size:14px;font-weight:800;color:#111827;">Punch photos — ${_ffTCEscape(staffName)} · ${_ffTCEscape(_ffTCFormatDay(entry.clockInAt))}</div>
+            <button id="tcPhotoViewerClose" type="button" style="background:#f3f4f6;border:none;border-radius:8px;width:28px;height:28px;font-size:15px;cursor:pointer;color:#111827;">x</button>
+          </div>
+          <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
+            ${slot('Clock-in', entry.photoInPath, entry.photoInFailed === true, entry.photoInPurgedAt)}
+            ${slot('Clock-out', entry.photoOutPath, entry.photoOutFailed === true, entry.photoOutPurgedAt)}
+          </div>
+          <div style="margin-top:12px;font-size:10.5px;color:#9ca3af;text-align:center;">Photos are visible to management only and are deleted automatically after 90 days.</div>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', (ev) => { if (ev.target === overlay) overlay.remove(); });
+      const closeBtn = overlay.querySelector('#tcPhotoViewerClose');
+      if (closeBtn) closeBtn.addEventListener('click', () => overlay.remove());
+      overlay.querySelectorAll('.tc-photo-slot').forEach((slotEl) => {
+        const path = slotEl.getAttribute('data-path');
+        if (!path) return;
+        if (typeof window.ffGetTimeClockPhotoUrl !== 'function') {
+          slotEl.textContent = 'Photo viewer unavailable';
+          return;
+        }
+        window.ffGetTimeClockPhotoUrl(path).then((url) => {
+          slotEl.innerHTML = `<img src="${_ffTCEscape(url)}" alt="Punch photo" style="width:100%;height:100%;object-fit:cover;display:block;"/>`;
+        }).catch((e) => {
+          console.warn('[Time Clock] punch photo load failed', e && e.code);
+          slotEl.textContent = 'Could not load photo (no access or deleted)';
+        });
+      });
+    } catch (e) {
+      console.warn('[Time Clock] photo viewer failed', e);
+    }
   }
 
   // Render the per-staff Summary view. Each row is a staff with regular/OT

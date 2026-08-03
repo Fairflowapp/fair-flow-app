@@ -901,6 +901,10 @@ const FF_TIME_CLOCK_DEFAULTS = Object.freeze({
   workweekStartDay: "monday",
   standardHours: { weekly: 40, daily: 8 },
   overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
+  // Kiosk punch photo (Stage B). Privacy feature — explicit opt-in per salon.
+  // onFailure: "fallback" records the punch flagged for manager review when
+  // the camera fails; "block" requires a manager-PIN override on the kiosk.
+  kioskPhoto: { enabled: false, onFailure: "fallback" },
 });
 
 function ffCloneTimeClockDefaults() {
@@ -908,6 +912,7 @@ function ffCloneTimeClockDefaults() {
     workweekStartDay: FF_TIME_CLOCK_DEFAULTS.workweekStartDay,
     standardHours: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.standardHours),
     overtime: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.overtime),
+    kioskPhoto: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.kioskPhoto),
   };
 }
 
@@ -927,6 +932,7 @@ function ffNormalizeTimeClockSettings(raw) {
     (raw && (raw.workweekStartDay === "sunday" || raw.workweekStartDay === "monday"))
       ? raw.workweekStartDay
       : FF_TIME_CLOCK_DEFAULTS.workweekStartDay;
+  const kp = (r.kioskPhoto && typeof r.kioskPhoto === "object") ? r.kioskPhoto : {};
   return {
     workweekStartDay: workweekStartDay,
     standardHours: {
@@ -938,6 +944,11 @@ function ffNormalizeTimeClockSettings(raw) {
       weeklyThreshold: numOrDefault(ot.weeklyThreshold, FF_TIME_CLOCK_DEFAULTS.overtime.weeklyThreshold),
       dailyThreshold:  numOrDefault(ot.dailyThreshold,  FF_TIME_CLOCK_DEFAULTS.overtime.dailyThreshold),
       multiplier:      multiplierOrDefault(ot.multiplier, FF_TIME_CLOCK_DEFAULTS.overtime.multiplier),
+    },
+    // Same shape + explicit-true rule the timeClockPunch callable applies.
+    kioskPhoto: {
+      enabled: kp.enabled === true,
+      onFailure: kp.onFailure === "block" ? "block" : "fallback",
     },
   };
 }
