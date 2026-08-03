@@ -89,19 +89,25 @@
  *  to drive hours calculations.
  * --------------------------------------------------------------------
  *
- * This file is intentionally narrow: only the CREATE helper is provided
- * in this stage. Close / void / query / subscribe helpers come later.
+ * SECURITY MODEL (Time Clock Stage A)
+ * -----------------------------------
+ * All WRITES go through trusted Cloud Functions — the client never writes
+ * timeEntries directly anymore:
+ *   - timeClockPunch       : clock in / clock out. The target staffId is
+ *                            derived SERVER-SIDE (own profile, or kiosk PIN
+ *                            verified in-function, or audited manager
+ *                            override). Geofence is enforced server-side.
+ *   - timeClockManageEntry : Manage Time Cards add / edit / void, manager
+ *                            rights verified server-side, before/after audit.
+ * The exported function names and return shapes are preserved so existing
+ * UI call sites keep working. READ helpers below still query Firestore
+ * directly (read rules are unchanged).
  *
- * NOTE ON SECURITY RULES
- * ----------------------
- * `firestore.rules` does not yet include a block for
- * `salons/{salonId}/timeEntries/**`. Until that block is added, calls to
- * ffCreateTimeEntry() will fail with `permission-denied`. This file is
- * ready to be tested locally against the Firestore emulator or once
- * rules are authored in a follow-up step.
+ * PIN SAFETY: a kiosk PIN passed via input.pin is forwarded to the callable
+ * and never logged, never persisted, never included in error messages.
  */
 
-import { doc, getDoc, addDoc, updateDoc, collection, query, where, getDocs, orderBy, limit, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 // ───────────────────────── salon id resolution ─────────────────────────
@@ -138,6 +144,91 @@ export function timeEntriesCollectionRef(salonId) {
     throw new Error("timeEntriesCollectionRef: salonId is required");
   }
   return collection(db, `salons/${salonId}/timeEntries`);
+}
+
+// ─────────────────────── callable plumbing ───────────────────────────
+// Same pattern as staff-writeups-formal-cloud.js callWriteupFn: v2 onCall
+// via the standard httpsCallable protocol, region-pinned us-central1.
+async function _ffCallTimeClockFn(name, payload) {
+  const { getFunctions, httpsCallable } = await import(
+    "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js"
+  );
+  const fn = httpsCallable(getFunctions(undefined, "us-central1"), name);
+  const res = await fn(payload);
+  return res && res.data ? res.data : {};
+}
+
+function _ffIsKioskSession() {
+  try {
+    return !!(typeof window !== "undefined" && window.__ff_kiosk_claims);
+  } catch (_) {
+    return false;
+  }
+}
+
+// Same stable per-browser id the push registration uses — one identity for
+// the device across features (salons/.../staffDeviceTokens and punches).
+const _FF_TC_DEVICE_ID_KEY = "ff_push_device_id_v1";
+function _ffTimeClockDeviceId() {
+  try {
+    let id = localStorage.getItem(_FF_TC_DEVICE_ID_KEY);
+    if (!id) {
+      id = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(_FF_TC_DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _ffTimeClockPlatform() {
+  try {
+    const p = window.Capacitor && typeof window.Capacitor.getPlatform === "function"
+      ? String(window.Capacitor.getPlatform())
+      : "web";
+    return (p === "ios" || p === "android") ? p : "web";
+  } catch (_) {
+    return "web";
+  }
+}
+
+/**
+ * Capture a fresh GPS fix for the punch, without nagging for the
+ * geolocation permission when it isn't needed:
+ *   - fence enforced for this branch → always attempt (the PIN gate already
+ *     prompted, and the server will reject the punch without coords);
+ *   - fence off/unknown → only capture silently when permission is already
+ *     granted (pure forensics, never a prompt).
+ * Errors never block here — the SERVER decides whether coords are required.
+ */
+async function _ffTimeClockCaptureCoords() {
+  try {
+    let fenceActive = null;
+    try {
+      if (typeof window.isTimeClockGeoFenceActive === "function") {
+        fenceActive = window.isTimeClockGeoFenceActive() === true;
+      }
+    } catch (_) {}
+    if (fenceActive !== true) {
+      try {
+        const st = await navigator.permissions.query({ name: "geolocation" });
+        if (!st || st.state !== "granted") return null;
+      } catch (_) {
+        return null;
+      }
+    }
+    if (typeof window.requestCurrentBrowserLocation !== "function") return null;
+    const pos = await window.requestCurrentBrowserLocation();
+    if (!pos || !isFinite(Number(pos.lat)) || !isFinite(Number(pos.lng))) return null;
+    return {
+      lat: Number(pos.lat),
+      lng: Number(pos.lng),
+      accuracy: Math.round(Number(pos.accuracy || 0)),
+    };
+  } catch (_) {
+    return null;
+  }
 }
 
 // ──────────────────────────── validators ─────────────────────────────
@@ -196,64 +287,46 @@ export async function ffCreateTimeEntry(input = {}) {
     : await _ffGetSalonIdForTimeEntries();
   if (!salonId) throw new Error("ffCreateTimeEntry: unable to resolve salonId");
 
-  const alreadyOpen = await ffGetOpenTimeEntryForStaff(staffId, salonId);
-  if (alreadyOpen && alreadyOpen.id) {
-    const err = new Error("This staff member is already clocked in. Clock out before starting another shift.");
-    err.code = "time-clock/already-open";
-    err.openEntry = alreadyOpen;
-    throw err;
-  }
-
-  const clockInAtCoerced = _ffCoerceTimestamp(input.clockInAt);
-  const clockInAt = clockInAtCoerced || serverTimestamp();
-
-  let linkedShiftId = null;
-  if (typeof input.linkedShiftId === "string" && input.linkedShiftId.trim()) {
-    linkedShiftId = input.linkedShiftId.trim();
-  }
-
-  // If the caller didn't set `scheduled` explicitly, infer it from
-  // whether we have a linked shift — a reasonable default.
-  const scheduled = (input.scheduled === true)
-    ? true
-    : (input.scheduled === false ? false : !!linkedShiftId);
-
-  const sourceRaw = typeof input.source === "string" ? input.source.trim().toLowerCase() : "manual";
-  const source = _FF_VALID_SOURCES.has(sourceRaw) ? sourceRaw : "manual";
-
   const notes = (typeof input.notes === "string" && input.notes.trim())
     ? input.notes.trim()
     : null;
 
-  const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+  // Manage Time Cards path: admin adds (and any explicit/backdated clockInAt)
+  // go through the manager-gated callable, which writes source:"admin" and a
+  // before/after audit event. Live punches never pass clockInAt — the server
+  // stamps its own time.
+  const sourceRaw = typeof input.source === "string" ? input.source.trim().toLowerCase() : "manual";
+  const explicitClockIn = _ffCoerceTimestamp(input.clockInAt);
+  if (sourceRaw === "admin" || explicitClockIn) {
+    const res = await _ffCallTimeClockFn("timeClockManageEntry", {
+      op: "add",
+      salonId,
+      staffId,
+      locationId,
+      clockInAt: explicitClockIn ? explicitClockIn.toMillis() : Date.now(),
+      notes,
+    });
+    return { id: res.entryId, data: null };
+  }
 
-  const payload = {
-    // context
+  // Live Clock In. staffId is sent only as expectedStaffId — the server
+  // derives the real target (own profile / kiosk PIN) and rejects if it
+  // doesn't match what the confirm screen displayed.
+  const res = await _ffCallTimeClockFn("timeClockPunch", {
+    action: "in",
     salonId,
     locationId,
-    staffId,
-    // time window
-    clockInAt,
-    clockOutAt: null,
-    // state
-    status: "open",
-    // schedule linkage (snapshot — never live)
-    linkedShiftId,
-    scheduled,
-    // metadata
-    source,
+    coords: await _ffTimeClockCaptureCoords(),
+    deviceId: _ffTimeClockDeviceId(),
+    platform: _ffTimeClockPlatform(),
+    pin: _ffIsKioskSession() && typeof input.pin === "string" ? input.pin : null,
+    expectedStaffId: staffId,
+    override: (input.override && typeof input.override === "object" && input.override.staffId)
+      ? { staffId: String(input.override.staffId), reason: String(input.override.reason || "") }
+      : null,
     notes,
-    durationMinutes: null,
-    // audit
-    createdAt: serverTimestamp(),
-    createdBy: uid,
-    updatedAt: serverTimestamp(),
-    updatedBy: uid,
-  };
-
-  const colRef = timeEntriesCollectionRef(salonId);
-  const docRef = await addDoc(colRef, payload);
-  return { id: docRef.id, data: payload };
+  });
+  return { id: res.entryId, data: null };
 }
 
 /**
@@ -299,62 +372,45 @@ export async function ffCloseTimeEntry(input = {}) {
     : await _ffGetSalonIdForTimeEntries();
   if (!salonId) throw new Error("ffCloseTimeEntry: unable to resolve salonId");
 
-  const entryRef = doc(db, `salons/${salonId}/timeEntries/${entryId}`);
-  const snap = await getDoc(entryRef);
-  if (!snap.exists()) {
-    throw new Error(`ffCloseTimeEntry: entry not found (id=${entryId})`);
-  }
-  const data = snap.data() || {};
-
-  if (data.status !== "open") {
-    throw new Error(
-      `ffCloseTimeEntry: entry is not open (current status="${data.status}")`
-    );
-  }
-
-  const clockInTs = (data.clockInAt instanceof Timestamp) ? data.clockInAt : null;
-  if (!clockInTs) {
-    // clockInAt may legitimately be a pending serverTimestamp if this is
-    // called immediately after create — re-reading before updating is the
-    // safe path, but we still need a real value. If missing, we refuse.
-    throw new Error("ffCloseTimeEntry: entry has no clockInAt timestamp yet");
+  // Manage Time Cards path: an explicit clockOutAt is a manager edit
+  // (backdated close) and goes through the manager-gated callable with a
+  // before/after audit event.
+  const explicitClockOut = _ffCoerceTimestamp(input.clockOutAt);
+  if (explicitClockOut) {
+    const payload = {
+      op: "edit",
+      salonId,
+      entryId,
+      clockOutAt: explicitClockOut.toMillis(),
+    };
+    if (typeof input.notes === "string") payload.notes = input.notes;
+    const res = await _ffCallTimeClockFn("timeClockManageEntry", payload);
+    return { id: entryId, clockOutAt: explicitClockOut, durationMinutes: null, changed: res.changed !== false };
   }
 
-  // Resolve clockOutAt. Default to client-side "now" so durationMinutes can
-  // be computed synchronously in the same update.
-  let clockOutTs = _ffCoerceTimestamp(input.clockOutAt);
-  if (!clockOutTs) clockOutTs = Timestamp.now();
-
-  const clockInMs = clockInTs.toMillis();
-  const clockOutMs = clockOutTs.toMillis();
-  if (clockOutMs < clockInMs) {
-    throw new Error(
-      "ffCloseTimeEntry: clockOutAt is earlier than clockInAt — refusing to close"
-    );
-  }
-
-  // durationMinutes is a plain number; rounded to the nearest minute so UI
-  // totals stay tidy and payroll reads are trivial. Precision of seconds
-  // is preserved in the Timestamps themselves for any future re-compute.
-  const durationMinutes = Math.round((clockOutMs - clockInMs) / 60000);
-
-  const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
-
-  const patch = {
-    status: "closed",
-    clockOutAt: clockOutTs,
-    durationMinutes,
-    updatedAt: serverTimestamp(),
-    updatedBy: uid,
+  // Live Clock Out. The server locates the open entry for the derived staff
+  // itself and stamps its own clock-out time; entryId is not trusted. The
+  // device binding (same personal device / any salon kiosk / legacy pass) is
+  // enforced server-side.
+  const res = await _ffCallTimeClockFn("timeClockPunch", {
+    action: "out",
+    salonId,
+    locationId: (typeof input.locationId === "string" && input.locationId.trim()) ? input.locationId.trim() : "default",
+    coords: await _ffTimeClockCaptureCoords(),
+    deviceId: _ffTimeClockDeviceId(),
+    platform: _ffTimeClockPlatform(),
+    pin: _ffIsKioskSession() && typeof input.pin === "string" ? input.pin : null,
+    expectedStaffId: (typeof input.expectedStaffId === "string" && input.expectedStaffId.trim()) ? input.expectedStaffId.trim() : null,
+    override: (input.override && typeof input.override === "object" && input.override.staffId)
+      ? { staffId: String(input.override.staffId), reason: String(input.override.reason || "") }
+      : null,
+    notes: (typeof input.notes === "string" && input.notes.trim()) ? input.notes.trim() : null,
+  });
+  return {
+    id: res.entryId || entryId,
+    clockOutAt: res.clockOutAtMs != null ? Timestamp.fromMillis(res.clockOutAtMs) : null,
+    durationMinutes: res.durationMinutes != null ? res.durationMinutes : null,
   };
-  if (typeof input.notes === "string") {
-    // Only touch notes when explicitly provided. Empty string clears notes.
-    patch.notes = input.notes.trim() ? input.notes.trim() : null;
-  }
-
-  await updateDoc(entryRef, patch);
-
-  return { id: entryId, clockOutAt: clockOutTs, durationMinutes };
 }
 
 /**
@@ -525,93 +581,56 @@ export async function ffUpdateTimeEntry(input = {}) {
     : await _ffGetSalonIdForTimeEntries();
   if (!salonId) throw new Error("ffUpdateTimeEntry: unable to resolve salonId");
 
-  const entryRef = doc(db, `salons/${salonId}/timeEntries/${entryId}`);
-  const snap = await getDoc(entryRef);
-  if (!snap.exists()) {
-    throw new Error(`ffUpdateTimeEntry: entry not found (id=${entryId})`);
+  // Pure void (soft delete) has its own op for a distinct audit event.
+  const statusRaw = typeof input.status === "string" ? input.status.trim().toLowerCase() : null;
+  const otherKeys = Object.keys(input).filter((k) => !["entryId", "salonId", "status", "reason"].includes(k));
+  if (statusRaw === "void" && otherKeys.length === 0) {
+    const res = await _ffCallTimeClockFn("timeClockManageEntry", {
+      op: "void",
+      salonId,
+      entryId,
+      reason: typeof input.reason === "string" ? input.reason : null,
+    });
+    return { id: entryId, changed: res.changed !== false };
   }
-  const current = snap.data() || {};
 
-  const patch = {};
+  const payload = { op: "edit", salonId, entryId };
 
-  // clockInAt
-  let finalClockIn = (current.clockInAt instanceof Timestamp) ? current.clockInAt : null;
   if (Object.prototype.hasOwnProperty.call(input, "clockInAt")) {
     const ts = _ffCoerceTimestamp(input.clockInAt);
     if (!ts) throw new Error("ffUpdateTimeEntry: clockInAt is invalid");
-    patch.clockInAt = ts;
-    finalClockIn = ts;
+    payload.clockInAt = ts.toMillis();
   }
 
-  // clockOutAt (null allowed to re-open)
-  let finalClockOut = (current.clockOutAt instanceof Timestamp) ? current.clockOutAt : null;
-  let reopen = false;
   if (Object.prototype.hasOwnProperty.call(input, "clockOutAt")) {
     if (input.clockOutAt === null) {
-      patch.clockOutAt = null;
-      finalClockOut = null;
-      reopen = true;
+      payload.clockOutAt = null; // explicit null re-opens the entry
     } else {
       const ts = _ffCoerceTimestamp(input.clockOutAt);
       if (!ts) throw new Error("ffUpdateTimeEntry: clockOutAt is invalid");
-      patch.clockOutAt = ts;
-      finalClockOut = ts;
+      payload.clockOutAt = ts.toMillis();
     }
   }
 
-  if (finalClockIn && finalClockOut && finalClockOut.toMillis() < finalClockIn.toMillis()) {
-    throw new Error(
-      "ffUpdateTimeEntry: clockOutAt is earlier than clockInAt — refusing to save"
-    );
-  }
-
-  // status
-  if (typeof input.status === "string") {
-    const s = input.status.trim().toLowerCase();
-    if (!["open", "closed", "void"].includes(s)) {
+  if (statusRaw) {
+    if (!["open", "closed", "void"].includes(statusRaw)) {
       throw new Error(`ffUpdateTimeEntry: invalid status "${input.status}"`);
     }
-    patch.status = s;
-  } else if (reopen) {
-    patch.status = "open";
-  } else if (finalClockOut && current.status !== "void") {
-    // If we're providing a real clock-out and the caller didn't override
-    // status, transitioning to closed is the expected behavior.
-    patch.status = "closed";
+    payload.status = statusRaw;
   }
 
-  // durationMinutes: recompute based on the final pair (or null when reopen)
-  if (patch.clockInAt !== undefined || patch.clockOutAt !== undefined || patch.status !== undefined) {
-    if (finalClockIn && finalClockOut && (patch.status || current.status) === "closed") {
-      patch.durationMinutes = Math.round((finalClockOut.toMillis() - finalClockIn.toMillis()) / 60000);
-    } else if (reopen || (patch.status === "open")) {
-      patch.durationMinutes = null;
-    }
-  }
-
-  // locationId
   if (typeof input.locationId === "string" && input.locationId.trim()) {
-    patch.locationId = input.locationId.trim();
+    payload.locationId = input.locationId.trim();
   }
 
-  // notes (empty string explicitly clears)
   if (typeof input.notes === "string") {
-    patch.notes = input.notes.trim() ? input.notes.trim() : null;
+    payload.notes = input.notes;
   } else if (input.notes === null) {
-    patch.notes = null;
+    payload.notes = null;
   }
 
-  if (Object.keys(patch).length === 0) {
-    // Nothing to change; treat as a no-op success.
-    return { id: entryId, changed: false };
-  }
-
-  const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
-  patch.updatedAt = serverTimestamp();
-  patch.updatedBy = uid;
-
-  await updateDoc(entryRef, patch);
-  return { id: entryId, changed: true, patch };
+  const res = await _ffCallTimeClockFn("timeClockManageEntry", payload);
+  return { id: entryId, changed: res.changed !== false };
 }
 
 // ───────────────────────────── window exposure ─────────────────────────────

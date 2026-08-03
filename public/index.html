@@ -39543,6 +39543,10 @@ function initializeUserProfileMenu() {
 
     window.__ffTCState.selectedLocationId = locationId;
     window.__ffTCState.confirmStaff = { id: staff.id, name: staff.name || 'Staff', pin: null };
+    // Kiosk sessions: keep the PIN in memory ONLY until the confirm call —
+    // the timeClockPunch callable re-verifies it server-side. It is cleared
+    // immediately after the call, never persisted and never logged.
+    window.__ffTCState.confirmPin = window.__ff_kiosk_claims ? String(pin || '') : null;
     window.__ffTCState.confirmOpenEntry = openEntry || null;
     window.__ffTCState.view = 'confirm';
     ffInitTimeClockUI();
@@ -39625,6 +39629,7 @@ function initializeUserProfileMenu() {
         }
       } catch (_) {}
       window.__ffTCState.confirmStaff = null;
+      window.__ffTCState.confirmPin = null;
       window.__ffTCState.confirmOpenEntry = null;
       window.__ffTCState.view = 'clock';
       ffInitTimeClockUI();
@@ -39652,12 +39657,27 @@ function initializeUserProfileMenu() {
       actionBtn.style.opacity = '0.6';
       if (msg) { msg.style.color = '#6b7280'; msg.textContent = isOut ? 'Clocking out-' : 'Clocking in-'; }
       try {
-        if (isOut) {
-          if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
-          await window.ffCloseTimeEntry({ entryId: openEntry.id });
-        } else {
-          if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
-          await window.ffCreateTimeEntry({ staffId: staff.id, locationId: locId || 'default' });
+        // Kiosk PIN: read once, and ALWAYS clear from state right after the
+        // call (success or failure). The server re-verifies it; it is never
+        // logged or persisted.
+        const kioskPin = (window.__ffTCState && typeof window.__ffTCState.confirmPin === 'string' && window.__ffTCState.confirmPin)
+          ? window.__ffTCState.confirmPin
+          : null;
+        try {
+          if (isOut) {
+            if (typeof window.ffCloseTimeEntry !== 'function') throw new Error('ffCloseTimeEntry is not loaded');
+            await window.ffCloseTimeEntry({
+              entryId: openEntry.id,
+              locationId: (openEntry && openEntry.locationId) || locId || 'default',
+              expectedStaffId: staff.id,
+              pin: kioskPin,
+            });
+          } else {
+            if (typeof window.ffCreateTimeEntry !== 'function') throw new Error('ffCreateTimeEntry is not loaded');
+            await window.ffCreateTimeEntry({ staffId: staff.id, locationId: locId || 'default', pin: kioskPin });
+          }
+        } finally {
+          try { window.__ffTCState.confirmPin = null; } catch (_) {}
         }
         if (msg) { msg.style.color = '#047857'; msg.textContent = isOut ? 'Clocked out. See you next shift!' : 'Clocked in. Have a great shift!'; }
         setTimeout(() => {
@@ -39668,7 +39688,62 @@ function initializeUserProfileMenu() {
         }, 1400);
       } catch (e) {
         console.warn('[Time Clock] confirm action failed', e);
-        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Error: ' + (e && e.message ? e.message : String(e)); }
+        let friendly = (e && e.message ? e.message : String(e));
+
+        // Manager Override: when the server refused because this is not the
+        // caller's own profile / wrong device, a manager may retry with a
+        // mandatory reason. The reason is recorded in the entry's audit
+        // trail server-side. Not available on kiosk sessions.
+        const reasonCode = (e && e.details && e.details.reason) || null;
+        const overridable = reasonCode === 'staff_mismatch' || reasonCode === 'device_mismatch' || reasonCode === 'no_staff_profile';
+        if (!window.__ff_kiosk_claims && overridable
+            && typeof _ffTCCurrentUserCanManage === 'function' && _ffTCCurrentUserCanManage()) {
+          const why = window.prompt(
+            `Manager override — clock ${staff.name || 'this staff member'} ${isOut ? 'out' : 'in'} anyway?\n` +
+            'Enter a reason (required, recorded in the audit log):'
+          );
+          if (why && why.trim()) {
+            try {
+              const override = { staffId: staff.id, reason: why.trim() };
+              if (isOut) {
+                await window.ffCloseTimeEntry({
+                  entryId: openEntry.id,
+                  locationId: (openEntry && openEntry.locationId) || locId || 'default',
+                  expectedStaffId: staff.id,
+                  override,
+                });
+              } else {
+                await window.ffCreateTimeEntry({ staffId: staff.id, locationId: locId || 'default', override });
+              }
+              if (msg) { msg.style.color = '#047857'; msg.textContent = isOut ? 'Clocked out (manager override).' : 'Clocked in (manager override).'; }
+              setTimeout(() => {
+                window.__ffTCState.confirmStaff = null;
+                window.__ffTCState.confirmOpenEntry = null;
+                window.__ffTCState.view = 'clock';
+                ffInitTimeClockUI();
+              }, 1400);
+              return;
+            } catch (e2) {
+              console.warn('[Time Clock] manager override failed', e2);
+              friendly = (e2 && e2.message ? e2.message : String(e2));
+            }
+          }
+        }
+
+        if (msg) { msg.style.color = '#b91c1c'; msg.textContent = 'Error: ' + friendly; }
+        if (window.__ff_kiosk_claims) {
+          // The PIN was already cleared, so a retry from this screen cannot
+          // re-authenticate — return to the PIN pad with the error visible.
+          setTimeout(() => {
+            window.__ffTCState.confirmStaff = null;
+            window.__ffTCState.confirmOpenEntry = null;
+            window.__ffTCState.view = 'clock';
+            ffInitTimeClockUI();
+            const errEl = document.getElementById('tcKioskError');
+            if (errEl) errEl.textContent = friendly;
+          }, 2200);
+          return;
+        }
         actionBtn.__ffTCConfirmBusy = false;
         actionBtn.disabled = false;
         actionBtn.style.transform = 'scale(1)';

@@ -568,6 +568,21 @@ async function timeClockPunchHandler(data, context) {
     staffData = staffSnap.data() || {};
   }
 
+  // UX safety net: the client sends the staffId it DISPLAYED on the confirm
+  // screen. It is never trusted for authorization — only compared against the
+  // server-derived target so we never silently clock a different person than
+  // the one shown on screen.
+  const expectedStaffId = trimStr(data.expectedStaffId);
+  if (expectedStaffId && expectedStaffId !== staffId) {
+    throw new HttpsError(
+      "failed-precondition",
+      caller.kind === "kiosk"
+        ? "The staff roster changed — please re-enter your PIN."
+        : "On this device you can only clock yourself in or out. Use a paired kiosk for shared stations.",
+      { reason: "staff_mismatch" },
+    );
+  }
+
   const isOverride = performedAs === "manager_override";
   const isOwnerRow = staffRowIsOwner(staffData);
   const perms = (staffData.permissions && typeof staffData.permissions === "object")
