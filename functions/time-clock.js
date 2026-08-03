@@ -40,6 +40,21 @@
  * salons/{salonId}/kioskPinThrottle/{kioskId} (server-only doc; no client
  * rules exist for it, so default-deny applies). 5 consecutive failures within
  * 10 minutes → locked for 5 minutes.
+ *
+ * Photo capture (Stage B, kiosk punches only): the kiosk sends one JPEG frame
+ * as base64 with the punch. It is uploaded HERE via the Admin SDK to
+ *   timeClockPhotos/{salonId}/{entryId}/{in|out}-{ts}.jpg
+ * BEFORE the entry is written (clients have no Storage write access to that
+ * path at all — see storage.rules). Policy lives in
+ * salons/{salonId}/settings/timeClock.kioskPhoto:
+ *   { enabled: boolean (explicit true required), onFailure: "fallback"|"block" }
+ * On capture/upload failure: "fallback" records the punch with a
+ * photoIn/OutFailed flag + a push alert to managers; "block" rejects with
+ * reason "photo_required" unless a photoOverride (manager PIN + mandatory
+ * reason, verified here) accompanies the retry. Legacy kiosk clients that
+ * send no photo* fields are exempt so stale devices keep punching during
+ * rollout. Photos are purged after 90 days by timeClockPhotosPurgeDaily;
+ * time entries themselves are never deleted by the purge.
  */
 
 const admin = require("firebase-admin");
@@ -48,6 +63,7 @@ if (!admin.apps.length) admin.initializeApp();
 // v2 callables (same reason as writeups.js): v1 function IAM cannot be opened
 // to callable clients under the org policy.
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 const REGION = "us-central1";
 
@@ -60,6 +76,13 @@ const DEFAULT_RADIUS_METERS = 100;
 const PIN_MAX_FAILURES = 5;
 const PIN_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const PIN_LOCK_MS = 5 * 60 * 1000;
+
+// Kiosk photo capture (Stage B).
+const PHOTO_MAX_BYTES = 1.5 * 1024 * 1024; // decoded JPEG; kiosk sends ~640px ≈ 50-120KB
+const PHOTO_ERROR_MAX_CHARS = 200; // client-reported failure text is capped + sanitized
+const PHOTO_OVERRIDE_REASON_MAX_CHARS = 500;
+const PHOTO_RETENTION_DAYS = 90;
+const PHOTO_STORAGE_PREFIX = "timeClockPhotos/";
 
 const VALID_PLATFORMS = new Set(["web", "ios", "android"]);
 
@@ -370,6 +393,269 @@ async function resolveStaffByPin(salonId, pin) {
 }
 
 // ---------------------------------------------------------------------------
+// Kiosk photo capture (Stage B)
+// ---------------------------------------------------------------------------
+
+/**
+ * Client-reported capture failure text. Sanitized BEFORE it can reach the
+ * audit trail: control characters stripped, whitespace collapsed, hard cap.
+ */
+function sanitizePhotoError(raw) {
+  if (typeof raw !== "string") return null;
+  const v = raw
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return v ? v.slice(0, PHOTO_ERROR_MAX_CHARS) : null;
+}
+
+/**
+ * Decode the punch photo (data-URL or bare base64) into a Buffer.
+ * Returns null when absent; throws invalid-argument when malformed,
+ * oversized, or not a JPEG (magic-byte check — content type is not trusted).
+ */
+function parsePhotoPayload(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") {
+    throw new HttpsError("invalid-argument", "photo must be a base64 JPEG string.");
+  }
+  let b64 = raw;
+  const dataUrl = /^data:image\/jpe?g;base64,/i.exec(raw);
+  if (dataUrl) {
+    b64 = raw.slice(dataUrl[0].length);
+  } else if (raw.startsWith("data:")) {
+    throw new HttpsError("invalid-argument", "photo must be a JPEG data URL.");
+  }
+  // Cheap pre-decode bound (base64 inflates ~4/3) so a huge payload is
+  // rejected before Buffer allocation.
+  if (b64.length > Math.ceil((PHOTO_MAX_BYTES * 4) / 3) + 8) {
+    throw new HttpsError("invalid-argument", "photo is too large.");
+  }
+  const buf = Buffer.from(b64, "base64");
+  if (!buf || buf.length < 100) {
+    throw new HttpsError("invalid-argument", "photo payload is not valid base64.");
+  }
+  if (buf.length > PHOTO_MAX_BYTES) {
+    throw new HttpsError("invalid-argument", "photo is too large.");
+  }
+  if (buf[0] !== 0xff || buf[1] !== 0xd8) {
+    throw new HttpsError("invalid-argument", "photo must be a JPEG image.");
+  }
+  return buf;
+}
+
+/**
+ * Photo policy from salons/{salonId}/settings/timeClock.kioskPhoto.
+ * enabled requires an EXPLICIT true (privacy feature — salons opt in via
+ * Time Clock Settings); onFailure defaults to "fallback".
+ */
+async function loadKioskPhotoPolicy(salonId) {
+  try {
+    const snap = await db().doc(`salons/${salonId}/settings/timeClock`).get();
+    const raw = snap.exists ? snap.get("kioskPhoto") : null;
+    const enabled = !!(raw && typeof raw === "object" && raw.enabled === true);
+    const onFailure =
+      raw && trimStr(raw.onFailure).toLowerCase() === "block" ? "block" : "fallback";
+    return { enabled, onFailure };
+  } catch (e) {
+    console.warn("[timeClockPunch] loadKioskPhotoPolicy failed — treating as disabled", e);
+    return { enabled: false, onFailure: "fallback" };
+  }
+}
+
+/**
+ * Resolve the bucket punch photos live in. The client config uses
+ * {project}.firebasestorage.app in both staging and production, so that is
+ * tried first; legacy *.appspot.com is the fallback (same duality
+ * index.js resolveFileForPath handles — but derived from the project, never
+ * hardcoded, so staging deploys never touch the production bucket).
+ */
+let _photoBucketPromise = null;
+function resolvePhotoBucket() {
+  if (!_photoBucketPromise) {
+    _photoBucketPromise = (async () => {
+      const project =
+        process.env.GCLOUD_PROJECT || trimStr((admin.app().options || {}).projectId);
+      for (const id of [`${project}.firebasestorage.app`, `${project}.appspot.com`]) {
+        try {
+          const bucket = admin.storage().bucket(id);
+          const [exists] = await bucket.exists();
+          if (exists) return bucket;
+        } catch (_) { /* try next candidate */ }
+      }
+      return admin.storage().bucket();
+    })();
+  }
+  return _photoBucketPromise;
+}
+
+/**
+ * Upload one punch photo. Runs BEFORE the entry write — a punch is only
+ * recorded with a photo path if the object actually exists. The custom
+ * metadata lets the 90-day purge clear the matching entry field.
+ */
+async function uploadPunchPhoto({ salonId, entryId, direction, buffer }) {
+  const bucket = await resolvePhotoBucket();
+  const field = direction === "in" ? "photoInPath" : "photoOutPath";
+  const path = `${PHOTO_STORAGE_PREFIX}${salonId}/${entryId}/${direction}-${Date.now()}.jpg`;
+  await bucket.file(path).save(buffer, {
+    resumable: false,
+    contentType: "image/jpeg",
+    metadata: { metadata: { salonId, entryId, field } },
+  });
+  return path;
+}
+
+/**
+ * Verify the quick kiosk photo-override: a MANAGER's PIN + mandatory reason,
+ * entered on the kiosk without leaving the confirm screen. Shares the kiosk
+ * PIN throttle. Approver must be owner/admin/manager or hold
+ * time_clock_manage, and cannot be the staff member being punched.
+ * Same PIN safety rules as the employee PIN: never logged, never echoed.
+ */
+async function verifyPhotoManagerOverride({ salonId, kioskId, raw, targetStaffId }) {
+  const reason = trimStr(raw && raw.reason).slice(0, PHOTO_OVERRIDE_REASON_MAX_CHARS);
+  if (!reason) {
+    throw new HttpsError("invalid-argument", "An override reason is required.", {
+      reason: "photo_override_reason_required",
+    });
+  }
+  await assertPinThrottleOpen(salonId, kioskId);
+  const match = await resolveStaffByPin(salonId, raw && raw.managerPin);
+  if (!match) {
+    await recordPinFailure(salonId, kioskId);
+    throw new HttpsError("permission-denied", "Incorrect manager PIN.", {
+      reason: "bad_manager_pin",
+    });
+  }
+  const s = match.staffData || {};
+  const role = trimStr(s.role).toLowerCase();
+  const canApprove =
+    staffRowIsOwner(s) ||
+    ["owner", "admin", "manager"].includes(role) ||
+    (s.permissions && typeof s.permissions === "object" && s.permissions.time_clock_manage === true);
+  if (!canApprove) {
+    // Correct PIN, insufficient rights — not a throttle event.
+    throw new HttpsError("permission-denied", "This PIN does not belong to a manager.", {
+      reason: "photo_override_not_manager",
+    });
+  }
+  if (match.staffId === trimStr(targetStaffId)) {
+    throw new HttpsError("permission-denied", "You cannot approve a photo override for your own punch.", {
+      reason: "photo_override_self",
+    });
+  }
+  await clearPinFailures(salonId, kioskId);
+  return { managerStaffId: match.staffId, reason };
+}
+
+/**
+ * Decide what happens photo-wise for a KIOSK punch. Returns null when the
+ * photo feature does not apply (legacy client that sent no photo* fields, or
+ * the salon has not enabled kioskPhoto). Otherwise:
+ *   { policy, buffer|null, error|null, override|null }
+ * Throws photo_required (block mode, no valid override) — the client shows
+ * the quick manager-PIN override form on that reason code.
+ */
+async function resolveKioskPhotoPlan({ salonId, kioskId, data, staffId }) {
+  const clientSupportsPhoto =
+    Object.prototype.hasOwnProperty.call(data, "photo") ||
+    Object.prototype.hasOwnProperty.call(data, "photoError") ||
+    Object.prototype.hasOwnProperty.call(data, "photoOverride");
+  if (!clientSupportsPhoto) return null;
+
+  const policy = await loadKioskPhotoPolicy(salonId);
+  if (!policy.enabled) return null;
+
+  const buffer = parsePhotoPayload(data.photo);
+  if (buffer) return { policy, buffer, error: null, override: null };
+
+  const error = sanitizePhotoError(data.photoError) || "no_photo";
+  const overrideRaw =
+    data.photoOverride && typeof data.photoOverride === "object" ? data.photoOverride : null;
+  if (overrideRaw) {
+    const override = await verifyPhotoManagerOverride({
+      salonId, kioskId, raw: overrideRaw, targetStaffId: staffId,
+    });
+    return { policy, buffer: null, error, override };
+  }
+  if (policy.onFailure === "block") {
+    throw new HttpsError(
+      "failed-precondition",
+      "A photo is required to clock in or out on this kiosk. Ask a manager to approve an override.",
+      { reason: "photo_required" },
+    );
+  }
+  return { policy, buffer: null, error, override: null };
+}
+
+/**
+ * Push alert to managers when a punch was recorded without its photo.
+ * Idempotent per entry+direction (marker doc created BEFORE the FCM attempt,
+ * same trade-off as writeups sendWriteupPushOnce). Recipients: owner/admin
+ * staff and time_clock_manage holders — the same audience that can read the
+ * photos. Every error here is non-fatal; the punch is already recorded.
+ */
+async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
+  const markerRef = db().doc(`salons/${salonId}/timeClockPhotoAlerts/${entryId}_${direction}`);
+  try {
+    await markerRef.create({
+      entryId, direction, staffId, createdAt: serverNow(),
+    });
+  } catch (err) {
+    if (err && err.code === 6) return { skipped: "already_attempted" }; // ALREADY_EXISTS
+    throw err;
+  }
+
+  const staffSnap = await db().collection(`salons/${salonId}/staff`).get();
+  const managerIds = new Set();
+  staffSnap.forEach((d) => {
+    const s = d.data() || {};
+    if (s.isArchived === true) return;
+    const role = trimStr(s.role).toLowerCase();
+    const isMgr =
+      staffRowIsOwner(s) ||
+      ["owner", "admin"].includes(role) ||
+      (s.permissions && typeof s.permissions === "object" && s.permissions.time_clock_manage === true);
+    if (isMgr) managerIds.add(d.id);
+  });
+  if (!managerIds.size) return { skipped: "no_managers" };
+
+  const tokensSnap = await db()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("enabled", "==", true)
+    .get();
+  const tokens = [
+    ...new Set(
+      tokensSnap.docs
+        .filter((d) => managerIds.has(trimStr((d.data() || {}).staffId)))
+        .map((d) => trimStr((d.data() || {}).token))
+        .filter(Boolean),
+    ),
+  ];
+  if (!tokens.length) return { skipped: "no_tokens" };
+
+  // Deliberately generic — no staff name or entry details in the push.
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens: tokens.slice(0, 500),
+    notification: {
+      title: "Fair Flow — Time Clock",
+      body: `Photo capture failed during a kiosk clock-${direction}. Open Manage Time Cards to review.`,
+    },
+    data: { type: "time_clock_photo_failed", salonId, entryId },
+    android: {
+      priority: "high",
+      notification: { channelId: "fairflow_alerts", defaultSound: true },
+    },
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { sound: "default", badge: 1 } },
+    },
+  });
+  return { successCount: response.successCount, failureCount: response.failureCount };
+}
+
+// ---------------------------------------------------------------------------
 // Geofence (server-authoritative mirror of verifyTimeClockGeoFence)
 // ---------------------------------------------------------------------------
 
@@ -615,6 +901,13 @@ async function timeClockPunchHandler(data, context) {
     await assertWithinTimeClockFence({ salonId, locationId, staffData, coords });
   }
 
+  // ── Kiosk photo (Stage B). Resolved AFTER all gates so a photo is never
+  //    uploaded for a punch that would be rejected anyway. null → feature not
+  //    applicable (personal device, legacy client, or salon opt-out).
+  const photoPlan = caller.kind === "kiosk"
+    ? await resolveKioskPhotoPlan({ salonId, kioskId, data, staffId })
+    : null;
+
   const source = caller.kind === "kiosk" ? "kiosk" : (isOverride ? "admin" : "manual");
   const geo = coords ? { lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy } : null;
   const auditBase = {
@@ -632,6 +925,52 @@ async function timeClockPunchHandler(data, context) {
 
   const entriesCol = db().collection(`salons/${salonId}/timeEntries`);
 
+  // Uploads the punch photo (if any) for the given entry id and returns the
+  // photo fields to merge into the entry + audit event. Upload happens BEFORE
+  // the entry write; an upload failure downgrades to the same failure policy
+  // as a capture failure (block mode without an approved override rejects).
+  async function settlePunchPhoto(entryId, direction) {
+    if (!photoPlan) return { entry: {}, audit: {}, failed: false };
+    const failedFields = (error) => ({
+      entry: { [direction === "in" ? "photoInFailed" : "photoOutFailed"]: true },
+      audit: {
+        photoFailed: true,
+        photoError: error,
+        ...(photoPlan.override
+          ? { photoOverride: { managerStaffId: photoPlan.override.managerStaffId, reason: photoPlan.override.reason } }
+          : {}),
+      },
+      failed: true,
+    });
+    if (!photoPlan.buffer) return failedFields(photoPlan.error);
+    try {
+      const path = await uploadPunchPhoto({ salonId, entryId, direction, buffer: photoPlan.buffer });
+      return {
+        entry: { [direction === "in" ? "photoInPath" : "photoOutPath"]: path },
+        audit: { photoPath: path },
+        failed: false,
+      };
+    } catch (e) {
+      console.error("[timeClockPunch] photo upload failed", { salonId, entryId, direction, message: e && e.message });
+      if (photoPlan.policy.onFailure === "block" && !photoPlan.override) {
+        throw new HttpsError(
+          "failed-precondition",
+          "The photo could not be saved. Try again, or ask a manager to approve an override.",
+          { reason: "photo_required", detail: "upload_failed" },
+        );
+      }
+      return failedFields("upload_failed");
+    }
+  }
+
+  async function alertPhotoFailed(entryId, direction) {
+    try {
+      await sendPhotoFailedAlert({ salonId, entryId, direction, staffId });
+    } catch (e) {
+      console.warn("[timeClockPunch] photo-failed alert error (non-fatal)", e && e.message);
+    }
+  }
+
   // ── Clock In ────────────────────────────────────────────────────────────
   if (action === "in") {
     const open = await findOpenEntry(salonId, staffId);
@@ -642,6 +981,10 @@ async function timeClockPunchHandler(data, context) {
         { reason: "already_open", entryId: open.id },
       );
     }
+    // Entry id is generated up-front so the photo (uploaded first) and the
+    // entry share it — the punch is only recorded after a successful upload.
+    const docRef = entriesCol.doc();
+    const photo = await settlePunchPhoto(docRef.id, "in");
     const payload = {
       // context (existing shape)
       salonId,
@@ -667,16 +1010,24 @@ async function timeClockPunchHandler(data, context) {
       clockInGeo: geo,
       clockInByUid: caller.uid,
       overrideReason,
+      // kiosk photo (Stage B)
+      photoInPath: null,
+      photoOutPath: null,
+      photoInFailed: false,
+      photoOutFailed: false,
+      ...photo.entry,
       // audit (existing shape)
       createdAt: serverNow(),
       createdBy: caller.uid,
       updatedAt: serverNow(),
       updatedBy: caller.uid,
     };
-    const docRef = await entriesCol.add(payload);
-    await appendAuditEvent(docRef, "clock_in", { action: "clock_in", ...auditBase });
+    await docRef.set(payload);
+    await appendAuditEvent(docRef, "clock_in", { action: "clock_in", ...auditBase, ...photo.audit });
+    if (photo.failed) await alertPhotoFailed(docRef.id, "in");
     console.log("[timeClockPunch] clock_in", {
       salonId, staffId, locationId, entryId: docRef.id, performedAs, source, kioskId, hasGeo: !!geo,
+      hasPhoto: !!photo.entry.photoInPath, photoFailed: photo.failed,
     });
     return { ok: true, action: "in", entryId: docRef.id, staffId };
   }
@@ -729,6 +1080,7 @@ async function timeClockPunchHandler(data, context) {
   }
 
   const entryRef = entriesCol.doc(open.id);
+  const photo = await settlePunchPhoto(open.id, "out");
   const patch = {
     status: "closed",
     clockOutAt: clockOutTs,
@@ -740,15 +1092,18 @@ async function timeClockPunchHandler(data, context) {
     clockOutGeo: geo,
     clockOutByUid: caller.uid,
     ...(overrideReason ? { clockOutOverrideReason: overrideReason } : {}),
+    ...photo.entry,
     updatedAt: serverNow(),
     updatedBy: caller.uid,
   };
   if (notes != null) patch.notes = notes;
   await entryRef.update(patch);
-  await appendAuditEvent(entryRef, "clock_out", { action: "clock_out", ...auditBase });
+  await appendAuditEvent(entryRef, "clock_out", { action: "clock_out", ...auditBase, ...photo.audit });
+  if (photo.failed) await alertPhotoFailed(open.id, "out");
   console.log("[timeClockPunch] clock_out", {
     salonId, staffId, locationId, entryId: open.id, performedAs, source, kioskId,
     durationMinutes: patch.durationMinutes, hasGeo: !!geo,
+    hasPhoto: !!photo.entry.photoOutPath, photoFailed: photo.failed,
   });
   return {
     ok: true,
@@ -842,6 +1197,10 @@ async function timeClockManageEntryHandler(data, context) {
       clockInGeo: null,
       clockInByUid: caller.uid,
       overrideReason: null,
+      photoInPath: null,
+      photoOutPath: null,
+      photoInFailed: false,
+      photoOutFailed: false,
       createdAt: serverNow(),
       createdBy: caller.uid,
       updatedAt: serverNow(),
@@ -984,3 +1343,78 @@ async function timeClockManageEntryHandler(data, context) {
   });
   return { ok: true, op: "edit", entryId, changed: true };
 }
+
+// ---------------------------------------------------------------------------
+// timeClockPhotosPurgeDaily — 90-day photo retention (Stage B)
+// ---------------------------------------------------------------------------
+
+/**
+ * Daily sweep of timeClockPhotos/ (one flat prefix listing — cheap even
+ * across all salons). Objects older than PHOTO_RETENTION_DAYS are deleted
+ * and, using the custom metadata stamped at upload, the matching entry field
+ * is nulled with a photoIn/OutPurgedAt marker + an audit event. The time
+ * entries themselves are NEVER deleted or otherwise modified here.
+ */
+exports.timeClockPhotosPurgeDaily = onSchedule(
+  {
+    schedule: "30 3 * * *", // 03:30 UTC daily
+    timeZone: "UTC",
+    region: REGION,
+    timeoutSeconds: 540,
+    memory: "256MiB",
+    retryCount: 0,
+  },
+  async () => {
+    const bucket = await resolvePhotoBucket();
+    const cutoffMs = Date.now() - PHOTO_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const [files] = await bucket.getFiles({ prefix: PHOTO_STORAGE_PREFIX });
+
+    let deleted = 0;
+    let errors = 0;
+    for (const file of files) {
+      try {
+        const createdMs = Date.parse(file.metadata && file.metadata.timeCreated);
+        if (!isFinite(createdMs) || createdMs > cutoffMs) continue;
+
+        const meta = (file.metadata && file.metadata.metadata) || {};
+        const salonId = trimStr(meta.salonId);
+        const entryId = trimStr(meta.entryId);
+        const field =
+          meta.field === "photoInPath" || meta.field === "photoOutPath" ? meta.field : null;
+
+        await file.delete();
+        deleted += 1;
+
+        if (salonId && entryId && field) {
+          const direction = field === "photoInPath" ? "in" : "out";
+          const entryRef = db().doc(`salons/${salonId}/timeEntries/${entryId}`);
+          await entryRef
+            .set(
+              {
+                [field]: null,
+                [direction === "in" ? "photoInPurgedAt" : "photoOutPurgedAt"]: serverNow(),
+                updatedAt: serverNow(),
+              },
+              { merge: true },
+            )
+            .catch(() => {});
+          await appendAuditEvent(entryRef, `photo_purged_${direction}`, {
+            action: "photo_purged",
+            field,
+            path: file.name,
+            retentionDays: PHOTO_RETENTION_DAYS,
+            performedAs: "system_retention",
+          }).catch(() => {});
+        }
+      } catch (e) {
+        errors += 1;
+        console.warn("[timeClockPhotosPurgeDaily] file purge failed", {
+          name: file && file.name, message: e && e.message,
+        });
+      }
+    }
+    console.log("[timeClockPhotosPurgeDaily] done", {
+      scanned: files.length, deleted, errors, retentionDays: PHOTO_RETENTION_DAYS,
+    });
+  },
+);

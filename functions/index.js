@@ -43,11 +43,13 @@ exports.writeupEmployeeAction = _writeups.writeupEmployeeAction;
 
 // Time Clock Stage A — trusted server-side punch + manage (staffId is derived
 // server-side; kiosk PIN verified in-function; auditEvents per entry).
-// Deploy ONLY by name:
-//   firebase deploy --only "functions:timeClockPunch,functions:timeClockManageEntry" --project fair-flow-staging
+// Stage B adds kiosk photo capture inside timeClockPunch + the daily 90-day
+// photo retention sweep. Deploy ONLY by name:
+//   firebase deploy --only "functions:timeClockPunch,functions:timeClockManageEntry,functions:timeClockPhotosPurgeDaily" --project fair-flow-staging
 const _timeClock = require("./time-clock");
 exports.timeClockPunch = _timeClock.timeClockPunch;
 exports.timeClockManageEntry = _timeClock.timeClockManageEntry;
+exports.timeClockPhotosPurgeDaily = _timeClock.timeClockPhotosPurgeDaily;
 
 // Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
 const _tasksAutoReset = require("./tasks-auto-reset");
