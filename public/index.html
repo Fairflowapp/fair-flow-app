@@ -2382,7 +2382,7 @@
                 <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">What happens when the camera is unavailable or the capture fails on the kiosk.</div>
                 <select id="tcKioskPhotoOnFailure" style="padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;color:#111827;outline:none;max-width:100%;">
                   <option value="fallback">Record the punch and alert managers (recommended)</option>
-                  <option value="block">Block the punch until a manager approves</option>
+                  <option value="block">Photo is mandatory. If it fails, only authorized staff can record the punch</option>
                 </select>
               </div>
             </div>
@@ -39872,7 +39872,7 @@ function initializeUserProfileMenu() {
           <!-- Quick manager override (photo could not be captured, block policy) -->
           <div id="tcPhotoOverrideForm" style="display:none;flex-direction:column;gap:8px;margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px;text-align:left;">
             <div style="font-size:12px;font-weight:700;color:#92400e;">Manager approval needed</div>
-            <div style="font-size:11px;color:#92400e;line-height:1.4;">The photo could not be captured. A manager can approve this punch without a photo.</div>
+            <div style="font-size:11px;color:#92400e;line-height:1.4;">Photo is mandatory. The photo could not be captured &mdash; only authorized staff can record the punch.</div>
             <input id="tcPhotoOvrPin" type="password" inputmode="numeric" autocomplete="off" placeholder="Manager PIN" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;"/>
             <input id="tcPhotoOvrReason" type="text" autocomplete="off" placeholder="Reason (required, recorded in audit log)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;outline:none;"/>
             <div id="tcPhotoOvrErr" style="min-height:14px;font-size:11px;color:#b91c1c;"></div>
