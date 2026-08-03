@@ -188,7 +188,14 @@ function bindPushListeners() {
   PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
     try {
       const data = action?.notification?.data || {};
-      if (data.type === "chat_message") {
+      if (data.type === "writeup_sent" && data.writeupId) {
+        // Reuse the ?ff_writeup deep-link path: my-writeups.js consumes the
+        // pending id and opens the specific document once its docs are loaded.
+        window.__ffPendingWriteupDeepLinkId = String(data.writeupId);
+        if (typeof window.ffConsumeWriteupDeepLink === "function") {
+          window.ffConsumeWriteupDeepLink();
+        }
+      } else if (data.type === "chat_message") {
         document.getElementById("chatBtn")?.click();
       } else if (data.type === "inbox_item") {
         document.getElementById("inboxBtn")?.click();

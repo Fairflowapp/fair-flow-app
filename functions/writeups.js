@@ -512,6 +512,19 @@ async function approveAndSendWriteupHandler(data, context) {
       toEmail: employeeEmail,
     });
 
+    // ---- Step C2: one-time push notification (first send ONLY — the resend
+    //      branch above returns before reaching this point, so an email
+    //      resend can never trigger a second push). Entirely non-fatal: a
+    //      missing token or an FCM outage must never fail the send. ----
+    try {
+      await sendWriteupPushOnce({ salonId, staffId, writeupId });
+    } catch (err) {
+      console.warn("[approveAndSendWriteup] push skipped (non-fatal)", {
+        writeupId,
+        message: err && err.message,
+      });
+    }
+
     // ---- Step D: flip incidents to included_in_writeup (only now — after the
     //      document, notification and email all succeeded) ----
     const batch = db().batch();
@@ -578,6 +591,70 @@ async function approveAndSendWriteupHandler(data, context) {
     });
 
     return { ok: true, status: "sent", mailId };
+}
+
+// Push copy is deliberately generic — no incident type, warning level, notes
+// or any other sensitive detail may ever appear in a notification.
+const WRITEUP_PUSH_TITLE = "New document in Fair Flow";
+const WRITEUP_PUSH_BODY =
+  "You have received a new employee write-up. Open Fair Flow and go to My Profile → My Write-Ups.";
+
+/**
+ * Send at most ONE push per write-up, ever. The idempotency marker is created
+ * with create() BEFORE the FCM attempt, so a retry of the send pipeline can
+ * never produce a duplicate push (ALREADY_EXISTS -> skip). The trade-off is
+ * intentional: if FCM fails after the marker exists, the push is dropped —
+ * the issued document, in-app notification and email remain the source of
+ * truth, exactly like email failure handling.
+ *
+ * Callers must treat every error thrown here as non-fatal.
+ */
+async function sendWriteupPushOnce({ salonId, staffId, writeupId }) {
+  const markerRef = db().doc(`salons/${salonId}/writeupPushMarkers/${writeupId}`);
+  try {
+    await markerRef.create({
+      staffId,
+      writeupId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    if (err && err.code === 6) return { skipped: "already_attempted" }; // ALREADY_EXISTS
+    throw err;
+  }
+
+  // Same token store the existing push senders use (registered by
+  // public/push-notifications.js). Disabled tokens are filtered out here.
+  const tokensSnap = await db()
+    .collection(`salons/${salonId}/staffDeviceTokens`)
+    .where("staffId", "==", staffId)
+    .where("enabled", "==", true)
+    .get();
+  const tokens = [
+    ...new Set(
+      tokensSnap.docs.map((d) => trimStr((d.data() || {}).token)).filter(Boolean),
+    ),
+  ];
+  if (!tokens.length) return { skipped: "no_tokens" };
+
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens: tokens.slice(0, 500),
+    notification: { title: WRITEUP_PUSH_TITLE, body: WRITEUP_PUSH_BODY },
+    // Only opaque routing IDs — the tap handler opens the document through
+    // the existing ?ff_writeup deep link.
+    data: { type: "writeup_sent", writeupId, salonId },
+    android: {
+      priority: "high",
+      notification: { channelId: "fairflow_alerts", defaultSound: true },
+    },
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { sound: "default", badge: 1 } },
+    },
+  });
+  return {
+    successCount: response.successCount,
+    failureCount: response.failureCount,
+  };
 }
 
 /**

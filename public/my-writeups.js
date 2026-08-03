@@ -385,6 +385,13 @@ export function ffMountMyWriteups(panel) {
 
 if (typeof window !== "undefined") {
   window.ffMountMyWriteups = ffMountMyWriteups;
+  // Called by push-notifications.js when a write-up push is tapped while the
+  // app is already running (docs loaded => no new snapshot to consume the
+  // pending deep-link id). Safe to call any time: it no-ops until docs load.
+  window.ffConsumeWriteupDeepLink = () => {
+    ensureSubscriptions();
+    maybeConsumeDeepLink();
+  };
 
   const tick = () => ensureSubscriptions();
   // Identity (salon + staff link) resolves at different moments across

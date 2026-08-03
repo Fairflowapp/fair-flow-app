@@ -24,9 +24,9 @@
         { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module", delay: 3150 },
         { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
         { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 3300 },
-  { src: "/my-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 3400 },
+  { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 3400 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
-        { src: "/push-notifications.js?v=20260524_ios_fcm_bridge_retry", type: "module", delay: 3500 },
+        { src: "/push-notifications.js?v=20260803_writeups_push", type: "module", delay: 3500 },
         { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
