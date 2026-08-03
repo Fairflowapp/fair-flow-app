@@ -118,6 +118,38 @@ service firebase.storage {
         );
     }
 
+    // ===== TIME CLOCK PUNCH PHOTOS (Stage B) =====
+    // Deliberately OUTSIDE salons/{salonId}/... — the staff/media paths above
+    // allow ANY signed-in user read/write, which must never apply here.
+    // Written ONLY by the timeClockPunch callable via the Admin SDK (bypasses
+    // these rules); clients — including the kiosk and the photographed
+    // employee — can never upload, replace or delete a punch photo.
+    // Read: owner/admin or time_clock_manage holders (same audience as the
+    // photo-failed alerts), following the writeups storage pattern.
+    function timeClockStaffDocData(salonId) {
+      return firestore.get(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId)).data;
+    }
+
+    function canManageTimeClockStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && (
+          userRoleLower() in ['admin', 'owner']
+          || (
+            userDoc().staffId is string
+            && firestore.exists(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId))
+            && timeClockStaffDocData(salonId).get('permissions', {}) is map
+            && timeClockStaffDocData(salonId).get('permissions', {}).get('time_clock_manage', false) == true
+          )
+        );
+    }
+
+    match /timeClockPhotos/{salonId}/{entryId}/{fileName} {
+      allow read: if canManageTimeClockStorage(salonId);
+      allow write: if false;
+    }
+
     // deny everything else
     match /{allPaths=**} {
       allow read, write: if false;
