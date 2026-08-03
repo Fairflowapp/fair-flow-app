@@ -1202,6 +1202,15 @@ service cloud.firestore {
     match /salons/{salonId}/timeEntries/{entryId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
       allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+
+      // Time Clock audit trail (Stage A). Written ONLY by the timeClockPunch /
+      // timeClockManageEntry callables via the Admin SDK (which bypasses these
+      // rules); clients may never write audit events. Readable by managers for
+      // the Manage Time Cards audit view.
+      match /auditEvents/{eventId} {
+        allow read: if isManager(salonId) || isPlatformAdmin();
+        allow write: if false;
+      }
     }
 
     // Staff presence / call feature (live heartbeat + call signaling).
