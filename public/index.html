@@ -38919,11 +38919,9 @@ function initializeUserProfileMenu() {
         kpOnFailureEl.__ffTCBound = true;
         kpOnFailureEl.addEventListener('change', persist);
       }
-      workweekRadios.forEach(function (r) {
-        if (r.__ffTCBound) return;
-        r.__ffTCBound = true;
-        r.addEventListener('change', persist);
-      });
+      // (workweek radios were replaced by the read-only Preferences mirror; a
+      // leftover binding to them threw here and silently killed hydration +
+      // the number-field save bindings below.)
       [weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl].forEach(function (el) {
         if (!el || el.__ffTCBound) return;
         el.__ffTCBound = true;
