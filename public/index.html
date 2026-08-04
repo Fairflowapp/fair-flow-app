@@ -12324,6 +12324,18 @@ function goToUserProfile(section) {
   if (typeof window.loadUserProfilePreferences === 'function') {
     window.loadUserProfilePreferences();
   }
+
+  // Prefetch Time Clock expand flags so the first TC card open in this
+  // Settings visit can size from last-known instead of the unknown min-height.
+  try {
+    if (!window.__ffTCLastKnownExpand && typeof window.ffLoadTimeClockSettings === 'function') {
+      Promise.resolve(window.ffLoadTimeClockSettings()).then(function (s) {
+        if (s && typeof window.ffTCRememberExpand === 'function') {
+          window.ffTCRememberExpand(s);
+        }
+      }).catch(function () {});
+    }
+  } catch (_) {}
   
   // Ensure Queue UI stays hidden when User Profile is active (safety check)
   ensureQueueUIHiddenForUserProfile();
