@@ -150,7 +150,7 @@
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260727_note_color_picker">
+<link rel="stylesheet" href="/main.css?v=20260804_queue_boot_skeleton">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -2514,6 +2514,20 @@
       <h1 style="margin:0 0 16px 0;font-size:24px;font-weight:600;color:#111827;">Account Inactive</h1>
       <p style="margin:0 0 24px 0;font-size:16px;color:#6b7280;line-height:1.5;">Your account has been archived and access has been revoked. Please contact an administrator if you believe this is an error.</p>
       <p style="margin:0;font-size:14px;color:#9ca3af;">You will be signed out automatically.</p>
+    </div>
+  </div>
+
+  <!-- Reserves joinBar + queue grid footprint after sign-in, before
+       ff-queue-ui-visible, so revealing the real chrome does not CLS. -->
+  <div id="ffQueueBootSkeleton" aria-hidden="true">
+    <div class="ff-qbs-join">
+      <div class="ff-qbs-pill"></div>
+      <div class="ff-qbs-btn"></div>
+      <div class="ff-qbs-controls"></div>
+    </div>
+    <div class="ff-qbs-grid">
+      <div class="ff-qbs-col"></div>
+      <div class="ff-qbs-col"></div>
     </div>
   </div>
 
@@ -52053,9 +52067,9 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
-  <script src="/analytics-loader.js?v=20260704_bootstrap_js_extract"></script>
+  <script src="/analytics-loader.js?v=20260804_batch_load"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260803_writeups_push"></script>
+  <script src="/safe-loader.js?v=20260804_batch_load"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
