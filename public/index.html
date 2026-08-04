@@ -38798,6 +38798,27 @@ function initializeUserProfileMenu() {
         kpKnob.style.left = on ? '18px' : '2px';
       };
 
+      // Loading state: while values are being hydrated from Firestore the
+      // controls are disabled and dimmed so nobody reads the HTML defaults as
+      // real values or saves them over the stored ones. Interaction is only
+      // re-enabled after a successful hydrate.
+      const interactiveEls = [toggle, weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl, kpToggle, kpOnFailureEl];
+      const pillEls = [pill, kpPill];
+      const setControlsLoading = function (loading) {
+        card.__ffTCControlsLoading = !!loading;
+        interactiveEls.forEach(function (el) {
+          if (el) el.disabled = !!loading;
+        });
+        pillEls.forEach(function (p) {
+          if (!p) return;
+          p.style.pointerEvents = loading ? 'none' : '';
+          p.style.opacity = loading ? '0.55' : '';
+        });
+        [fields, kpFields].forEach(function (wrap) {
+          if (wrap) wrap.style.opacity = loading ? '0.55' : '';
+        });
+      };
+
       // Drop any stale "not saved yet" hint left over from Stage 2.
       const staleHint = Array.prototype.find.call(card.querySelectorAll('p'), function (p) {
         return /not saved yet/i.test(p.textContent || '');
@@ -38888,7 +38909,13 @@ function initializeUserProfileMenu() {
       const setHint = function (state) {
         clearTimeout(card.__ffTCHintTimer);
         hintEl.style.opacity = '1';
-        if (state === 'saving') {
+        if (state === 'loading') {
+          hintEl.textContent = 'Loading\u2026';
+          hintEl.style.color = '#6b7280';
+        } else if (state === 'load-error') {
+          hintEl.textContent = 'Couldn\u2019t load settings. Close and reopen this tab to retry.';
+          hintEl.style.color = '#b91c1c';
+        } else if (state === 'saving') {
           hintEl.textContent = 'Saving\u2026';
           hintEl.style.color = '#6b7280';
         } else if (state === 'saved') {
@@ -38929,6 +38956,7 @@ function initializeUserProfileMenu() {
         pill.__ffTCBound = true;
         pill.addEventListener('click', function (e) {
           e.preventDefault();
+          if (card.__ffTCControlsLoading) return;
           toggle.checked = !toggle.checked;
           toggle.dispatchEvent(new Event('change', { bubbles: true }));
         });
@@ -38944,6 +38972,7 @@ function initializeUserProfileMenu() {
         kpPill.__ffTCBound = true;
         kpPill.addEventListener('click', function (e) {
           e.preventDefault();
+          if (card.__ffTCControlsLoading) return;
           kpToggle.checked = !kpToggle.checked;
           kpToggle.dispatchEvent(new Event('change', { bubbles: true }));
         });
@@ -38989,6 +39018,8 @@ function initializeUserProfileMenu() {
       card.__ffTCLoading = true;
       applyOvertimeVisibility();
       applyKioskPhotoVisibility();
+      setControlsLoading(true);
+      setHint('loading');
       const waitForLoadFn = function (timeoutMs) {
         return new Promise(function (resolve) {
           const startedAt = Date.now();
@@ -39001,17 +39032,25 @@ function initializeUserProfileMenu() {
       };
       waitForLoadFn(60000).then(function (available) {
         if (!available) {
-          console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 60s, showing UI defaults');
+          console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 60s');
+          setHint('load-error');
           return null;
         }
         return window.ffLoadTimeClockSettings();
       }).then(function (settings) {
-        if (settings) hydrateUI(settings);
+        if (settings) {
+          hydrateUI(settings);
+          // Only now is it safe to interact: the controls show real values.
+          setControlsLoading(false);
+          setHint('');
+        }
       }).catch(function (e) {
-        console.warn('[Time Clock Settings] load failed, using UI defaults', e);
+        // Controls stay disabled on purpose: enabling them with the HTML
+        // defaults would let a save overwrite the real stored values.
+        console.warn('[Time Clock Settings] load failed', e);
         applyOvertimeVisibility();
         applyKioskPhotoVisibility();
-        setHint('error');
+        setHint('load-error');
       }).finally(function () {
         card.__ffTCLoading = false;
       });
