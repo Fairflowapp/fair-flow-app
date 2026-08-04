@@ -957,62 +957,103 @@ function settingsTimeClockRef(salonId) {
   return doc(db, `salons/${salonId}/settings`, "timeClock");
 }
 
-// Single-flight flag: prevents two concurrent load calls from both trying to
-// seed defaults into Firestore. The first caller owns the seed; everyone
-// else reuses its promise.
+// Single-flight + session cache: concurrent callers share one promise, and
+// the resolved value is kept until salon switch / explicit force refresh /
+// successful save (which updates the cache in place).
 let _timeClockLoadPromise = null;
+let _timeClockCachedSalonId = null;
 // Tracks whether we've already created the default doc this session. Saves a
 // redundant getDoc → setDoc round-trip if the user re-opens the tab after
 // the initial seed.
 let _timeClockSeeded = false;
+
+function ffInvalidateTimeClockSettingsCache() {
+  _timeClockLoadPromise = null;
+  _timeClockCachedSalonId = null;
+  _timeClockSeeded = false;
+  try {
+    if (typeof window !== "undefined") {
+      window.__ffTCCachedSettings = null;
+      window.__ffTCSettingsPending = null;
+      const card = typeof document !== "undefined"
+        ? document.getElementById("userProfileCardTimeClockSettings")
+        : null;
+      if (card) card.__ffTCHydratedSalonId = null;
+    }
+  } catch (_) {}
+}
+
+async function _ffFetchTimeClockSettings(salonId) {
+  const ref = settingsTimeClockRef(salonId);
+  const snap = await getDoc(ref);
+  if (snap.exists()) {
+    _timeClockSeeded = true;
+    return ffNormalizeTimeClockSettings(snap.data());
+  }
+  // First-time seed. Use setDoc (no merge) since we're creating the doc
+  // from scratch with a clean default shape. If two tabs race here both
+  // writes will produce identical content, so the race is harmless.
+  if (!_timeClockSeeded) {
+    _timeClockSeeded = true;
+    const defaults = ffCloneTimeClockDefaults();
+    const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
+    try {
+      await setDoc(ref, Object.assign({}, defaults, {
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      }));
+    } catch (seedErr) {
+      console.warn("[SettingsCloud] timeClock seed failed (non-fatal)", seedErr);
+    }
+    return defaults;
+  }
+  return ffCloneTimeClockDefaults();
+}
 
 /**
  * Load Time Clock Settings from Firestore.
  * - If the doc doesn't exist, seed it ONCE with defaults (and stamp
  *   updatedAt + updatedBy), then return those defaults.
  * - If it does exist, return the normalized data.
- * Safe to call repeatedly — concurrent calls share a single promise.
+ * Safe to call repeatedly — concurrent calls share a single promise, and the
+ * result stays cached for the salon until invalidate / force / save.
+ * opts.force: bypass cache and re-read (quiet background refresh).
  */
-async function ffLoadTimeClockSettings() {
-  if (_timeClockLoadPromise) return _timeClockLoadPromise;
-  _timeClockLoadPromise = (async () => {
+async function ffLoadTimeClockSettings(opts) {
+  const force = !!(opts && opts.force);
+  const salonId = _salonId || await getSalonId();
+  if (!salonId) return ffCloneTimeClockDefaults();
+
+  if (_timeClockCachedSalonId && _timeClockCachedSalonId !== salonId) {
+    ffInvalidateTimeClockSettingsCache();
+  }
+
+  if (!force && _timeClockLoadPromise) {
+    return _timeClockLoadPromise;
+  }
+
+  const p = (async () => {
     try {
-      const salonId = _salonId || await getSalonId();
-      if (!salonId) return ffCloneTimeClockDefaults();
-      const ref = settingsTimeClockRef(salonId);
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        _timeClockSeeded = true;
-        return ffNormalizeTimeClockSettings(snap.data());
-      }
-      // First-time seed. Use setDoc (no merge) since we're creating the doc
-      // from scratch with a clean default shape. If two tabs race here both
-      // writes will produce identical content, so the race is harmless.
-      if (!_timeClockSeeded) {
-        _timeClockSeeded = true;
-        const defaults = ffCloneTimeClockDefaults();
-        const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
-        try {
-          await setDoc(ref, Object.assign({}, defaults, {
-            updatedAt: serverTimestamp(),
-            updatedBy: uid,
-          }));
-        } catch (seedErr) {
-          console.warn("[SettingsCloud] timeClock seed failed (non-fatal)", seedErr);
-        }
-        return defaults;
-      }
-      return ffCloneTimeClockDefaults();
+      return await _ffFetchTimeClockSettings(salonId);
     } catch (e) {
       console.warn("[SettingsCloud] ffLoadTimeClockSettings failed", e);
       return ffCloneTimeClockDefaults();
-    } finally {
-      // Clear the single-flight lock after the current microtask. Next call
-      // will do a fresh read (so UI updates after a save are reflected).
-      setTimeout(() => { _timeClockLoadPromise = null; }, 0);
     }
   })();
-  return _timeClockLoadPromise;
+
+  if (!force) {
+    _timeClockLoadPromise = p;
+    _timeClockCachedSalonId = salonId;
+  } else {
+    p.then((result) => {
+      _timeClockLoadPromise = Promise.resolve(result);
+      _timeClockCachedSalonId = salonId;
+      try {
+        if (typeof window !== "undefined") window.__ffTCCachedSettings = result;
+      } catch (_) {}
+    }).catch(() => {});
+  }
+  return p;
 }
 
 /**
@@ -1030,6 +1071,11 @@ async function ffSaveTimeClockSettings(settings) {
       updatedAt: serverTimestamp(),
       updatedBy: uid,
     }), { merge: true });
+    _timeClockLoadPromise = Promise.resolve(normalized);
+    _timeClockCachedSalonId = salonId;
+    try {
+      if (typeof window !== "undefined") window.__ffTCCachedSettings = normalized;
+    } catch (_) {}
     return true;
   } catch (e) {
     console.warn("[SettingsCloud] ffSaveTimeClockSettings failed", e);
@@ -1352,12 +1398,15 @@ async function ffDeleteTechnicianType(technicianTypeId) {
 function tryConnect() {
   getSalonId().then((sid) => {
     if (sid && sid !== _salonId) {
+      // Drop TC cache from the previous salon (or cold start) before binding.
+      ffInvalidateTimeClockSettingsCache();
       _salonId = sid;
       subscribeUi(sid);
       subscribeMain(sid);
       console.log("[SettingsCloud] Subscribed to salon", sid);
     } else if (!sid) {
       _salonId = null;
+      ffInvalidateTimeClockSettingsCache();
       if (_unsubUi) { _unsubUi(); _unsubUi = null; }
       if (_unsubMain) { _unsubMain(); _unsubMain = null; }
     }
@@ -1391,4 +1440,5 @@ if (typeof window !== "undefined") {
   window.ffSupportedCurrencies = FF_SUPPORTED_CURRENCIES.slice();
   window.ffLoadTimeClockSettings = ffLoadTimeClockSettings;
   window.ffSaveTimeClockSettings = ffSaveTimeClockSettings;
+  window.ffInvalidateTimeClockSettingsCache = ffInvalidateTimeClockSettingsCache;
 }

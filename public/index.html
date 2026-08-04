@@ -38946,10 +38946,31 @@ function initializeUserProfileMenu() {
         };
       };
 
-      const hydrateUI = function (s) {
-        if (!s || typeof s !== 'object') return;
+      const settingsEqual = function (a, b) {
+        if (!a || !b) return false;
+        try {
+          return Number(a.standardHours && a.standardHours.weekly) === Number(b.standardHours && b.standardHours.weekly)
+            && Number(a.standardHours && a.standardHours.daily) === Number(b.standardHours && b.standardHours.daily)
+            && !!((a.overtime && a.overtime.enabled)) === !!((b.overtime && b.overtime.enabled))
+            && Number(a.overtime && a.overtime.weeklyThreshold) === Number(b.overtime && b.overtime.weeklyThreshold)
+            && Number(a.overtime && a.overtime.dailyThreshold) === Number(b.overtime && b.overtime.dailyThreshold)
+            && Number(a.overtime && a.overtime.multiplier) === Number(b.overtime && b.overtime.multiplier)
+            && !!((a.kioskPhoto && a.kioskPhoto.enabled)) === !!((b.kioskPhoto && b.kioskPhoto.enabled))
+            && ((a.kioskPhoto && a.kioskPhoto.onFailure) === 'block' ? 'block' : 'fallback')
+              === ((b.kioskPhoto && b.kioskPhoto.onFailure) === 'block' ? 'block' : 'fallback');
+        } catch (_) {
+          return false;
+        }
+      };
+
+      const hydrateUI = function (s, opts) {
+        if (!s || typeof s !== 'object') return false;
         // Week start is read-only here and always reflects Preferences.
         renderWorkweekMirror();
+        if (opts && opts.quiet) {
+          // Background refresh: only rewrite controls when remote data differs.
+          if (settingsEqual(readCurrentSettings(), s)) return false;
+        }
         if (weeklyStdEl) weeklyStdEl.value = (s.standardHours && s.standardHours.weekly) ?? FF_TC_UI_DEFAULTS.standardHours.weekly;
         if (dailyStdEl)  dailyStdEl.value  = (s.standardHours && s.standardHours.daily)  ?? FF_TC_UI_DEFAULTS.standardHours.daily;
         toggle.checked = !!(s.overtime && s.overtime.enabled);
@@ -38960,6 +38981,7 @@ function initializeUserProfileMenu() {
         if (kpToggle) kpToggle.checked = !!(s.kioskPhoto && s.kioskPhoto.enabled === true);
         if (kpOnFailureEl) kpOnFailureEl.value = (s.kioskPhoto && s.kioskPhoto.onFailure === 'block') ? 'block' : 'fallback';
         applyKioskPhotoVisibility();
+        return true;
       };
 
       // -- 4. 3-state save feedback (Saving.../Saved/Error) --------------
@@ -39005,14 +39027,21 @@ function initializeUserProfileMenu() {
       let saveSeq = 0;
       const persist = function () {
         if (typeof window.ffSaveTimeClockSettings !== 'function') return;
-        const mySeq = ++saveSeq;
         const snapshot = readCurrentSettings();
+        // Skip no-op blur/change (same values as last hydrate/save).
+        if (card.__ffTCLastSavedSnapshot && settingsEqual(snapshot, card.__ffTCLastSavedSnapshot)) {
+          return;
+        }
+        const mySeq = ++saveSeq;
         setHint('saving');
         Promise.resolve(window.ffSaveTimeClockSettings(snapshot))
           .then(function (ok) {
             if (mySeq !== saveSeq) return; // stale
-            if (ok && typeof window.ffTCRememberExpand === 'function') {
-              window.ffTCRememberExpand(snapshot);
+            if (ok) {
+              card.__ffTCLastSavedSnapshot = snapshot;
+              if (typeof window.ffTCRememberExpand === 'function') {
+                window.ffTCRememberExpand(snapshot);
+              }
             }
             setHint(ok ? 'saved' : 'error');
           })
@@ -39085,15 +39114,17 @@ function initializeUserProfileMenu() {
       // or slow device it can arrive 20s+ after the app opens. Poll for it
       // (up to 60s) instead of silently rendering the HTML defaults with no
       // retry.
+      const salonIdNow = window.currentSalonId || null;
+      const alreadyHydratedForSalon = !!(card.__ffTCHydratedSalonId && salonIdNow &&
+        card.__ffTCHydratedSalonId === salonIdNow);
+
       if (card.__ffTCLoading) {
         // Re-entry while a load is in flight: keep the skeleton expand state;
         // don't run a premature visibility pass that fights the loader.
         if (!card.__ffTCControlsLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); }
         return;
       }
-      card.__ffTCLoading = true;
-      setControlsLoading(true);
-      setHint('loading');
+
       const waitForLoadFn = function (timeoutMs) {
         return new Promise(function (resolve) {
           const startedAt = Date.now();
@@ -39104,6 +39135,48 @@ function initializeUserProfileMenu() {
           })();
         });
       };
+
+      // Re-entry: values already on screen for this salon. Refresh quietly
+      // (force getDoc, no skeleton) and only rewrite controls if data changed.
+      if (alreadyHydratedForSalon) {
+        if (card.__ffTCQuietRefreshing) return;
+        card.__ffTCQuietRefreshing = true;
+        waitForLoadFn(60000).then(function (available) {
+          if (!available) return null;
+          return window.ffLoadTimeClockSettings({ force: true });
+        }).then(function (settings) {
+          if (!settings) return;
+          if (card.__ffTCHydratedSalonId !== salonIdNow) return;
+          // Don't clobber in-progress edits the owner hasn't saved yet.
+          const dirty = card.__ffTCLastSavedSnapshot
+            && !settingsEqual(readCurrentSettings(), card.__ffTCLastSavedSnapshot);
+          if (dirty || card.__ffTCControlsLoading) {
+            renderWorkweekMirror();
+            return;
+          }
+          setToggleTransitions(false);
+          const changed = hydrateUI(settings, { quiet: true });
+          if (changed) {
+            card.__ffTCLastSavedSnapshot = readCurrentSettings();
+            if (typeof window.ffTCRememberExpand === 'function') {
+              window.ffTCRememberExpand(settings);
+            }
+          } else {
+            renderWorkweekMirror();
+          }
+          try { void card.offsetWidth; } catch (_) {}
+          requestAnimationFrame(function () { setToggleTransitions(true); });
+        }).catch(function (e) {
+          console.warn('[Time Clock Settings] quiet refresh failed', e);
+        }).finally(function () {
+          card.__ffTCQuietRefreshing = false;
+        });
+        return;
+      }
+
+      card.__ffTCLoading = true;
+      setControlsLoading(true);
+      setHint('loading');
       waitForLoadFn(60000).then(function (available) {
         if (!available) {
           console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 60s');
@@ -39118,6 +39191,8 @@ function initializeUserProfileMenu() {
           // from the last painted OFF frame.
           setToggleTransitions(false);
           hydrateUI(settings);
+          card.__ffTCHydratedSalonId = salonIdNow;
+          card.__ffTCLastSavedSnapshot = readCurrentSettings();
           if (typeof window.ffTCRememberExpand === 'function') {
             window.ffTCRememberExpand(settings);
           }
@@ -42229,8 +42304,15 @@ function initializeUserProfileMenu() {
       targetCard.style.display = 'block';
       // Time Clock settings: hide default toggle values before the first paint
       // after show, so HTML OFF defaults never flash before init hydrates.
+      // Skeleton only on first hydrate for this salon. Re-entries keep visible
+      // values and refresh quietly inside ffInitTimeClockSettingsUI.
       if (section === 'time-clock-settings' && typeof window.ffTCSettingsApplyEnterSkeleton === 'function') {
-        window.ffTCSettingsApplyEnterSkeleton(targetCard);
+        const sid = window.currentSalonId || null;
+        const alreadyHydrated = !!(targetCard.__ffTCHydratedSalonId && sid &&
+          targetCard.__ffTCHydratedSalonId === sid);
+        if (!alreadyHydrated) {
+          window.ffTCSettingsApplyEnterSkeleton(targetCard);
+        }
       }
       const isMobileDetail = ffSettingsIsMobile() && opts.mobileDetail === true;
       const profileScreen = document.getElementById('userProfileScreen');
@@ -52140,7 +52222,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260804_batch_revert"></script>
+  <script src="/safe-loader.js?v=20260804_tc_load_cache"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
