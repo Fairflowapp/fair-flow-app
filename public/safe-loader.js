@@ -1,71 +1,50 @@
     (function () {
-      // Stage 2: load in ordered batches of 3–4. Items inside a batch are
-      // independent (or only need app.js / Firebase CDN). Batches themselves
-      // stay sequential so window-global and ordering deps are preserved:
-      //   locations-cloud → location-helpers → location-switcher
-      //   schedule-helpers → availability → generator → validator → schedule-ui
-      //   floor-flows → floor-cloud
-      //   staff-documents → staff-writeups
-      // settings-cloud statically imports schedule-helpers, so its module graph
-      // pulls those files early — the later schedule-* entries stay cached.
-      var batches = [
-        [
-          { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module" },
-          { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module" },
-          { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module" },
-          { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module" }
-        ],
-        [
-          { src: "/locations-cloud.js?v=20260501_points", type: "module" }
-        ],
-        [
-          { src: "/location-helpers.js?v=20260603_owner_primary_location" }
-        ],
-        [
-          { src: "/location-switcher.js?v=20260514_location_fallback", type: "module" },
-          { src: "/queue-cloud.js?v=20260728_cloud_wins_guard", type: "module" },
-          { src: "/tickets.js?v=20260721_ticket_soft_delete", type: "module" },
-          { src: "/tasks-cloud.js?v=20260727_tasks_done_60d", type: "module" }
-        ],
-        [
-          { src: "/points-engine.js?v=20260625_points_split", type: "module" },
-          { src: "/schedule-helpers.js?v=20260625_loc_fallback", type: "module" }
-        ],
-        [
-          { src: "/schedule-availability.js?v=20260501_points", type: "module" },
-          { src: "/schedule-generator.js?v=20260501_points", type: "module" },
-          { src: "/schedule-validator.js?v=20260501_points", type: "module" }
-        ],
-        [
-          { src: "/schedule-ui.js?v=20260704_schedule_nav_runtime_viewtabs_fix", type: "module" },
-          { src: "/dashboard.js?v=20260626_dashboard_split", type: "module" },
-          { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module" }
-        ],
-        [
-          { src: "/inbox.js?v=20260721_inbox_modal_stack", type: "module" },
-          { src: "/media-upload.js?v=20260719_media_lightbox", type: "module" },
-          { src: "/chat.js?v=20260701_chat_compose_split", type: "module" }
-        ],
-        [
-          { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module" }
-        ],
-        [
-          { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module" },
-          { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module" },
-          { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module" }
-        ],
-        [
-          { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module" },
-          { src: "/my-writeups.js?v=20260803_writeups_push", type: "module" },
-          { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module" },
-          { src: "/push-notifications.js?v=20260803_writeups_push", type: "module" }
-        ],
-        [
-          { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module" },
-          { src: "/time-clock-engine.js?v=20260501_points" },
-          { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module" },
-          { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module" }
-        ]
+      // Sequential load (stage-2 batching reverted — parallel peers raced
+      // window globals / staff+settings UI updates). Keeps stage-1 ordering:
+      // fixed delay monotonicity + settings-cloud / time-clock-entries early.
+      var scripts = [
+        { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
+        { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
+        // settings-cloud + time-clock-entries moved up from the tail of the
+        // chain (they used to arrive 8-13s after boot): both are light, only
+        // depend on app.js / firebase CDN / schedule-helpers (static import),
+        // and the Settings + Time Clock screens block on them.
+        { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 750 },
+        { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 800 },
+        { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
+        { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
+        { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
+        { src: "/queue-cloud.js?v=20260728_cloud_wins_guard", type: "module", delay: 1350 },
+        { src: "/tickets.js?v=20260721_ticket_soft_delete", type: "module", delay: 1400 },
+        { src: "/tasks-cloud.js?v=20260727_tasks_done_60d", type: "module", delay: 1500 },
+        { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 1650 },
+        { src: "/schedule-helpers.js?v=20260625_loc_fallback", type: "module", delay: 1800 },
+        { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
+        { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
+        { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
+        { src: "/schedule-ui.js?v=20260704_schedule_nav_runtime_viewtabs_fix", type: "module", delay: 2300 },
+        { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
+        // delay was 1800 (< dashboard's 2500): the loader's lastDelay tracker
+        // dropped back, adding dead wait to every later module. 2500 = load
+        // immediately after dashboard, same effective order as before.
+        { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 2500 },
+        { src: "/inbox.js?v=20260721_inbox_modal_stack", type: "module", delay: 2700 },
+        { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 2780 },
+        { src: "/chat.js?v=20260701_chat_compose_split", type: "module", delay: 2900 },
+        { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
+        { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 3120 },
+        { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module", delay: 3150 },
+        { src: "/staff-documents.js?v=20260516_ios_document_viewer", type: "module", delay: 3200 },
+        { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 3300 },
+        { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 3400 },
+        { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
+        { src: "/push-notifications.js?v=20260803_writeups_push", type: "module", delay: 3500 },
+        { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
+        { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
+        // was 4900 with a 3000 entry before it → 1.9s dead wait. 3900 keeps
+        // inventory last-but-one with a short gap after time-clock-engine.
+        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 3900 },
+        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 4000 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -84,12 +63,12 @@
         });
       }
       // Wait until the user is authenticated AND a salon is selected before
-      // loading the heavy module scripts. Loading many modules during the login
-      // flow attached dozens of onAuthStateChanged listeners that all fired in
-      // parallel when the user signed in, blocking Chrome's main thread long
-      // enough to trigger the "This page isn't responding" dialog. By gating
-      // the loader on currentSalonId we guarantee subscriptions only run for
-      // the chosen salon and never race the auth resolution.
+      // loading the heavy module scripts. Loading 29 modules during the login
+      // flow attached 29 onAuthStateChanged listeners that all fired in parallel
+      // when the user signed in, blocking Chrome's main thread long enough to
+      // trigger the "This page isn't responding" dialog. By gating the loader
+      // on currentSalonId we guarantee subscriptions only run for the chosen
+      // salon and never race the auth resolution.
       function waitForSalonReady() {
         return new Promise(function (resolve) {
           function ready() {
@@ -114,17 +93,18 @@
       }
       (async function loadSafely() {
         try { await waitForSalonReady(); } catch (_) {}
-        // Small gap after salon-ready so auth listeners settle, then run
-        // batches. Within a batch: parallel (max 4). Between batches: await.
-        await wait(200);
-        for (var b = 0; b < batches.length; b += 1) {
-          await Promise.all(batches[b].map(loadScript));
-          // Brief yield between batches so a long evaluation burst can't freeze
-          // the main thread the way a full parallel load used to.
-          if (b < batches.length - 1) await wait(40);
+        // Once salon is ready, load all modules sequentially with monotonic
+        // delays so we don't overload the browser with simultaneous module
+        // evaluations (batching was tried in stage 2 and reverted).
+        var lastDelay = 0;
+        for (var i = 0; i < scripts.length; i += 1) {
+          var item = scripts[i];
+          await wait(Math.max(0, (item.delay || 0) - lastDelay));
+          lastDelay = item.delay || lastDelay;
+          await loadScript(item);
         }
-        if (typeof window.ffRunAnalyticsLoader === "function") {
-          await window.ffRunAnalyticsLoader(wait, loadScript, 0);
+        if (typeof window.ffRunAnalyticsLoader === 'function') {
+          lastDelay = await window.ffRunAnalyticsLoader(wait, loadScript, lastDelay);
         }
       })();
     })();
