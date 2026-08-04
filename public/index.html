@@ -12262,6 +12262,17 @@ function goToUserProfile(section) {
   userProfileScreen.style.display = 'block';
   userProfileScreen.style.pointerEvents = 'auto';
 
+  // Always open Settings at the top. Without this, a non-zero window.scrollY
+  // from Queue (or elsewhere) paints Settings mid-page for a frame, then
+  // mobile-detail scrollTo(0) snaps it — the "scrolled down then jump up" glitch.
+  try {
+    if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+    userProfileScreen.scrollTop = 0;
+    if (typeof userProfileScreen.scrollTo === 'function') {
+      userProfileScreen.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  } catch (_) {}
+
   try {
     document.body.style.overflow = '';
     document.body.classList.remove('ff-avatar-dropdown-open');
@@ -12324,25 +12335,25 @@ function goToUserProfile(section) {
     document.body.classList.remove('ff-avatar-dropdown-open');
   }
   
-  // If section parameter provided, open that section
-  if (targetSection && targetSection !== 'password') {
-    // Wait a bit for DOM to be ready, then switch to the requested section
-    setTimeout(() => {
-      const handleMenuClick = window.__ff_handleMenuClick;
-      var openMobileDetail = false;
-      try {
-        openMobileDetail = !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
-      } catch (_) {}
-      if (handleMenuClick) {
-        handleMenuClick(targetSection, { mobileDetail: openMobileDetail });
-      } else {
-        // Fallback: try to find and click the menu item
-        const menuItem = document.querySelector(`.user-profile-menu-item[data-section="${targetSection}"]`);
-        if (menuItem) {
-          menuItem.click();
-        }
-      }
-    }, 150);
+  // Open the requested section in this same turn (no 150ms delay) so the
+  // default Password card never paints first. Keep mobileDetail so
+  // ff-settings-mobile-detail + its scrollTo(0) still run on small viewports.
+  if (targetSection) {
+    const handleMenuClickFn = window.__ff_handleMenuClick;
+    var openMobileDetail = false;
+    try {
+      openMobileDetail = !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+    } catch (_) {}
+    if (typeof handleMenuClickFn === 'function') {
+      handleMenuClickFn(targetSection, { mobileDetail: openMobileDetail });
+    } else {
+      const menuItem = document.querySelector(`.user-profile-menu-item[data-section="${targetSection}"]`);
+      if (menuItem) menuItem.click();
+    }
+    try {
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+      userProfileScreen.scrollTop = 0;
+    } catch (_) {}
   }
   
   // Minimal instrumentation: END log with computed styles
@@ -38844,18 +38855,17 @@ function initializeUserProfileMenu() {
           // A toggle pill's position IS its value — hide it entirely.
           p.style.visibility = loading ? 'hidden' : '';
         });
-        // Reserve the expanded height of both collapsible groups while
-        // loading (invisible but occupying space) so the card doesn't jump
-        // when hydration decides their real expanded/collapsed state.
-        if (fields) {
-          fields.style.visibility = loading ? 'hidden' : '';
-          if (loading) fields.style.display = 'flex';
-        }
-        if (kpFields) {
-          kpFields.style.visibility = loading ? 'hidden' : '';
-          if (loading) kpFields.style.display = 'block';
-        }
-        if (!loading) {
+        // Match last-known expand state (or a conservative card min-height)
+        // instead of forcing both collapsible groups open — that caused a
+        // ~190–290px collapse when overtime/kioskPhoto hydrated as OFF.
+        if (loading) {
+          if (typeof window.ffTCApplySkeletonExpand === 'function') {
+            window.ffTCApplySkeletonExpand(card, fields, kpFields);
+          }
+        } else {
+          card.style.minHeight = '';
+          if (fields) fields.style.visibility = '';
+          if (kpFields) kpFields.style.visibility = '';
           // Commit the hydrated ON/OFF styles with transitions still off,
           // then restore click animations on the next frame.
           try { void card.offsetWidth; } catch (_) {}
@@ -38989,6 +38999,9 @@ function initializeUserProfileMenu() {
         Promise.resolve(window.ffSaveTimeClockSettings(snapshot))
           .then(function (ok) {
             if (mySeq !== saveSeq) return; // stale
+            if (ok && typeof window.ffTCRememberExpand === 'function') {
+              window.ffTCRememberExpand(snapshot);
+            }
             setHint(ok ? 'saved' : 'error');
           })
           .catch(function () {
@@ -39061,8 +39074,8 @@ function initializeUserProfileMenu() {
       // (up to 60s) instead of silently rendering the HTML defaults with no
       // retry.
       if (card.__ffTCLoading) {
-        // Re-entry while a load is in flight: don't collapse the reserved
-        // skeleton blocks with a premature visibility pass.
+        // Re-entry while a load is in flight: keep the skeleton expand state;
+        // don't run a premature visibility pass that fights the loader.
         if (!card.__ffTCControlsLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); }
         return;
       }
@@ -39093,6 +39106,9 @@ function initializeUserProfileMenu() {
           // from the last painted OFF frame.
           setToggleTransitions(false);
           hydrateUI(settings);
+          if (typeof window.ffTCRememberExpand === 'function') {
+            window.ffTCRememberExpand(settings);
+          }
           setControlsLoading(false);
           setHint('');
         }
@@ -39111,6 +39127,56 @@ function initializeUserProfileMenu() {
     }
   }
   window.ffInitTimeClockSettingsUI = ffInitTimeClockSettingsUI;
+
+  /**
+   * Last hydrated/saved expand flags for Time Clock settings. Used by the
+   * enter-skeleton so we only reserve height for groups that are actually ON.
+   */
+  window.__ffTCLastKnownExpand = window.__ffTCLastKnownExpand || null;
+  // Conservative floor for the collapsed card (base fields + toggles + hint)
+  // when we have never hydrated this session — avoids forcing hidden blocks open.
+  const FF_TC_SKELETON_MIN_HEIGHT = '480px';
+
+  window.ffTCRememberExpand = function ffTCRememberExpand(settings) {
+    try {
+      window.__ffTCLastKnownExpand = {
+        overtime: !!(settings && settings.overtime && settings.overtime.enabled),
+        kioskPhoto: !!(settings && settings.kioskPhoto && settings.kioskPhoto.enabled === true),
+      };
+    } catch (_) {
+      window.__ffTCLastKnownExpand = null;
+    }
+  };
+
+  window.ffTCApplySkeletonExpand = function ffTCApplySkeletonExpand(card, otFields, kpFields) {
+    if (!card) return;
+    const known = window.__ffTCLastKnownExpand;
+    if (known && typeof known === 'object') {
+      if (otFields) {
+        const on = !!known.overtime;
+        otFields.style.display = on ? 'flex' : 'none';
+        otFields.style.visibility = on ? 'hidden' : '';
+      }
+      if (kpFields) {
+        const on = !!known.kioskPhoto;
+        kpFields.style.display = on ? 'block' : 'none';
+        kpFields.style.visibility = on ? 'hidden' : '';
+      }
+      card.style.minHeight = '';
+      return;
+    }
+    // Unknown: keep collapsible groups collapsed; hold a conservative floor
+    // so the card doesn't paint smaller than the base layout during load.
+    if (otFields) {
+      otFields.style.display = 'none';
+      otFields.style.visibility = '';
+    }
+    if (kpFields) {
+      kpFields.style.display = 'none';
+      kpFields.style.visibility = '';
+    }
+    card.style.minHeight = FF_TC_SKELETON_MIN_HEIGHT;
+  };
 
   /**
    * Apply the Time Clock settings skeleton the instant the card is shown
@@ -39145,15 +39211,8 @@ function initializeUserProfileMenu() {
         }
       });
       const otFields = card.querySelector('#tcOvertimeFields');
-      if (otFields) {
-        otFields.style.visibility = 'hidden';
-        otFields.style.display = 'flex';
-      }
       const kpFields = card.querySelector('#tcKioskPhotoFields');
-      if (kpFields) {
-        kpFields.style.visibility = 'hidden';
-        kpFields.style.display = 'block';
-      }
+      window.ffTCApplySkeletonExpand(card, otFields, kpFields);
       let hintEl = card.querySelector('#tcSaveHint');
       if (!hintEl) {
         hintEl = document.createElement('div');
