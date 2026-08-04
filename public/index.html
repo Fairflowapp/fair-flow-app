@@ -38807,16 +38807,29 @@ function initializeUserProfileMenu() {
       const setControlsLoading = function (loading) {
         card.__ffTCControlsLoading = !!loading;
         interactiveEls.forEach(function (el) {
-          if (el) el.disabled = !!loading;
+          if (!el) return;
+          el.disabled = !!loading;
+          // Skeleton: hide the value, keep the control box, so nothing that
+          // looks like a real setting is shown before hydration.
+          el.style.color = loading ? 'transparent' : '';
         });
         pillEls.forEach(function (p) {
           if (!p) return;
           p.style.pointerEvents = loading ? 'none' : '';
-          p.style.opacity = loading ? '0.55' : '';
+          // A toggle pill's position IS its value — hide it entirely.
+          p.style.visibility = loading ? 'hidden' : '';
         });
-        [fields, kpFields].forEach(function (wrap) {
-          if (wrap) wrap.style.opacity = loading ? '0.55' : '';
-        });
+        // Reserve the expanded height of both collapsible groups while
+        // loading (invisible but occupying space) so the card doesn't jump
+        // when hydration decides their real expanded/collapsed state.
+        if (fields) {
+          fields.style.visibility = loading ? 'hidden' : '';
+          if (loading) fields.style.display = 'flex';
+        }
+        if (kpFields) {
+          kpFields.style.visibility = loading ? 'hidden' : '';
+          if (loading) kpFields.style.display = 'block';
+        }
       };
 
       // Drop any stale "not saved yet" hint left over from Stage 2.
@@ -39014,10 +39027,13 @@ function initializeUserProfileMenu() {
       // or slow device it can arrive 20s+ after the app opens. Poll for it
       // (up to 60s) instead of silently rendering the HTML defaults with no
       // retry.
-      if (card.__ffTCLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); return; }
+      if (card.__ffTCLoading) {
+        // Re-entry while a load is in flight: don't collapse the reserved
+        // skeleton blocks with a premature visibility pass.
+        if (!card.__ffTCControlsLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); }
+        return;
+      }
       card.__ffTCLoading = true;
-      applyOvertimeVisibility();
-      applyKioskPhotoVisibility();
       setControlsLoading(true);
       setHint('loading');
       const waitForLoadFn = function (timeoutMs) {

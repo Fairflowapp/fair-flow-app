@@ -2,6 +2,12 @@
       var scripts = [
         { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
+        // settings-cloud + time-clock-entries moved up from the tail of the
+        // chain (they used to arrive 8-13s after boot): both are light, only
+        // depend on app.js / firebase CDN / schedule-helpers (static import),
+        // and the Settings + Time Clock screens block on them.
+        { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 750 },
+        { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 800 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
@@ -15,7 +21,10 @@
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
         { src: "/schedule-ui.js?v=20260704_schedule_nav_runtime_viewtabs_fix", type: "module", delay: 2300 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
-        { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1800 },
+        // delay was 1800 (< dashboard's 2500): the loader's lastDelay tracker
+        // dropped back, adding dead wait to every later module. 2500 = load
+        // immediately after dashboard, same effective order as before.
+        { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 2500 },
         { src: "/inbox.js?v=20260721_inbox_modal_stack", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260701_chat_compose_split", type: "module", delay: 2900 },
@@ -27,12 +36,12 @@
   { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 3400 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
         { src: "/push-notifications.js?v=20260803_writeups_push", type: "module", delay: 3500 },
-        { src: "/settings-cloud.js?v=20260719_queue_client_autoreset_off", type: "module", delay: 3600 },
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
-        { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 3000 },
-        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 4900 },
-        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 5400 }
+        // was 4900 with a 3000 entry before it → 1.9s dead wait. 3900 keeps
+        // inventory last-but-one with a short gap after time-clock-engine.
+        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 3900 },
+        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 4000 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
