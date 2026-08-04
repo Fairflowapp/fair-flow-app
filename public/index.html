@@ -38802,10 +38802,21 @@ function initializeUserProfileMenu() {
       // controls are disabled and dimmed so nobody reads the HTML defaults as
       // real values or saves them over the stored ones. Interaction is only
       // re-enabled after a successful hydrate.
+      // Toggle pills/knobs use CSS transitions for user clicks; those must be
+      // off during hydrate→reveal, or the browser animates OFF→ON from the
+      // last painted frame when visibility returns.
       const interactiveEls = [toggle, weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl, kpToggle, kpOnFailureEl];
       const pillEls = [pill, kpPill];
+      const toggleAnimEls = [pill, knob, kpPill, kpKnob];
+      const setToggleTransitions = function (enabled) {
+        toggleAnimEls.forEach(function (el) {
+          if (!el) return;
+          el.style.transition = enabled ? '' : 'none';
+        });
+      };
       const setControlsLoading = function (loading) {
         card.__ffTCControlsLoading = !!loading;
+        if (loading) setToggleTransitions(false);
         interactiveEls.forEach(function (el) {
           if (!el) return;
           el.disabled = !!loading;
@@ -38829,6 +38840,14 @@ function initializeUserProfileMenu() {
         if (kpFields) {
           kpFields.style.visibility = loading ? 'hidden' : '';
           if (loading) kpFields.style.display = 'block';
+        }
+        if (!loading) {
+          // Commit the hydrated ON/OFF styles with transitions still off,
+          // then restore click animations on the next frame.
+          try { void card.offsetWidth; } catch (_) {}
+          requestAnimationFrame(function () {
+            if (!card.__ffTCControlsLoading) setToggleTransitions(true);
+          });
         }
       };
 
@@ -39055,8 +39074,11 @@ function initializeUserProfileMenu() {
         return window.ffLoadTimeClockSettings();
       }).then(function (settings) {
         if (settings) {
+          // Keep transitions off while applying the real ON/OFF state, then
+          // reveal (setControlsLoading(false)) so the browser never animates
+          // from the last painted OFF frame.
+          setToggleTransitions(false);
           hydrateUI(settings);
-          // Only now is it safe to interact: the controls show real values.
           setControlsLoading(false);
           setHint('');
         }
@@ -39075,6 +39097,65 @@ function initializeUserProfileMenu() {
     }
   }
   window.ffInitTimeClockSettingsUI = ffInitTimeClockSettingsUI;
+
+  /**
+   * Apply the Time Clock settings skeleton the instant the card is shown
+   * (display=block), before ffInitTimeClockSettingsUI runs. Prevents a rare
+   * painted frame of HTML-default OFF toggles between show and init.
+   * Init's setControlsLoading(true) is idempotent on top of this.
+   */
+  function ffTCSettingsApplyEnterSkeleton(card) {
+    try {
+      if (!card) return;
+      card.__ffTCControlsLoading = true;
+      const ids = [
+        'tcWeeklyStandardHours', 'tcDailyStandardHours',
+        'tcWeeklyOvertimeThreshold', 'tcDailyOvertimeThreshold',
+        'tcOvertimeMultiplier', 'tcOvertimeEnabled',
+        'tcKioskPhotoEnabled', 'tcKioskPhotoOnFailure',
+      ];
+      ids.forEach(function (id) {
+        const el = card.querySelector('#' + id);
+        if (!el) return;
+        el.disabled = true;
+        el.style.color = 'transparent';
+      });
+      ['tcOvertimeEnabledPill', 'tcOvertimeEnabledKnob',
+       'tcKioskPhotoEnabledPill', 'tcKioskPhotoEnabledKnob'].forEach(function (id) {
+        const el = card.querySelector('#' + id);
+        if (!el) return;
+        el.style.transition = 'none';
+        if (id.indexOf('Pill') !== -1) {
+          el.style.visibility = 'hidden';
+          el.style.pointerEvents = 'none';
+        }
+      });
+      const otFields = card.querySelector('#tcOvertimeFields');
+      if (otFields) {
+        otFields.style.visibility = 'hidden';
+        otFields.style.display = 'flex';
+      }
+      const kpFields = card.querySelector('#tcKioskPhotoFields');
+      if (kpFields) {
+        kpFields.style.visibility = 'hidden';
+        kpFields.style.display = 'block';
+      }
+      let hintEl = card.querySelector('#tcSaveHint');
+      if (!hintEl) {
+        hintEl = document.createElement('div');
+        hintEl.id = 'tcSaveHint';
+        hintEl.setAttribute('aria-live', 'polite');
+        hintEl.style.cssText = 'font-size:11px;font-weight:600;margin-top:8px;min-height:14px;transition:color 0.15s ease,opacity 0.2s ease;';
+        card.appendChild(hintEl);
+      }
+      hintEl.textContent = 'Loading\u2026';
+      hintEl.style.color = '#6b7280';
+      hintEl.style.opacity = '1';
+    } catch (e) {
+      console.warn('[Time Clock Settings] enter skeleton failed', e);
+    }
+  }
+  window.ffTCSettingsApplyEnterSkeleton = ffTCSettingsApplyEnterSkeleton;
 
   /**
    * Time Clock - Mangomint-style kiosk UI.
@@ -42061,6 +42142,11 @@ function initializeUserProfileMenu() {
     const targetCard = document.getElementById(cardId);
     if (targetCard) {
       targetCard.style.display = 'block';
+      // Time Clock settings: hide default toggle values before the first paint
+      // after show, so HTML OFF defaults never flash before init hydrates.
+      if (section === 'time-clock-settings' && typeof window.ffTCSettingsApplyEnterSkeleton === 'function') {
+        window.ffTCSettingsApplyEnterSkeleton(targetCard);
+      }
       const isMobileDetail = ffSettingsIsMobile() && opts.mobileDetail === true;
       const profileScreen = document.getElementById('userProfileScreen');
       if (isMobileDetail && profileScreen) {
