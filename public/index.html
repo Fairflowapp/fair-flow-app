@@ -38698,15 +38698,55 @@ function initializeUserProfileMenu() {
       const canSee = (typeof window.ffIsCurrentUserOwnerOrAdminForSettings === 'function')
         ? window.ffIsCurrentUserOwnerOrAdminForSettings()
         : true;
+      // A false here may just mean the role signal (__ff_user_role / staff
+      // store) hasn't loaded yet right after a refresh. Never wipe the static
+      // markup (that used to leave the card permanently broken): hide it
+      // behind a removable notice and poll the role check for up to 10s,
+      // re-running the full init once it turns true.
+      const restoreCardContent = function () {
+        const n = card.querySelector('#tcNoPermissionNotice');
+        if (!n) return;
+        n.remove();
+        Array.prototype.forEach.call(card.children, function (ch) {
+          ch.style.display = ch.__ffTCPrevDisplay || '';
+        });
+      };
       if (!canSee) {
-        card.innerHTML = `
-          <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock</h3>
-          <div style="padding:14px 16px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;color:#92400e;font-size:12px;line-height:1.5;">
-            You don\u2019t have permission to view these settings. Ask an owner or admin for access.
-          </div>
-        `;
+        if (!card.querySelector('#tcNoPermissionNotice')) {
+          Array.prototype.forEach.call(card.children, function (ch) {
+            ch.__ffTCPrevDisplay = ch.style.display;
+            ch.style.display = 'none';
+          });
+          const notice = document.createElement('div');
+          notice.id = 'tcNoPermissionNotice';
+          notice.innerHTML = `
+            <h3 style="margin:0 0 8px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock</h3>
+            <div style="padding:14px 16px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;color:#92400e;font-size:12px;line-height:1.5;">
+              You don\u2019t have permission to view these settings. Ask an owner or admin for access.
+            </div>
+          `;
+          card.appendChild(notice);
+        }
+        if (card.__ffTCPermPolling) return;
+        card.__ffTCPermPolling = true;
+        const permStartedAt = Date.now();
+        (function pollPerm() {
+          let ok = false;
+          try { ok = !!window.ffIsCurrentUserOwnerOrAdminForSettings(); } catch (_) {}
+          if (ok) {
+            card.__ffTCPermPolling = false;
+            ffInitTimeClockSettingsUI();
+            return;
+          }
+          if (Date.now() - permStartedAt >= 10000) {
+            card.__ffTCPermPolling = false;
+            return;
+          }
+          setTimeout(pollPerm, 250);
+        })();
         return;
       }
+      restoreCardContent();
 
       // -- 2. Element lookups --------------------------------------------
       const toggle = card.querySelector('#tcOvertimeEnabled');
