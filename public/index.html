@@ -38701,7 +38701,7 @@ function initializeUserProfileMenu() {
       // A false here may just mean the role signal (__ff_user_role / staff
       // store) hasn't loaded yet right after a refresh. Never wipe the static
       // markup (that used to leave the card permanently broken): hide it
-      // behind a removable notice and poll the role check for up to 10s,
+      // behind a removable notice and poll the role check for up to 60s,
       // re-running the full init once it turns true.
       const restoreCardContent = function () {
         const n = card.querySelector('#tcNoPermissionNotice');
@@ -38738,7 +38738,7 @@ function initializeUserProfileMenu() {
             ffInitTimeClockSettingsUI();
             return;
           }
-          if (Date.now() - permStartedAt >= 10000) {
+          if (Date.now() - permStartedAt >= 60000) {
             card.__ffTCPermPolling = false;
             return;
           }
@@ -38980,10 +38980,11 @@ function initializeUserProfileMenu() {
       });
 
       // -- 6. Load from Firestore (or seed defaults on first-ever open) --
-      // settings-cloud.js is loaded by the safe-loader with a ~3.6s delay, so
-      // ffLoadTimeClockSettings may not exist yet if this section is opened
-      // right after a refresh. Poll for it (up to ~10s) instead of silently
-      // rendering the HTML defaults with no retry.
+      // settings-cloud.js is loaded by the safe-loader, which loads all the
+      // module scripts sequentially after salon selection — on a cold cache
+      // or slow device it can arrive 20s+ after the app opens. Poll for it
+      // (up to 60s) instead of silently rendering the HTML defaults with no
+      // retry.
       if (card.__ffTCLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); return; }
       card.__ffTCLoading = true;
       applyOvertimeVisibility();
@@ -38998,9 +38999,9 @@ function initializeUserProfileMenu() {
           })();
         });
       };
-      waitForLoadFn(10000).then(function (available) {
+      waitForLoadFn(60000).then(function (available) {
         if (!available) {
-          console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 10s, showing UI defaults');
+          console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 60s, showing UI defaults');
           return null;
         }
         return window.ffLoadTimeClockSettings();
