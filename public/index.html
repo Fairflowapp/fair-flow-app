@@ -38940,24 +38940,40 @@ function initializeUserProfileMenu() {
       });
 
       // -- 6. Load from Firestore (or seed defaults on first-ever open) --
+      // settings-cloud.js is loaded by the safe-loader with a ~3.6s delay, so
+      // ffLoadTimeClockSettings may not exist yet if this section is opened
+      // right after a refresh. Poll for it (up to ~10s) instead of silently
+      // rendering the HTML defaults with no retry.
       if (card.__ffTCLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); return; }
       card.__ffTCLoading = true;
-      if (typeof window.ffLoadTimeClockSettings === 'function') {
-        window.ffLoadTimeClockSettings().then(function (settings) {
-          hydrateUI(settings);
-        }).catch(function (e) {
-          console.warn('[Time Clock Settings] load failed, using UI defaults', e);
-          applyOvertimeVisibility();
-          applyKioskPhotoVisibility();
-          setHint('error');
-        }).finally(function () {
-          card.__ffTCLoading = false;
+      applyOvertimeVisibility();
+      applyKioskPhotoVisibility();
+      const waitForLoadFn = function (timeoutMs) {
+        return new Promise(function (resolve) {
+          const startedAt = Date.now();
+          (function poll() {
+            if (typeof window.ffLoadTimeClockSettings === 'function') return resolve(true);
+            if (Date.now() - startedAt >= timeoutMs) return resolve(false);
+            setTimeout(poll, 250);
+          })();
         });
-      } else {
+      };
+      waitForLoadFn(10000).then(function (available) {
+        if (!available) {
+          console.warn('[Time Clock Settings] ffLoadTimeClockSettings not available after 10s, showing UI defaults');
+          return null;
+        }
+        return window.ffLoadTimeClockSettings();
+      }).then(function (settings) {
+        if (settings) hydrateUI(settings);
+      }).catch(function (e) {
+        console.warn('[Time Clock Settings] load failed, using UI defaults', e);
         applyOvertimeVisibility();
         applyKioskPhotoVisibility();
+        setHint('error');
+      }).finally(function () {
         card.__ffTCLoading = false;
-      }
+      });
     } catch (e) {
       console.warn('[Time Clock Settings] init failed', e);
     }
