@@ -55,6 +55,9 @@
  * send no photo* fields are exempt so stale devices keep punching during
  * rollout. Photos are purged after 90 days by timeClockPhotosPurgeDaily;
  * time entries themselves are never deleted by the purge.
+ *
+ * Schedule enforcement helpers live in ./time-clock-schedule.js (S0). Punch
+ * wiring for early clock-in / lateClockOutFlag follows in S1–S2.
  */
 
 const admin = require("firebase-admin");
