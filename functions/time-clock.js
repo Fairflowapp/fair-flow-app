@@ -582,7 +582,7 @@ async function resolveKioskPhotoPlan({ salonId, kioskId, data, staffId }) {
   if (policy.onFailure === "block") {
     throw new HttpsError(
       "failed-precondition",
-      "A photo is required to clock in or out on this kiosk. Ask a manager to approve an override.",
+      "Photo is mandatory. If it fails, only authorized staff can record the punch.",
       { reason: "photo_required" },
     );
   }
@@ -955,7 +955,7 @@ async function timeClockPunchHandler(data, context) {
       if (photoPlan.policy.onFailure === "block" && !photoPlan.override) {
         throw new HttpsError(
           "failed-precondition",
-          "The photo could not be saved. Try again, or ask a manager to approve an override.",
+          "Photo is mandatory. The photo could not be saved — only authorized staff can record the punch.",
           { reason: "photo_required", detail: "upload_failed" },
         );
       }
