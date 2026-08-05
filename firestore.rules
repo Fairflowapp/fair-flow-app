@@ -1205,7 +1205,9 @@ service cloud.firestore {
 
     match /salons/{salonId}/timeEntries/{entryId} {
       allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
-      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+      // Time Clock Stage C lock: clients may never create/update/delete entries.
+      // All writes go through timeClockPunch / timeClockManageEntry (Admin SDK).
+      allow write: if false;
 
       // Time Clock audit trail (Stage A). Written ONLY by the timeClockPunch /
       // timeClockManageEntry callables via the Admin SDK (which bypasses these
