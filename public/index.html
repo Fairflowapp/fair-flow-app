@@ -6251,15 +6251,16 @@ function ffCurrentUserHasQueueReorderPermission() {
 }
 
 /** Reset Queue control: staff.permissions.queue_reset === true (Permissions tab: Reset queue).
- *  Salon owner ALWAYS passes - they have full access regardless of the
- *  permissions doc (which may be missing/false for legacy accounts). */
+ *  Salon owner ALWAYS passes. Everyone else — including Manager / Admin / Kiosk —
+ *  must have the Reset queue toggle ON. Role alone must not grant reset (otherwise
+ *  turning the permission off for a Manager-role kiosk has no effect). */
 function ffStaffHasQueueResetPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
   if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(staff)) {
     return true;
   }
   const roleLc = String(staff.role || '').toLowerCase().trim();
-  if (roleLc === 'owner' || roleLc === 'manager' || staff.isOwner === true || staff.isManager === true) return true;
+  if (roleLc === 'owner' || staff.isOwner === true) return true;
   const p = staff.permissions;
   return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.queue_reset));
 }
@@ -9785,9 +9786,8 @@ async function resetDay(){
     await ffStyledAlert("You don't have permission to reset the queue.", 'Reset Queue');
     return;
   }
-  // Queue reset is controlled by queue_reset/Admin/Manager permission above and
-  // by the staff PIN check below. Do not re-block permitted Admin/Manager users
-  // with an owner-only account check.
+  // Queue reset requires queue_reset on the PIN staff (or salon owner). Manager
+  // role alone is not enough — see ffStaffHasQueueResetPermission.
 
   // Step 1: Show confirmation modal
   const confirmed = await showResetConfirmation();
@@ -9809,7 +9809,7 @@ async function resetDay(){
   }
   const authResult = window.ffAuthByPin(code);
   if (!authResult.ok || !authResult.staff || !ffStaffHasQueueResetPermission(authResult.staff)) {
-    await ffStyledAlert('Not authorized to reset the queue.', 'Reset Queue');
+    await ffStyledAlert('Not authorized to reset the queue. Turn on “Reset queue” for this staff profile in Permissions.', 'Reset Queue');
     return;
   }
   const staff = authResult.staff;
