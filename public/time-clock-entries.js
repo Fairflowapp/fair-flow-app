@@ -154,8 +154,17 @@ async function _ffCallTimeClockFn(name, payload) {
     "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js"
   );
   const fn = httpsCallable(getFunctions(undefined, "us-central1"), name);
-  const res = await fn(payload);
-  return res && res.data ? res.data : {};
+  try {
+    const res = await fn(payload);
+    return res && res.data ? res.data : {};
+  } catch (err) {
+    // Preserve callable details.reason for UI gates (schedule / photo / device).
+    const e = new Error((err && err.message) ? String(err.message) : String(err));
+    e.code = err && err.code;
+    e.details = err && err.details;
+    e.customData = err && err.customData;
+    throw e;
+  }
 }
 
 function _ffIsKioskSession() {
@@ -212,6 +221,13 @@ function _ffKioskPhotoFields(input) {
     out.photoOverride = {
       managerPin: String(input.photoOverride.managerPin),
       reason: String(input.photoOverride.reason || ""),
+    };
+  }
+  // Schedule enforcement override (same PIN+reason shape as photo override).
+  if (input.scheduleOverride && typeof input.scheduleOverride === "object" && input.scheduleOverride.managerPin) {
+    out.scheduleOverride = {
+      managerPin: String(input.scheduleOverride.managerPin),
+      reason: String(input.scheduleOverride.reason || ""),
     };
   }
   return out;

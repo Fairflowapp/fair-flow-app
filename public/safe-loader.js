@@ -10,7 +10,7 @@
         // depend on app.js / firebase CDN / schedule-helpers (static import),
         // and the Settings + Time Clock screens block on them.
         { src: "/settings-cloud.js?v=20260805_tc_schedule_enf", type: "module", delay: 750 },
-        { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 800 },
+        { src: "/time-clock-entries.js?v=20260805_tc_schedule_s4", type: "module", delay: 800 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
@@ -38,7 +38,7 @@
         { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 3300 },
         { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 3400 },
         { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
-        { src: "/push-notifications.js?v=20260803_writeups_push", type: "module", delay: 3500 },
+        { src: "/push-notifications.js?v=20260805_tc_schedule_push", type: "module", delay: 3500 },
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
         { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
         // was 4900 with a 3000 entry before it → 1.9s dead wait. 3900 keeps

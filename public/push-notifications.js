@@ -201,6 +201,19 @@ function bindPushListeners() {
         document.getElementById("inboxBtn")?.click();
       } else if (data.type === "schedule_updated" || data.type === "schedule_published") {
         document.getElementById("scheduleBtn")?.click();
+      } else if (
+        data.type === "time_clock_late_clock_out" ||
+        data.type === "time_clock_photo_failed"
+      ) {
+        try {
+          window.__ffTCState = window.__ffTCState || {};
+          window.__ffTCState.view = "manage";
+        } catch (_) {}
+        if (typeof window.goToTimeClock === "function") {
+          window.goToTimeClock();
+        } else {
+          document.getElementById("timeClockBtn")?.click();
+        }
       } else {
         document.getElementById("queueBtn")?.click();
       }

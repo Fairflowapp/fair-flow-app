@@ -40461,6 +40461,19 @@ function initializeUserProfileMenu() {
             </div>
           </div>
 
+          <!-- Quick manager override (schedule enforcement: too early / no shift) -->
+          <div id="tcScheduleOverrideForm" style="display:none;flex-direction:column;gap:8px;margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px;text-align:left;">
+            <div style="font-size:12px;font-weight:700;color:#92400e;">Manager approval needed</div>
+            <div id="tcScheduleOvrBlurb" style="font-size:11px;color:#92400e;line-height:1.4;">Clock-in is blocked by the schedule. A manager can approve this punch.</div>
+            <input id="tcScheduleOvrPin" type="password" inputmode="numeric" autocomplete="off" placeholder="Manager PIN" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;"/>
+            <input id="tcScheduleOvrReason" type="text" autocomplete="off" placeholder="Reason (required, recorded in audit log)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;outline:none;"/>
+            <div id="tcScheduleOvrErr" style="min-height:14px;font-size:11px;color:#b91c1c;"></div>
+            <div style="display:flex;gap:8px;">
+              <button id="tcScheduleOvrApprove" type="button" style="flex:1;min-height:44px;background:linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;">Approve punch</button>
+              <button id="tcScheduleOvrCancel" type="button" style="flex:0 0 auto;min-height:44px;padding:0 14px;background:#fff;color:#6b7280;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+            </div>
+          </div>
+
           <div id="tcConfirmMsg" style="min-height:18px;font-size:12px;color:#6b7280;margin:14px 0 0;"></div>
 
           <button id="tcConfirmAction" type="button" style="margin-top:16px;width:100%;min-height:58px;padding:16px 0;background:${primaryGrad};color:#fff;border:none;border-radius:16px;font-size:17px;font-weight:800;letter-spacing:0.02em;cursor:pointer;box-shadow:${primaryShadow};transition:transform 0.1s ease, opacity 0.15s ease;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;">${primaryLabel}</button>
@@ -40594,6 +40607,33 @@ function initializeUserProfileMenu() {
         }, 1400);
       };
 
+      const formatAllowedAtFriendly = (iso) => {
+        try {
+          if (!iso) return '';
+          const d = new Date(iso);
+          if (!Number.isFinite(d.getTime())) return '';
+          return d.toLocaleString(undefined, {
+            weekday: 'short', month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit',
+          });
+        } catch (_) { return ''; }
+      };
+      const scheduleFriendlyMessage = (err) => {
+        const details = (err && err.details) || {};
+        const reason = details.reason || null;
+        if (reason === 'too_early_for_shift') {
+          const when = formatAllowedAtFriendly(details.allowedAt);
+          const start = details.linkedShiftStart ? String(details.linkedShiftStart) : '';
+          if (when) return `Too early to clock in. You can clock in starting ${when}.`;
+          if (start) return `Too early to clock in. Your shift starts at ${start}.`;
+          return 'Too early to clock in for your scheduled shift.';
+        }
+        if (reason === 'no_scheduled_shift') {
+          return 'No scheduled shift for today at this location. Ask a manager to override.';
+        }
+        return (err && err.message) ? String(err.message) : String(err);
+      };
+
       // Quick manager override form (photo_required, block policy). Shown in
       // place; retries the SAME punch with photoOverride. The employee PIN
       // and manager PIN live only in this closure.
@@ -40641,13 +40681,63 @@ function initializeUserProfileMenu() {
         return true;
       };
 
+      // Schedule enforcement override (kiosk): manager PIN + reason, same
+      // pattern as photo override. Retries with scheduleOverride.
+      const showScheduleOverrideForm = (blurbText) => {
+        const form = container.querySelector('#tcScheduleOverrideForm');
+        if (!form) return false;
+        const photoForm = container.querySelector('#tcPhotoOverrideForm');
+        if (photoForm) photoForm.style.display = 'none';
+        form.style.display = 'flex';
+        const blurb = form.querySelector('#tcScheduleOvrBlurb');
+        if (blurb) blurb.textContent = blurbText || 'Clock-in is blocked by the schedule. A manager can approve this punch.';
+        if (msg) { msg.style.color = '#92400e'; msg.textContent = ''; }
+        const pinEl = form.querySelector('#tcScheduleOvrPin');
+        const reasonEl = form.querySelector('#tcScheduleOvrReason');
+        const errEl = form.querySelector('#tcScheduleOvrErr');
+        const approveBtn = form.querySelector('#tcScheduleOvrApprove');
+        const cancelOvr = form.querySelector('#tcScheduleOvrCancel');
+        if (pinEl) { try { pinEl.focus(); } catch (_) {} }
+        if (cancelOvr && !cancelOvr.__ffTCBound) {
+          cancelOvr.__ffTCBound = true;
+          cancelOvr.addEventListener('click', function () { cancelConfirm(); });
+        }
+        if (approveBtn && !approveBtn.__ffTCBound) {
+          approveBtn.__ffTCBound = true;
+          approveBtn.addEventListener('click', async function () {
+            const managerPin = pinEl ? String(pinEl.value || '').trim() : '';
+            const reason = reasonEl ? String(reasonEl.value || '').trim() : '';
+            if (!managerPin) { if (errEl) errEl.textContent = 'Manager PIN is required.'; return; }
+            if (!reason) { if (errEl) errEl.textContent = 'A reason is required.'; return; }
+            approveBtn.disabled = true;
+            approveBtn.style.opacity = '0.6';
+            if (errEl) errEl.textContent = '';
+            try {
+              const photoFields = capturePhotoFields();
+              await doPunch(Object.assign({}, photoFields, {
+                scheduleOverride: { managerPin: managerPin, reason: reason },
+              }));
+              try { if (pinEl) pinEl.value = ''; } catch (_) {}
+              form.style.display = 'none';
+              finishSuccess(true);
+            } catch (e2) {
+              console.warn('[Time Clock] schedule override failed', e2 && e2.code);
+              if (errEl) errEl.textContent = scheduleFriendlyMessage(e2);
+              approveBtn.disabled = false;
+              approveBtn.style.opacity = '1';
+            }
+          });
+        }
+        return true;
+      };
+
       try {
         const photoFields = capturePhotoFields();
         await doPunch(photoFields);
         finishSuccess(false);
       } catch (e) {
         console.warn('[Time Clock] confirm action failed', e);
-        let friendly = (e && e.message ? e.message : String(e));
+        let friendly = scheduleFriendlyMessage(e);
 
         // Photo required (block policy) on the kiosk: open the inline
         // manager-PIN override form instead of bouncing to the PIN pad.
@@ -40663,16 +40753,33 @@ function initializeUserProfileMenu() {
           }
         }
 
+        // Schedule enforcement on the kiosk: open schedule override form.
+        if (window.__ff_kiosk_claims
+            && (errReason === 'too_early_for_shift' || errReason === 'no_scheduled_shift')) {
+          if (showScheduleOverrideForm(friendly)) {
+            actionBtn.__ffTCConfirmBusy = false;
+            actionBtn.disabled = false;
+            actionBtn.style.transform = 'scale(1)';
+            actionBtn.style.opacity = '1';
+            return;
+          }
+        }
+
         // Manager Override: when the server refused because this is not the
-        // caller's own profile / wrong device, a manager may retry with a
-        // mandatory reason. The reason is recorded in the entry's audit
-        // trail server-side. Not available on kiosk sessions.
+        // caller's own profile / wrong device / schedule gate, a manager may
+        // retry with a mandatory reason. Not available on kiosk sessions
+        // (kiosk uses PIN forms above).
         const reasonCode = (e && e.details && e.details.reason) || null;
-        const overridable = reasonCode === 'staff_mismatch' || reasonCode === 'device_mismatch' || reasonCode === 'no_staff_profile';
+        const overridable = reasonCode === 'staff_mismatch'
+          || reasonCode === 'device_mismatch'
+          || reasonCode === 'no_staff_profile'
+          || reasonCode === 'too_early_for_shift'
+          || reasonCode === 'no_scheduled_shift';
         if (!window.__ff_kiosk_claims && overridable
             && typeof _ffTCCurrentUserCanManage === 'function' && _ffTCCurrentUserCanManage()) {
           const why = window.prompt(
             `Manager override — clock ${staff.name || 'this staff member'} ${isOut ? 'out' : 'in'} anyway?\n` +
+            (friendly ? (friendly + '\n\n') : '') +
             'Enter a reason (required, recorded in the audit log):'
           );
           if (why && why.trim()) {
@@ -40698,7 +40805,7 @@ function initializeUserProfileMenu() {
               return;
             } catch (e2) {
               console.warn('[Time Clock] manager override failed', e2);
-              friendly = (e2 && e2.message ? e2.message : String(e2));
+              friendly = scheduleFriendlyMessage(e2);
             }
           }
         }
@@ -41648,15 +41755,18 @@ function initializeUserProfileMenu() {
         : '';
       // Kiosk punch photos (Stage B): camera chip opens the photo viewer;
       // amber chip flags punches whose photo capture failed.
+      // Late clock-out chip (Schedule enforcement): review / edit in Manage.
       const hasPhotos = !!(r.photoInPath || r.photoOutPath);
       const photoFailed = (r.photoInFailed === true) || (r.photoOutFailed === true);
+      const lateClockOut = r.lateClockOutFlag === true;
       const photoChips = `${hasPhotos ? `
         <button type="button" class="tc-m-photo-btn" data-entry-id="${_ffTCEscape(r.id)}" title="View punch photos"
           style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;font-size:9.5px;font-weight:700;cursor:pointer;vertical-align:middle;">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
           Photo
         </button>` : ''}${photoFailed ? `
-        <span title="Photo capture failed on this punch" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:9.5px;font-weight:700;vertical-align:middle;">Photo failed</span>` : ''}`;
+        <span title="Photo capture failed on this punch" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:9.5px;font-weight:700;vertical-align:middle;">Photo failed</span>` : ''}${lateClockOut ? `
+        <span title="Clock-out was after the scheduled shift end window" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;font-size:9.5px;font-weight:700;vertical-align:middle;">Late clock-out</span>` : ''}`;
       return `
         <tr data-entry-id="${_ffTCEscape(r.id)}" class="tc-row-clickable tc-manage-card-row" style="border-bottom:1px solid #f3f4f6;transition:background 0.12s ease;cursor:pointer;" onmouseover="this.style.background='#faf7ff'" onmouseout="this.style.background='transparent'">
           <td colspan="6" style="padding:0;vertical-align:top;">
