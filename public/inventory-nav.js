@@ -138,6 +138,9 @@ function hideFullscreenPeersForInventory() {
 }
 
 export async function goToInventory() {
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === "function") window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
     try {
       window.ffCloseGlobalBlockingOverlays();

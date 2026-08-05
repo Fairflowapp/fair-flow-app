@@ -134,6 +134,10 @@ export function goToInbox(onReady) {
     return;
   }
 
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
+
   // Staff Members modal uses z-index above main screens — close it so the Inbox view is actually visible
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();

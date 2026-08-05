@@ -45,6 +45,9 @@ export function goToTickets() {
     if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
     return;
   }
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();

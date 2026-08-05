@@ -220,7 +220,10 @@ body.ff-queue-route-active .wrap {
 
 /* Boot skeleton: same footprint as joinBar + two queue columns while the user
    is signed in but before ff-queue-ui-visible. Stops the large CLS when the
-   real queue chrome is revealed (joinBtn / pinwrap / queueControls / wrap). */
+   real queue chrome is revealed (joinBtn / pinwrap / queueControls / wrap).
+   ff-queue-boot-dismissed sticks after Queue first-paint OR any leave-queue
+   navigation (Floor/Live, Chat, Media, …) so removing ff-queue-ui-visible
+   when leaving Queue cannot resurrect the gray bars on top of other modules. */
 #ffQueueBootSkeleton {
   display: none;
   max-width: 1140px;
@@ -230,10 +233,11 @@ body.ff-queue-route-active .wrap {
   pointer-events: none;
   user-select: none;
 }
-body:not(.ff-logged-out):not(.ff-queue-ui-visible):not(.ff-kiosk-mode):not(.ff-kiosk-pairing-active) #ffQueueBootSkeleton {
+body:not(.ff-logged-out):not(.ff-queue-ui-visible):not(.ff-queue-boot-dismissed):not(.ff-kiosk-mode):not(.ff-kiosk-pairing-active) #ffQueueBootSkeleton {
   display: block;
 }
 body.ff-queue-ui-visible #ffQueueBootSkeleton,
+body.ff-queue-boot-dismissed #ffQueueBootSkeleton,
 body.ff-logged-out #ffQueueBootSkeleton,
 body.ff-kiosk-mode #ffQueueBootSkeleton {
   display: none !important;

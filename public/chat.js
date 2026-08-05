@@ -747,6 +747,9 @@ async function goToChat() {
   _bindChatSendBtn();
   chatState._chatBadgePerfOpenMs = performance.now();
   chatState._chatBadgePerfRenderLogged = false;
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();

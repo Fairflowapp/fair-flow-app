@@ -60,6 +60,9 @@ import {
 // =====================
 
 export async function goToMedia() {
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === "function") window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === "function") {
     try {
       window.ffCloseGlobalBlockingOverlays();

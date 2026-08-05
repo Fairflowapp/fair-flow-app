@@ -257,6 +257,7 @@ function goToFloor() {
   try {
     document.body.classList.remove('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-staff-members-open', 'ff-dashboard-open', 'ff-dashboard-analytics-open');
     document.body.classList.add('ff-ui-ready');
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
   } catch (e) {}
 
   const screenIdsToHide = [
@@ -928,6 +929,9 @@ window.ffCreateFloorOrderPlaceholder = ffCreateFloorOrderPlaceholder;
  * Time Clock - full-screen route (peer to Schedule / Tasks). Not part of Settings.
  */
 function goToTimeClock() {
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try { window.ffCloseGlobalBlockingOverlays(); } catch (e) {}
   }
@@ -4753,6 +4757,9 @@ window.openReportTrainingDetails = openReportTrainingDetails;
 window.backFromReportTrainingDetails = backFromReportTrainingDetails;
 
 async function goToTraining() {
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();

@@ -1298,7 +1298,7 @@ function showLoginScreen() {
   if (resetSection) resetSection.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-queue-boot-dismissed", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
 
   /* Full-screen modules live OUTSIDE #main-app-content; hiding only main-app leaves them visible. */
@@ -1328,7 +1328,7 @@ function showResetPasswordScreen() {
   if (signupSection) signupSection.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-queue-boot-dismissed", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
   if (resetSection) resetSection.style.display = "block";
 
@@ -1418,7 +1418,7 @@ function ffShowInitialBillingRequiredGate({ salonId }) {
     if (el) el.style.display = "none";
   });
 
-  document.body.classList.remove("ff-logged-out", "ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-logged-out", "ff-queue-ui-visible", "ff-queue-boot-dismissed", "ff-ui-ready", "ff-auth-resolving");
   if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 
   const gate = document.createElement("div");
@@ -1605,7 +1605,7 @@ function ffShowNativeNoBusinessScreen(user) {
   if (completeSetupSection) completeSetupSection.style.display = "none";
   if (mainApp) mainApp.style.display = "none";
 
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-queue-boot-dismissed", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
   if (typeof window.ffRemoveAuthSplash === "function") window.ffRemoveAuthSplash();
 
@@ -1674,7 +1674,7 @@ function showCompleteSetupScreen(user) {
   if (mainApp) mainApp.style.display = "none";
   if (completeSetupSection) completeSetupSection.style.display = "block";
 
-  document.body.classList.remove("ff-queue-ui-visible", "ff-ui-ready", "ff-auth-resolving");
+  document.body.classList.remove("ff-queue-ui-visible", "ff-queue-boot-dismissed", "ff-ui-ready", "ff-auth-resolving");
   document.body.classList.add("ff-logged-out");
 
   // Pre-fill what we can from the auth user
