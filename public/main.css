@@ -976,12 +976,21 @@ body.ff-avatar-dropdown-open #userAvatarDropdown * {
 }
 
 /* ===== CHAT SCREEN STYLES ===== */
+/* Fixed shell (like Live/Floor/Tickets) so in-document #ffQueueBootSkeleton
+   cannot push Chat down the page if it is still painted. */
 #chatScreen {
   display: none;
+  position: fixed;
+  top: var(--header-h, 60px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9850;
   flex-direction: column;
-  height: calc(100vh - 56px);
+  height: auto;
   overflow: hidden;
   background: #f9fafb;
+  box-sizing: border-box;
 }
 /* Chat top toolbar - match Inbox / Media / Tickets thin bar (2px 20px, min-height 40px) */
 #chatTopBar {

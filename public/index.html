@@ -152,7 +152,7 @@
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260804_queue_boot_skeleton">
+<link rel="stylesheet" href="/main.css?v=20260805_queue_boot_dismiss2">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -6810,13 +6810,35 @@ try {
 
 /** Hide #ffQueueBootSkeleton for the rest of the session (until logout).
  *  Decoupled from ff-queue-ui-visible so leave-queue navigation can drop that
- *  class without resurrecting the gray queue boot bars over other modules. */
+ *  class without resurrecting the gray queue boot bars over other modules.
+ *  Also sets an inline display:none — survives stale cached main.css that does
+ *  not yet know about .ff-queue-boot-dismissed. */
 function ffDismissQueueBootSkeleton() {
   try {
     document.body.classList.add('ff-queue-boot-dismissed');
+    var el = document.getElementById('ffQueueBootSkeleton');
+    if (el) {
+      el.style.setProperty('display', 'none', 'important');
+      el.setAttribute('hidden', '');
+      el.setAttribute('aria-hidden', 'true');
+    }
   } catch (e) {}
 }
 window.ffDismissQueueBootSkeleton = ffDismissQueueBootSkeleton;
+
+/** Allow the boot skeleton again after logout / signed-out shell (next login). */
+function ffResetQueueBootSkeleton() {
+  try {
+    document.body.classList.remove('ff-queue-boot-dismissed');
+    var el = document.getElementById('ffQueueBootSkeleton');
+    if (el) {
+      el.style.removeProperty('display');
+      el.removeAttribute('hidden');
+      el.setAttribute('aria-hidden', 'true');
+    }
+  } catch (e) {}
+}
+window.ffResetQueueBootSkeleton = ffResetQueueBootSkeleton;
 
 /** Queue first-paint guard: remove after staff-backed permission state is usable (or timeout). */
 function ffMarkUiReady() {
@@ -22914,6 +22936,9 @@ window.ffCloseGlobalBlockingOverlays = function () {
       if (typeof window.ffCloseLiveScreen === 'function') window.ffCloseLiveScreen();
       else liveScreenEl.style.display = 'none';
     }
+  } catch (e) {}
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
   } catch (e) {}
   try {
     document.body.classList.remove('ff-queue-route-active');
@@ -51699,6 +51724,11 @@ function hookSettingsGuard_DISABLED(){
       function openLiveScreen() {
         var screen = document.getElementById("liveScreen");
         if (!screen) return;
+        // Live covers Queue; never leave the queue boot skeleton taking layout
+        // space underneath (and later pushing Chat when leaving Live).
+        try {
+          if (typeof window.ffDismissQueueBootSkeleton === "function") window.ffDismissQueueBootSkeleton();
+        } catch (_) {}
         renderLiveScreen();
         screen.style.display = "flex";
         ffSetLiveFabState(true);
@@ -51707,6 +51737,9 @@ function hookSettingsGuard_DISABLED(){
         var screen = document.getElementById("liveScreen");
         if (screen) screen.style.display = "none";
         ffSetLiveFabState(false);
+        try {
+          if (typeof window.ffDismissQueueBootSkeleton === "function") window.ffDismissQueueBootSkeleton();
+        } catch (_) {}
         // The conversation popup lives on top of the Live screen — never leave
         // it orphaned when Live closes.
         if (typeof window.ffCloseLiveChatThread === "function") {
