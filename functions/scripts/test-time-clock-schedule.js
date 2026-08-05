@@ -259,8 +259,7 @@ const unscheduledOut = sched.evaluateScheduleClockOut({
 });
 check("unscheduled entry → no late flag", unscheduledOut.lateClockOutFlag === false);
 
-// Snapshot is source of truth: live schedule change would not matter — we only
-// read linkedShiftEnd/dateKey (S2 contract).
+// Snapshot is preferred when present (punch may also live-fallback when absent).
 const snapshotOnly = sched.evaluateScheduleClockOut({
   enforcement: enf,
   scheduled: true,
@@ -271,6 +270,62 @@ const snapshotOnly = sched.evaluateScheduleClockOut({
   timeZone: "America/New_York",
 });
 check("S2 snapshot end drives late flag", snapshotOnly.lateClockOutFlag === true);
+
+check(
+  "entryHasLinkedShiftSnapshot requires end+dateKey",
+  sched.entryHasLinkedShiftSnapshot({
+    scheduled: true,
+    linkedShiftEnd: "16:00",
+    linkedShiftDateKey: "2026-08-05",
+  }) === true,
+);
+check(
+  "entryHasLinkedShiftSnapshot false when missing dateKey",
+  sched.entryHasLinkedShiftSnapshot({
+    scheduled: true,
+    linkedShiftEnd: "16:00",
+  }) === false,
+);
+check(
+  "entryHasLinkedShiftSnapshot true even if scheduled false (legacy fields)",
+  sched.entryHasLinkedShiftSnapshot({
+    scheduled: false,
+    linkedShiftEnd: "16:00",
+    linkedShiftDateKey: "2026-08-05",
+  }) === true,
+);
+
+const snapFromShift = sched.linkedShiftSnapshotFromShift({
+  dateKey: "2026-08-05",
+  startTime: "14:00",
+  endTime: "16:00",
+  linkedShiftId: "staff::2026-08-05",
+});
+check(
+  "linkedShiftSnapshotFromShift shape",
+  !!(snapFromShift
+    && snapFromShift.scheduled === true
+    && snapFromShift.linkedShiftEnd === "16:00"
+    && snapFromShift.linkedShiftStart === "14:00"
+    && snapFromShift.linkedShiftDateKey === "2026-08-05"),
+  snapFromShift,
+);
+
+// Live-fallback-shaped eval (same as punch after published lookup fills args).
+const liveFallbackLate = sched.evaluateScheduleClockOut({
+  enforcement: enf,
+  scheduled: true,
+  linkedShiftEnd: "16:00",
+  linkedShiftStart: "14:00",
+  dateKey: "2026-08-05",
+  nowMs: Date.parse("2026-08-05T20:48:37.000Z"), // 16:48 EDT > 16:15
+  timeZone: "America/New_York",
+});
+check(
+  "live-fallback args flag late after Y",
+  liveFallbackLate.lateClockOutFlag === true && liveFallbackLate.reason === "past_schedule",
+  liveFallbackLate,
+);
 
 // S5: publish gate + defaults still hold under enforcement-on payloads.
 const pubGate = sched.evaluateScheduleClockIn({

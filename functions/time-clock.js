@@ -1373,30 +1373,43 @@ async function timeClockPunchHandler(data, context) {
     throw new HttpsError("failed-precondition", "Clock-out time is earlier than clock-in time.");
   }
 
-  // Late clock-out flag (S2): NEVER blocks out. Uses clock-in snapshot only.
+  // Late clock-out flag (S2): NEVER blocks out.
+  // Prefer entry linkedShift* snapshot; if missing (manual / legacy), fall back
+  // to a live published-schedule lookup for the clock-in day + location.
+  // This path is punch-only — Manage edits never set the flag.
   let lateClockOutFlag = false;
   let lateClockOutAudit = {};
+  let lateSnapshotPatch = null;
   try {
     const enforcement = await loadScheduleEnforcement(salonId);
-    const tzInfo = await tcSchedule.resolveSalonTimeZone(db(), salonId, locationId);
-    const lateDecision = tcSchedule.evaluateScheduleClockOut({
-      enforcement,
-      scheduled: entry.scheduled === true,
-      linkedShiftEnd: entry.linkedShiftEnd || null,
-      linkedShiftStart: entry.linkedShiftStart || null,
-      dateKey: entry.linkedShiftDateKey || null,
+    const lateResolved = await tcSchedule.resolveLateClockOutForPunch(db(), {
+      salonId,
+      locationId,
+      staffId,
+      entry,
       nowMs: clockOutTs.toMillis(),
-      timeZone: tzInfo.timeZone,
+      enforcement,
     });
+    const lateDecision = lateResolved.decision || {};
     lateClockOutFlag = lateDecision.lateClockOutFlag === true;
-    if (lateClockOutFlag) {
-      lateClockOutAudit = {
+    lateSnapshotPatch = lateResolved.snapshotPatch || null;
+    lateClockOutAudit = {
+      lateClockOutSource: lateResolved.source || null,
+      lateEvalReason: lateDecision.reason || null,
+      ...(lateClockOutFlag ? {
         lateClockOutFlag: true,
         lateMinutes: lateDecision.lateMinutes || null,
         shiftEndMs: lateDecision.shiftEndMs || null,
         thresholdMs: lateDecision.thresholdMs || null,
-      };
-    }
+      } : {}),
+      ...(lateSnapshotPatch ? {
+        linkedShiftId: lateSnapshotPatch.linkedShiftId,
+        linkedShiftStart: lateSnapshotPatch.linkedShiftStart,
+        linkedShiftEnd: lateSnapshotPatch.linkedShiftEnd,
+        linkedShiftDateKey: lateSnapshotPatch.linkedShiftDateKey,
+        scheduled: true,
+      } : {}),
+    };
   } catch (e) {
     console.warn("[timeClockPunch] late clock-out eval failed (non-fatal)", e && e.message);
   }
@@ -1421,6 +1434,8 @@ async function timeClockPunchHandler(data, context) {
     clockOutAt: clockOutTs,
     durationMinutes: durationMinutesBetween(clockInTs, clockOutTs),
     lateClockOutFlag,
+    // Persist live-fallback snapshot so Manage / audit stay consistent.
+    ...(lateSnapshotPatch || {}),
     clockOutDeviceId: caller.kind === "kiosk" ? null : deviceId,
     clockOutKioskId: kioskId,
     clockOutPlatform: platform,
@@ -1456,6 +1471,8 @@ async function timeClockPunchHandler(data, context) {
     durationMinutes: patch.durationMinutes, hasGeo: !!geo,
     hasPhoto: !!photo.entry.photoOutPath, photoFailed: photo.failed,
     lateClockOutFlag,
+    lateClockOutSource: lateClockOutAudit.lateClockOutSource || null,
+    lateEvalReason: lateClockOutAudit.lateEvalReason || null,
   });
   return {
     ok: true,
@@ -1475,6 +1492,7 @@ async function timeClockPunchHandler(data, context) {
 exports.timeClockManageEntry = onCall({ region: REGION }, async (req) =>
   timeClockManageEntryHandler(req.data || {}, { auth: req.auth, rawRequest: req.rawRequest }),
 );
+exports.timeClockManageEntryHandler = timeClockManageEntryHandler;
 
 async function timeClockManageEntryHandler(data, context) {
   const caller = classifyCaller(context.auth);
@@ -1531,6 +1549,29 @@ async function timeClockManageEntryHandler(data, context) {
       );
     }
 
+    // Attach published-shift snapshot when one matches clock-in day/location/staff.
+    // Manual clockOutAt (if any) does NOT set lateClockOutFlag — that is punch-only.
+    let scheduleSnap = {
+      linkedShiftId: null,
+      scheduled: false,
+      linkedShiftStart: null,
+      linkedShiftEnd: null,
+      linkedShiftDateKey: null,
+    };
+    try {
+      const resolved = await tcSchedule.resolveLinkedShiftSnapshotForManageAdd(db(), {
+        salonId,
+        locationId,
+        staffId,
+        clockInAtMs: clockInTs.toMillis(),
+      });
+      if (resolved && resolved.snapshot) {
+        scheduleSnap = resolved.snapshot;
+      }
+    } catch (e) {
+      console.warn("[timeClockManageEntry] schedule snapshot on add failed (non-fatal)", e && e.message);
+    }
+
     const payload = {
       salonId,
       locationId,
@@ -1538,8 +1579,8 @@ async function timeClockManageEntryHandler(data, context) {
       clockInAt: clockInTs,
       clockOutAt: clockOutTs || null,
       status: clockOutTs ? "closed" : "open",
-      linkedShiftId: null,
-      scheduled: false,
+      ...scheduleSnap,
+      lateClockOutFlag: false,
       source: "admin",
       notes: sanitizeNotes(data.notes),
       durationMinutes: clockOutTs ? durationMinutesBetween(clockInTs, clockOutTs) : null,
@@ -1566,9 +1607,18 @@ async function timeClockManageEntryHandler(data, context) {
       locationId,
       clockInAtMs: clockInTs.toMillis(),
       clockOutAtMs: clockOutTs ? clockOutTs.toMillis() : null,
+      scheduled: payload.scheduled === true,
+      linkedShiftId: payload.linkedShiftId || null,
+      linkedShiftStart: payload.linkedShiftStart || null,
+      linkedShiftEnd: payload.linkedShiftEnd || null,
+      linkedShiftDateKey: payload.linkedShiftDateKey || null,
       ...auditBase,
     });
-    console.log("[timeClockManageEntry] add", { salonId, staffId, entryId: docRef.id, byUid: caller.uid });
+    console.log("[timeClockManageEntry] add", {
+      salonId, staffId, entryId: docRef.id, byUid: caller.uid,
+      scheduled: payload.scheduled === true,
+      linkedShiftEnd: payload.linkedShiftEnd || null,
+    });
     return { ok: true, op: "add", entryId: docRef.id };
   }
 

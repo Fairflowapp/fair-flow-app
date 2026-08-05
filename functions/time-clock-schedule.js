@@ -394,6 +394,173 @@ function evaluateScheduleClockOut(args) {
   };
 }
 
+/**
+ * Entry has a usable clock-in schedule snapshot for late clock-out.
+ * linkedShiftEnd + linkedShiftDateKey are required; scheduled may be missing
+ * on some legacy rows that still carried the wall-clock fields.
+ */
+function entryHasLinkedShiftSnapshot(entry) {
+  if (!entry || typeof entry !== "object") return false;
+  return !!(trimStr(entry.linkedShiftEnd) && trimStr(entry.linkedShiftDateKey));
+}
+
+/** Snapshot fields written onto a time entry from a published-shift hit. */
+function linkedShiftSnapshotFromShift(shift, dateKeyFallback) {
+  if (!shift || !trimStr(shift.endTime)) return null;
+  const dateKey = trimStr(shift.dateKey) || trimStr(dateKeyFallback);
+  if (!dateKey) return null;
+  return {
+    scheduled: true,
+    linkedShiftId: trimStr(shift.linkedShiftId) || null,
+    linkedShiftStart: trimStr(shift.startTime) || null,
+    linkedShiftEnd: trimStr(shift.endTime),
+    linkedShiftDateKey: dateKey,
+  };
+}
+
+/**
+ * Resolve late clock-out eval inputs for a PUNCH clock-out.
+ * Prefers entry linkedShift* snapshot; if missing (manual / legacy /
+ * scheduled:false), falls back to a live published-schedule lookup for the
+ * clock-in salon-local day + location.
+ *
+ * @returns {Promise<{
+ *   source: "snapshot"|"live_fallback"|"none",
+ *   decision: object,
+ *   snapshotPatch: object|null,
+ *   timeZone: string,
+ * }>}
+ */
+async function resolveLateClockOutForPunch(db, {
+  salonId, locationId, staffId, entry, nowMs, enforcement,
+}) {
+  const enf = enforcement || normalizeScheduleEnforcement(null);
+  const tzInfo = await resolveSalonTimeZone(db, salonId, locationId);
+  const timeZone = tzInfo.timeZone;
+  const ms = Number(nowMs);
+
+  if (entryHasLinkedShiftSnapshot(entry)) {
+    const decision = evaluateScheduleClockOut({
+      enforcement: enf,
+      scheduled: true,
+      linkedShiftEnd: entry.linkedShiftEnd,
+      linkedShiftStart: entry.linkedShiftStart || null,
+      dateKey: entry.linkedShiftDateKey,
+      nowMs: ms,
+      timeZone,
+    });
+    return {
+      source: "snapshot",
+      decision,
+      snapshotPatch: null,
+      timeZone,
+      dateKey: trimStr(entry.linkedShiftDateKey),
+    };
+  }
+
+  // Live fallback — clock-in salon day when available, else punch "now".
+  let clockInMs = null;
+  try {
+    const ci = entry && entry.clockInAt;
+    if (ci && typeof ci.toMillis === "function") clockInMs = ci.toMillis();
+    else if (ci && typeof ci.toDate === "function") clockInMs = ci.toDate().getTime();
+    else if (typeof ci === "number" && isFinite(ci)) clockInMs = ci;
+    else if (ci instanceof Date) clockInMs = ci.getTime();
+  } catch (_) { /* ignore */ }
+  const dayMs = (typeof clockInMs === "number" && isFinite(clockInMs)) ? clockInMs : ms;
+  const dateKey = salonDateKey(new Date(dayMs), timeZone);
+  const weekStartsOn = await resolveWeekStartsOn(db, salonId);
+  const loaded = await loadScheduleShiftForDay(
+    db, salonId, locationId, staffId, dateKey, weekStartsOn,
+  );
+
+  if (!loaded.weekPublished) {
+    const decision = evaluateScheduleClockOut({
+      enforcement: enf,
+      scheduled: false,
+      linkedShiftEnd: null,
+      dateKey: null,
+      nowMs: ms,
+      timeZone,
+    });
+    return {
+      source: "none",
+      decision: Object.assign({}, decision, { reason: decision.reason || "unpublished_week" }),
+      snapshotPatch: null,
+      timeZone,
+      dateKey,
+      weekStartKey: loaded.weekStartKey,
+    };
+  }
+
+  const snapshotPatch = linkedShiftSnapshotFromShift(loaded.shift, dateKey);
+  if (!snapshotPatch) {
+    const decision = evaluateScheduleClockOut({
+      enforcement: enf,
+      scheduled: false,
+      linkedShiftEnd: null,
+      dateKey: null,
+      nowMs: ms,
+      timeZone,
+    });
+    return {
+      source: "none",
+      decision: Object.assign({}, decision, { reason: decision.reason || "live_no_shift" }),
+      snapshotPatch: null,
+      timeZone,
+      dateKey,
+      weekStartKey: loaded.weekStartKey,
+    };
+  }
+
+  const decision = evaluateScheduleClockOut({
+    enforcement: enf,
+    scheduled: true,
+    linkedShiftEnd: snapshotPatch.linkedShiftEnd,
+    linkedShiftStart: snapshotPatch.linkedShiftStart,
+    dateKey: snapshotPatch.linkedShiftDateKey,
+    nowMs: ms,
+    timeZone,
+  });
+  return {
+    source: "live_fallback",
+    decision,
+    snapshotPatch,
+    timeZone,
+    dateKey: snapshotPatch.linkedShiftDateKey,
+    weekStartKey: loaded.weekStartKey,
+  };
+}
+
+/**
+ * Snapshot to attach on Manage-add when a published shift exists for the
+ * clock-in salon-local day / location / staff. Returns nulls when none.
+ */
+async function resolveLinkedShiftSnapshotForManageAdd(db, {
+  salonId, locationId, staffId, clockInAtMs,
+}) {
+  const tzInfo = await resolveSalonTimeZone(db, salonId, locationId);
+  const timeZone = tzInfo.timeZone;
+  const ms = Number(clockInAtMs);
+  if (!isFinite(ms)) {
+    return { snapshot: null, timeZone, dateKey: null };
+  }
+  const dateKey = salonDateKey(new Date(ms), timeZone);
+  const weekStartsOn = await resolveWeekStartsOn(db, salonId);
+  const loaded = await loadScheduleShiftForDay(
+    db, salonId, locationId, staffId, dateKey, weekStartsOn,
+  );
+  if (!loaded.weekPublished) {
+    return { snapshot: null, timeZone, dateKey, weekStartKey: loaded.weekStartKey };
+  }
+  return {
+    snapshot: linkedShiftSnapshotFromShift(loaded.shift, dateKey),
+    timeZone,
+    dateKey,
+    weekStartKey: loaded.weekStartKey,
+  };
+}
+
 // ─── Firestore loaders ───────────────────────────────────────────────────────
 
 /**
@@ -572,6 +739,10 @@ module.exports = {
   isWeekPublished,
   evaluateScheduleClockIn,
   evaluateScheduleClockOut,
+  entryHasLinkedShiftSnapshot,
+  linkedShiftSnapshotFromShift,
+  resolveLateClockOutForPunch,
+  resolveLinkedShiftSnapshotForManageAdd,
   resolveSalonTimeZone,
   resolveWeekStartsOn,
   loadScheduleShiftForDay,
