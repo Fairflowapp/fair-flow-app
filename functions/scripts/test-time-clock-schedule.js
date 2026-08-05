@@ -290,6 +290,58 @@ check("S5 unpublished week never blocks", pubGate.ok === true && pubGate.enforce
 const defPolicy = sched.normalizeScheduleEnforcement({ enabled: true });
 check("S5 default noShiftPolicy remains allow", defPolicy.noShiftPolicy === "allow");
 
+// Device TZ must not affect enforcement: same absolute nowMs + salon TZ → same
+// decision whether the Node process thinks it is in Costa Rica or New York.
+const priorTz = process.env.TZ;
+const shiftNy = {
+  dateKey: "2026-08-05",
+  startTime: "09:00",
+  endTime: "17:00",
+  linkedShiftId: "s::2026-08-05",
+};
+const enfNy = sched.normalizeScheduleEnforcement({
+  enabled: true,
+  earlyClockInMinutes: 15,
+  lateClockOutMinutes: 15,
+  noShiftPolicy: "allow",
+});
+const nowEarlyUtc = Date.parse("2026-08-05T12:30:00.000Z"); // 08:30 EDT
+process.env.TZ = "America/Costa_Rica";
+const fromCr = sched.evaluateScheduleClockIn({
+  enforcement: enfNy,
+  weekPublished: true,
+  shift: shiftNy,
+  nowMs: nowEarlyUtc,
+  timeZone: "America/New_York",
+});
+process.env.TZ = "America/New_York";
+const fromNy = sched.evaluateScheduleClockIn({
+  enforcement: enfNy,
+  weekPublished: true,
+  shift: shiftNy,
+  nowMs: nowEarlyUtc,
+  timeZone: "America/New_York",
+});
+if (priorTz == null) delete process.env.TZ;
+else process.env.TZ = priorTz;
+
+check(
+  "device TZ Costa Rica vs NY: same too_early decision",
+  fromCr.ok === false && fromNy.ok === false
+    && fromCr.reason === "too_early_for_shift"
+    && fromNy.reason === "too_early_for_shift",
+);
+check(
+  "device TZ does not change allowedAt",
+  fromCr.allowedAt === fromNy.allowedAt
+    && fromCr.allowedAt === "2026-08-05T12:45:00.000Z",
+  { fromCr: fromCr.allowedAt, fromNy: fromNy.allowedAt },
+);
+check(
+  "salonDateKey ignores process TZ (NY calendar day)",
+  sched.salonDateKey(new Date(nowEarlyUtc), "America/New_York") === "2026-08-05",
+);
+
 console.log("");
 if (failures) {
   console.error(`FAILED: ${failures} check(s)`);

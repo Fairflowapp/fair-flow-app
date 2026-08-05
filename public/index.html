@@ -39685,16 +39685,156 @@ function initializeUserProfileMenu() {
     return [];
   }
 
-  function _ffTCFormatTime(ts) {
+  /** Salon IANA TZ for Time Clock display + Manage edits. Fallback NY. */
+  function _ffTCSalonTimeZone() {
     try {
-      const d = (ts && typeof ts.toDate === 'function') ? ts.toDate()
-              : (ts instanceof Date ? ts : null);
-      if (!d) return '-';
-      if (typeof window.ffFormatDisplayTime === 'function') {
-        return window.ffFormatDisplayTime(d, { hour: 'numeric', minute: '2-digit', fallback: '-' });
+      const z = (window.settings && window.settings.preferences && window.settings.preferences.salonTimeZone)
+        ? String(window.settings.preferences.salonTimeZone).trim()
+        : '';
+      if (z) {
+        try {
+          Intl.DateTimeFormat('en-US', { timeZone: z }).format(new Date());
+          return z;
+        } catch (_) { /* invalid → fallback */ }
       }
-      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    } catch (_) { return '-'; }
+    } catch (_) {}
+    return 'America/New_York';
+  }
+
+  /** EST/EDT → ET, CST/CDT → CT, etc. Leave other short names as-is. */
+  function _ffTCShortTzLabel(rawShort) {
+    const s = String(rawShort || '').trim();
+    const m = s.match(/^([A-Z])([SD])T$/i);
+    if (m) return (m[1] + 'T').toUpperCase();
+    return s;
+  }
+
+  function _ffTCToDate(ts) {
+    if (!ts) return null;
+    if (ts instanceof Date) return Number.isFinite(ts.getTime()) ? ts : null;
+    if (typeof ts.toDate === 'function') {
+      try {
+        const d = ts.toDate();
+        return d instanceof Date && Number.isFinite(d.getTime()) ? d : null;
+      } catch (_) { return null; }
+    }
+    if (typeof ts === 'number' || typeof ts === 'string') {
+      const d = new Date(ts);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+    return null;
+  }
+
+  /** Wall-clock parts of an instant in salon TZ. */
+  function _ffTCLocalPartsInSalon(date) {
+    const tz = _ffTCSalonTimeZone();
+    const d = date instanceof Date ? date : _ffTCToDate(date);
+    if (!d) return null;
+    try {
+      const fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+        timeZoneName: 'short',
+      });
+      const p = {};
+      for (const part of fmt.formatToParts(d)) p[part.type] = part.value;
+      let hh = parseInt(p.hour, 10);
+      if (hh === 24) hh = 0;
+      const mm = parseInt(p.minute, 10);
+      return {
+        timeZone: tz,
+        dateKey: `${p.year}-${p.month}-${p.day}`,
+        year: parseInt(p.year, 10),
+        month: parseInt(p.month, 10),
+        day: parseInt(p.day, 10),
+        hour: hh,
+        minute: mm,
+        tzLabel: _ffTCShortTzLabel(p.timeZoneName),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Convert salon-local civil wall time (YYYY-MM-DD + HH:mm) → Date (UTC ms).
+   * Same iterative offset correction used server-side for schedule windows.
+   */
+  function _ffTCZonedWallToDate(dateKey, hhmm) {
+    const tz = _ffTCSalonTimeZone();
+    const key = String(dateKey || '').trim();
+    const hm = _ffTCNormalizeHHMM(hhmm);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || !hm) return null;
+    const y = parseInt(key.slice(0, 4), 10);
+    const mo = parseInt(key.slice(5, 7), 10);
+    const d = parseInt(key.slice(8, 10), 10);
+    const h = parseInt(hm.slice(0, 2), 10);
+    const mi = parseInt(hm.slice(3, 5), 10);
+    const wantMins = h * 60 + mi;
+    let utcMs = Date.UTC(y, mo - 1, d, h, mi, 0, 0);
+    for (let i = 0; i < 4; i++) {
+      const parts = _ffTCLocalPartsInSalon(new Date(utcMs));
+      if (!parts) break;
+      const [py, pm, pd] = parts.dateKey.split('-').map(Number);
+      const dayDiffMs = Date.UTC(y, mo - 1, d) - Date.UTC(py, pm - 1, pd);
+      const minDiffMs = (wantMins - (parts.hour * 60 + parts.minute)) * 60 * 1000;
+      const adjust = dayDiffMs + minDiffMs;
+      if (adjust === 0) break;
+      utcMs += adjust;
+    }
+    const out = new Date(utcMs);
+    return Number.isFinite(out.getTime()) ? out : null;
+  }
+
+  /**
+   * Format an instant in salon TZ.
+   * opts: { withDate, withSeconds, withTz (default true), fallback }
+   * Example: "1:45 PM ET" or "Wed, Aug 5, 1:45 PM ET"
+   */
+  function _ffTCFormatInSalonTz(ts, opts) {
+    const o = opts || {};
+    const fallback = o.fallback != null ? String(o.fallback) : '-';
+    const d = _ffTCToDate(ts);
+    if (!d) return fallback;
+    const tz = _ffTCSalonTimeZone();
+    try {
+      const prefer24 = _ffTCPrefers24HourInputs();
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        ...(o.withDate ? { weekday: 'short', month: 'short', day: 'numeric' } : {}),
+        hour: 'numeric',
+        minute: '2-digit',
+        ...(o.withSeconds ? { second: '2-digit' } : {}),
+        hour12: !prefer24,
+        timeZoneName: 'short',
+      }).formatToParts(d);
+      const map = {};
+      for (const p of parts) map[p.type] = p.value;
+      let timeCore;
+      if (prefer24) {
+        let hh = parseInt(map.hour, 10);
+        if (hh === 24) hh = 0;
+        timeCore = String(hh).padStart(2, '0') + ':' + String(map.minute || '00').padStart(2, '0');
+        if (o.withSeconds) timeCore += ':' + String(map.second || '00').padStart(2, '0');
+      } else {
+        timeCore = `${map.hour}:${map.minute}${o.withSeconds ? (':' + map.second) : ''} ${map.dayPeriod || ''}`.replace(/\s+/g, ' ').trim();
+      }
+      const tzLab = (o.withTz === false) ? '' : _ffTCShortTzLabel(map.timeZoneName);
+      const dateCore = o.withDate
+        ? `${map.weekday}, ${map.month} ${map.day}`
+        : '';
+      if (dateCore && tzLab) return `${dateCore}, ${timeCore} ${tzLab}`;
+      if (dateCore) return `${dateCore}, ${timeCore}`;
+      if (tzLab) return `${timeCore} ${tzLab}`;
+      return timeCore;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function _ffTCFormatTime(ts) {
+    return _ffTCFormatInSalonTz(ts, { withTz: true, fallback: '-' });
   }
 
   function _ffTCPrefers24HourInputs() {
@@ -39706,9 +39846,11 @@ function initializeUserProfileMenu() {
     }
   }
 
+  /** HH:mm in salon TZ (for Manage edit fields). */
   function _ffTCHHMMFromDate(d) {
-    if (!(d instanceof Date) || !isFinite(d.getTime())) return '';
-    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const parts = _ffTCLocalPartsInSalon(d);
+    if (!parts) return '';
+    return String(parts.hour).padStart(2, '0') + ':' + String(parts.minute).padStart(2, '0');
   }
 
   function _ffTCNormalizeHHMM(value) {
@@ -39723,10 +39865,13 @@ function initializeUserProfileMenu() {
 
   function _ffTCFormatDay(ts) {
     try {
-      const d = (ts && typeof ts.toDate === 'function') ? ts.toDate()
-              : (ts instanceof Date ? ts : null);
-      if (!d) return '-';
-      return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+      const parts = _ffTCLocalPartsInSalon(ts);
+      if (!parts) return '-';
+      const d = _ffTCToDate(ts);
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: parts.timeZone,
+        weekday: 'short', month: 'short', day: 'numeric',
+      }).format(d);
     } catch (_) { return '-'; }
   }
 
@@ -40052,14 +40197,20 @@ function initializeUserProfileMenu() {
       </div>
     `;
 
-    // --- live clock ----------------------------------------------------
+    // --- live clock (salon TZ, not device TZ) --------------------------
     const timeEl = container.querySelector('#tcKioskClockTime');
     const dateEl = container.querySelector('#tcKioskClockDate');
     function tick() {
       try {
         const now = new Date();
-        if (timeEl) timeEl.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-        if (dateEl) dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+        if (timeEl) timeEl.textContent = _ffTCFormatInSalonTz(now, { withTz: true, fallback: '' });
+        if (dateEl) {
+          const tz = _ffTCSalonTimeZone();
+          dateEl.textContent = new Intl.DateTimeFormat('en-US', {
+            timeZone: tz,
+            weekday: 'long', month: 'long', day: 'numeric',
+          }).format(now);
+        }
       } catch (_) {}
     }
     tick();
@@ -40610,12 +40761,7 @@ function initializeUserProfileMenu() {
       const formatAllowedAtFriendly = (iso) => {
         try {
           if (!iso) return '';
-          const d = new Date(iso);
-          if (!Number.isFinite(d.getTime())) return '';
-          return d.toLocaleString(undefined, {
-            weekday: 'short', month: 'short', day: 'numeric',
-            hour: 'numeric', minute: '2-digit',
-          });
+          return _ffTCFormatInSalonTz(iso, { withDate: true, withTz: true, fallback: '' });
         } catch (_) { return ''; }
       };
       const scheduleFriendlyMessage = (err) => {
@@ -40624,8 +40770,14 @@ function initializeUserProfileMenu() {
         if (reason === 'too_early_for_shift') {
           const when = formatAllowedAtFriendly(details.allowedAt);
           const start = details.linkedShiftStart ? String(details.linkedShiftStart) : '';
+          const tzLab = (() => {
+            try {
+              const p = _ffTCLocalPartsInSalon(new Date());
+              return (p && p.tzLabel) ? p.tzLabel : '';
+            } catch (_) { return ''; }
+          })();
           if (when) return `Too early to clock in. You can clock in starting ${when}.`;
-          if (start) return `Too early to clock in. Your shift starts at ${start}.`;
+          if (start) return `Too early to clock in. Your shift starts at ${start}${tzLab ? (' ' + tzLab) : ''}.`;
           return 'Too early to clock in for your scheduled shift.';
         }
         if (reason === 'no_scheduled_shift') {
@@ -40848,9 +41000,33 @@ function initializeUserProfileMenu() {
   // A period id + optional custom YYYY-MM-DD pair resolves into the
   // inclusive/exclusive {from, to} window the list query should use.
   // `to === null` means "up to now".
+  function _ffTCAddDaysToDateKey(dateKey, days) {
+    const key = String(dateKey || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+    const y = parseInt(key.slice(0, 4), 10);
+    const mo = parseInt(key.slice(5, 7), 10);
+    const d = parseInt(key.slice(8, 10), 10);
+    const utc = new Date(Date.UTC(y, mo - 1, d + Number(days || 0), 12, 0, 0));
+    return utc.getUTCFullYear() + '-'
+      + String(utc.getUTCMonth() + 1).padStart(2, '0') + '-'
+      + String(utc.getUTCDate()).padStart(2, '0');
+  }
+
+  function _ffTCWeekStartKey(dateKey, weekStartsOn) {
+    const key = String(dateKey || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+    const y = parseInt(key.slice(0, 4), 10);
+    const mo = parseInt(key.slice(5, 7), 10);
+    const d = parseInt(key.slice(8, 10), 10);
+    const utcNoon = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+    const day = utcNoon.getUTCDay(); // 0=Sun
+    const startsSunday = String(weekStartsOn || '').toLowerCase() === 'sunday';
+    const diff = startsSunday ? -day : (day === 0 ? -6 : 1 - day);
+    return _ffTCAddDaysToDateKey(key, diff);
+  }
+
   function _ffTCComputePeriodRange(period, customFrom, customTo) {
     const now = new Date();
-    const startOfDay = (d) => { const c = new Date(d); c.setHours(0,0,0,0); return c; };
     // Prefer the live salon Preferences value (single source of truth for
     // week start across the app). Fall back to the cached TC doc for
     // backwards compatibility if preferences haven't loaded yet.
@@ -40858,42 +41034,37 @@ function initializeUserProfileMenu() {
     const wwStart = (wwPrefRaw === 'sunday' || wwPrefRaw === 'monday')
       ? wwPrefRaw
       : ((window.__ffTCCachedSettings && window.__ffTCCachedSettings.workweekStartDay) || 'monday');
-    const startOfWorkweek = (d) => {
-      const c = startOfDay(d);
-      const day = c.getDay(); // 0=Sun ... 6=Sat
-      const wwIdx = wwStart === 'sunday' ? 0 : 1;
-      const diff = (day - wwIdx + 7) % 7;
-      c.setDate(c.getDate() - diff);
-      return c;
-    };
-    if (period === 'today') {
-      const from = startOfDay(now);
-      const to = new Date(from.getTime() + 86400000);
+    // Day/week/month boundaries in salon TZ (not device TZ).
+    const nowParts = _ffTCLocalPartsInSalon(now);
+    const todayKey = (nowParts && nowParts.dateKey) || null;
+    const startOfSalonDay = (dateKey) => _ffTCZonedWallToDate(dateKey, '00:00');
+    if (period === 'today' && todayKey) {
+      const from = startOfSalonDay(todayKey);
+      const to = startOfSalonDay(_ffTCAddDaysToDateKey(todayKey, 1));
       return { from, to, label: 'Today' };
     }
-    if (period === 'week') {
-      const from = startOfWorkweek(now);
-      const to = new Date(from.getTime() + 7 * 86400000);
-      return { from, to, label: 'This week' };
-    }
-    if (period === 'lastweek') {
-      const thisStart = startOfWorkweek(now);
-      const from = new Date(thisStart.getTime() - 7 * 86400000);
-      return { from, to: thisStart, label: 'Last week' };
-    }
-    if (period === 'last2weeks') {
-      const thisStart = startOfWorkweek(now);
-      const from = new Date(thisStart.getTime() - 14 * 86400000);
+    if ((period === 'week' || period === 'lastweek' || period === 'last2weeks') && todayKey) {
+      const thisStartKey = _ffTCWeekStartKey(todayKey, wwStart);
+      const thisStart = startOfSalonDay(thisStartKey);
+      if (period === 'week') {
+        const to = startOfSalonDay(_ffTCAddDaysToDateKey(thisStartKey, 7));
+        return { from: thisStart, to, label: 'This week' };
+      }
+      if (period === 'lastweek') {
+        const from = startOfSalonDay(_ffTCAddDaysToDateKey(thisStartKey, -7));
+        return { from, to: thisStart, label: 'Last week' };
+      }
+      const from = startOfSalonDay(_ffTCAddDaysToDateKey(thisStartKey, -14));
       return { from, to: thisStart, label: 'Last 2 weeks' };
     }
-    if (period === 'month') {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (period === 'month' && todayKey) {
+      const monthKey = todayKey.slice(0, 8) + '01';
+      const from = startOfSalonDay(monthKey);
       return { from, to: null, label: 'This month' };
     }
     if (period === 'custom' && customFrom && customTo) {
-      const from = new Date(customFrom + 'T00:00:00');
-      const toDate = new Date(customTo + 'T00:00:00');
-      const to = new Date(toDate.getTime() + 86400000);
+      const from = startOfSalonDay(customFrom);
+      const to = startOfSalonDay(_ffTCAddDaysToDateKey(customTo, 1));
       return { from, to, label: 'Custom' };
     }
     return { from: null, to: null, label: 'All time' };
@@ -42061,22 +42232,25 @@ function initializeUserProfileMenu() {
                : (ci instanceof Date ? ci : now);
         outDate = (co && typeof co.toDate === 'function') ? co.toDate()
                 : (co instanceof Date ? co : null);
-        // Build YYYY-MM-DD in the user's local time-zone (input[type=date] is local).
-        const y = inDate.getFullYear();
-        const m = String(inDate.getMonth() + 1).padStart(2, '0');
-        const d = String(inDate.getDate()).padStart(2, '0');
-        dayISO = `${y}-${m}-${d}`;
+        // Day key in salon TZ (not device TZ) so Costa Rica devices edit NY days.
+        const inParts = _ffTCLocalPartsInSalon(inDate);
+        dayISO = (inParts && inParts.dateKey) ? inParts.dateKey : dayISO;
         locPrefill = String(entry.locationId || locPrefill);
         staffPrefill = String(entry.staffId || '');
         notesPrefill = typeof entry.notes === 'string' ? entry.notes : '';
       } catch (_) {}
+    } else {
+      const nowParts = _ffTCLocalPartsInSalon(now);
+      if (nowParts && nowParts.dateKey) dayISO = nowParts.dateKey;
     }
-    const inH12 = ((inDate.getHours() + 11) % 12) + 1;
-    const inMins = String(inDate.getMinutes()).padStart(2, '0');
-    const inAmPm = inDate.getHours() >= 12 ? 'PM' : 'AM';
-    const outH12 = outDate ? (((outDate.getHours() + 11) % 12) + 1) : '';
-    const outMins = outDate ? String(outDate.getMinutes()).padStart(2, '0') : '';
-    const outAmPm = outDate ? (outDate.getHours() >= 12 ? 'PM' : 'AM') : '';
+    const inPartsUi = _ffTCLocalPartsInSalon(inDate) || { hour: 0, minute: 0 };
+    const outPartsUi = outDate ? _ffTCLocalPartsInSalon(outDate) : null;
+    const inH12 = ((inPartsUi.hour + 11) % 12) + 1;
+    const inMins = String(inPartsUi.minute).padStart(2, '0');
+    const inAmPm = inPartsUi.hour >= 12 ? 'PM' : 'AM';
+    const outH12 = outPartsUi ? (((outPartsUi.hour + 11) % 12) + 1) : '';
+    const outMins = outPartsUi ? String(outPartsUi.minute).padStart(2, '0') : '';
+    const outAmPm = outPartsUi ? (outPartsUi.hour >= 12 ? 'PM' : 'AM') : '';
     const prefers24h = _ffTCPrefers24HourInputs();
     const inHHMM = _ffTCHHMMFromDate(inDate);
     const outHHMM = outDate ? _ffTCHHMMFromDate(outDate) : '';
@@ -42190,8 +42364,6 @@ function initializeUserProfileMenu() {
 
   function _ffTCBuildDateFromParts(dayISO, h12, mm, ampm) {
     if (!dayISO || !h12 || mm == null || !ampm) return null;
-    const [y, m, d] = String(dayISO).split('-').map((x) => parseInt(x, 10));
-    if (!y || !m || !d) return null;
     let h = parseInt(h12, 10);
     const mi = parseInt(mm, 10);
     if (!isFinite(h) || !isFinite(mi)) return null;
@@ -42202,18 +42374,14 @@ function initializeUserProfileMenu() {
       if (ampm === 'PM' && h !== 12) h += 12;
       if (ampm === 'AM' && h === 12) h = 0;
     }
-    const dt = new Date(y, m - 1, d, h, mi, 0, 0);
-    return isFinite(dt.getTime()) ? dt : null;
+    // Interpret wall clock as salon-local (not device-local).
+    return _ffTCZonedWallToDate(dayISO, String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0'));
   }
 
   function _ffTCBuildDateFromHHMM(dayISO, hhmm) {
     const normalized = _ffTCNormalizeHHMM(hhmm);
     if (!dayISO || !normalized) return null;
-    const [y, m, d] = String(dayISO).split('-').map((x) => parseInt(x, 10));
-    const [h, mi] = normalized.split(':').map((x) => parseInt(x, 10));
-    if (!y || !m || !d || !Number.isFinite(h) || !Number.isFinite(mi)) return null;
-    const dt = new Date(y, m - 1, d, h, mi, 0, 0);
-    return isFinite(dt.getTime()) ? dt : null;
+    return _ffTCZonedWallToDate(dayISO, normalized);
   }
 
   async function _ffTCSubmitAddTimeCard(drawer) {
