@@ -272,10 +272,28 @@ const snapshotOnly = sched.evaluateScheduleClockOut({
 });
 check("S2 snapshot end drives late flag", snapshotOnly.lateClockOutFlag === true);
 
+// S5: publish gate + defaults still hold under enforcement-on payloads.
+const pubGate = sched.evaluateScheduleClockIn({
+  enforcement: sched.normalizeScheduleEnforcement({
+    enabled: true,
+    earlyClockInMinutes: 0,
+    lateClockOutMinutes: 0,
+    noShiftPolicy: "block",
+  }),
+  weekPublished: false,
+  shift,
+  nowMs: Date.parse("2026-08-05T10:00:00.000Z"),
+  timeZone: "America/New_York",
+});
+check("S5 unpublished week never blocks", pubGate.ok === true && pubGate.enforce === false);
+
+const defPolicy = sched.normalizeScheduleEnforcement({ enabled: true });
+check("S5 default noShiftPolicy remains allow", defPolicy.noShiftPolicy === "allow");
+
 console.log("");
 if (failures) {
   console.error(`FAILED: ${failures} check(s)`);
   process.exit(1);
 }
-console.log("All S0/S2 time-clock-schedule checks passed.");
+console.log("All S0/S2/S5 time-clock-schedule checks passed.");
 process.exit(0);

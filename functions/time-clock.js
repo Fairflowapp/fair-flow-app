@@ -1572,6 +1572,15 @@ async function timeClockManageEntryHandler(data, context) {
     } else if (reopen || patch.status === "open") {
       patch.durationMinutes = null;
     }
+    // Manager correction of punch times clears the late-clock-out review flag
+    // (S5). Snapshot shift fields are left intact for audit.
+    if (
+      current.lateClockOutFlag === true &&
+      (changes.clockOutAt || changes.clockInAt || reopen || patch.status === "void")
+    ) {
+      patch.lateClockOutFlag = false;
+      changes.lateClockOutFlag = { from: true, to: false };
+    }
   }
 
   if (typeof data.locationId === "string" && data.locationId.trim()) {

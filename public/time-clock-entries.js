@@ -52,6 +52,14 @@
  *             // Snapshot taken at clock-in: did a planned shift exist for
  *             // this staff member today? Never recomputed from live data.
  *             // If scheduling data later changes, this boolean does NOT.
+ *     linkedShiftStart / linkedShiftEnd: "HH:mm" | null,
+ *             // Wall-clock snapshot of the published assignment (S1).
+ *             // Clock-out late flag uses THESE, not live schedule.
+ *     linkedShiftDateKey: "YYYY-MM-DD" | null,
+ *             // Salon-local date key for the snapshot (S1).
+ *     lateClockOutFlag: boolean,
+ *             // Set on clock-out when out > linkedShiftEnd + Y (S2).
+ *             // Cleared when a manager edits punch times (S5).
  *
  *     // ── Metadata (future-friendly, optional today) ─────────────────
  *     source: "manual" | "kiosk" | "admin" | "auto",
