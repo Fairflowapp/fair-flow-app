@@ -67,6 +67,7 @@ if (!admin.apps.length) admin.initializeApp();
 // to callable clients under the org policy.
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const tcSchedule = require("./time-clock-schedule");
 
 const REGION = "us-central1";
 
@@ -510,17 +511,21 @@ async function uploadPunchPhoto({ salonId, entryId, direction, buffer }) {
 }
 
 /**
- * Verify the quick kiosk photo-override: a MANAGER's PIN + mandatory reason,
- * entered on the kiosk without leaving the confirm screen. Shares the kiosk
+ * Verify a kiosk manager-PIN override (photo or schedule). Shares the kiosk
  * PIN throttle. Approver must be owner/admin/manager or hold
  * time_clock_manage, and cannot be the staff member being punched.
  * Same PIN safety rules as the employee PIN: never logged, never echoed.
+ *
+ * @param {string} reasonPrefix — "photo" | "schedule" (shapes details.reason codes)
  */
-async function verifyPhotoManagerOverride({ salonId, kioskId, raw, targetStaffId }) {
+async function verifyKioskManagerPinOverride({
+  salonId, kioskId, raw, targetStaffId, reasonPrefix,
+}) {
+  const prefix = trimStr(reasonPrefix) || "photo";
   const reason = trimStr(raw && raw.reason).slice(0, PHOTO_OVERRIDE_REASON_MAX_CHARS);
   if (!reason) {
     throw new HttpsError("invalid-argument", "An override reason is required.", {
-      reason: "photo_override_reason_required",
+      reason: `${prefix}_override_reason_required`,
     });
   }
   await assertPinThrottleOpen(salonId, kioskId);
@@ -540,16 +545,151 @@ async function verifyPhotoManagerOverride({ salonId, kioskId, raw, targetStaffId
   if (!canApprove) {
     // Correct PIN, insufficient rights — not a throttle event.
     throw new HttpsError("permission-denied", "This PIN does not belong to a manager.", {
-      reason: "photo_override_not_manager",
+      reason: `${prefix}_override_not_manager`,
     });
   }
   if (match.staffId === trimStr(targetStaffId)) {
-    throw new HttpsError("permission-denied", "You cannot approve a photo override for your own punch.", {
-      reason: "photo_override_self",
-    });
+    throw new HttpsError(
+      "permission-denied",
+      prefix === "schedule"
+        ? "You cannot approve a schedule override for your own punch."
+        : "You cannot approve a photo override for your own punch.",
+      { reason: `${prefix}_override_self` },
+    );
   }
   await clearPinFailures(salonId, kioskId);
   return { managerStaffId: match.staffId, reason };
+}
+
+/** @deprecated name kept for call sites — delegates to verifyKioskManagerPinOverride. */
+async function verifyPhotoManagerOverride(args) {
+  return verifyKioskManagerPinOverride({ ...args, reasonPrefix: "photo" });
+}
+
+/** Schedule enforcement block from salons/{salonId}/settings/timeClock. */
+async function loadScheduleEnforcement(salonId) {
+  try {
+    const snap = await db().doc(`salons/${salonId}/settings/timeClock`).get();
+    const raw = snap.exists ? snap.get("scheduleEnforcement") : null;
+    return tcSchedule.normalizeScheduleEnforcement(raw);
+  } catch (e) {
+    console.warn("[timeClockPunch] loadScheduleEnforcement failed — treating as disabled", e);
+    return tcSchedule.normalizeScheduleEnforcement(null);
+  }
+}
+
+/**
+ * Resolve schedule snapshot + gate for clock-in.
+ * Manager personal override and verified kiosk scheduleOverride bypass the
+ * gate but still receive the snapshot when a published shift exists.
+ */
+async function resolveClockInScheduleGate({
+  salonId, locationId, staffId, callerKind, kioskId, data, isPersonalOverride,
+}) {
+  const enforcement = await loadScheduleEnforcement(salonId);
+  const empty = {
+    enforcement,
+    snapshot: {
+      linkedShiftId: null,
+      scheduled: false,
+      linkedShiftStart: null,
+      linkedShiftEnd: null,
+      linkedShiftDateKey: null,
+    },
+    audit: {},
+  };
+  if (!enforcement.enabled) return empty;
+
+  const nowMs = Date.now();
+  const ctx = await tcSchedule.resolveScheduleContextForPunch(db(), {
+    salonId,
+    locationId,
+    staffId,
+    nowMs,
+    enforcement,
+  });
+  const decision = ctx.decision || {};
+
+  const snapshot = {
+    linkedShiftId: decision.scheduled === true ? (decision.linkedShiftId || null) : null,
+    scheduled: decision.scheduled === true,
+    linkedShiftStart: decision.scheduled === true ? (decision.linkedShiftStart || null) : null,
+    linkedShiftEnd: decision.scheduled === true ? (decision.linkedShiftEnd || null) : null,
+    linkedShiftDateKey: decision.scheduled === true ? (ctx.dateKey || null) : null,
+  };
+
+  // too_early still carries shift snapshot fields even though ok === false.
+  if (decision.reason === "too_early_for_shift" && decision.linkedShiftStart) {
+    snapshot.linkedShiftId = decision.linkedShiftId || null;
+    snapshot.scheduled = true;
+    snapshot.linkedShiftStart = decision.linkedShiftStart || null;
+    snapshot.linkedShiftEnd = decision.linkedShiftEnd || null;
+    snapshot.linkedShiftDateKey = ctx.dateKey || null;
+  }
+
+  if (decision.ok !== false) {
+    return { enforcement, snapshot, audit: {}, decision, ctx };
+  }
+
+  // Personal-app manager override bypasses with full audit.
+  if (isPersonalOverride) {
+    return {
+      enforcement,
+      snapshot,
+      decision,
+      ctx,
+      audit: {
+        scheduleEnforcementBypassed: true,
+        scheduleRejectReason: decision.reason || null,
+        allowedAt: decision.allowedAt || null,
+      },
+    };
+  }
+
+  // Kiosk: photo-override pattern (manager PIN + reason).
+  const scheduleOverrideRaw =
+    data.scheduleOverride && typeof data.scheduleOverride === "object"
+      ? data.scheduleOverride
+      : null;
+  if (callerKind === "kiosk" && scheduleOverrideRaw) {
+    const ov = await verifyKioskManagerPinOverride({
+      salonId,
+      kioskId,
+      raw: scheduleOverrideRaw,
+      targetStaffId: staffId,
+      reasonPrefix: "schedule",
+    });
+    return {
+      enforcement,
+      snapshot,
+      decision,
+      ctx,
+      audit: {
+        scheduleEnforcementBypassed: true,
+        scheduleRejectReason: decision.reason || null,
+        allowedAt: decision.allowedAt || null,
+        scheduleOverride: { managerStaffId: ov.managerStaffId, reason: ov.reason },
+      },
+      scheduleOverrideReason: ov.reason,
+    };
+  }
+
+  const details = {
+    reason: decision.reason || "schedule_blocked",
+    allowedAt: decision.allowedAt || null,
+    linkedShiftStart: decision.linkedShiftStart || null,
+    linkedShiftEnd: decision.linkedShiftEnd || null,
+    scheduleOverrideRequired: callerKind === "kiosk",
+  };
+  let message = "Clock-in is not allowed for the current schedule.";
+  if (decision.reason === "too_early_for_shift") {
+    message = decision.allowedAt
+      ? `Too early to clock in. You can clock in starting ${decision.allowedAt}.`
+      : "Too early to clock in for your scheduled shift.";
+  } else if (decision.reason === "no_scheduled_shift") {
+    message = "No scheduled shift for today at this location. Ask a manager to override.";
+  }
+  throw new HttpsError("failed-precondition", message, details);
 }
 
 /**
@@ -775,6 +915,8 @@ function durationMinutesBetween(clockInTs, clockOutTs) {
 exports.timeClockPunch = onCall({ region: REGION }, async (req) =>
   timeClockPunchHandler(req.data || {}, { auth: req.auth, rawRequest: req.rawRequest }),
 );
+// Exported for staging headless smokes (S1+).
+exports.timeClockPunchHandler = timeClockPunchHandler;
 
 async function timeClockPunchHandler(data, context) {
   const caller = classifyCaller(context.auth);
@@ -984,6 +1126,23 @@ async function timeClockPunchHandler(data, context) {
         { reason: "already_open", entryId: open.id },
       );
     }
+
+    // Schedule enforcement (S1). Opt-in via settings/timeClock.scheduleEnforcement.
+    // Personal manager override + kiosk scheduleOverride bypass the gate; both
+    // still receive a published-shift snapshot when one exists.
+    const scheduleGate = await resolveClockInScheduleGate({
+      salonId,
+      locationId,
+      staffId,
+      callerKind: caller.kind,
+      kioskId,
+      data,
+      isPersonalOverride: isOverride,
+    });
+    const scheduleSnap = scheduleGate.snapshot || {};
+    const scheduleAudit = scheduleGate.audit || {};
+    const scheduleOverrideReason = scheduleGate.scheduleOverrideReason || null;
+
     // Entry id is generated up-front so the photo (uploaded first) and the
     // entry share it — the punch is only recorded after a successful upload.
     const docRef = entriesCol.doc();
@@ -998,9 +1157,13 @@ async function timeClockPunchHandler(data, context) {
       clockOutAt: null,
       // state
       status: "open",
-      // schedule linkage snapshot (unchanged semantics)
-      linkedShiftId: null,
-      scheduled: false,
+      // schedule linkage snapshot (S1 — source of truth for late clock-out)
+      linkedShiftId: scheduleSnap.linkedShiftId || null,
+      scheduled: scheduleSnap.scheduled === true,
+      linkedShiftStart: scheduleSnap.linkedShiftStart || null,
+      linkedShiftEnd: scheduleSnap.linkedShiftEnd || null,
+      linkedShiftDateKey: scheduleSnap.linkedShiftDateKey || null,
+      lateClockOutFlag: false,
       // metadata
       source,
       notes,
@@ -1013,6 +1176,7 @@ async function timeClockPunchHandler(data, context) {
       clockInGeo: geo,
       clockInByUid: caller.uid,
       overrideReason,
+      ...(scheduleOverrideReason ? { scheduleOverrideReason } : {}),
       // kiosk photo (Stage B)
       photoInPath: null,
       photoOutPath: null,
@@ -1026,11 +1190,24 @@ async function timeClockPunchHandler(data, context) {
       updatedBy: caller.uid,
     };
     await docRef.set(payload);
-    await appendAuditEvent(docRef, "clock_in", { action: "clock_in", ...auditBase, ...photo.audit });
+    await appendAuditEvent(docRef, "clock_in", {
+      action: "clock_in",
+      ...auditBase,
+      ...photo.audit,
+      ...scheduleAudit,
+      scheduled: payload.scheduled,
+      linkedShiftId: payload.linkedShiftId,
+      linkedShiftStart: payload.linkedShiftStart,
+      linkedShiftEnd: payload.linkedShiftEnd,
+      linkedShiftDateKey: payload.linkedShiftDateKey,
+      ...(scheduleOverrideReason ? { scheduleOverrideReason } : {}),
+    });
     if (photo.failed) await alertPhotoFailed(docRef.id, "in");
     console.log("[timeClockPunch] clock_in", {
       salonId, staffId, locationId, entryId: docRef.id, performedAs, source, kioskId, hasGeo: !!geo,
       hasPhoto: !!photo.entry.photoInPath, photoFailed: photo.failed,
+      scheduled: payload.scheduled,
+      scheduleBypassed: !!scheduleAudit.scheduleEnforcementBypassed,
     });
     return { ok: true, action: "in", entryId: docRef.id, staffId };
   }
