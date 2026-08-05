@@ -732,24 +732,8 @@ async function resolveKioskPhotoPlan({ salonId, kioskId, data, staffId }) {
   return { policy, buffer: null, error, override: null };
 }
 
-/**
- * Push alert to managers when a punch was recorded without its photo.
- * Idempotent per entry+direction (marker doc created BEFORE the FCM attempt,
- * same trade-off as writeups sendWriteupPushOnce). Recipients: owner/admin
- * staff and time_clock_manage holders — the same audience that can read the
- * photos. Every error here is non-fatal; the punch is already recorded.
- */
-async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
-  const markerRef = db().doc(`salons/${salonId}/timeClockPhotoAlerts/${entryId}_${direction}`);
-  try {
-    await markerRef.create({
-      entryId, direction, staffId, createdAt: serverNow(),
-    });
-  } catch (err) {
-    if (err && err.code === 6) return { skipped: "already_attempted" }; // ALREADY_EXISTS
-    throw err;
-  }
-
+/** Collect FCM tokens for owner/admin + time_clock_manage staff. */
+async function loadTimeClockManagerPushTokens(salonId) {
   const staffSnap = await db().collection(`salons/${salonId}/staff`).get();
   const managerIds = new Set();
   staffSnap.forEach((d) => {
@@ -762,7 +746,7 @@ async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
       (s.permissions && typeof s.permissions === "object" && s.permissions.time_clock_manage === true);
     if (isMgr) managerIds.add(d.id);
   });
-  if (!managerIds.size) return { skipped: "no_managers" };
+  if (!managerIds.size) return { tokens: [], skipped: "no_managers" };
 
   const tokensSnap = await db()
     .collection(`salons/${salonId}/staffDeviceTokens`)
@@ -776,16 +760,40 @@ async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
         .filter(Boolean),
     ),
   ];
-  if (!tokens.length) return { skipped: "no_tokens" };
+  if (!tokens.length) return { tokens: [], skipped: "no_tokens" };
+  return { tokens, skipped: null };
+}
 
-  // Deliberately generic — no staff name or entry details in the push.
+/**
+ * Idempotent manager push (marker created BEFORE the FCM attempt).
+ * Body/title stay generic — no staff names in the notification.
+ */
+async function sendTimeClockManagerAlert({
+  salonId, entryId, staffId, markerPath, dataType, body, markerFields,
+}) {
+  const markerRef = db().doc(markerPath);
+  try {
+    await markerRef.create({
+      entryId,
+      staffId,
+      createdAt: serverNow(),
+      ...(markerFields && typeof markerFields === "object" ? markerFields : {}),
+    });
+  } catch (err) {
+    if (err && err.code === 6) return { skipped: "already_attempted" }; // ALREADY_EXISTS
+    throw err;
+  }
+
+  const { tokens, skipped } = await loadTimeClockManagerPushTokens(salonId);
+  if (skipped) return { skipped };
+
   const response = await admin.messaging().sendEachForMulticast({
     tokens: tokens.slice(0, 500),
     notification: {
       title: "Fair Flow — Time Clock",
-      body: `Photo capture failed during a kiosk clock-${direction}. Open Manage Time Cards to review.`,
+      body,
     },
-    data: { type: "time_clock_photo_failed", salonId, entryId },
+    data: { type: dataType, salonId, entryId },
     android: {
       priority: "high",
       notification: { channelId: "fairflow_alerts", defaultSound: true },
@@ -796,6 +804,40 @@ async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
     },
   });
   return { successCount: response.successCount, failureCount: response.failureCount };
+}
+
+/**
+ * Push alert to managers when a punch was recorded without its photo.
+ * Idempotent per entry+direction (marker doc created BEFORE the FCM attempt,
+ * same trade-off as writeups sendWriteupPushOnce). Recipients: owner/admin
+ * staff and time_clock_manage holders — the same audience that can read the
+ * photos. Every error here is non-fatal; the punch is already recorded.
+ */
+async function sendPhotoFailedAlert({ salonId, entryId, direction, staffId }) {
+  return sendTimeClockManagerAlert({
+    salonId,
+    entryId,
+    staffId,
+    markerPath: `salons/${salonId}/timeClockPhotoAlerts/${entryId}_${direction}`,
+    dataType: "time_clock_photo_failed",
+    body: `Photo capture failed during a kiosk clock-${direction}. Open Manage Time Cards to review.`,
+    markerFields: { direction },
+  });
+}
+
+/**
+ * Push when clock-out is later than (linkedShiftEnd + Y). Never blocks the
+ * punch — alert is best-effort after the entry is already closed.
+ */
+async function sendLateClockOutAlert({ salonId, entryId, staffId }) {
+  return sendTimeClockManagerAlert({
+    salonId,
+    entryId,
+    staffId,
+    markerPath: `salons/${salonId}/timeClockLateClockOutAlerts/${entryId}`,
+    dataType: "time_clock_late_clock_out",
+    body: "Late clock-out recorded. Open Manage Time Cards to review.",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1259,12 +1301,41 @@ async function timeClockPunchHandler(data, context) {
     throw new HttpsError("failed-precondition", "Clock-out time is earlier than clock-in time.");
   }
 
+  // Late clock-out flag (S2): NEVER blocks out. Uses clock-in snapshot only.
+  let lateClockOutFlag = false;
+  let lateClockOutAudit = {};
+  try {
+    const enforcement = await loadScheduleEnforcement(salonId);
+    const tzInfo = await tcSchedule.resolveSalonTimeZone(db(), salonId, locationId);
+    const lateDecision = tcSchedule.evaluateScheduleClockOut({
+      enforcement,
+      scheduled: entry.scheduled === true,
+      linkedShiftEnd: entry.linkedShiftEnd || null,
+      linkedShiftStart: entry.linkedShiftStart || null,
+      dateKey: entry.linkedShiftDateKey || null,
+      nowMs: clockOutTs.toMillis(),
+      timeZone: tzInfo.timeZone,
+    });
+    lateClockOutFlag = lateDecision.lateClockOutFlag === true;
+    if (lateClockOutFlag) {
+      lateClockOutAudit = {
+        lateClockOutFlag: true,
+        lateMinutes: lateDecision.lateMinutes || null,
+        shiftEndMs: lateDecision.shiftEndMs || null,
+        thresholdMs: lateDecision.thresholdMs || null,
+      };
+    }
+  } catch (e) {
+    console.warn("[timeClockPunch] late clock-out eval failed (non-fatal)", e && e.message);
+  }
+
   const entryRef = entriesCol.doc(open.id);
   const photo = await settlePunchPhoto(open.id, "out");
   const patch = {
     status: "closed",
     clockOutAt: clockOutTs,
     durationMinutes: durationMinutesBetween(clockInTs, clockOutTs),
+    lateClockOutFlag,
     clockOutDeviceId: caller.kind === "kiosk" ? null : deviceId,
     clockOutKioskId: kioskId,
     clockOutPlatform: platform,
@@ -1278,12 +1349,25 @@ async function timeClockPunchHandler(data, context) {
   };
   if (notes != null) patch.notes = notes;
   await entryRef.update(patch);
-  await appendAuditEvent(entryRef, "clock_out", { action: "clock_out", ...auditBase, ...photo.audit });
+  await appendAuditEvent(entryRef, "clock_out", {
+    action: "clock_out",
+    ...auditBase,
+    ...photo.audit,
+    ...lateClockOutAudit,
+  });
   if (photo.failed) await alertPhotoFailed(open.id, "out");
+  if (lateClockOutFlag) {
+    try {
+      await sendLateClockOutAlert({ salonId, entryId: open.id, staffId });
+    } catch (e) {
+      console.warn("[timeClockPunch] late clock-out alert error (non-fatal)", e && e.message);
+    }
+  }
   console.log("[timeClockPunch] clock_out", {
     salonId, staffId, locationId, entryId: open.id, performedAs, source, kioskId,
     durationMinutes: patch.durationMinutes, hasGeo: !!geo,
     hasPhoto: !!photo.entry.photoOutPath, photoFailed: photo.failed,
+    lateClockOutFlag,
   });
   return {
     ok: true,
@@ -1292,6 +1376,7 @@ async function timeClockPunchHandler(data, context) {
     staffId,
     clockOutAtMs: clockOutTs.toMillis(),
     durationMinutes: patch.durationMinutes,
+    lateClockOutFlag,
   };
 }
 

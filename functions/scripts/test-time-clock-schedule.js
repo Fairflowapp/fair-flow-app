@@ -259,10 +259,23 @@ const unscheduledOut = sched.evaluateScheduleClockOut({
 });
 check("unscheduled entry → no late flag", unscheduledOut.lateClockOutFlag === false);
 
+// Snapshot is source of truth: live schedule change would not matter — we only
+// read linkedShiftEnd/dateKey (S2 contract).
+const snapshotOnly = sched.evaluateScheduleClockOut({
+  enforcement: enf,
+  scheduled: true,
+  linkedShiftEnd: "12:00",
+  dateKey: "2026-08-05",
+  nowMs: Date.parse("2026-08-05T20:00:00.000Z"), // 16:00 EDT �6-08-05",
+  nowMs: Date.parse("2026-08-05T20:00:00.000Z"), // 16:00 EDT ≫ 12:00+15m
+  timeZone: "America/New_York",
+});
+check("S2 snapshot end drives late flag", snapshotOnly.lateClockOutFlag === true);
+
 console.log("");
 if (failures) {
   console.error(`FAILED: ${failures} check(s)`);
   process.exit(1);
 }
-console.log("All S0 time-clock-schedule checks passed.");
+console.log("All S0/S2 time-clock-schedule checks passed.");
 process.exit(0);
