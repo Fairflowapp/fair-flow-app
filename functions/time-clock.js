@@ -203,6 +203,61 @@ async function appendAuditEvent(entryRef, eventId, payload) {
     );
 }
 
+/**
+ * Denormalized override row for Manage Time Cards (chip + detail).
+ * type: "personal" | "schedule" | "photo"
+ * direction: "in" | "out"
+ */
+function buildManagerOverrideRow({ type, direction, reason, byStaffId, byUid }) {
+  const r = trimStr(reason).slice(0, PHOTO_OVERRIDE_REASON_MAX_CHARS || 500);
+  if (!r) return null;
+  return {
+    type: trimStr(type) || "personal",
+    direction: direction === "out" ? "out" : "in",
+    reason: r,
+    byStaffId: trimStr(byStaffId) || null,
+    byUid: trimStr(byUid) || null,
+    atMs: Date.now(),
+  };
+}
+
+/** Collect override rows for a clock-in / clock-out from the live punch context. */
+function collectManagerOverridesForPunch({
+  direction, isPersonalOverride, overrideReason, callerUid,
+  scheduleGate, photoPlan,
+}) {
+  const out = [];
+  if (isPersonalOverride && overrideReason) {
+    const row = buildManagerOverrideRow({
+      type: "personal",
+      direction,
+      reason: overrideReason,
+      byUid: callerUid,
+    });
+    if (row) out.push(row);
+  }
+  const schedOv = scheduleGate && scheduleGate.audit && scheduleGate.audit.scheduleOverride;
+  if (schedOv && (schedOv.reason || scheduleGate.scheduleOverrideReason)) {
+    const row = buildManagerOverrideRow({
+      type: "schedule",
+      direction,
+      reason: schedOv.reason || scheduleGate.scheduleOverrideReason,
+      byStaffId: schedOv.managerStaffId,
+    });
+    if (row) out.push(row);
+  }
+  if (photoPlan && photoPlan.override) {
+    const row = buildManagerOverrideRow({
+      type: "photo",
+      direction,
+      reason: photoPlan.override.reason,
+      byStaffId: photoPlan.override.managerStaffId,
+    });
+    if (row) out.push(row);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Caller identity
 // ---------------------------------------------------------------------------
@@ -632,6 +687,8 @@ async function resolveClockInScheduleGate({
   }
 
   // Personal-app manager override bypasses with full audit.
+  // Reason itself lives on overrideReason / managerOverrides (personal);
+  // audit still records that schedule enforcement was skipped.
   if (isPersonalOverride) {
     return {
       enforcement,
@@ -1189,6 +1246,17 @@ async function timeClockPunchHandler(data, context) {
     // entry share it — the punch is only recorded after a successful upload.
     const docRef = entriesCol.doc();
     const photo = await settlePunchPhoto(docRef.id, "in");
+    const managerOverridesIn = collectManagerOverridesForPunch({
+      direction: "in",
+      isPersonalOverride: isOverride,
+      overrideReason,
+      callerUid: caller.uid,
+      scheduleGate,
+      photoPlan,
+    });
+    const photoOverrideReason = (photoPlan && photoPlan.override && photoPlan.override.reason)
+      ? trimStr(photoPlan.override.reason).slice(0, PHOTO_OVERRIDE_REASON_MAX_CHARS)
+      : null;
     const payload = {
       // context (existing shape)
       salonId,
@@ -1217,8 +1285,11 @@ async function timeClockPunchHandler(data, context) {
       clockInIp: ip,
       clockInGeo: geo,
       clockInByUid: caller.uid,
-      overrideReason,
+      ...(overrideReason ? { overrideReason } : {}),
       ...(scheduleOverrideReason ? { scheduleOverrideReason } : {}),
+      ...(photoOverrideReason ? { photoOverrideReason } : {}),
+      // Denormalized for Manage chip / detail (all override kinds).
+      ...(managerOverridesIn.length ? { managerOverrides: managerOverridesIn } : {}),
       // kiosk photo (Stage B)
       photoInPath: null,
       photoOutPath: null,
@@ -1243,6 +1314,7 @@ async function timeClockPunchHandler(data, context) {
       linkedShiftEnd: payload.linkedShiftEnd,
       linkedShiftDateKey: payload.linkedShiftDateKey,
       ...(scheduleOverrideReason ? { scheduleOverrideReason } : {}),
+      ...(managerOverridesIn.length ? { managerOverrides: managerOverridesIn } : {}),
     });
     if (photo.failed) await alertPhotoFailed(docRef.id, "in");
     console.log("[timeClockPunch] clock_in", {
@@ -1331,6 +1403,19 @@ async function timeClockPunchHandler(data, context) {
 
   const entryRef = entriesCol.doc(open.id);
   const photo = await settlePunchPhoto(open.id, "out");
+  const managerOverridesOut = collectManagerOverridesForPunch({
+    direction: "out",
+    isPersonalOverride: isOverride,
+    overrideReason,
+    callerUid: caller.uid,
+    scheduleGate: null,
+    photoPlan,
+  });
+  const prevOverrides = Array.isArray(entry.managerOverrides) ? entry.managerOverrides.slice() : [];
+  const mergedOverrides = prevOverrides.concat(managerOverridesOut);
+  const photoOverrideReasonOut = (photoPlan && photoPlan.override && photoPlan.override.reason)
+    ? trimStr(photoPlan.override.reason).slice(0, PHOTO_OVERRIDE_REASON_MAX_CHARS)
+    : null;
   const patch = {
     status: "closed",
     clockOutAt: clockOutTs,
@@ -1343,6 +1428,8 @@ async function timeClockPunchHandler(data, context) {
     clockOutGeo: geo,
     clockOutByUid: caller.uid,
     ...(overrideReason ? { clockOutOverrideReason: overrideReason } : {}),
+    ...(photoOverrideReasonOut ? { photoOutOverrideReason: photoOverrideReasonOut } : {}),
+    ...(mergedOverrides.length ? { managerOverrides: mergedOverrides } : {}),
     ...photo.entry,
     updatedAt: serverNow(),
     updatedBy: caller.uid,
@@ -1354,6 +1441,7 @@ async function timeClockPunchHandler(data, context) {
     ...auditBase,
     ...photo.audit,
     ...lateClockOutAudit,
+    ...(managerOverridesOut.length ? { managerOverrides: managerOverridesOut } : {}),
   });
   if (photo.failed) await alertPhotoFailed(open.id, "out");
   if (lateClockOutFlag) {

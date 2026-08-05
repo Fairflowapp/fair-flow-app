@@ -41096,6 +41096,296 @@ function initializeUserProfileMenu() {
     return window.__ffTCSettingsPending;
   }
 
+  /** Normalize override rows from entry fields (new + legacy). */
+  function _ffTCCollectOverrideRowsFromEntry(entry) {
+    const rows = [];
+    const seen = new Set();
+    const push = (row) => {
+      if (!row || !row.reason) return;
+      const key = `${row.type}|${row.direction}|${row.reason}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push(row);
+    };
+    if (Array.isArray(entry && entry.managerOverrides)) {
+      entry.managerOverrides.forEach((o) => {
+        if (!o || typeof o !== 'object') return;
+        push({
+          type: String(o.type || 'personal'),
+          direction: o.direction === 'out' ? 'out' : 'in',
+          reason: String(o.reason || '').trim(),
+          byStaffId: o.byStaffId ? String(o.byStaffId) : null,
+          byUid: o.byUid ? String(o.byUid) : null,
+          atMs: (typeof o.atMs === 'number' && isFinite(o.atMs)) ? o.atMs : null,
+        });
+      });
+    }
+    // Legacy / partial denormalized fields (existing punches before managerOverrides).
+    if (entry && entry.overrideReason) {
+      push({
+        type: 'personal',
+        direction: 'in',
+        reason: String(entry.overrideReason).trim(),
+        byStaffId: null,
+        byUid: entry.clockInByUid ? String(entry.clockInByUid) : (entry.createdBy ? String(entry.createdBy) : null),
+        atMs: (() => {
+          try {
+            const d = _ffTCToDate(entry.clockInAt);
+            return d ? d.getTime() : null;
+          } catch (_) { return null; }
+        })(),
+      });
+    }
+    if (entry && entry.scheduleOverrideReason) {
+      push({
+        type: 'schedule',
+        direction: 'in',
+        reason: String(entry.scheduleOverrideReason).trim(),
+        byStaffId: null,
+        byUid: null,
+        atMs: (() => {
+          try {
+            const d = _ffTCToDate(entry.clockInAt);
+            return d ? d.getTime() : null;
+          } catch (_) { return null; }
+        })(),
+      });
+    }
+    if (entry && entry.photoOverrideReason) {
+      push({
+        type: 'photo',
+        direction: 'in',
+        reason: String(entry.photoOverrideReason).trim(),
+        byStaffId: null,
+        byUid: null,
+        atMs: (() => {
+          try {
+            const d = _ffTCToDate(entry.clockInAt);
+            return d ? d.getTime() : null;
+          } catch (_) { return null; }
+        })(),
+      });
+    }
+    if (entry && entry.clockOutOverrideReason) {
+      push({
+        type: 'personal',
+        direction: 'out',
+        reason: String(entry.clockOutOverrideReason).trim(),
+        byStaffId: null,
+        byUid: entry.clockOutByUid ? String(entry.clockOutByUid) : null,
+        atMs: (() => {
+          try {
+            const d = _ffTCToDate(entry.clockOutAt);
+            return d ? d.getTime() : null;
+          } catch (_) { return null; }
+        })(),
+      });
+    }
+    if (entry && entry.photoOutOverrideReason) {
+      push({
+        type: 'photo',
+        direction: 'out',
+        reason: String(entry.photoOutOverrideReason).trim(),
+        byStaffId: null,
+        byUid: null,
+        atMs: (() => {
+          try {
+            const d = _ffTCToDate(entry.clockOutAt);
+            return d ? d.getTime() : null;
+          } catch (_) { return null; }
+        })(),
+      });
+    }
+    return rows;
+  }
+
+  function _ffTCOverrideTypeLabel(type) {
+    const t = String(type || '').toLowerCase();
+    if (t === 'schedule') return 'Schedule';
+    if (t === 'photo') return 'Photo';
+    return 'Manager';
+  }
+
+  function _ffTCResolveApproverLabel(row, staffById) {
+    try {
+      if (row && row.byStaffId && staffById && staffById[String(row.byStaffId)]) {
+        const s = staffById[String(row.byStaffId)];
+        return (s && s.name) ? String(s.name) : String(row.byStaffId);
+      }
+      if (row && row.byStaffId) {
+        const list = _ffTCStaffList();
+        const hit = list.find((s) => String(s.id) === String(row.byStaffId));
+        if (hit && hit.name) return String(hit.name);
+      }
+      if (row && row.byUid) {
+        const list = _ffTCStaffList();
+        const hit = list.find((s) => String(s.uid || '') === String(row.byUid));
+        if (hit && hit.name) return String(hit.name);
+        return 'Manager (' + String(row.byUid).slice(0, 8) + '…)';
+      }
+    } catch (_) {}
+    return 'Manager';
+  }
+
+  /**
+   * Enrich override rows from auditEvents when approver id is missing
+   * (legacy punches that only stored overrideReason on the entry).
+   */
+  async function _ffTCEnrichOverridesFromAudit(entry, baseRows) {
+    const rows = (baseRows || []).map((r) => Object.assign({}, r));
+    const needsAudit = !rows.length || rows.some((r) => r && ((!r.byStaffId && !r.byUid) || !r.atMs));
+    if (!needsAudit) return rows;
+    try {
+      const salonId = window.currentSalonId || null;
+      if (!salonId || !entry || !entry.id) return rows;
+      const { getFirestore, collection, getDocs, query, orderBy, limit } = await import(
+        'https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js'
+      );
+      const db = (typeof window.getFirestore === 'function')
+        ? window.getFirestore()
+        : getFirestore();
+      const col = collection(db, 'salons', salonId, 'timeEntries', String(entry.id), 'auditEvents');
+      const snap = await getDocs(query(col, orderBy('createdAt', 'asc'), limit(20)));
+      const events = [];
+      snap.forEach((d) => events.push(Object.assign({ id: d.id }, d.data() || {})));
+
+      const applyFromEvent = (ev, direction) => {
+        const atMs = (() => {
+          try {
+            const t = ev.createdAt;
+            if (t && typeof t.toDate === 'function') return t.toDate().getTime();
+          } catch (_) {}
+          return null;
+        })();
+        if (ev.scheduleOverride && ev.scheduleOverride.reason) {
+          const existing = rows.find((r) => r.type === 'schedule' && r.direction === direction);
+          if (existing) {
+            if (!existing.byStaffId) existing.byStaffId = ev.scheduleOverride.managerStaffId || null;
+            if (!existing.atMs) existing.atMs = atMs;
+            if (!existing.reason) existing.reason = String(ev.scheduleOverride.reason);
+          } else {
+            rows.push({
+              type: 'schedule', direction,
+              reason: String(ev.scheduleOverride.reason),
+              byStaffId: ev.scheduleOverride.managerStaffId || null,
+              byUid: null, atMs,
+            });
+          }
+        }
+        if (ev.photoOverride && ev.photoOverride.reason) {
+          const existing = rows.find((r) => r.type === 'photo' && r.direction === direction);
+          if (existing) {
+            if (!existing.byStaffId) existing.byStaffId = ev.photoOverride.managerStaffId || null;
+            if (!existing.atMs) existing.atMs = atMs;
+            if (!existing.reason) existing.reason = String(ev.photoOverride.reason);
+          } else {
+            rows.push({
+              type: 'photo', direction,
+              reason: String(ev.photoOverride.reason),
+              byStaffId: ev.photoOverride.managerStaffId || null,
+              byUid: null, atMs,
+            });
+          }
+        }
+        if (ev.performedAs === 'manager_override' && (ev.overrideReason || ev.reason)) {
+          const reason = String(ev.overrideReason || ev.reason || '');
+          const existing = rows.find((r) => r.type === 'personal' && r.direction === direction);
+          if (existing) {
+            if (!existing.byUid) existing.byUid = ev.performedByUid || null;
+            if (!existing.atMs) existing.atMs = atMs;
+            if (!existing.reason && reason) existing.reason = reason;
+          } else if (reason) {
+            rows.push({
+              type: 'personal', direction,
+              reason,
+              byStaffId: null,
+              byUid: ev.performedByUid || null,
+              atMs,
+            });
+          }
+        }
+        if (Array.isArray(ev.managerOverrides)) {
+          ev.managerOverrides.forEach((o) => {
+            if (!o || !o.reason) return;
+            const dir = o.direction === 'out' ? 'out' : direction;
+            const existing = rows.find((r) => r.type === o.type && r.direction === dir && r.reason === o.reason);
+            if (existing) {
+              if (!existing.byStaffId && o.byStaffId) existing.byStaffId = o.byStaffId;
+              if (!existing.byUid && o.byUid) existing.byUid = o.byUid;
+              if (!existing.atMs) existing.atMs = o.atMs || atMs;
+            }
+          });
+        }
+      };
+
+      events.forEach((ev) => {
+        const action = String(ev.action || '');
+        const id = String(ev.id || '');
+        if (action === 'clock_in' || id === 'clock_in') applyFromEvent(ev, 'in');
+        else if (action === 'clock_out' || id === 'clock_out') applyFromEvent(ev, 'out');
+      });
+    } catch (e) {
+      console.warn('[Time Clock] override audit enrich failed', e);
+    }
+    return rows.filter((r) => r && r.reason);
+  }
+
+  function _ffTCShowOverrideDetails(entry, staffById) {
+    try {
+      const old = document.getElementById('tcOverrideViewer');
+      if (old) old.remove();
+      const base = _ffTCCollectOverrideRowsFromEntry(entry);
+      const overlay = document.createElement('div');
+      overlay.id = 'tcOverrideViewer';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100420;background:rgba(17,24,39,0.45);display:flex;align-items:center;justify-content:center;padding:16px;';
+      overlay.innerHTML = `
+        <div role="dialog" aria-label="Manager override details" style="width:min(420px,100%);max-height:min(80vh,560px);overflow:auto;background:#fff;border-radius:16px;box-shadow:0 24px 48px -12px rgba(17,24,39,0.35);">
+          <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid #e5e7eb;">
+            <div style="font-size:14px;font-weight:800;color:#111827;">Manager override</div>
+            <button type="button" id="tcOverrideViewerClose" aria-label="Close" style="margin-left:auto;width:28px;height:28px;border:none;border-radius:8px;background:#f3f4f6;color:#374151;font-size:16px;cursor:pointer;line-height:1;">×</button>
+          </div>
+          <div id="tcOverrideViewerBody" style="padding:14px 16px;font-size:12px;color:#6b7280;">Loading…</div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = () => { try { overlay.remove(); } catch (_) {} };
+      overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+      const closeBtn = overlay.querySelector('#tcOverrideViewerClose');
+      if (closeBtn) closeBtn.addEventListener('click', close);
+      const body = overlay.querySelector('#tcOverrideViewerBody');
+      _ffTCEnrichOverridesFromAudit(entry, base).then((rows) => {
+        if (!body) return;
+        if (!rows.length) {
+          body.textContent = 'No override details found for this time card.';
+          return;
+        }
+        body.innerHTML = rows.map((row) => {
+          const when = row.atMs
+            ? _ffTCFormatInSalonTz(row.atMs, { withDate: true, withTz: true, fallback: '-' })
+            : '-';
+          const who = _ffTCResolveApproverLabel(row, staffById);
+          const dir = row.direction === 'out' ? 'Clock-out' : 'Clock-in';
+          const kind = _ffTCOverrideTypeLabel(row.type);
+          return `
+            <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;margin-bottom:10px;">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+                <span style="padding:2px 8px;border-radius:999px;background:#f5f3ff;color:#5b21b6;font-size:10px;font-weight:700;">${_ffTCEscape(kind)}</span>
+                <span style="padding:2px 8px;border-radius:999px;background:#f3f4f6;color:#374151;font-size:10px;font-weight:600;">${_ffTCEscape(dir)}</span>
+              </div>
+              <div style="font-size:13px;font-weight:600;color:#111827;line-height:1.4;margin-bottom:8px;">${_ffTCEscape(row.reason || '-')}</div>
+              <div style="font-size:11px;color:#6b7280;line-height:1.45;">
+                <div><span style="font-weight:600;color:#374151;">Approved by</span> ${_ffTCEscape(who)}</div>
+                <div><span style="font-weight:600;color:#374151;">When</span> ${_ffTCEscape(when)}</div>
+              </div>
+            </div>`;
+        }).join('');
+      }).catch(() => {
+        if (body) body.textContent = 'Could not load override details.';
+      });
+    } catch (e) {
+      console.warn('[Time Clock] show override details failed', e);
+    }
+  }
+
   // Currency formatter - reads the salon currency when available.
   function _ffTCFormatMoney(amount) {
     const n = Number(amount);
@@ -41927,9 +42217,15 @@ function initializeUserProfileMenu() {
       // Kiosk punch photos (Stage B): camera chip opens the photo viewer;
       // amber chip flags punches whose photo capture failed.
       // Late clock-out chip (Schedule enforcement): review / edit in Manage.
+      // Manager override chip: personal / schedule / photo — reason on click.
       const hasPhotos = !!(r.photoInPath || r.photoOutPath);
       const photoFailed = (r.photoInFailed === true) || (r.photoOutFailed === true);
       const lateClockOut = r.lateClockOutFlag === true;
+      const overrideRows = _ffTCCollectOverrideRowsFromEntry(r);
+      const hasOverride = overrideRows.length > 0;
+      const overrideTitle = hasOverride
+        ? overrideRows.map((o) => (o.reason || '')).filter(Boolean).join(' · ').slice(0, 180)
+        : '';
       const photoChips = `${hasPhotos ? `
         <button type="button" class="tc-m-photo-btn" data-entry-id="${_ffTCEscape(r.id)}" title="View punch photos"
           style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;font-size:9.5px;font-weight:700;cursor:pointer;vertical-align:middle;">
@@ -41937,7 +42233,11 @@ function initializeUserProfileMenu() {
           Photo
         </button>` : ''}${photoFailed ? `
         <span title="Photo capture failed on this punch" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;font-size:9.5px;font-weight:700;vertical-align:middle;">Photo failed</span>` : ''}${lateClockOut ? `
-        <span title="Clock-out was after the scheduled shift end window" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;font-size:9.5px;font-weight:700;vertical-align:middle;">Late clock-out</span>` : ''}`;
+        <span title="Clock-out was after the scheduled shift end window" style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #fed7aa;background:#fff7ed;color:#9a3412;font-size:9.5px;font-weight:700;vertical-align:middle;">Late clock-out</span>` : ''}${hasOverride ? `
+        <button type="button" class="tc-m-override-btn" data-entry-id="${_ffTCEscape(r.id)}" title="${_ffTCEscape(overrideTitle || 'Manager override')}"
+          style="display:inline-flex;align-items:center;gap:4px;margin-left:6px;padding:2px 7px;border-radius:999px;border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;font-size:9.5px;font-weight:700;cursor:pointer;vertical-align:middle;">
+          Manager override
+        </button>` : ''}`;
       return `
         <tr data-entry-id="${_ffTCEscape(r.id)}" class="tc-row-clickable tc-manage-card-row" style="border-bottom:1px solid #f3f4f6;transition:background 0.12s ease;cursor:pointer;" onmouseover="this.style.background='#faf7ff'" onmouseout="this.style.background='transparent'">
           <td colspan="6" style="padding:0;vertical-align:top;">
@@ -41981,6 +42281,15 @@ function initializeUserProfileMenu() {
           const id = btn.getAttribute('data-entry-id');
           const entry = id ? rowsById[String(id)] : null;
           if (entry) _ffTCShowPunchPhotos(entry, staffById);
+        });
+      });
+      // Manager override chip → reason / approver / when.
+      body.querySelectorAll('.tc-m-override-btn').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const id = btn.getAttribute('data-entry-id');
+          const entry = id ? rowsById[String(id)] : null;
+          if (entry) _ffTCShowOverrideDetails(entry, staffById);
         });
       });
     } catch (_) {}
@@ -42322,6 +42631,20 @@ function initializeUserProfileMenu() {
         <label style="${labelStyle}">Notes
           <input id="tcAddNotes" type="text" placeholder="Enter notes" value="${_ffTCEscape(notesPrefill)}" style="${fieldStyle}"/>
         </label>
+        ${(() => {
+          if (!isEdit) return '';
+          const ovr = _ffTCCollectOverrideRowsFromEntry(entry);
+          if (!ovr.length) return '';
+          const preview = ovr.map((o) => o.reason).filter(Boolean).join(' · ');
+          return `
+            <div style="padding:10px 12px;border:1px solid #ddd6fe;border-radius:10px;background:#f5f3ff;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                <span style="padding:2px 8px;border-radius:999px;background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;">Manager override</span>
+                <button type="button" id="tcAddOverrideDetails" style="margin-left:auto;background:none;border:none;color:#5b21b6;font-size:10px;font-weight:700;cursor:pointer;padding:0;">View details</button>
+              </div>
+              <div style="font-size:11px;color:#374151;line-height:1.4;">${_ffTCEscape(preview)}</div>
+            </div>`;
+        })()}
         <div id="tcAddErr" style="min-height:12px;font-size:10px;color:#b91c1c;"></div>
         ${isEdit ? `
           <button id="tcAddVoid" type="button" style="margin-top:4px;background:transparent;color:#b91c1c;border:1px dashed #fecaca;border-radius:7px;padding:7px 0;font-size:10px;font-weight:700;letter-spacing:0.05em;cursor:pointer;">DELETE THIS TIME CARD</button>
@@ -42360,6 +42683,18 @@ function initializeUserProfileMenu() {
 
     const voidBtn = drawer.querySelector('#tcAddVoid');
     if (voidBtn) voidBtn.addEventListener('click', () => _ffTCSubmitVoidTimeCard(drawer, entry));
+
+    const ovrDetailsBtn = drawer.querySelector('#tcAddOverrideDetails');
+    if (ovrDetailsBtn && isEdit && entry) {
+      ovrDetailsBtn.addEventListener('click', (ev) => {
+        try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {}
+        const staffById = {};
+        try {
+          _ffTCStaffList().forEach((s) => { if (s && s.id) staffById[String(s.id)] = s; });
+        } catch (_) {}
+        _ffTCShowOverrideDetails(entry, staffById);
+      });
+    }
   }
 
   function _ffTCBuildDateFromParts(dayISO, h12, mm, ampm) {
