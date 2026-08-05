@@ -9,7 +9,7 @@
         // chain (they used to arrive 8-13s after boot): both are light, only
         // depend on app.js / firebase CDN / schedule-helpers (static import),
         // and the Settings + Time Clock screens block on them.
-        { src: "/settings-cloud.js?v=20260804_tc_load_cache", type: "module", delay: 750 },
+        { src: "/settings-cloud.js?v=20260805_tc_schedule_enf", type: "module", delay: 750 },
         { src: "/time-clock-entries.js?v=20260512_manage_wait", type: "module", delay: 800 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },

@@ -905,6 +905,13 @@ const FF_TIME_CLOCK_DEFAULTS = Object.freeze({
   // onFailure: "fallback" records the punch flagged for manager review when
   // the camera fails; "block" requires a manager-PIN override on the kiosk.
   kioskPhoto: { enabled: false, onFailure: "fallback" },
+  // Schedule enforcement (S3). Opt-in; mirrors functions/time-clock-schedule.js.
+  scheduleEnforcement: {
+    enabled: false,
+    earlyClockInMinutes: 15,
+    lateClockOutMinutes: 15,
+    noShiftPolicy: "allow",
+  },
 });
 
 function ffCloneTimeClockDefaults() {
@@ -913,6 +920,7 @@ function ffCloneTimeClockDefaults() {
     standardHours: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.standardHours),
     overtime: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.overtime),
     kioskPhoto: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.kioskPhoto),
+    scheduleEnforcement: Object.assign({}, FF_TIME_CLOCK_DEFAULTS.scheduleEnforcement),
   };
 }
 
@@ -933,6 +941,17 @@ function ffNormalizeTimeClockSettings(raw) {
       ? raw.workweekStartDay
       : FF_TIME_CLOCK_DEFAULTS.workweekStartDay;
   const kp = (r.kioskPhoto && typeof r.kioskPhoto === "object") ? r.kioskPhoto : {};
+  const se = (r.scheduleEnforcement && typeof r.scheduleEnforcement === "object")
+    ? r.scheduleEnforcement
+    : {};
+  const clampWindowMins = (v, def) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return def;
+    const i = Math.floor(n);
+    if (i < 0) return 0;
+    if (i > 24 * 60) return 24 * 60;
+    return i;
+  };
   return {
     workweekStartDay: workweekStartDay,
     standardHours: {
@@ -949,6 +968,18 @@ function ffNormalizeTimeClockSettings(raw) {
     kioskPhoto: {
       enabled: kp.enabled === true,
       onFailure: kp.onFailure === "block" ? "block" : "fallback",
+    },
+    scheduleEnforcement: {
+      enabled: se.enabled === true,
+      earlyClockInMinutes: clampWindowMins(
+        se.earlyClockInMinutes,
+        FF_TIME_CLOCK_DEFAULTS.scheduleEnforcement.earlyClockInMinutes,
+      ),
+      lateClockOutMinutes: clampWindowMins(
+        se.lateClockOutMinutes,
+        FF_TIME_CLOCK_DEFAULTS.scheduleEnforcement.lateClockOutMinutes,
+      ),
+      noShiftPolicy: se.noShiftPolicy === "block" ? "block" : "allow",
     },
   };
 }

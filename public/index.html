@@ -2388,6 +2388,53 @@
                 </select>
               </div>
             </div>
+
+            <!-- Schedule enforcement (opt-in; server-enforced in timeClockPunch) -->
+            <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
+              <div style="display:flex;align-items:flex-start;gap:12px;">
+                <label style="position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;">
+                  <input type="checkbox" id="tcScheduleEnforcementEnabled" style="opacity:0;width:0;height:0;position:absolute;"/>
+                  <span id="tcScheduleEnforcementEnabledPill" style="width:36px;height:20px;border-radius:999px;background:#d1d5db;position:relative;transition:background 0.18s ease;display:inline-block;">
+                    <span id="tcScheduleEnforcementEnabledKnob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.18);transition:left 0.18s ease;"></span>
+                  </span>
+                </label>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:#111827;">Schedule enforcement</div>
+                  <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-top:2px;">Block clock-in too early before a published shift, and flag late clock-outs for review. Off by default. Uses the salon timezone from Preferences.</div>
+                </div>
+              </div>
+              <div id="tcScheduleEnforcementTzWarn" style="display:none;margin-top:12px;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;color:#92400e;font-size:11px;line-height:1.45;">
+                Salon timezone is not set. Schedule enforcement will fall back to America/New_York until you set it in <strong>Settings → Preferences → Salon timezone</strong>.
+              </div>
+              <div id="tcScheduleEnforcementFields" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #e5e7eb;flex-direction:column;gap:12px;">
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                  <div style="flex:1;min-width:180px;">
+                    <label for="tcEarlyClockInMinutes" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Early clock-in window</label>
+                    <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Minutes before shift start when clock-in becomes allowed.</div>
+                    <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                      <input type="number" id="tcEarlyClockInMinutes" value="15" min="0" max="1440" step="1" inputmode="numeric" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                      <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">min</span>
+                    </div>
+                  </div>
+                  <div style="flex:1;min-width:180px;">
+                    <label for="tcLateClockOutMinutes" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Late clock-out window</label>
+                    <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Minutes after shift end before a Late clock-out flag is set. Clock-out is never blocked.</div>
+                    <div style="display:inline-flex;align-items:center;border:1px solid #d1d5db;border-radius:8px;background:#fff;overflow:hidden;">
+                      <input type="number" id="tcLateClockOutMinutes" value="15" min="0" max="1440" step="1" inputmode="numeric" style="width:100px;padding:7px 10px;border:none;outline:none;font-size:13px;font-family:inherit;background:#fff;"/>
+                      <span style="padding:0 10px;font-size:12px;color:#6b7280;background:#f9fafb;border-left:1px solid #d1d5db;height:32px;display:flex;align-items:center;">min</span>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label for="tcNoShiftPolicy" style="display:block;font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">If there is no published shift today</label>
+                  <div style="font-size:11px;color:#6b7280;line-height:1.4;margin-bottom:6px;">Applies per location. Managers can always override.</div>
+                  <select id="tcNoShiftPolicy" style="padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;color:#111827;outline:none;max-width:100%;">
+                    <option value="allow">Allow clock-in (recommended)</option>
+                    <option value="block">Block clock-in (manager override required)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -3441,6 +3488,8 @@ async function initFirebaseAuth() {
                   var queueBtnEl = document.getElementById('queueBtn');
                   var queueIsActive = queueBtnEl && queueBtnEl.classList.contains('active');
                   if (!queueIsActive) return;
+                  if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return;
+                  if (typeof ffHasActiveNonQueueScreen === 'function' && ffHasActiveNonQueueScreen()) return;
                   var wrapEl = document.querySelector('.wrap');
                   var wrapHidden = !wrapEl || (window.getComputedStyle(wrapEl).display === 'none') || (window.getComputedStyle(wrapEl).visibility === 'hidden');
                   if (wrapHidden && typeof goToQueue === 'function') {
@@ -6851,8 +6900,24 @@ function ffMarkUiReady() {
   } catch (e) {}
 }
 
+/** Apps launcher overlay — not a module screen, but must block post-login
+ *  goToQueue restore timers (0/600/1800ms) that call ffCloseGlobalBlockingOverlays
+ *  and would otherwise slam the panel shut right after the user opens it. */
+function ffIsAppsPanelOpen() {
+  try {
+    var ap = document.getElementById('appsPanel');
+    if (!ap) return false;
+    var display = ap.style.display || (window.getComputedStyle ? window.getComputedStyle(ap).display : '');
+    return !!(display && display !== 'none');
+  } catch (e) {
+    return false;
+  }
+}
+window.ffIsAppsPanelOpen = ffIsAppsPanelOpen;
+
 function ffHasActiveNonQueueScreen() {
   try {
+    if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return true;
     var ids = [
       'liveScreen',
       'floorScreen',
@@ -26454,9 +26519,13 @@ function initializeAppsPanel() {
     return display !== 'none' && display !== '';
   }
   
+  // Ignore backdrop clicks briefly after open (ghost click / same-gesture close).
+  var _appsIgnoreBackdropUntil = 0;
+
   // Open panel
   function openAppsPanel() {
     closeProductsScreenForAppsNavigation();
+    _appsIgnoreBackdropUntil = Date.now() + 450;
     appsOverlayBackdrop.style.display = 'block';
     appsOverlayBackdrop.style.pointerEvents = 'auto';
     appsPanel.style.display = 'flex';
@@ -26543,6 +26612,7 @@ function initializeAppsPanel() {
   
   // Close panel when clicking backdrop
   appsOverlayBackdrop.onclick = function(e) {
+    if (Date.now() < _appsIgnoreBackdropUntil) return;
     if (e.target === appsOverlayBackdrop) {
       closeAppsPanel();
     }
@@ -38761,6 +38831,12 @@ function initializeUserProfileMenu() {
     standardHours: { weekly: 40, daily: 8 },
     overtime: { enabled: true, weeklyThreshold: 40, dailyThreshold: 8, multiplier: 1.5 },
     kioskPhoto: { enabled: false, onFailure: 'fallback' },
+    scheduleEnforcement: {
+      enabled: false,
+      earlyClockInMinutes: 15,
+      lateClockOutMinutes: 15,
+      noShiftPolicy: 'allow',
+    },
   };
   function ffInitTimeClockSettingsUI() {
     try {
@@ -38841,6 +38917,14 @@ function initializeUserProfileMenu() {
       const kpKnob = card.querySelector('#tcKioskPhotoEnabledKnob');
       const kpFields = card.querySelector('#tcKioskPhotoFields');
       const kpOnFailureEl = card.querySelector('#tcKioskPhotoOnFailure');
+      const seToggle = card.querySelector('#tcScheduleEnforcementEnabled');
+      const sePill = card.querySelector('#tcScheduleEnforcementEnabledPill');
+      const seKnob = card.querySelector('#tcScheduleEnforcementEnabledKnob');
+      const seFields = card.querySelector('#tcScheduleEnforcementFields');
+      const seTzWarn = card.querySelector('#tcScheduleEnforcementTzWarn');
+      const seEarlyEl = card.querySelector('#tcEarlyClockInMinutes');
+      const seLateEl = card.querySelector('#tcLateClockOutMinutes');
+      const seNoShiftEl = card.querySelector('#tcNoShiftPolicy');
       if (!toggle || !pill || !knob || !fields) return;
 
       // Single source of truth for "week starts on" lives in the salon
@@ -38875,6 +38959,25 @@ function initializeUserProfileMenu() {
         kpKnob.style.left = on ? '18px' : '2px';
       };
 
+      const salonTimeZoneConfigured = function () {
+        try {
+          const z = (window.settings && window.settings.preferences && window.settings.preferences.salonTimeZone) || '';
+          return !!(String(z).trim());
+        } catch (_) {
+          return false;
+        }
+      };
+      const applyScheduleEnforcementVisibility = function () {
+        if (!seToggle || !sePill || !seKnob || !seFields) return;
+        const on = !!seToggle.checked;
+        seFields.style.display = on ? 'flex' : 'none';
+        sePill.style.background = on ? '#7c3aed' : '#d1d5db';
+        seKnob.style.left = on ? '18px' : '2px';
+        if (seTzWarn) {
+          seTzWarn.style.display = (on && !salonTimeZoneConfigured()) ? 'block' : 'none';
+        }
+      };
+
       // Loading state: while values are being hydrated from Firestore the
       // controls are disabled and dimmed so nobody reads the HTML defaults as
       // real values or saves them over the stored ones. Interaction is only
@@ -38882,9 +38985,13 @@ function initializeUserProfileMenu() {
       // Toggle pills/knobs use CSS transitions for user clicks; those must be
       // off during hydrate→reveal, or the browser animates OFF→ON from the
       // last painted frame when visibility returns.
-      const interactiveEls = [toggle, weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl, kpToggle, kpOnFailureEl];
-      const pillEls = [pill, kpPill];
-      const toggleAnimEls = [pill, knob, kpPill, kpKnob];
+      const interactiveEls = [
+        toggle, weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl,
+        kpToggle, kpOnFailureEl,
+        seToggle, seEarlyEl, seLateEl, seNoShiftEl,
+      ];
+      const pillEls = [pill, kpPill, sePill];
+      const toggleAnimEls = [pill, knob, kpPill, kpKnob, sePill, seKnob];
       const setToggleTransitions = function (enabled) {
         toggleAnimEls.forEach(function (el) {
           if (!el) return;
@@ -38912,12 +39019,13 @@ function initializeUserProfileMenu() {
         // ~190–290px collapse when overtime/kioskPhoto hydrated as OFF.
         if (loading) {
           if (typeof window.ffTCApplySkeletonExpand === 'function') {
-            window.ffTCApplySkeletonExpand(card, fields, kpFields);
+            window.ffTCApplySkeletonExpand(card, fields, kpFields, seFields);
           }
         } else {
           card.style.minHeight = '';
           if (fields) fields.style.visibility = '';
           if (kpFields) kpFields.style.visibility = '';
+          if (seFields) seFields.style.visibility = '';
           // Commit the hydrated ON/OFF styles with transitions still off,
           // then restore click animations on the next frame.
           try { void card.offsetWidth; } catch (_) {}
@@ -38947,12 +39055,22 @@ function initializeUserProfileMenu() {
         if (!Number.isFinite(n)) return fallback;
         return n < 1 ? 1 : n;
       };
+      const clampWindowMins = function (raw, fallback) {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return fallback;
+        const i = Math.floor(n);
+        if (i < 0) return 0;
+        if (i > 1440) return 1440;
+        return i;
+      };
       const fallbackForField = function (el) {
         if (el === weeklyStdEl) return FF_TC_UI_DEFAULTS.standardHours.weekly;
         if (el === dailyStdEl)  return FF_TC_UI_DEFAULTS.standardHours.daily;
         if (el === weeklyOtEl)  return FF_TC_UI_DEFAULTS.overtime.weeklyThreshold;
         if (el === dailyOtEl)   return FF_TC_UI_DEFAULTS.overtime.dailyThreshold;
         if (el === multEl)      return FF_TC_UI_DEFAULTS.overtime.multiplier;
+        if (el === seEarlyEl)   return FF_TC_UI_DEFAULTS.scheduleEnforcement.earlyClockInMinutes;
+        if (el === seLateEl)    return FF_TC_UI_DEFAULTS.scheduleEnforcement.lateClockOutMinutes;
         return 0;
       };
 
@@ -38978,10 +39096,22 @@ function initializeUserProfileMenu() {
             multiplier:      clampMultiplier(multEl && multEl.value,    FF_TC_UI_DEFAULTS.overtime.multiplier),
           },
           // Hydrated from Firestore on load, so a save triggered by any other
-          // field never clobbers the kiosk photo policy.
+          // field never clobbers the kiosk photo / schedule policy.
           kioskPhoto: {
             enabled: !!(kpToggle && kpToggle.checked),
             onFailure: (kpOnFailureEl && kpOnFailureEl.value === 'block') ? 'block' : 'fallback',
+          },
+          scheduleEnforcement: {
+            enabled: !!(seToggle && seToggle.checked),
+            earlyClockInMinutes: clampWindowMins(
+              seEarlyEl && seEarlyEl.value,
+              FF_TC_UI_DEFAULTS.scheduleEnforcement.earlyClockInMinutes,
+            ),
+            lateClockOutMinutes: clampWindowMins(
+              seLateEl && seLateEl.value,
+              FF_TC_UI_DEFAULTS.scheduleEnforcement.lateClockOutMinutes,
+            ),
+            noShiftPolicy: (seNoShiftEl && seNoShiftEl.value === 'block') ? 'block' : 'allow',
           },
         };
       };
@@ -38989,6 +39119,8 @@ function initializeUserProfileMenu() {
       const settingsEqual = function (a, b) {
         if (!a || !b) return false;
         try {
+          const aSe = a.scheduleEnforcement || {};
+          const bSe = b.scheduleEnforcement || {};
           return Number(a.standardHours && a.standardHours.weekly) === Number(b.standardHours && b.standardHours.weekly)
             && Number(a.standardHours && a.standardHours.daily) === Number(b.standardHours && b.standardHours.daily)
             && !!((a.overtime && a.overtime.enabled)) === !!((b.overtime && b.overtime.enabled))
@@ -38997,7 +39129,12 @@ function initializeUserProfileMenu() {
             && Number(a.overtime && a.overtime.multiplier) === Number(b.overtime && b.overtime.multiplier)
             && !!((a.kioskPhoto && a.kioskPhoto.enabled)) === !!((b.kioskPhoto && b.kioskPhoto.enabled))
             && ((a.kioskPhoto && a.kioskPhoto.onFailure) === 'block' ? 'block' : 'fallback')
-              === ((b.kioskPhoto && b.kioskPhoto.onFailure) === 'block' ? 'block' : 'fallback');
+              === ((b.kioskPhoto && b.kioskPhoto.onFailure) === 'block' ? 'block' : 'fallback')
+            && !!aSe.enabled === !!bSe.enabled
+            && Number(aSe.earlyClockInMinutes) === Number(bSe.earlyClockInMinutes)
+            && Number(aSe.lateClockOutMinutes) === Number(bSe.lateClockOutMinutes)
+            && ((aSe.noShiftPolicy === 'block') ? 'block' : 'allow')
+              === ((bSe.noShiftPolicy === 'block') ? 'block' : 'allow');
         } catch (_) {
           return false;
         }
@@ -39021,6 +39158,16 @@ function initializeUserProfileMenu() {
         if (kpToggle) kpToggle.checked = !!(s.kioskPhoto && s.kioskPhoto.enabled === true);
         if (kpOnFailureEl) kpOnFailureEl.value = (s.kioskPhoto && s.kioskPhoto.onFailure === 'block') ? 'block' : 'fallback';
         applyKioskPhotoVisibility();
+        const se = s.scheduleEnforcement || FF_TC_UI_DEFAULTS.scheduleEnforcement;
+        if (seToggle) seToggle.checked = !!(se && se.enabled === true);
+        if (seEarlyEl) seEarlyEl.value = (se && se.earlyClockInMinutes != null)
+          ? se.earlyClockInMinutes
+          : FF_TC_UI_DEFAULTS.scheduleEnforcement.earlyClockInMinutes;
+        if (seLateEl) seLateEl.value = (se && se.lateClockOutMinutes != null)
+          ? se.lateClockOutMinutes
+          : FF_TC_UI_DEFAULTS.scheduleEnforcement.lateClockOutMinutes;
+        if (seNoShiftEl) seNoShiftEl.value = (se && se.noShiftPolicy === 'block') ? 'block' : 'allow';
+        applyScheduleEnforcementVisibility();
         return true;
       };
 
@@ -39128,10 +39275,30 @@ function initializeUserProfileMenu() {
         kpOnFailureEl.__ffTCBound = true;
         kpOnFailureEl.addEventListener('change', persist);
       }
+      if (sePill && seToggle && !sePill.__ffTCBound) {
+        sePill.__ffTCBound = true;
+        sePill.addEventListener('click', function (e) {
+          e.preventDefault();
+          if (card.__ffTCControlsLoading) return;
+          seToggle.checked = !seToggle.checked;
+          seToggle.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+      if (seToggle && !seToggle.__ffTCBound) {
+        seToggle.__ffTCBound = true;
+        seToggle.addEventListener('change', function () {
+          applyScheduleEnforcementVisibility();
+          persist();
+        });
+      }
+      if (seNoShiftEl && !seNoShiftEl.__ffTCBound) {
+        seNoShiftEl.__ffTCBound = true;
+        seNoShiftEl.addEventListener('change', persist);
+      }
       // (workweek radios were replaced by the read-only Preferences mirror; a
       // leftover binding to them threw here and silently killed hydration +
       // the number-field save bindings below.)
-      [weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl].forEach(function (el) {
+      [weeklyStdEl, dailyStdEl, weeklyOtEl, dailyOtEl, multEl, seEarlyEl, seLateEl].forEach(function (el) {
         if (!el || el.__ffTCBound) return;
         el.__ffTCBound = true;
         // On blur/change: normalize the displayed value (so users see what
@@ -39139,7 +39306,9 @@ function initializeUserProfileMenu() {
         // default; negative - 0; multiplier < 1 - 1.
         const clampAndSave = function () {
           const fallback = fallbackForField(el);
-          const clamper = (el === multEl) ? clampMultiplier : clampHours;
+          let clamper = clampHours;
+          if (el === multEl) clamper = clampMultiplier;
+          else if (el === seEarlyEl || el === seLateEl) clamper = clampWindowMins;
           const clamped = clamper(el.value, fallback);
           el.value = clamped;
           persist();
@@ -39161,7 +39330,11 @@ function initializeUserProfileMenu() {
       if (card.__ffTCLoading) {
         // Re-entry while a load is in flight: keep the skeleton expand state;
         // don't run a premature visibility pass that fights the loader.
-        if (!card.__ffTCControlsLoading) { applyOvertimeVisibility(); applyKioskPhotoVisibility(); }
+        if (!card.__ffTCControlsLoading) {
+          applyOvertimeVisibility();
+          applyKioskPhotoVisibility();
+          applyScheduleEnforcementVisibility();
+        }
         return;
       }
 
@@ -39245,6 +39418,7 @@ function initializeUserProfileMenu() {
         console.warn('[Time Clock Settings] load failed', e);
         applyOvertimeVisibility();
         applyKioskPhotoVisibility();
+        applyScheduleEnforcementVisibility();
         setHint('load-error');
       }).finally(function () {
         card.__ffTCLoading = false;
@@ -39269,13 +39443,14 @@ function initializeUserProfileMenu() {
       window.__ffTCLastKnownExpand = {
         overtime: !!(settings && settings.overtime && settings.overtime.enabled),
         kioskPhoto: !!(settings && settings.kioskPhoto && settings.kioskPhoto.enabled === true),
+        scheduleEnforcement: !!(settings && settings.scheduleEnforcement && settings.scheduleEnforcement.enabled === true),
       };
     } catch (_) {
       window.__ffTCLastKnownExpand = null;
     }
   };
 
-  window.ffTCApplySkeletonExpand = function ffTCApplySkeletonExpand(card, otFields, kpFields) {
+  window.ffTCApplySkeletonExpand = function ffTCApplySkeletonExpand(card, otFields, kpFields, seFields) {
     if (!card) return;
     const known = window.__ffTCLastKnownExpand;
     if (known && typeof known === 'object') {
@@ -39289,6 +39464,11 @@ function initializeUserProfileMenu() {
         kpFields.style.display = on ? 'block' : 'none';
         kpFields.style.visibility = on ? 'hidden' : '';
       }
+      if (seFields) {
+        const on = !!known.scheduleEnforcement;
+        seFields.style.display = on ? 'flex' : 'none';
+        seFields.style.visibility = on ? 'hidden' : '';
+      }
       card.style.minHeight = '';
       return;
     }
@@ -39301,6 +39481,10 @@ function initializeUserProfileMenu() {
     if (kpFields) {
       kpFields.style.display = 'none';
       kpFields.style.visibility = '';
+    }
+    if (seFields) {
+      seFields.style.display = 'none';
+      seFields.style.visibility = '';
     }
     card.style.minHeight = FF_TC_SKELETON_MIN_HEIGHT;
   };
@@ -39320,6 +39504,8 @@ function initializeUserProfileMenu() {
         'tcWeeklyOvertimeThreshold', 'tcDailyOvertimeThreshold',
         'tcOvertimeMultiplier', 'tcOvertimeEnabled',
         'tcKioskPhotoEnabled', 'tcKioskPhotoOnFailure',
+        'tcScheduleEnforcementEnabled', 'tcEarlyClockInMinutes',
+        'tcLateClockOutMinutes', 'tcNoShiftPolicy',
       ];
       ids.forEach(function (id) {
         const el = card.querySelector('#' + id);
@@ -39328,7 +39514,8 @@ function initializeUserProfileMenu() {
         el.style.color = 'transparent';
       });
       ['tcOvertimeEnabledPill', 'tcOvertimeEnabledKnob',
-       'tcKioskPhotoEnabledPill', 'tcKioskPhotoEnabledKnob'].forEach(function (id) {
+       'tcKioskPhotoEnabledPill', 'tcKioskPhotoEnabledKnob',
+       'tcScheduleEnforcementEnabledPill', 'tcScheduleEnforcementEnabledKnob'].forEach(function (id) {
         const el = card.querySelector('#' + id);
         if (!el) return;
         el.style.transition = 'none';
@@ -39339,7 +39526,8 @@ function initializeUserProfileMenu() {
       });
       const otFields = card.querySelector('#tcOvertimeFields');
       const kpFields = card.querySelector('#tcKioskPhotoFields');
-      window.ffTCApplySkeletonExpand(card, otFields, kpFields);
+      const seFields = card.querySelector('#tcScheduleEnforcementFields');
+      window.ffTCApplySkeletonExpand(card, otFields, kpFields, seFields);
       let hintEl = card.querySelector('#tcSaveHint');
       if (!hintEl) {
         hintEl = document.createElement('div');

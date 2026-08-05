@@ -266,8 +266,8 @@ const snapshotOnly = sched.evaluateScheduleClockOut({
   scheduled: true,
   linkedShiftEnd: "12:00",
   dateKey: "2026-08-05",
-  nowMs: Date.parse("2026-08-05T20:00:00.000Z"), // 16:00 EDT �6-08-05",
-  nowMs: Date.parse("2026-08-05T20:00:00.000Z"), // 16:00 EDT ≫ 12:00+15m
+  // 16:00 EDT ≫ 12:00 + 15m window
+  nowMs: Date.parse("2026-08-05T20:00:00.000Z"),
   timeZone: "America/New_York",
 });
 check("S2 snapshot end drives late flag", snapshotOnly.lateClockOutFlag === true);
