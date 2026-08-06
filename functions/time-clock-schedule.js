@@ -439,6 +439,17 @@ async function resolveLateClockOutForPunch(db, {
   const timeZone = tzInfo.timeZone;
   const ms = Number(nowMs);
 
+  // Feature off → no live lookup, no snapshot write, no late flag.
+  // Keeps punch behavior identical to pre-enforcement when salons leave it disabled.
+  if (!enf.enabled) {
+    return {
+      source: "none",
+      decision: { lateClockOutFlag: false, reason: null },
+      snapshotPatch: null,
+      timeZone,
+    };
+  }
+
   if (entryHasLinkedShiftSnapshot(entry)) {
     const decision = evaluateScheduleClockOut({
       enforcement: enf,

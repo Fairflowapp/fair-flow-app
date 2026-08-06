@@ -327,6 +327,17 @@ check(
   liveFallbackLate,
 );
 
+// When enforcement is off, evaluate never flags (punch helper short-circuits too).
+const lateOff = sched.evaluateScheduleClockOut({
+  enforcement: sched.normalizeScheduleEnforcement({ enabled: false }),
+  scheduled: true,
+  linkedShiftEnd: "12:00",
+  dateKey: "2026-08-05",
+  nowMs: Date.parse("2026-08-05T20:00:00.000Z"),
+  timeZone: "America/New_York",
+});
+check("enforcement off → never late flag", lateOff.lateClockOutFlag === false && lateOff.reason == null);
+
 // S5: publish gate + defaults still hold under enforcement-on payloads.
 const pubGate = sched.evaluateScheduleClockIn({
   enforcement: sched.normalizeScheduleEnforcement({

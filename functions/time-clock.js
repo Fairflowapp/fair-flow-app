@@ -1549,7 +1549,9 @@ async function timeClockManageEntryHandler(data, context) {
       );
     }
 
-    // Attach published-shift snapshot when one matches clock-in day/location/staff.
+    // Attach published-shift snapshot only when schedule enforcement is ON for
+    // the salon. When the feature is off, keep the legacy add shape (no
+    // linkedShift*) so production salons see zero behavior change.
     // Manual clockOutAt (if any) does NOT set lateClockOutFlag — that is punch-only.
     let scheduleSnap = {
       linkedShiftId: null,
@@ -1559,14 +1561,17 @@ async function timeClockManageEntryHandler(data, context) {
       linkedShiftDateKey: null,
     };
     try {
-      const resolved = await tcSchedule.resolveLinkedShiftSnapshotForManageAdd(db(), {
-        salonId,
-        locationId,
-        staffId,
-        clockInAtMs: clockInTs.toMillis(),
-      });
-      if (resolved && resolved.snapshot) {
-        scheduleSnap = resolved.snapshot;
+      const enforcement = await loadScheduleEnforcement(salonId);
+      if (enforcement.enabled === true) {
+        const resolved = await tcSchedule.resolveLinkedShiftSnapshotForManageAdd(db(), {
+          salonId,
+          locationId,
+          staffId,
+          clockInAtMs: clockInTs.toMillis(),
+        });
+        if (resolved && resolved.snapshot) {
+          scheduleSnap = resolved.snapshot;
+        }
       }
     } catch (e) {
       console.warn("[timeClockManageEntry] schedule snapshot on add failed (non-fatal)", e && e.message);
