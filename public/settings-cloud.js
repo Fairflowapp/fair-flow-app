@@ -199,7 +199,7 @@ function _applyMainSnapshot(data) {
       : null;
     const _locPrefs = _prefsLocBucket && typeof _prefsLocBucket === 'object' ? _prefsLocBucket : {};
 
-    // Staff Call Messages — prefer per-location bucket, fallback to legacy
+    // Staff Calls templates — prefer per-location bucket, fallback to legacy
     // salon-wide top-level fields so existing data keeps working.
     {
       const locTpls = _locPrefs && _locPrefs.staffCallTemplates;
@@ -555,7 +555,7 @@ function ffSaveAppSettings(brandName, brandPalette, managers, staffCallTemplates
   if (brandName !== undefined) payload.brandName = brandName || '';
   if (Array.isArray(brandPalette)) payload.brandPalette = brandPalette;
   if (Array.isArray(managers)) payload.managers = managers;
-  // Staff Call Messages are PER-LOCATION: when an active location is set we
+  // Staff Call templates are PER-LOCATION: when an active location is set we
   // route the write to `locationPreferences.{locationId}.*`. Without one we
   // keep the legacy salon-wide path so no data is lost during onboarding.
   const _locId = _ffActiveLocationIdForSettings();

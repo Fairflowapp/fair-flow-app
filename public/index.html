@@ -1920,12 +1920,12 @@
         <!-- Preferences Card (typography aligned with Staff Setup) -->
         <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
-          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Organized into focused sections so location, display, and message settings are easier to manage.</p>
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Organized into focused sections so location, display, and staff call settings are easier to manage.</p>
           <div class="ff-pref-tabs" role="tablist" aria-label="Preference sections">
             <button type="button" class="ff-pref-tab" data-pref-tab="salon-location">Salon Location</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="business-format">Business Format</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="tickets">Tickets</button>
-            <button type="button" class="ff-pref-tab" data-pref-tab="messages">Messages</button>
+            <button type="button" class="ff-pref-tab" data-pref-tab="messages">Staff Calls</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="staff-setup">Staff Setup</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="media-categories">Media Categories</button>
           </div>
@@ -2198,12 +2198,12 @@
             <div class="ff-pref-pane" data-pref-pane="messages">
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
               <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
-                <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Call Messages</h4>
-                <div style="font-size:11px;color:#6b7280;line-height:1.45;">Salon-wide messages for calls sent to technicians from Available and In Service.</div>
+                <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Calls</h4>
+                <div style="font-size:11px;color:#6b7280;line-height:1.45;">Messages for calls sent to technicians from Available and In Service. The Message is spoken on phone calls; Subtext is for the on-screen call only.</div>
               </div>
               <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:10px;"></div>
               <div style="display:flex;justify-content:flex-end;margin-top:10px;">
-                <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:6px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Staff Call Messages</button>
+                <button id="userProfileSaveStaffCallTemplates" type="button" style="padding:6px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">Save Staff Calls</button>
               </div>
             </div>
             </div>
@@ -2869,8 +2869,8 @@
         </div>
 
         <div id="staffCallMessagesSection" style="margin-top:24px;">
-          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Staff Call Messages</h4>
-          <div class="row small" style="margin-bottom:12px;">Choose preset text or customize what technicians see when they are called from Available or In Service.</div>
+          <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Staff Calls</h4>
+          <div class="row small" style="margin-bottom:12px;">Choose preset text or customize what technicians hear on phone calls and see on screen when called from Available or In Service.</div>
           <div id="staffCallMessageTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
 
@@ -7602,6 +7602,17 @@ function ffTwilioVoiceStatusText(data){
   return status.replace(/_/g, ' ');
 }
 
+/** Strip vendor / Firebase noise from call errors shown next to the call icon. */
+function ffStaffCallUserErrorText(err){
+  let msg = String((err && (err.message || err.details)) || 'Failed').trim();
+  msg = msg.replace(/^Firebase:\s*/i, '');
+  msg = msg.replace(/\s*\(functions\/[^)]+\)\.?/gi, '');
+  msg = msg.replace(/\bTwilio\b/gi, 'Phone').trim();
+  if (!msg) return 'Failed';
+  if (/does not have a phone number/i.test(msg)) return 'No phone on file';
+  return msg.length > 48 ? (msg.slice(0, 45).trim() + '…') : msg;
+}
+
 window.__ffTwilioVoiceLogUnsubs = window.__ffTwilioVoiceLogUnsubs || {};
 window.__ffTwilioVoiceRecentCalls = window.__ffTwilioVoiceRecentCalls || {};
 
@@ -7654,10 +7665,10 @@ async function ffSubscribeTwilioVoiceCallLog(callLogId, statusEl, meta = {}){
       statusEl.style.display = 'inline';
       ffTwilioVoiceRememberCall({ ...meta, callLogId: key, status });
     }, (err) => {
-      console.warn('[TwilioVoicePOC] call log listen failed', err);
+      console.warn('[StaffCall] call log listen failed', err);
     });
   } catch (err) {
-    console.warn('[TwilioVoicePOC] subscribe failed', err);
+    console.warn('[StaffCall] subscribe failed', err);
   }
 }
 
@@ -7703,9 +7714,9 @@ async function ffSendTwilioVoiceStaffCall({ staffId, queueEntryId, callType, sta
     }
     return { ok: true, ...data };
   } catch (err) {
-    console.error('[TwilioVoicePOC] callStaff failed', err);
+    console.error('[StaffCall] callStaff failed', err);
     if (statusEl) {
-      statusEl.textContent = err?.message || 'Failed';
+      statusEl.textContent = ffStaffCallUserErrorText(err);
       statusEl.style.display = 'inline';
     }
     return { ok: false, error: err };
@@ -13701,15 +13712,15 @@ function renderStaffCallMessageSettings() {
 
   const timeoutTitle = document.createElement("div");
   timeoutTitle.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
-  timeoutTitle.textContent = "Call timeout";
+  timeoutTitle.textContent = "On-screen call timeout";
 
   const timeoutDescription = document.createElement("div");
   timeoutDescription.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
-  timeoutDescription.textContent = "Controls how long the call stays on the technician screen and when admin sees No response.";
+  timeoutDescription.textContent = "How long the on-screen call stays open when the phone call can’t go through, and when you see No response. This does not control how long the phone rings.";
 
   const timeoutLabel = document.createElement("label");
   timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-  timeoutLabel.textContent = "How long should the call stay active?";
+  timeoutLabel.textContent = "How long should the on-screen call stay active?";
 
   const timeoutSelect = document.createElement("select");
   timeoutSelect.id = "staffCallTimeoutSeconds";
@@ -14474,15 +14485,15 @@ function renderUserProfileStaffCallMessageSettings() {
 
   const timeoutTitle = document.createElement("div");
   timeoutTitle.style.cssText = "font-size:12px;font-weight:700;color:#111827;";
-  timeoutTitle.textContent = "Call timeout";
+  timeoutTitle.textContent = "On-screen call timeout";
 
   const timeoutDescription = document.createElement("div");
   timeoutDescription.style.cssText = "font-size:11px;color:#6b7280;line-height:1.45;";
-  timeoutDescription.textContent = "Controls how long the call stays on the technician screen and when admin sees No response.";
+  timeoutDescription.textContent = "How long the on-screen call stays open when the phone call can’t go through, and when you see No response. This does not control how long the phone rings.";
 
   const timeoutLabel = document.createElement("label");
   timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-  timeoutLabel.textContent = "How long should the call stay active?";
+  timeoutLabel.textContent = "How long should the on-screen call stay active?";
 
   const timeoutSelect = document.createElement("select");
   timeoutSelect.id = "userProfileStaffCallTimeoutSeconds";
@@ -14675,7 +14686,7 @@ function renderUserProfileStaffCallMessageSettings() {
       }
       saveBtn.textContent = "Saved";
       setTimeout(() => {
-        saveBtn.textContent = "Save Staff Call Messages";
+        saveBtn.textContent = "Save Staff Calls";
       }, 1400);
     });
   }
