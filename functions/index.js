@@ -9,6 +9,60 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onRequest: onRequestV2 } = require("firebase-functions/v2/https");
 functions.region = functionsV1.region;
 
+// Kiosk feature — shared, non-destructive role seeding (Stage 2).
+const {
+  ensureKioskRoleForSalon,
+  backfillAllSalons,
+} = require("./kiosk/seed");
+const { TECHNICIAN_KIOSK_ROLE_ID } = require("./kiosk/permissions");
+
+// Twilio Voice staff calls (callStaff + webhook handlers). Source restored
+// to match prod-deployed webhooks (twilioVoicePrompt/Response/Status).
+// Deploy by name only when changing this module:
+//   firebase deploy --only "functions:callStaff,functions:twilioVoicePrompt,functions:twilioVoiceResponse,functions:twilioCallStatus" --project fair-flow-staging
+Object.assign(exports, require("./twilio-voice"));
+
+// Stripe billing integration (createStripeCheckoutSession,
+// createStripePortalSession, stripeWebhook). Lives in its own file so this
+// module stays focused on existing concerns.
+Object.assign(exports, require("./stripe"));
+
+// Internal billing override (owner-only comped/free access). Imports
+// recomputeAccountStatus from ./stripe — must be required AFTER ./stripe.
+Object.assign(exports, require("./billing"));
+
+// Server-side scheduled queue auto-reset (runs even when no device is open).
+const _queueAutoReset = require("./queue-auto-reset");
+exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
+exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
+
+const _docSizeMonitor = require("./doc-size-monitor");
+exports.scheduledDocSizeMonitor = _docSizeMonitor.scheduledDocSizeMonitor;
+exports.debugRunDocSizeMonitor = _docSizeMonitor.debugRunDocSizeMonitor;
+
+// Employee Write-Ups Phase 2 (trusted approve/send + employee open/respond/
+// acknowledge). Deploy ONLY by name:
+//   firebase deploy --only "functions:approveAndSendWriteup,functions:writeupEmployeeAction"
+const _writeups = require("./writeups");
+exports.approveAndSendWriteup = _writeups.approveAndSendWriteup;
+exports.writeupEmployeeAction = _writeups.writeupEmployeeAction;
+
+// Time Clock Stage A — trusted server-side punch + manage (staffId is derived
+// server-side; kiosk PIN verified in-function; auditEvents per entry).
+// Stage B adds kiosk photo capture inside timeClockPunch + the daily 90-day
+// photo retention sweep. Deploy ONLY by name:
+//   firebase deploy --only "functions:timeClockPunch,functions:timeClockManageEntry,functions:timeClockPhotosPurgeDaily" --project fair-flow-staging
+const _timeClock = require("./time-clock");
+exports.timeClockPunch = _timeClock.timeClockPunch;
+exports.timeClockManageEntry = _timeClock.timeClockManageEntry;
+exports.timeClockPhotosPurgeDaily = _timeClock.timeClockPhotosPurgeDaily;
+
+// Server-side scheduled Tasks Opening/Closing auto-reset (cloud-authoritative).
+const _tasksAutoReset = require("./tasks-auto-reset");
+exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;
+exports.debugRunTasksAutoReset = _tasksAutoReset.debugRunTasksAutoReset;
+
+
 /**
  * Simple test callable – use to verify IAM/CORS/region work.
  * Call from console: httpsCallable(getFunctions(app,"us-central1"),"testCallable")({test:1})
@@ -906,4 +960,618 @@ exports.mediaDownloadFile = onRequestV2(
     .pipe(res);
   }
 );
+
+// ============================================================================
+// Kiosk roles seeding (Stage 2)
+// Runs inside Google with built-in credentials — no gcloud / service-account
+// key needed. Deploy ONLY these functions, to staging:
+//   firebase deploy --only functions:seedKioskRoleOnSalonCreate,functions:backfillKioskRoles --project fair-flow-staging
+// Both paths are idempotent and never overwrite a salon's customized role.
+// ============================================================================
+
+/**
+ * Auto-seed the default technician-kiosk role whenever a new salon is created.
+ * Works in any environment (incl. production) with no manual step.
+ */
+exports.seedKioskRoleOnSalonCreate = onDocumentCreated(
+  { document: "salons/{salonId}", region: "us-central1" },
+  async (event) => {
+    const salonId = event.params.salonId;
+    try {
+      const created = await ensureKioskRoleForSalon(admin.firestore(), salonId);
+      console.log(
+        `[seedKioskRoleOnSalonCreate] salon ${salonId}: role ` +
+          `${created ? "created" : "already existed (preserved)"}`
+      );
+    } catch (err) {
+      // Don't throw: a seeding hiccup must not break salon creation. Backfill
+      // can repair it later.
+      console.error(
+        `[seedKioskRoleOnSalonCreate] failed for salon ${salonId}:`,
+        err && err.message ? err.message : err
+      );
+    }
+  }
+);
+
+/**
+ * One-time backfill of the default kiosk role into existing salons.
+ *
+ * Default (safe, multi-tenant): seeds only the caller's own salon. Requires the
+ * caller to be signed in as owner/admin of that salon.
+ *
+ * Optional sweep mode: pass { allSalons: true }. This is gated behind a custom
+ * claim (token.superAdmin === true) so a normal salon admin can never write
+ * roles into other businesses' salons.
+ */
+exports.backfillKioskRoles = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+    }
+    const uid = context.auth.uid;
+    const requestData = typeof data === "object" && data ? data : {};
+
+    // Sweep mode: every salon. Only a platform super-admin may do this.
+    if (requestData.allSalons === true) {
+      if (context.auth.token && context.auth.token.superAdmin === true) {
+        const result = await backfillAllSalons(admin.firestore());
+        console.log("[backfillKioskRoles] sweep all salons:", result);
+        return { ok: true, mode: "allSalons", ...result };
+      }
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Sweep mode requires platform super-admin."
+      );
+    }
+
+    // Default mode: caller's own salon only.
+    const userSnap = await admin.firestore().doc(`users/${uid}`).get();
+    if (!userSnap.exists) {
+      throw new functions.https.HttpsError("permission-denied", "User profile not found.");
+    }
+    const userData = userSnap.data() || {};
+    const role = String(userData.role || "").toLowerCase();
+    if (!["owner", "admin"].includes(role)) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Only owner/admin can backfill kiosk roles."
+      );
+    }
+    const salonId = userData.salonId;
+    if (!salonId) {
+      throw new functions.https.HttpsError("failed-precondition", "No salonId on user profile.");
+    }
+
+    const created = await ensureKioskRoleForSalon(admin.firestore(), salonId);
+    console.log(`[backfillKioskRoles] salon ${salonId}: created=${created}`);
+    return {
+      ok: true,
+      mode: "ownSalon",
+      salonId,
+      created,
+      message: created
+        ? "Kiosk role created."
+        : "Kiosk role already existed (preserved).",
+    };
+  });
+
+// ============================================================================
+// Kiosk device pairing — token issuance (Stage 3b)
+//
+// Trampoline (no callable). When an owner/admin approves a pairing code
+// (pending -> approved, with their salonId set; enforced by Security Rules),
+// this trigger:
+//   1. creates salons/{salonId}/kiosks/{kioskId}
+//   2. self-heals the technician-kiosk role for that salon
+//   3. mints a custom token with claims { isKiosk, salonId, kioskId, roleId }
+//   4. writes token + tokenExpiresAt back to the doc and sets status=tokenReady
+//
+// The tablet (listening to the doc by its secret high-entropy id) then signs in
+// with the token and deletes the doc (delete-after-read).
+//
+// Deploy staging-only by name:
+//   firebase deploy --only functions:onPairingApproved --project fair-flow-staging
+// Requires the runtime SA (fair-flow-staging@appspot.gserviceaccount.com) to
+// have roles/iam.serviceAccountTokenCreator on itself (for createCustomToken).
+// ============================================================================
+
+// How long the minted token doc stays usable before the tablet should give up.
+const KIOSK_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+exports.onPairingApproved = functions
+  .region("us-central1")
+  .firestore.document("pairingCodes/{pairId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const pairId = context.params.pairId;
+
+    // Act ONLY on the pending -> approved transition. This also prevents a loop:
+    // our own write below sets status to "tokenReady", which re-fires onUpdate
+    // but fails this guard and exits.
+    if (before.status === "approved" || after.status !== "approved") {
+      return null;
+    }
+    // Defensive: never re-mint if a token was somehow already issued.
+    if (after.token || after.kioskId) {
+      return null;
+    }
+
+    const db = admin.firestore();
+
+    // salonId is guaranteed by Security Rules to equal the approver's own salon.
+    const salonId = typeof after.salonId === "string" ? after.salonId.trim() : "";
+    if (!salonId) {
+      await change.after.ref.set(
+        {
+          status: "error",
+          error: "Missing salonId on approval.",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      console.error(`[onPairingApproved] ${pairId}: approval missing salonId`);
+      return null;
+    }
+
+    try {
+      // 1. Create the kiosk device document.
+      const kioskRef = db
+        .collection("salons")
+        .doc(salonId)
+        .collection("kiosks")
+        .doc();
+      const kioskId = kioskRef.id;
+      const name =
+        typeof after.kioskName === "string" && after.kioskName.trim()
+          ? after.kioskName.trim()
+          : "Kiosk";
+      const locationId =
+        typeof after.locationId === "string" && after.locationId.trim()
+          ? after.locationId.trim()
+          : null;
+
+      await kioskRef.set({
+        name,
+        locationId,
+        roleId: TECHNICIAN_KIOSK_ROLE_ID,
+        businessId: salonId,
+        status: "active",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Self-heal: make sure this salon has the kiosk role (covers existing
+      //    salons that pre-date the auto-seed trigger). Non-destructive.
+      await ensureKioskRoleForSalon(db, salonId);
+
+      // 3. Mint a custom token identifying the DEVICE (not a person).
+      const uid = `kiosk_${kioskId}`;
+      const claims = {
+        isKiosk: true,
+        salonId,
+        kioskId,
+        roleId: TECHNICIAN_KIOSK_ROLE_ID,
+      };
+      const token = await admin.auth().createCustomToken(uid, claims);
+
+      // 4. Hand the token back to the tablet via the (secret-id) doc.
+      const tokenExpiresAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + KIOSK_TOKEN_TTL_MS
+      );
+      await change.after.ref.set(
+        {
+          status: "tokenReady",
+          kioskId,
+          token,
+          tokenExpiresAt,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      console.log(
+        `[onPairingApproved] ${pairId}: paired kiosk ${kioskId} for salon ${salonId}`
+      );
+      return null;
+    } catch (err) {
+      const msg = err && err.message ? err.message : String(err);
+      await change.after.ref.set(
+        {
+          status: "error",
+          error: msg,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      console.error(`[onPairingApproved] ${pairId}: failed —`, msg);
+      return null;
+    }
+  });
+
+
+// ============================================================================
+// Phase 3 — Staff document expiration reminders (Gen1 scheduled, daily)
+// ============================================================================
+
+/**
+ * Parse expiration to UTC millis (staff docs may store Timestamp, Date, or YYYY-MM-DD string).
+ */
+function _staffDocExpirationToMillis(raw) {
+  if (raw == null || raw === "") return null;
+  try {
+    if (typeof raw.toDate === "function") return raw.toDate().getTime();
+    if (raw instanceof admin.firestore.Timestamp) return raw.toDate().getTime();
+    if (raw instanceof Date) return raw.getTime();
+    if (typeof raw === "string") {
+      const s = raw.trim().slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+      return new Date(`${s}T12:00:00.000Z`).getTime();
+    }
+  } catch (e) {
+    console.warn("[staffDocExpiry] bad expiration field", e && e.message);
+  }
+  return null;
+}
+
+/** Whole UTC days from today to expiration day (negative = expired). */
+function _utcDayDiffFromToday(expMs) {
+  const exp = new Date(expMs);
+  const expDay = Date.UTC(exp.getUTCFullYear(), exp.getUTCMonth(), exp.getUTCDate());
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((expDay - today) / 86400000);
+}
+
+async function _getSalonManagersForReminders(salonId) {
+  const snap = await admin.firestore().collection("users").where("salonId", "==", salonId).get();
+  const out = [];
+  snap.forEach((d) => {
+    const x = d.data() || {};
+    const r = String(x.role || "").toLowerCase();
+    if (["owner", "admin", "manager"].includes(r)) {
+      out.push({
+        uid: d.id,
+        staffId: String(x.staffId || ""),
+        name: String(x.name || x.displayName || "").trim() || d.id,
+        role: r,
+      });
+    }
+  });
+  return out;
+}
+
+function _buildExpiryMessage({ subjectStaffName, documentTitle, documentType, diffDays, expired }) {
+  const who = subjectStaffName || "A staff member";
+  const title = documentTitle || documentType || "Document";
+  if (expired) {
+    return `${who}'s ${title} is past expiration.`;
+  }
+  if (diffDays <= 0) {
+    return `${who}'s ${title} expires today.`;
+  }
+  if (diffDays === 1) {
+    return `${who}'s ${title} expires tomorrow.`;
+  }
+  return `${who}'s ${title} expires in ${diffDays} days.`;
+}
+
+/** Same fingerprint as public/staff-doc-expiry-inbox.js — dedupe Inbox when two doc rows share one file. */
+function _fingerprintStaffDocData(data) {
+  const d = data || {};
+  const p = String(d.storagePath || d.filePath || "").trim();
+  if (p) {
+    const base = p.split("/").pop() || p;
+    return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  }
+  const title = String(d.title || d.type || "doc").trim();
+  const m = title.match(/([a-f0-9]{8}-[a-f0-9-]{4,}[^.\s]*\.\w+)/i);
+  if (m) return m[1].replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+  return title.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 160);
+}
+
+function _expYmdUtcBucket(expirationMs) {
+  const d = new Date(expirationMs);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function _sanitizeInboxIdSegment(s) {
+  return String(s || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 200);
+}
+
+/** 30-day vs expired must use different id prefixes (same file + expiry date could otherwise collide). */
+function _buildStaffDocExpiryInboxDocId(alertType, forUid, staffId, expirationMs, docData) {
+  const expYmd = _expYmdUtcBucket(expirationMs);
+  const fp = _fingerprintStaffDocData(docData);
+  const tag = alertType === "document_expired" ? "docex" : "doc30";
+  const id = `auto_${tag}_${_sanitizeInboxIdSegment(forUid)}_${_sanitizeInboxIdSegment(staffId)}_${expYmd}_${_sanitizeInboxIdSegment(fp)}`;
+  return id.length > 1400 ? id.slice(0, 1400) : id;
+}
+
+/**
+ * One batch: N inbox rows + staff document flags/lifecycle (avoids orphan inbox if doc update fails).
+ */
+async function _commitStaffDocAlertBatch(docRef, salonId, payload) {
+  const {
+    managers,
+    alertType,
+    message,
+    staffId,
+    documentId,
+    documentTitle,
+    documentType,
+    expirationMs,
+    subjectStaffName,
+    subjectLocationId,
+    creatorUid,
+    creatorStaffId,
+    creatorName,
+    creatorRole,
+    reminderField,
+    staffDocDataForFingerprint,
+  } = payload;
+  if (!managers || !managers.length) {
+    console.warn("[staffDocExpiry] no managers for salon", salonId);
+    return;
+  }
+  const expTs = admin.firestore.Timestamp.fromMillis(expirationMs);
+  const batch = admin.firestore().batch();
+  const creator = managers.find((m) => m.uid === creatorUid) || managers[0];
+  const cUid = creatorUid || creator.uid;
+  const cStaffId = creatorStaffId != null ? creatorStaffId : creator.staffId;
+  const cName = creatorName || creator.name;
+  const cRole = creatorRole || creator.role;
+
+  const fpSource = staffDocDataForFingerprint && typeof staffDocDataForFingerprint === "object" ? staffDocDataForFingerprint : {};
+
+  for (const m of managers) {
+    const itemId = _buildStaffDocExpiryInboxDocId(alertType, m.uid, staffId, expirationMs, fpSource);
+    const ref = admin.firestore().collection("salons").doc(salonId).collection("inboxItems").doc(itemId);
+    // eslint-disable-next-line no-await-in-loop
+    const existing = await ref.get();
+    if (existing.exists) {
+      continue;
+    }
+    batch.set(ref, {
+      tenantId: salonId,
+      locationId: subjectLocationId || null,
+      type: alertType,
+      status: "open",
+      priority: "normal",
+      assignedTo: null,
+      sentToStaffIds: [],
+      sentToNames: [],
+      message,
+      source: "staff_documents",
+      staffId,
+      documentId,
+      documentTitle,
+      documentType,
+      expirationDate: expTs,
+      data: {
+        source: "staff_documents",
+        staffId,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationDate: expTs,
+        message,
+        subjectStaffName,
+        automated: true,
+      },
+      managerNotes: null,
+      responseNote: null,
+      decidedBy: null,
+      decidedAt: null,
+      needsInfoQuestion: null,
+      staffReply: null,
+      visibility: "managers_only",
+      unreadForManagers: true,
+      createdByUid: cUid,
+      createdByStaffId: cStaffId,
+      createdByName: cName,
+      createdByRole: cRole,
+      forUid: m.uid,
+      forStaffId: m.staffId || "",
+      forStaffName: m.name || "Manager",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: null,
+    });
+  }
+
+  const docUpdate = {
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lifecycleStatus: alertType === "document_expired" ? "expired" : "expiring_soon",
+  };
+  if (reminderField === "expired") {
+    docUpdate.expiredReminderSentAt = admin.firestore.FieldValue.serverTimestamp();
+  } else if (reminderField === "thirtyDay") {
+    docUpdate.thirtyDayReminderSentAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  batch.update(docRef, docUpdate);
+  await batch.commit();
+}
+
+async function _processOneStaffDocument(salonId, staffId, docSnap, managersCache) {
+  const docRef = docSnap.ref;
+  const data = docSnap.data() || {};
+  const documentId = docSnap.id;
+
+  const life = String(data.lifecycleStatus || "").toLowerCase();
+  if (life === "archived") return;
+
+  const approval = String(data.approvalStatus || "").toLowerCase();
+  if (approval !== "approved") return;
+
+  const sid = String(staffId || "").trim();
+  if (!sid) return;
+
+  const expMs = _staffDocExpirationToMillis(data.expirationDate);
+  if (expMs == null) return;
+
+  const diffDays = _utcDayDiffFromToday(expMs);
+
+  let managers = managersCache[salonId];
+  if (!managers) {
+    managers = await _getSalonManagersForReminders(salonId);
+    managersCache[salonId] = managers;
+  }
+
+  let staffName = "";
+  let subjectLocationId = null;
+  try {
+    const st = await admin.firestore().doc(`salons/${salonId}/staff/${sid}`).get();
+    const sd = (st.exists && st.data()) || {};
+    staffName = String(sd.name || "").trim();
+    // Resolve the subject staff's location so each inbox reminder can be
+    // scoped to the correct branch. Prefer the primary location; fall back
+    // to the first allowed location; otherwise leave as null so the client
+    // can fall through to legacy staff-based location resolution.
+    if (typeof sd.primaryLocationId === "string" && sd.primaryLocationId.trim()) {
+      subjectLocationId = sd.primaryLocationId.trim();
+    } else if (Array.isArray(sd.allowedLocationIds) && sd.allowedLocationIds[0]) {
+      subjectLocationId = String(sd.allowedLocationIds[0]).trim() || null;
+    }
+  } catch (_) {
+    staffName = "";
+  }
+  const subjectStaffName = staffName || "Staff member";
+  const documentTitle = String(data.title || data.type || "Document").trim() || "Document";
+  const documentType = String(data.type || "").trim() || "Document";
+
+  const creator = managers[0];
+
+  if (diffDays < 0) {
+    if (!data.expiredReminderSentAt && creator) {
+      const message = _buildExpiryMessage({
+        subjectStaffName,
+        documentTitle,
+        documentType,
+        diffDays,
+        expired: true,
+      });
+      await _commitStaffDocAlertBatch(docRef, salonId, {
+        managers,
+        alertType: "document_expired",
+        reminderField: "expired",
+        message,
+        staffId: sid,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationMs: expMs,
+        subjectStaffName,
+        subjectLocationId,
+        creatorUid: creator.uid,
+        creatorStaffId: creator.staffId,
+        creatorName: creator.name,
+        creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
+      });
+    } else {
+      await docRef.update({
+        lifecycleStatus: "expired",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } else if (diffDays <= 30) {
+    if (!data.thirtyDayReminderSentAt && creator) {
+      const message = _buildExpiryMessage({
+        subjectStaffName,
+        documentTitle,
+        documentType,
+        diffDays,
+        expired: false,
+      });
+      await _commitStaffDocAlertBatch(docRef, salonId, {
+        managers,
+        alertType: "document_expiring_soon",
+        reminderField: "thirtyDay",
+        message,
+        staffId: sid,
+        documentId,
+        documentTitle,
+        documentType,
+        expirationMs: expMs,
+        subjectStaffName,
+        subjectLocationId,
+        creatorUid: creator.uid,
+        creatorStaffId: creator.staffId,
+        creatorName: creator.name,
+        creatorRole: creator.role,
+        staffDocDataForFingerprint: data,
+      });
+    } else {
+      await docRef.update({
+        lifecycleStatus: "expiring_soon",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  } else {
+    await docRef.update({
+      lifecycleStatus: "active",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+}
+
+exports.scheduledStaffDocumentExpirationReminders = functions
+  .region("us-central1")
+  .runWith({ timeoutSeconds: 540, memory: "512MB" })
+  .pubsub.schedule("0 8 * * *")
+  .timeZone("America/Chicago")
+  .onRun(async () => {
+    const managersCache = Object.create(null);
+    let salonsProcessed = 0;
+    let docsSeen = 0;
+    let errors = 0;
+
+    try {
+      const salonsSnap = await admin.firestore().collection("salons").get();
+      for (const salonDoc of salonsSnap.docs) {
+        salonsProcessed += 1;
+        const salonId = salonDoc.id;
+        try {
+          const staffSnap = await salonDoc.ref.collection("staff").get();
+          for (const staffDoc of staffSnap.docs) {
+            const staffId = staffDoc.id;
+            let docsSnap;
+            try {
+              docsSnap = await staffDoc.ref.collection("documents").get();
+            } catch (e) {
+              console.warn("[staffDocExpiry] list documents failed", salonId, staffId, e && e.message);
+              errors += 1;
+              continue;
+            }
+            for (const d of docsSnap.docs) {
+              docsSeen += 1;
+              try {
+                await _processOneStaffDocument(salonId, staffId, d, managersCache);
+              } catch (e) {
+                errors += 1;
+                console.warn("[staffDocExpiry] doc failed", salonId, staffId, d.id, e && e.message);
+              }
+            }
+          }
+        } catch (e) {
+          errors += 1;
+          console.warn("[staffDocExpiry] salon failed", salonId, e && e.message);
+        }
+      }
+    } catch (e) {
+      console.error("[staffDocExpiry] fatal", e);
+      throw e;
+    }
+
+    console.log("[staffDocExpiry] done", { salonsProcessed, docsSeen, errors });
+    return null;
+  });
 

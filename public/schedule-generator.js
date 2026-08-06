@@ -1,22 +1,28 @@
 import {
   enumerateDateRange,
   getEffectiveAvailability,
-} from "./schedule-availability.js?v=20260416_modal_ensure_first";
+} from "./schedule-availability.js?v=20260615_default_schedule_source";
 import {
   normalizeManagerType,
   normalizeScheduleRules,
   normalizeStaffSchedulingData,
   normalizeCoverageRules,
-  normalizeBusinessHours,
+  normalizeDayShiftSegments,
   getEffectiveScheduleRulesForDate,
   isCoverageRulesAllZeros,
+  hasSegmentListCoverageMinimums,
   getEffectiveWeeklyHoursCap,
   getDayNameFromDateKey,
+  getEffectiveShiftSegmentsForDay,
+  resolvedSegmentCoverage,
+  getCustomSegmentOverlapCoverageGaps,
   assignmentDurationHoursFromTimes,
   sliceTimeWindowFromStart,
   parseScheduleTimeToMinutes,
   formatMinutesAsScheduleTime,
-} from "./schedule-helpers.js?v=20260403_reception_split";
+  normalizeBusinessHours,
+  clipTimeWindowToBestShiftSegment,
+} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 
 function getNormalizedStaffList(staffList) {
   return (Array.isArray(staffList) ? staffList : [])
@@ -102,21 +108,49 @@ function isFullManagerAssignment(assignment) {
   return false;
 }
 
+function isAssistantManagerAssignment(assignment) {
+  return assignment.role === "manager" && assignment.managerType === "assistant_manager";
+}
+
+function assignmentOverlapsSegmentWindow(assignment, segStartTime, segEndTime) {
+  const aS = parseScheduleTimeToMinutes(assignment.startTime);
+  const aE = parseScheduleTimeToMinutes(assignment.endTime);
+  const s = parseScheduleTimeToMinutes(segStartTime);
+  const e = parseScheduleTimeToMinutes(segEndTime);
+  if (aS == null || aE == null || s == null || e == null || e <= s) return false;
+  return Math.min(aE, e) > Math.max(aS, s);
+}
+
+function assignmentOverlapsMinuteRange(assignment, lo, hi) {
+  const aS = parseScheduleTimeToMinutes(assignment.startTime);
+  const aE = parseScheduleTimeToMinutes(assignment.endTime);
+  if (aS == null || aE == null || aE <= aS) return false;
+  return Math.min(aE, hi) > Math.max(aS, lo);
+}
+
 /**
  * When coverage rules are customized (not all zeros), pick a minimal set that tries to meet
- * per-day effective minimums (managers / front desk / technicians / total).
- * Otherwise keep every available assignment (legacy behavior).
+ * per-day effective minimums (full managers / assistant managers / technicians / total).
+ * When custom shift segments exist, requirements are enforced per segment (overlap with assignment window).
  */
-function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, coverageRules) {
+function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, coverageRules, options = {}) {
   const sorted = [...candidates].sort((a, b) =>
     String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })
   );
-  const cov = normalizeCoverageRules(coverageRules);
-  if (!coverageRules || isCoverageRulesAllZeros(cov)) {
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayName = getDayNameFromDateKey(dateKey);
+  const { businessHours, dayShiftSegments } = options;
+
+  const covAllZero = isCoverageRulesAllZeros(cov);
+  const segMin = dayName ? hasSegmentListCoverageMinimums(dayName, dayShiftSegments, cov) : false;
+  if (covAllZero && !segMin) {
     return sorted.sort(compareAssignmentsByTime);
   }
 
-  const eff = getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules);
+  const customSegForDay = dayName ? (normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || []) : [];
+
+  const runDayLevelPick = () => {
+    const eff = getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules, { businessHours, dayShiftSegments });
   const taken = new Set();
   const picked = [];
 
@@ -133,11 +167,11 @@ function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, 
   };
 
   const fullManagers = sorted.filter(isFullManagerAssignment);
-  const frontDesk = sorted.filter((a) => a.role === "front_desk");
+    const assistantManagers = sorted.filter(isAssistantManagerAssignment);
   const technicians = sorted.filter((a) => a.role === "technician");
 
   takeUpTo(fullManagers, eff.minManagersPerShift);
-  takeUpTo(frontDesk, eff.minFrontDeskPerDay);
+    takeUpTo(assistantManagers, eff.minFrontDeskPerDay);
   takeUpTo(technicians, eff.minTechniciansPerDay);
 
   for (const a of sorted) {
@@ -149,22 +183,377 @@ function filterAssignmentsByCoverageTargets(candidates, dateKey, scheduleRules, 
   }
 
   return picked.sort(compareAssignmentsByTime);
+  };
+
+  if (!customSegForDay.length || !dayName || !businessHours) {
+    return runDayLevelPick();
+  }
+
+  const dayCov = cov[dayName] || { minManagers: 0, minFrontDesk: 0, minTechnicians: 0, minTotalStaff: 0 };
+  const effectiveSegs = getEffectiveShiftSegmentsForDay(dayName, businessHours, dayShiftSegments);
+  if (!effectiveSegs.length) {
+    return sorted.sort(compareAssignmentsByTime);
+  }
+
+  const pickedList = [];
+  const taken = new Set();
+  const add = (a) => {
+    const k = assignmentStaffKey(a);
+    if (!k || taken.has(k)) return;
+    taken.add(k);
+    pickedList.push(a);
+  };
+
+  const countOverlapInRange = (pred, lo, hi) =>
+    pickedList.filter((a) => pred(a) && assignmentOverlapsMinuteRange(a, lo, hi)).length;
+
+  const overlapGaps = getCustomSegmentOverlapCoverageGaps(dayName, businessHours, dayShiftSegments, coverageRules);
+
+  if (overlapGaps && overlapGaps.length > 0) {
+    overlapGaps.forEach((gap) => {
+      while (countOverlapInRange(isFullManagerAssignment, gap.startMin, gap.endMin) < gap.needFull) {
+        const next = sorted.find(
+          (a) =>
+            isFullManagerAssignment(a)
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsMinuteRange(a, gap.startMin, gap.endMin),
+        );
+        if (!next) break;
+        add(next);
+      }
+      while (countOverlapInRange(isAssistantManagerAssignment, gap.startMin, gap.endMin) < gap.needAsst) {
+        const next = sorted.find(
+          (a) =>
+            isAssistantManagerAssignment(a)
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsMinuteRange(a, gap.startMin, gap.endMin),
+        );
+        if (!next) break;
+        add(next);
+      }
+      while (countOverlapInRange((a) => a.role === "technician", gap.startMin, gap.endMin) < gap.needTech) {
+        const next = sorted.find(
+          (a) =>
+            a.role === "technician"
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsMinuteRange(a, gap.startMin, gap.endMin),
+        );
+        if (!next) break;
+        add(next);
+      }
+    });
+  } else {
+    const countOverlap = (pred, seg) =>
+      pickedList.filter((a) => pred(a) && assignmentOverlapsSegmentWindow(a, seg.startTime, seg.endTime)).length;
+
+    for (const seg of effectiveSegs) {
+      const req = resolvedSegmentCoverage(seg, dayCov);
+      while (countOverlap(isFullManagerAssignment, seg) < req.minManagers) {
+        const next = sorted.find(
+          (a) =>
+            isFullManagerAssignment(a)
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsSegmentWindow(a, seg.startTime, seg.endTime),
+        );
+        if (!next) break;
+        add(next);
+      }
+      while (countOverlap(isAssistantManagerAssignment, seg) < req.minFrontDesk) {
+        const next = sorted.find(
+          (a) =>
+            isAssistantManagerAssignment(a)
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsSegmentWindow(a, seg.startTime, seg.endTime),
+        );
+        if (!next) break;
+        add(next);
+      }
+      while (countOverlap((a) => a.role === "technician", seg) < req.minTechnicians) {
+        const next = sorted.find(
+          (a) =>
+            a.role === "technician"
+            && !taken.has(assignmentStaffKey(a))
+            && assignmentOverlapsSegmentWindow(a, seg.startTime, seg.endTime),
+        );
+        if (!next) break;
+        add(next);
+      }
+    }
+  }
+
+  const eff = getEffectiveScheduleRulesForDate(dateKey, scheduleRules, coverageRules, { businessHours, dayShiftSegments });
+  for (const a of sorted) {
+    if (pickedList.length >= eff.minTotalStaffPerDay) break;
+    const k = assignmentStaffKey(a);
+    if (!k || taken.has(k)) continue;
+    add(a);
+  }
+
+  return pickedList.sort(compareAssignmentsByTime);
 }
 
-function buildAssignmentsForDate(staffList, availabilityDirectory, dateKey) {
+/**
+ * Returns true when the given [startMin,endMin) window overlaps ANY busy
+ * window already assigned to this staff at a different location for the
+ * same date. Used to block cross-location double-booking during Build
+ * Schedule without introducing travel buffers or other complex rules.
+ * Busy windows come from `crossLocationBusy[staffKey][dateKey]`.
+ */
+function hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, dateKey, startMin, endMin) {
+  if (!crossLocationBusy || !dateKey) return false;
+  if (startMin == null || endMin == null || endMin <= startMin) return false;
+  for (const k of staffKeys) {
+    const byDate = k ? crossLocationBusy[k] : null;
+    const list = byDate && byDate[dateKey];
+    if (!Array.isArray(list) || list.length === 0) continue;
+    for (const w of list) {
+      const ws = Number(w.startMin);
+      const we = Number(w.endMin);
+      if (!Number.isFinite(ws) || !Number.isFinite(we) || we <= ws) continue;
+      if (Math.min(endMin, we) > Math.max(startMin, ws)) return true;
+    }
+  }
+  return false;
+}
+
+function staffBusyElsewhereForAvailability(staff, dateKey, availability, crossLocationBusy) {
+  if (!crossLocationBusy) return false;
+  const aS = parseScheduleTimeToMinutes(availability?.startTime);
+  const aE = parseScheduleTimeToMinutes(availability?.endTime);
+  if (aS == null || aE == null || aE <= aS) return false;
+  const staffKeys = [getStaffIdentifier(staff), getStaffUid(staff)].filter(Boolean);
+  return hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, dateKey, aS, aE);
+}
+
+function buildAssignmentsForDate(staffList, availabilityDirectory, dateKey, options = {}) {
+  const crossLocationBusy = options && options.crossLocationBusy;
   return getNormalizedStaffList(staffList)
     .map((staff) => {
       const dailyAvailability = getAvailabilityForStaffDate(staff, availabilityDirectory, dateKey);
       if (!dailyAvailability?.isAvailable) return null;
+      // Skip this staff entirely for this date if their availability overlaps
+      // with a busy window in another location. This matches the Multi-location
+      // conflict guard shown in the Default Schedule editor: same staff cannot
+      // be booked to overlapping shifts across branches.
+      if (staffBusyElsewhereForAvailability(staff, dateKey, dailyAvailability, crossLocationBusy)) {
+        return null;
+      }
       return buildAssignment(staff, dailyAvailability);
     })
     .filter(Boolean)
     .sort(compareAssignmentsByTime);
 }
 
-function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules }) {
-  const all = buildAssignmentsForDate(staffList, availabilityDirectory, date);
-  const assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules);
+/**
+ * With 2+ custom segments, full managers are assigned to segment windows that actually require
+ * full managers (minManagers &gt; 0 per segment), in start-time order — not to raw segment index 1, 2,
+ * so a middle segment that only needs an assistant does not "steal" the second full manager.
+ */
+function applyStaggeredFullManagerSegmentWindows({
+  date,
+  assignments,
+  staffList,
+  availabilityDirectory,
+  businessHours,
+  dayShiftSegments,
+  coverageRules,
+}) {
+  const dayName = getDayNameFromDateKey(date);
+  if (!dayName) return assignments;
+  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
+  if (rawSeg.length < 2) return assignments;
+
+  const bhNorm = normalizeBusinessHours(
+    businessHours || (typeof window !== "undefined" && window.settings?.businessHours) || {},
+  );
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length < 2) return assignments;
+
+  const sortedSegs = [...segs].sort((a, b) => {
+    const ma = parseScheduleTimeToMinutes(a.startTime);
+    const mb = parseScheduleTimeToMinutes(b.startTime);
+    return (ma ?? 0) - (mb ?? 0);
+  });
+
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayCov = cov[dayName] || {};
+  const fullManagerSegs = sortedSegs.filter((seg) => resolvedSegmentCoverage(seg, dayCov).minManagers > 0);
+  if (fullManagerSegs.length === 0) return assignments;
+
+  let minH = Infinity;
+  let maxH = -Infinity;
+  sortedSegs.forEach((seg) => {
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s != null && e != null && e > s) {
+      minH = Math.min(minH, s);
+      maxH = Math.max(maxH, e);
+    }
+  });
+  const hullSeg =
+    Number.isFinite(minH) && maxH > minH
+      ? { startTime: formatMinutesAsScheduleTime(minH), endTime: formatMinutesAsScheduleTime(maxH) }
+      : null;
+
+  const fullMgrs = assignments.filter(isFullManagerAssignment).sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }),
+  );
+  if (fullMgrs.length < 1) return assignments;
+
+  const nextAssignments = assignments.map((a) => ({ ...a }));
+
+  fullMgrs.forEach((orig, i) => {
+    const target = nextAssignments.find((x) => assignmentStaffKey(x) === assignmentStaffKey(orig));
+    if (!target) return;
+    const seg = i < fullManagerSegs.length ? fullManagerSegs[i] : hullSeg;
+    if (!seg) return;
+    const staff = findStaffForAssignmentList(staffList, target);
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s == null || e == null || e <= s) return;
+    const c = staff
+      ? clampSegmentMinutesToAvailability(staff, date, s, e, availabilityDirectory)
+      : { startMin: s, endMin: e };
+    if (!c) return;
+    target.startTime = formatMinutesAsScheduleTime(c.startMin);
+    target.endTime = formatMinutesAsScheduleTime(c.endMin);
+  });
+
+  return nextAssignments.sort(compareAssignmentsByTime);
+}
+
+/**
+ * Clamps assistant managers to the shift segment(s) that require assistant coverage (minFrontDesk &gt; 0),
+ * not always the first segment of the day.
+ */
+function narrowAssistantManagersToFirstSegment({
+  date,
+  assignments,
+  staffList,
+  availabilityDirectory,
+  businessHours,
+  dayShiftSegments,
+  coverageRules,
+}) {
+  const dayName = getDayNameFromDateKey(date);
+  if (!dayName) return assignments;
+  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
+  if (rawSeg.length < 2) return assignments;
+
+  const bhNorm = normalizeBusinessHours(
+    businessHours || (typeof window !== "undefined" && window.settings?.businessHours) || {},
+  );
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length < 2) return assignments;
+
+  const sortedSegs = [...segs].sort((a, b) => {
+    const ma = parseScheduleTimeToMinutes(a.startTime);
+    const mb = parseScheduleTimeToMinutes(b.startTime);
+    return (ma ?? 0) - (mb ?? 0);
+  });
+
+  const cov = normalizeCoverageRules(coverageRules || {});
+  const dayCov = cov[dayName] || {};
+  const asstSegs = sortedSegs.filter((seg) => resolvedSegmentCoverage(seg, dayCov).minFrontDesk > 0);
+  if (asstSegs.length === 0) return assignments;
+
+  const assistants = assignments
+    .filter(isAssistantManagerAssignment)
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" }));
+  if (assistants.length === 0) return assignments;
+
+  const next = assignments.map((a) => ({ ...a }));
+
+  assistants.forEach((orig, i) => {
+    const target = next.find((x) => assignmentStaffKey(x) === assignmentStaffKey(orig));
+    if (!target) return;
+    const seg = asstSegs[Math.min(i, asstSegs.length - 1)];
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s == null || e == null || e <= s) return;
+    const staff = findStaffForAssignmentList(staffList, target);
+    const c = staff
+      ? clampSegmentMinutesToAvailability(staff, date, s, e, availabilityDirectory)
+      : { startMin: s, endMin: e };
+    if (!c) return;
+    target.startTime = formatMinutesAsScheduleTime(c.startMin);
+    target.endTime = formatMinutesAsScheduleTime(c.endMin);
+  });
+
+  return next.sort(compareAssignmentsByTime);
+}
+
+function narrowTechniciansToBestSegment({
+  date,
+  assignments,
+  staffList,
+  availabilityDirectory,
+  businessHours,
+  dayShiftSegments,
+}) {
+  const dayName = getDayNameFromDateKey(date);
+  if (!dayName) return assignments;
+  const rawSeg = normalizeDayShiftSegments(dayShiftSegments || {})[dayName] || [];
+  if (rawSeg.length < 2) return assignments;
+
+  const bhNorm = normalizeBusinessHours(
+    businessHours || (typeof window !== "undefined" && window.settings?.businessHours) || {},
+  );
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length < 2) return assignments;
+
+  const next = assignments.map((a) => ({ ...a }));
+  next.forEach((target) => {
+    if (target.role !== "technician") return;
+    const st = target.startTime;
+    const en = target.endTime;
+    if (!st || !en) return;
+    const clipped = clipTimeWindowToBestShiftSegment(st, en, segs);
+    if (!clipped) return;
+    const staff = findStaffForAssignmentList(staffList, target);
+    const s = parseScheduleTimeToMinutes(clipped.startTime);
+    const e = parseScheduleTimeToMinutes(clipped.endTime);
+    if (s == null || e == null || e <= s) return;
+    const c = staff
+      ? clampSegmentMinutesToAvailability(staff, date, s, e, availabilityDirectory)
+      : { startMin: s, endMin: e };
+    if (!c) return;
+    target.startTime = formatMinutesAsScheduleTime(c.startMin);
+    target.endTime = formatMinutesAsScheduleTime(c.endMin);
+  });
+
+  return next.sort(compareAssignmentsByTime);
+}
+
+function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments, crossLocationBusy } = {}) {
+  const all = buildAssignmentsForDate(staffList, availabilityDirectory, date, { crossLocationBusy });
+  let assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
+  assignments = applyStaggeredFullManagerSegmentWindows({
+    date,
+    assignments,
+    staffList,
+    availabilityDirectory,
+    businessHours,
+    dayShiftSegments,
+    coverageRules,
+  });
+  assignments = narrowAssistantManagersToFirstSegment({
+    date,
+    assignments,
+    staffList,
+    availabilityDirectory,
+    businessHours,
+    dayShiftSegments,
+    coverageRules,
+  });
+  assignments = narrowTechniciansToBestSegment({
+    date,
+    assignments,
+    staffList,
+    availabilityDirectory,
+    businessHours,
+    dayShiftSegments,
+  });
   return {
     date,
     assignments,
@@ -261,7 +650,7 @@ function computeStaffWeeklyHoursInDays(days, staff) {
 /**
  * Adds shifts on days where the staff had no assignment yet, until weeklyHoursTarget (capped) is reached.
  */
-function applyWeeklyRemainingHoursFill(draft, staffList) {
+function applyWeeklyRemainingHoursFill(draft, staffList, crossLocationBusy) {
   const availabilityDirectory = draft.context?.availabilityDirectory;
   if (!availabilityDirectory) return draft;
 
@@ -279,6 +668,7 @@ function applyWeeklyRemainingHoursFill(draft, staffList) {
 
     const staffId = getStaffIdentifier(staff);
     const uid = getStaffUid(staff);
+    const staffKeys = [staffId, uid].filter(Boolean);
 
     for (let i = 0; i < days.length; i++) {
       if (remaining <= 0.02) break;
@@ -297,6 +687,15 @@ function applyWeeklyRemainingHoursFill(draft, staffList) {
 
       const window = sliceTimeWindowFromStart(avail.startTime, avail.endTime, addH);
       if (!window) continue;
+
+      // Respect cross-location busy windows when topping up weekly hours too,
+      // otherwise the fill step could re-introduce the exact double-booking
+      // buildDayDraft just prevented.
+      const winStart = parseScheduleTimeToMinutes(window.startTime);
+      const winEnd = parseScheduleTimeToMinutes(window.endTime);
+      if (hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, day.date, winStart, winEnd)) {
+        continue;
+      }
 
       day.assignments.push({
         staffId,
@@ -348,21 +747,72 @@ function isManagementRoleAssignment(a) {
   return a.role === "admin" || a.role === "manager";
 }
 
+/** Min/max minutes spanning all effective shift segments for a weekday (union bounds). */
+function getDaySplitBoundsFromSegments(dayName, bhNorm, dayShiftSegments) {
+  const bh = bhNorm[dayName];
+  if (!bh || bh.isOpen !== true) return null;
+  const segs = getEffectiveShiftSegmentsForDay(dayName, bhNorm, dayShiftSegments);
+  if (!Array.isArray(segs) || segs.length === 0) return null;
+  let minS = Infinity;
+  let maxE = -Infinity;
+  for (const seg of segs) {
+    const s = parseScheduleTimeToMinutes(seg.startTime);
+    const e = parseScheduleTimeToMinutes(seg.endTime);
+    if (s != null && e != null && e > s) {
+      minS = Math.min(minS, s);
+      maxE = Math.max(maxE, e);
+    }
+  }
+  if (!Number.isFinite(minS) || maxE <= minS) return null;
+  return { openM: minS, closeM: maxE };
+}
+
 /**
  * Splits the salon business window into equal consecutive segments among admin + manager only
- * when 2+ management staff are scheduled the same day. Front desk and technicians are unchanged.
+ * when 2+ management staff are scheduled the same day. Reception/front desk role and technicians are unchanged.
+ * Skipped when custom shift segments exist — overlapping coverage requires concurrent shifts, not sequential splits.
  */
-function applyEqualSplitAmongManagement(draft, staffList, businessHours) {
+function applyEqualSplitAmongManagement(draft, staffList, businessHours, dayShiftSegments) {
   const availabilityDirectory = draft.context?.availabilityDirectory;
-  const bhNorm = normalizeBusinessHours(businessHours || {});
+  const bhNorm = normalizeBusinessHours(
+    businessHours || (typeof window !== "undefined" && window.settings?.businessHours) || {},
+  );
+  const dss =
+    dayShiftSegments !== undefined && dayShiftSegments !== null
+      ? dayShiftSegments
+      : typeof window !== "undefined"
+        ? window.settings?.dayShiftSegments
+        : undefined;
+  const covNorm =
+    draft?.coverageRules && typeof draft.coverageRules === "object"
+      ? normalizeCoverageRules(draft.coverageRules)
+      : typeof window !== "undefined" && window.settings?.coverageRules
+        ? normalizeCoverageRules(window.settings.coverageRules)
+        : normalizeCoverageRules({});
 
   const days = (draft.days || []).map((day) => {
     const dayName = getDayNameFromDateKey(day.date);
+    const rawSeg = dayName ? normalizeDayShiftSegments(dss || {})[dayName] : null;
+    if (Array.isArray(rawSeg) && rawSeg.length > 0) {
+      return day;
+    }
+    const effectiveSegs = dayName ? getEffectiveShiftSegmentsForDay(dayName, bhNorm, dss || {}) : [];
+    if (effectiveSegs.length > 1) {
+      return day;
+    }
+    if (dayName && hasSegmentListCoverageMinimums(dayName, dss, covNorm)) {
+      return day;
+    }
     const bh = dayName ? bhNorm[dayName] : null;
     if (!bh || bh.isOpen !== true) return day;
 
-    const openM = parseScheduleTimeToMinutes(bh.openTime);
-    const closeM = parseScheduleTimeToMinutes(bh.closeTime);
+    const openFromBh = parseScheduleTimeToMinutes(bh.openTime);
+    const closeFromBh = parseScheduleTimeToMinutes(bh.closeTime);
+    if (openFromBh == null || closeFromBh == null || closeFromBh <= openFromBh) return day;
+
+    const splitBounds = dayName ? getDaySplitBoundsFromSegments(dayName, bhNorm, dss || {}) : null;
+    const openM = splitBounds ? splitBounds.openM : openFromBh;
+    const closeM = splitBounds ? splitBounds.closeM : closeFromBh;
     if (openM == null || closeM == null || closeM <= openM) return day;
 
     const assignments = Array.isArray(day.assignments) ? [...day.assignments] : [];
@@ -396,11 +846,15 @@ function applyEqualSplitAmongManagement(draft, staffList, businessHours) {
   return { ...draft, days };
 }
 
-function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dateRange, businessHours, coverageRules } = {}) {
+function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dateRange, businessHours, coverageRules, dayShiftSegments, crossLocationBusy } = {}) {
   const dates = enumerateDateRange(dateRange);
   const normalizedStaffList = getNormalizedStaffList(staffList);
-  const availabilityDirectory = buildAvailabilityDirectory(normalizedStaffList, requests, dateRange, { businessHours });
+  const availabilityDirectory = buildAvailabilityDirectory(normalizedStaffList, requests, dateRange, {
+    businessHours,
+    dayShiftSegments,
+  });
   const normalizedRules = normalizeScheduleRules(rules);
+  const normalizedCrossBusy = (crossLocationBusy && typeof crossLocationBusy === "object") ? crossLocationBusy : null;
 
   const days = dates.map((date) =>
     buildDayDraft({
@@ -409,6 +863,9 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
       availabilityDirectory,
       rules: normalizedRules,
       coverageRules,
+      businessHours,
+      dayShiftSegments,
+      crossLocationBusy: normalizedCrossBusy,
     })
   );
 
@@ -431,9 +888,9 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
   };
 
   let draft = applyWeeklyHoursCapToDraft(draftBeforeCap, normalizedStaffList);
-  draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList);
+  draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList, normalizedCrossBusy);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
-  draft = applyEqualSplitAmongManagement(draft, normalizedStaffList, businessHours);
+  draft = applyEqualSplitAmongManagement(draft, normalizedStaffList, businessHours, dayShiftSegments);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
   return draft;
 }

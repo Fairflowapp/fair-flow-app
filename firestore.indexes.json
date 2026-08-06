@@ -97,6 +97,32 @@
         {"fieldPath": "featured", "order": "ASCENDING"},
         {"fieldPath": "createdAt", "order": "DESCENDING"}
       ]
+    },
+    {
+      "collectionGroup": "inventoryItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "categoryId", "order": "ASCENDING"},
+        {"fieldPath": "subcategoryId", "order": "ASCENDING"},
+        {"fieldPath": "order", "order": "ASCENDING"},
+        {"fieldPath": "name", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "scheduleWeekAcks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "weekStart", "order": "ASCENDING"},
+        {"fieldPath": "locationId", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {"fieldPath": "status", "order": "ASCENDING"},
+        {"fieldPath": "createdAt", "order": "DESCENDING"}
+      ]
     }
   ],
   "fieldOverrides": []

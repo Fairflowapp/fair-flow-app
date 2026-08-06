@@ -43,6 +43,182 @@ service cloud.firestore {
         && userRole() in ['admin', 'owner'];
     }
 
+    /** True when this user is the salon doc ownerUid (covers multi-salon when member role is missing). */
+    function isFirestoreSalonOwnerUid(salonId) {
+      return isSignedIn()
+        && salonId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId))
+        && get(/databases/$(database)/documents/salons/$(salonId)).data.ownerUid == request.auth.uid;
+    }
+
+    /**
+     * Platform admin = entry exists at platformAdmins/{uid}.
+     * Bootstrapped manually via Firebase Console / Admin SDK.
+     */
+    function isPlatformAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid));
+    }
+
+    function permPointsManageAllowed(salonId) {
+      return isAdminOrOwner(salonId)
+        || (
+          mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.points_manage == true
+        );
+    }
+
+    // ===== EMPLOYEE WRITE-UPS HELPERS =====
+    // Confidential HR data: owner / admin / explicit writeups_manage flag ONLY.
+    // Deliberately NOT isManager() — managers must not see write-ups by role.
+    function canManageWriteups(salonId) {
+      return isAdminOrOwner(salonId)
+        || isFirestoreSalonOwnerUid(salonId)
+        || (
+          belongsToSalon(salonId)
+          && mySalonStaffDocData(salonId) != null
+          && mySalonStaffDocData(salonId).permissions is map
+          && mySalonStaffDocData(salonId).permissions.writeups_manage == true
+        );
+    }
+
+    /** Reads permissions.writeups_manage off a staff doc payload; missing = false. */
+    function writeupsManageFlag(d) {
+      return d.get('permissions', {}) is map
+        ? d.get('permissions', {}).get('writeups_manage', false)
+        : false;
+    }
+
+    function memberExists(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid));
+    }
+
+    function memberDocData(salonId) {
+      return get(/databases/$(database)/documents/salons/$(salonId)/members/$(request.auth.uid)).data;
+    }
+
+    function memberStaffId(salonId) {
+      return memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        ? memberDocData(salonId).staffId
+        : '';
+    }
+
+    function membershipStaffId(salonId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId != ''
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId
+        : '';
+    }
+
+    function activeStaffIdForSalon(salonId) {
+      return memberStaffId(salonId) != ''
+        ? memberStaffId(salonId)
+        : (membershipStaffId(salonId) != '' ? membershipStaffId(salonId) : userStaffId());
+    }
+
+    function memberStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return memberExists(salonId)
+        && staffDocId is string
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId.size() >= 14
+        && staffDocId.size() >= memberDocData(salonId).staffId.size()
+        && staffDocId.matches('^' + memberDocData(salonId).staffId + '.*');
+    }
+
+    function userStaffPrefixMatchesStaffDocId(staffDocId) {
+      return userExists()
+        && staffDocId is string
+        && userDocData().staffId is string
+        && userDocData().staffId.size() >= 14
+        && staffDocId.size() >= userDocData().staffId.size()
+        && staffDocId.matches('^' + userDocData().staffId + '.*');
+    }
+
+    function membershipStaffPrefixMatchesStaffDocId(salonId, staffDocId) {
+      return isSignedIn()
+        && staffDocId is string
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId is string
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size() >= 14
+        && staffDocId.size() >= get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId.size()
+        && staffDocId.matches('^' + get(/databases/$(database)/documents/users/$(request.auth.uid)/memberships/$(salonId)).data.staffId + '.*');
+    }
+
+    function staffDocUidMatches(salonId, staffId) {
+      return isSignedIn()
+        && staffId is string
+        && exists(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId))
+        && (
+          get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.uid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.firebaseAuthUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.authUid == request.auth.uid
+          || get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.userUid == request.auth.uid
+          || (
+            request.auth.token.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email is string
+            && get(/databases/$(database)/documents/salons/$(salonId)/staff/$(staffId)).data.email.lower() == request.auth.token.email.lower()
+          )
+          || (
+            memberExists(salonId)
+            && memberDocData(salonId).staffId is string
+            && memberDocData(salonId).staffId == staffId
+          )
+          || (
+            userExists()
+            && userDocData().staffId is string
+            && userDocData().staffId == staffId
+          )
+          || memberStaffPrefixMatchesStaffDocId(salonId, staffId)
+          || userStaffPrefixMatchesStaffDocId(staffId)
+          || membershipStaffPrefixMatchesStaffDocId(salonId, staffId)
+        );
+    }
+
+    function matchesOwnStaffId(salonId, staffId) {
+      return (
+        userExists()
+        && userDocData().staffId is string
+        && userDocData().staffId == staffId
+      ) || (
+        activeStaffIdForSalon(salonId) != ''
+        && activeStaffIdForSalon(salonId) == staffId
+      ) || (
+        memberExists(salonId)
+        && memberDocData(salonId).staffId is string
+        && memberDocData(salonId).staffId == staffId
+      )
+        || staffDocUidMatches(salonId, staffId);
+    }
+
+    function staffDocumentLifecycleIsArchived() {
+      return resource.data.lifecycleStatus is string
+        && resource.data.lifecycleStatus.lower() == 'archived';
+    }
+
+    function isKioskForSalon(salonId) {
+      return isSignedIn()
+        && request.auth.token.isKiosk == true
+        && request.auth.token.salonId == salonId;
+    }
+
+    function isThisKiosk(salonId, kioskId) {
+      return isKioskForSalon(salonId)
+        && request.auth.token.kioskId == kioskId;
+    }
+
+    // Admin/Owner of their OWN salon, without needing a salonId path arg.
+    // Used by collections that are not (yet) salon-scoped, e.g. pairingCodes.
+    function isAdminOrOwnerAny() {
+      return userExists()
+        && userRole() in ['admin', 'owner'];
+    }
+
     // Training: staffId on /users/{uid} (set when technician uses PIN / profile)
     function userStaffId() {
       return userExists() && userDocData().keys().hasAll(['staffId'])
@@ -120,9 +296,61 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // ===== Kiosk device pairing (Stage 3a) =====
+    // Trampoline-style pairing (no callable). An UNAUTHENTICATED tablet creates a
+    // pending code at an UNGUESSABLE high-entropy doc id (pairId). The 4-digit
+    // `code` is only a lookup field for the owner. An admin/owner approves; a
+    // Cloud Function (admin SDK, which bypasses these rules) then writes the
+    // custom token back to the same doc. The tablet reads it by its secret id and
+    // deletes the doc (delete-after-read).
+    match /pairingCodes/{pairId} {
+      // GET by exact (secret) id only. This is what protects the token: the
+      // tablet listens to its own doc; nobody can enumerate the collection.
+      allow get: if true;
+
+      // LIST/QUERY is the security boundary: ONLY an authenticated admin/owner
+      // may search by code. Unauthenticated tablets can NEVER list/scan.
+      allow list: if isAdminOrOwnerAny();
+
+      // CREATE by the (unauthenticated) tablet, tightly constrained:
+      //  - high-entropy doc id, status must start as pending
+      //  - 4-digit code + a >=32-char deviceSecretHash (never the secret itself)
+      //  - short, forward-only expiry (<= 15 min)
+      //  - may NOT pre-set token / salon / kiosk fields
+      allow create: if pairId.size() >= 20
+        && request.resource.data.status == 'pending'
+        && request.resource.data.code is string
+        && request.resource.data.code.matches('^[0-9]{4}$')
+        && request.resource.data.deviceSecretHash is string
+        && request.resource.data.deviceSecretHash.size() >= 32
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(15, 'm')
+        && !request.resource.data.keys().hasAny(
+             ['token', 'tokenExpiresAt', 'salonId', 'kioskId', 'kioskName', 'locationId']);
+
+      // UPDATE = owner approval ONLY (pending -> approved), scoped to the
+      // approver's own salon. The token is written later by the Cloud Function
+      // (admin SDK), so the client may NOT set token/tokenExpiresAt here, and the
+      // code/deviceSecretHash identity fields are immutable.
+      allow update: if isAdminOrOwnerAny()
+        && resource.data.status == 'pending'
+        && request.resource.data.status == 'approved'
+        && request.resource.data.salonId == userDocData().salonId
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.deviceSecretHash == resource.data.deviceSecretHash
+        && !request.resource.data.keys().hasAny(['token', 'tokenExpiresAt']);
+
+      // DELETE = the tablet's delete-after-read cleanup (it knows the secret id).
+      allow delete: if true;
+    }
+
     // User profile doc: each signed-in user can read/write ONLY their own doc
+    // Fair Flow Console (platform admin): read-only owner profile lookup for Customer 360.
     match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if (request.auth != null && request.auth.uid == uid) || isPlatformAdmin();
+      allow write: if request.auth != null && request.auth.uid == uid;
     }
 
     // Salon members directory: minimal public profile (name, role, staffId) for "Send to" lookup
@@ -154,7 +382,80 @@ service cloud.firestore {
     // Basic salon doc: any signed-in user can read
     match /salons/{salonId} {
       allow read: if request.auth != null;
+      // Owners/admins may mirror Preferences salonTimeZone → timezone for
+      // scheduled queue auto-reset (and other server jobs). No other client writes.
+      allow update: if isAdminOrOwner(salonId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['timezone', 'updatedAt']);
+      allow create, delete: if false;
+    }
+
+    // Stripe billing state — written by Cloud Functions (Admin SDK) only.
+    // Owner can read so the Settings UI can show subscription status.
+    match /salons/{salonId}/billing/{docId} {
+      allow read: if isFirestoreSalonOwnerUid(salonId) || isPlatformAdmin();
+      allow create, update, delete:
+        if docId == 'override' && isPlatformAdmin();
       allow write: if false;
+    }
+
+    // ===== KIOSK DEVICES =====
+    // Kiosk devices can read only their own device doc after custom-token pairing.
+    match /salons/{salonId}/kiosks/{kioskId} {
+      allow get: if isAdminOrOwner(salonId) || isThisKiosk(salonId, kioskId);
+      allow list: if isAdminOrOwner(salonId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    // Kiosk role configuration. Owners/admins manage permissions; paired kiosk
+    // devices read their assigned role to decide which modules to show.
+    match /salons/{salonId}/roles/{roleId} {
+      allow read: if isAdminOrOwner(salonId)
+        || (isKioskForSalon(salonId) && request.auth.token.roleId == roleId);
+      allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    match /salons/{salonId}/locations/{locationId} {
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
+      allow write: if belongsToSalon(salonId);
+    }
+
+    // Platform admin allowlist - bootstrapped manually (Firebase Console /
+    // Admin SDK). Console reads own doc via get(); owner-role admins may list
+    // and manage team members; each admin may update own profile fields only.
+    match /platformAdmins/{uid} {
+      function isPlatformOwnerAdmin() {
+        return isPlatformAdmin()
+          && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.role == 'owner';
+      }
+      allow get: if isSignedIn() && request.auth.uid == uid;
+      allow list: if isPlatformOwnerAdmin();
+      allow create: if isPlatformOwnerAdmin();
+      allow update: if isPlatformOwnerAdmin()
+        || (
+          isPlatformAdmin()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).changedKeys()
+               .hasOnly(['photoURL', 'name', 'updatedAt', 'updatedBy'])
+        );
+      allow delete: if false;
+    }
+
+    // Fair Flow Console: branded team-invite emails (Firestore trigger sends the mail).
+    match /consoleInviteRequests/{docId} {
+      allow create: if isPlatformAdmin();
+      allow read, update, delete: if false;
+    }
+
+    // Fair Flow Console support inbox: customers' support requests handled by
+    // platform admins (read threads, reply, mark read, resolve).
+    match /supportTickets/{ticketId} {
+      allow read, create, update: if isPlatformAdmin();
+      allow delete: if false;
+      match /messages/{messageId} {
+        allow read, create: if isPlatformAdmin();
+        allow update, delete: if false;
+      }
     }
 
     match /settings/{docId} {
@@ -178,7 +479,31 @@ service cloud.firestore {
         && userRole() in ['owner', 'admin', 'manager']
         && request.resource.data.to is string
         && request.resource.data.message is map;
-      allow read, update, delete: if false;
+      // Write-up emails only: the salon's owner/admin may read the delivery
+      // state (Queued / Send failed chip). The backend stamps salonId on
+      // these docs; every other mail doc stays completely unreadable.
+      allow read: if docId.matches('writeup_.*')
+        && resource.data.salonId is string
+        && (
+          isAdminOrOwner(resource.data.salonId)
+          || isFirestoreSalonOwnerUid(resource.data.salonId)
+        );
+      allow update, delete: if false;
+    }
+
+    // Staging-only write-up email queue. On fair-flow-staging the backend
+    // writes write-up emails here (never to `mail`) so the Trigger Email
+    // extension installed on this collection can never process old test
+    // documents from `mail`. Backend-only writes; the salon's owner/admin
+    // may read the delivery state of their own write-up emails.
+    match /writeupMailStaging/{docId} {
+      allow read: if docId.matches('writeup_.*')
+        && resource.data.salonId is string
+        && (
+          isAdminOrOwner(resource.data.salonId)
+          || isFirestoreSalonOwnerUid(resource.data.salonId)
+        );
+      allow create, update, delete: if false;
     }
 
     // Finalize invite request
@@ -192,7 +517,7 @@ service cloud.firestore {
 
     // Custom Request Types - per-salon (Admin/Owner only)
     match /salons/{salonId}/requestTypes/{typeId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow create, update, delete: if isAdminOrOwner(salonId);
     }
 
@@ -204,7 +529,7 @@ service cloud.firestore {
 
     // Inbox visibility settings (which request types are hidden from staff)
     match /salons/{salonId}/inboxSettings/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
       allow write: if isAdminOrOwner(salonId);
     }
 
@@ -257,15 +582,18 @@ service cloud.firestore {
           || isManager(salonId)
         );
 
-      // READ: manager sees all; technician sees requests they created OR are recipient of
-      allow read: if belongsToSalon(salonId)
+      // READ: manager sees all; technician sees requests they created OR are recipient of.
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        belongsToSalon(salonId)
         && (
           isManager(salonId)
           || (isTechnician(salonId) && (
             resource.data.createdByUid == request.auth.uid ||
             resource.data.forUid == request.auth.uid
           ))
-        );
+        )
+      ) || isPlatformAdmin();
 
       // UPDATE
       allow update: if belongsToSalon(salonId)
@@ -337,9 +665,175 @@ service cloud.firestore {
     // ===== STAFF MEMBERS (cloud sync) =====
     // Manager/Admin/Owner: full CRUD. All salon members: read (needed for queue/join flow)
     match /salons/{salonId}/staff/{staffId} {
-      allow read: if belongsToSalon(salonId);
-      allow create, update, delete: if belongsToSalon(salonId)
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
+      // Managers can manage staff, but only admin/owner may set or change the
+      // confidential permissions.writeups_manage flag (no self-granting).
+      allow create: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && (isAdminOrOwner(salonId) || writeupsManageFlag(request.resource.data) != true);
+      allow update: if belongsToSalon(salonId)
+        && isManager(salonId)
+        && (isAdminOrOwner(salonId) || writeupsManageFlag(request.resource.data) == writeupsManageFlag(resource.data));
+      allow delete: if belongsToSalon(salonId)
         && isManager(salonId);
+
+      // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
+      match /documents/{documentId} {
+        allow read: if (belongsToSalon(salonId) && isManager(salonId))
+          || matchesOwnStaffId(salonId, staffId)
+          || (
+            memberExists(salonId)
+            && memberStaffId(salonId) is string
+            && memberStaffId(salonId) == staffId
+          )
+          || staffDocUidMatches(salonId, staffId);
+        allow create, update: if belongsToSalon(salonId) && isManager(salonId);
+        allow delete: if belongsToSalon(salonId) && isManager(salonId)
+          && staffDocumentLifecycleIsArchived();
+      }
+    }
+
+    // ===== EMPLOYEE WRITE-UPS (Phase 1: confidential incidents) =====
+    // Owner / admin / staff with permissions.writeups_manage ONLY. Managers
+    // and regular employees have NO access — the employee never sees these
+    // incident records (sent formal write-ups live in writeupDocuments below,
+    // which the employee can read). No platform-admin read: confidential HR data.
+    match /salons/{salonId}/staff/{staffId}/writeupIncidents/{incidentId} {
+      allow read: if canManageWriteups(salonId);
+      // Creation: identity + tenancy fields must match the request context
+      // (path + auth uid) and timestamps must be server timestamps.
+      allow create: if canManageWriteups(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status in ['documented', 'excused', 'included_in_writeup']
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.recordedByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      // Edits keep ownership/origin fields immutable (salonId/employeeId are
+      // pinned to the path; createdBy/recordedBy/createdAt pinned to original)
+      // — corrections are tracked in the append-only auditEvents subcollection.
+      allow update: if canManageWriteups(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status in ['documented', 'excused', 'included_in_writeup']
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.recordedByUid == resource.data.recordedByUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+
+      // Append-only audit trail: client may create, never edit or delete.
+      // Identity and timestamp are validated server-side, never trusted.
+      match /auditEvents/{eventId} {
+        allow read: if canManageWriteups(salonId);
+        allow create: if canManageWriteups(salonId)
+          && request.resource.data.performedByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Formal write-ups — admin workflow doc (Phase 2). Client-editable ONLY
+    // while status == 'draft'; every send-time field (approvedAt, sentAt,
+    // acknowledgment, email attempts…) is written exclusively by the trusted
+    // approveAndSendWriteup backend. permissions.writeups_manage can draft;
+    // approving/sending is Owner/Admin only and enforced by that backend.
+    match /salons/{salonId}/staff/{staffId}/writeups/{writeupId} {
+      // A formal write-up must reference an existing location of THIS salon —
+      // the location's saved name is the employee-facing salon name (the
+      // backend re-fetches it server-side; a cross-salon locationId cannot
+      // pass this path-scoped exists() check).
+      function writeupLocationValid(salonId) {
+        return request.resource.data.locationId is string
+          && request.resource.data.locationId != ''
+          && exists(/databases/$(database)/documents/salons/$(salonId)/locations/$(request.resource.data.locationId));
+      }
+      allow read: if canManageWriteups(salonId);
+      allow create: if canManageWriteups(salonId)
+        && writeupLocationValid(salonId)
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && !request.resource.data.keys().hasAny([
+          'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
+          'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
+          'emailAttempts', 'lastMailId', 'lastMailCollection', 'supersededBy',
+          'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
+          'declinedToAcknowledgeNote'
+        ]);
+      // Draft edits only: identity/tenancy pinned, still a draft, and clients
+      // can never smuggle in send/acknowledgment fields. Once sent, the
+      // workflow doc is fully client-immutable — every later change (email
+      // resends, declined-to-acknowledge, superseding, employee mirroring)
+      // is written exclusively by the trusted backend callables.
+      allow update: if canManageWriteups(salonId)
+        && writeupLocationValid(salonId)
+        && resource.data.status == 'draft'
+        && request.resource.data.status == 'draft'
+        && request.resource.data.salonId == salonId
+        && request.resource.data.employeeId == staffId
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time
+        && !request.resource.data.keys().hasAny([
+          'approvedAt', 'approvedByUid', 'sentAt', 'openedInAppAt',
+          'acknowledgedAt', 'employeeResponse', 'employeeResponseAt',
+          'emailAttempts', 'lastMailId', 'lastMailCollection', 'supersededBy',
+          'declinedToAcknowledgeAt', 'declinedToAcknowledgeByUid',
+          'declinedToAcknowledgeNote'
+        ]);
+      // Only unsent drafts may be discarded; sent write-ups are permanent.
+      allow delete: if canManageWriteups(salonId) && resource.data.status == 'draft';
+
+      match /auditEvents/{eventId} {
+        allow read: if canManageWriteups(salonId);
+        allow create: if canManageWriteups(salonId)
+          && request.resource.data.performedByUid == request.auth.uid
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // Issued formal write-up documents (Phase 2) — the immutable snapshot the
+    // employee sees. Created ONLY by the approveAndSendWriteup backend (Admin
+    // SDK); no client may ever create, edit or delete one. Readable by
+    // write-ups managers and by the employee it was issued to — deliberately
+    // NOT the shared staff documents collection, which all managers can read.
+    match /salons/{salonId}/staff/{staffId}/writeupDocuments/{writeupId} {
+      allow read: if canManageWriteups(salonId) || matchesOwnStaffId(salonId, staffId);
+      allow create, update, delete: if false;
+    }
+
+    // Private per-staff notifications (Phase 2: type 'writeup_sent'). Separate
+    // from staffNotifications on purpose — managers can read those, but must
+    // not even learn that a write-up notification exists. Backend-created only.
+    match /salons/{salonId}/staffPrivateNotifications/{notifId} {
+      allow read: if canManageWriteups(salonId)
+        || (
+          resource.data.forStaffId is string
+          && resource.data.forStaffId != ''
+          && (
+            userStaffId() == resource.data.forStaffId
+            || memberStaffId(salonId) == resource.data.forStaffId
+            || membershipStaffId(salonId) == resource.data.forStaffId
+            || staffDocUidMatches(salonId, resource.data.forStaffId)
+          )
+        );
+      // Recipient may mark their own notification read — nothing else.
+      allow update: if resource.data.forStaffId is string
+        && resource.data.forStaffId != ''
+        && (
+          userStaffId() == resource.data.forStaffId
+          || memberStaffId(salonId) == resource.data.forStaffId
+          || membershipStaffId(salonId) == resource.data.forStaffId
+          || staffDocUidMatches(salonId, resource.data.forStaffId)
+        )
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt']);
+      allow create, delete: if false;
     }
 
     // ===== CHAT / STRUCTURED MESSAGES SYSTEM =====
@@ -366,8 +860,11 @@ service cloud.firestore {
 
     // Conversations (PRIVATE) — only participants can read
     match /salons/{salonId}/conversations/{conversationId} {
-      allow read: if belongsToSalon(salonId)
-        && request.auth.uid in resource.data.participants;
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        belongsToSalon(salonId)
+        && request.auth.uid in resource.data.participants
+      ) || isPlatformAdmin();
 
       // Participant can create a 1:1 conversation doc
       allow create: if belongsToSalon(salonId)
@@ -414,11 +911,23 @@ service cloud.firestore {
                 && request.resource.data.flowId is string
                 && request.resource.data.flowTitle is string
                 && request.resource.data.renderedText is string)
+            || (request.resource.data.keys().hasAll(['title', 'message'])
+                && request.resource.data.title is string
+                && request.resource.data.message is string
+                && !request.resource.data.keys().hasAny(['templateId', 'flowId']))
           );
 
-        // Allow updating only readBy field (mark as read)
+        // Allow updating only readBy (mark as read) and reactions (WhatsApp-style
+        // emoji reactions). A user may only add/change/remove their OWN
+        // reactions.{uid} entry — never another user's.
         allow update: if isParticipant()
-          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy']);
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly(['readBy', 'reactions'])
+          && (
+            !request.resource.data.diff(resource.data).changedKeys().hasAny(['reactions'])
+            || request.resource.data.get('reactions', {})
+                 .diff(resource.data.get('reactions', {}))
+                 .changedKeys().hasOnly([request.auth.uid])
+          );
 
         allow delete: if false;
       }
@@ -449,7 +958,7 @@ service cloud.firestore {
     // Technicians: create + read their own
     // Manager/Admin/Owner: full read + update (close/archive) + delete
     match /salons/{salonId}/tickets/{ticketId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create: if belongsToSalon(salonId)
         && request.resource.data.createdByUid == request.auth.uid;
       allow update: if belongsToSalon(salonId)
@@ -459,6 +968,16 @@ service cloud.firestore {
         );
       allow delete: if belongsToSalon(salonId)
         && isAdminOrOwner(salonId);
+    }
+
+    // Historical rows when a ticket is closed (Summary layer; not deleted when
+    // live ticket is removed). Written by the app on ticket close.
+    // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+    match /salons/{salonId}/ticketSummaries/{summaryId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId);
+      allow update: if belongsToSalon(salonId) && isAdminOrOwner(salonId);
+      allow delete: if false;
     }
 
     // ===== SERVICE CATALOG =====
@@ -475,7 +994,7 @@ service cloud.firestore {
 
     // Weekly schedule publish flags (which ISO week-start dates are visible to all staff)
     match /salons/{salonId}/schedulePublish/{docId} {
-      allow read: if belongsToSalon(salonId);
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
       allow create, update: if belongsToSalon(salonId) && isManager(salonId);
       allow delete: if false;
     }
@@ -495,7 +1014,13 @@ service cloud.firestore {
         && request.resource.data.weekStart is string
         && request.resource.data.staffId is string
         && request.resource.data.pingAt is timestamp
-        && pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          pingId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && pingId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 
@@ -509,7 +1034,13 @@ service cloud.firestore {
         && request.resource.data.staffId is string
         && request.resource.data.staffId == userStaffId()
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow update: if belongsToSalon(salonId)
         && userStaffId() != ''
         && resource.data.staffId == userStaffId()
@@ -517,7 +1048,13 @@ service cloud.firestore {
         && request.resource.data.weekStart == resource.data.weekStart
         && request.resource.data.staffId == resource.data.staffId
         && request.resource.data.seenAt is timestamp
-        && ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId;
+        && (
+          ackId == request.resource.data.weekStart + '_' + request.resource.data.staffId
+          || (
+            request.resource.data.locationId is string
+            && ackId == request.resource.data.locationId + '__' + request.resource.data.weekStart + '_' + request.resource.data.staffId
+          )
+        );
       allow delete: if false;
     }
 
@@ -556,7 +1093,7 @@ service cloud.firestore {
 
     // Legacy Media module (contentWorks, mediaItems, postedHistory)
     match /salons/{salonId}/contentWorks/{workId} {
-      allow read: if canAccessMedia(salonId);
+      allow read: if canAccessMedia(salonId) || isPlatformAdmin();
       allow create: if canAccessMedia(salonId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.salonId == salonId
@@ -567,7 +1104,7 @@ service cloud.firestore {
       allow update, delete: if canAccessMedia(salonId);
 
       match /mediaItems/{mediaId} {
-        allow read: if canAccessMedia(salonId);
+        allow read: if canAccessMedia(salonId) || isPlatformAdmin();
         allow create: if canAccessMedia(salonId)
           && request.resource.data.mediaType is string
           && request.resource.data.mediaUrl is string
@@ -622,25 +1159,264 @@ service cloud.firestore {
 
     // ===== UI SETTINGS (historyRange, etc.) =====
     match /salons/{salonId}/settings/{docId} {
-      allow read: if belongsToSalon(salonId);
+      // Kiosk sessions may read ONLY the timeClock doc — the kiosk camera
+      // gate needs kioskPhoto.enabled/onFailure (Time Clock Stage B). All
+      // other settings docs stay hidden from kiosks, and kiosks never write.
+      allow read: if belongsToSalon(salonId)
+        || (isKioskForSalon(salonId) && docId == 'timeClock');
       allow write: if belongsToSalon(salonId);
     }
 
     // ===== QUEUE / TASKS STATE =====
     match /salons/{salonId}/queueState/{docId} {
+      // Optimistic concurrency (compare-and-swap): a write that changes
+      // queue/service/log must advance rev by exactly 1. A stale-rev write is
+      // rejected (permission-denied), which triggers the existing 3-way merge +
+      // retry in queue-cloud.js and prevents stale-cache "resurrection"
+      // overwrites. Settings-only writes (no content change) may keep rev.
+      function queueContentChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys().hasAny(['queue', 'service', 'log']);
+      }
+      function currentRev() {
+        return ('rev' in resource.data) ? resource.data.rev : 0;
+      }
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
+      allow create: if (belongsToSalon(salonId) || isKioskForSalon(salonId))
+        && request.resource.data.rev is int
+        && request.resource.data.rev >= 0;
+      allow update: if (belongsToSalon(salonId) || isKioskForSalon(salonId))
+        && (
+          !queueContentChanged()
+          || request.resource.data.rev == currentRev() + 1
+        );
+      allow delete: if false;
+    }
+
+    // Per-device queue sync diagnostics (rolling client trace). Written by the
+    // device itself on every save attempt; read for debugging sync issues.
+    match /salons/{salonId}/queueDiag/{deviceId} {
+      allow read, write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    match /salons/{salonId}/tasksState/{docId} {
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
+      allow write: if belongsToSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    match /salons/{salonId}/timeEntries/{entryId} {
+      allow read: if belongsToSalon(salonId) || isKioskForSalon(salonId) || isPlatformAdmin();
+      // Time Clock Stage C lock: clients may never create/update/delete entries.
+      // All writes go through timeClockPunch / timeClockManageEntry (Admin SDK).
+      allow write: if false;
+
+      // Time Clock audit trail (Stage A). Written ONLY by the timeClockPunch /
+      // timeClockManageEntry callables via the Admin SDK (which bypasses these
+      // rules); clients may never write audit events. Readable by managers for
+      // the Manage Time Cards audit view.
+      match /auditEvents/{eventId} {
+        allow read: if isManager(salonId) || isPlatformAdmin();
+        allow write: if false;
+      }
+    }
+
+    // Staff presence / call feature (live heartbeat + call signaling).
+    // Read by salon members for queue presence dots; written by the staff's
+    // own app, by managers calling a technician, and by the kiosk.
+    match /salons/{salonId}/staffPresence/{staffId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+      allow write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // Inventory module (categories tree, stock subcategories, orders, drafts).
+    // Operational salon data — readable/writable by salon members (UI gates
+    // structural edits to managers). Mirrors queueState/tasksState model.
+    match /salons/{salonId}/inventoryCategories/{catId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
+      allow write: if belongsToSalon(salonId);
+      match /inventorySubcategories/{subId} {
+        allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
+        allow write: if belongsToSalon(salonId);
+      }
+    }
+
+    // Legacy flat inventory list (still read by the Fair Flow Console usage overview).
+    match /salons/{salonId}/inventoryItems/{itemId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isPlatformAdmin();
+      allow write: if belongsToSalon(salonId);
+    }
+    match /salons/{salonId}/inventoryOrders/{orderId} {
+      allow read: if belongsToSalon(salonId);
+      allow write: if belongsToSalon(salonId);
+    }
+    match /salons/{salonId}/inventoryDrafts/{draftId} {
       allow read: if belongsToSalon(salonId);
       allow write: if belongsToSalon(salonId);
     }
 
-    match /salons/{salonId}/tasksState/{docId} {
-      allow read: if belongsToSalon(salonId);
-      allow write: if belongsToSalon(salonId);
+    // ===== FLOOR MODULE =====
+    // Floor request setup (categories, regular requests, flows + nested
+    // steps/options) and live floor orders. Operational salon data: staff send
+    // floor orders, managers manage the setup, and everyone in the salon reads.
+    // Without these rules every Floor onSnapshot subscription is denied
+    // (permission-denied) and the Floor screen shows up empty. Mirrors the
+    // staffPresence access model (members + staff + kiosk).
+    match /salons/{salonId}/floorCategories/{categoryId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+    match /salons/{salonId}/floorRegularRequests/{requestId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+    match /salons/{salonId}/floorFlows/{flowId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+      match /steps/{stepId} {
+        allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+        match /options/{optionId} {
+          allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+        }
+      }
+    }
+    match /salons/{salonId}/floorOrders/{orderId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // ===== STICKY NOTES (Live screen shift-handover notes) =====
+    // Reception staff leave notes for the next shift; anyone in the salon can
+    // add, check off, and delete. Mirrors the floorOrders access model.
+    match /salons/{salonId}/stickyNotes/{noteId} {
+      allow read, write: if belongsToSalon(salonId) || isStaffInSalon(salonId) || isKioskForSalon(salonId);
+    }
+
+    // ===== ACCOUNT-LEVEL SHARED SETUP (multi-location ticket service catalog) =====
+    // accountId currently resolves to the salonId for this app, so reuse the same
+    // salon membership helpers while keeping these paths account-scoped. Without
+    // these rules the Tickets "Service Catalog" read is denied (permission-denied)
+    // and the screen shows "Service Catalog is still loading".
+    match /accounts/{accountId}/shared/serviceCatalog {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{serviceId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/serviceCategories {
+      allow read: if belongsToSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{categoryId} {
+        allow read: if belongsToSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/serviceOverrides/{serviceId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
+    // Shared TASK templates (Tasks module). Without this the Tasks screen is empty.
+    match /accounts/{accountId}/shared/taskTemplates {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{taskId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    // Shared CHAT templates + flows (Chat module).
+    match /accounts/{accountId}/shared/chatTemplates {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{templateId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    match /accounts/{accountId}/shared/chatFlows {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /items/{flowId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+      }
+    }
+
+    // Shared INVENTORY catalog (Inventory module): categories → subcategories → items.
+    match /accounts/{accountId}/shared/inventoryCatalog {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if isManager(accountId);
+      allow delete: if false;
+
+      match /categories/{categoryId} {
+        allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+        allow create, update, delete: if isManager(accountId);
+
+        match /subcategories/{subId} {
+          allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+          allow create, update, delete: if isManager(accountId);
+
+          match /items/{itemId} {
+            allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+            allow create, update, delete: if isManager(accountId);
+          }
+        }
+      }
+    }
+
+    // Per-location inventory stock state.
+    match /accounts/{accountId}/locations/{locationId}/inventoryState/{subId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update, delete: if isManager(accountId);
+    }
+
+    // Points settings (account-level and per-location) — from sync/production.
+    match /accounts/{accountId}/settings/{settingId} {
+      allow read: if settingId == "points" && isSignedIn();
+      allow create, update: if settingId == "points"
+        && permPointsManageAllowed(accountId);
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/locations/{locationId}/settings/{settingId} {
+      allow read: if settingId == "points" && isSignedIn();
+      allow create, update: if settingId == "points"
+        && permPointsManageAllowed(accountId);
+      allow delete: if false;
+    }
+
+    // Points ledger + per-staff summaries (Points engine writes these as staff act).
+    match /accounts/{accountId}/pointsEvents/{eventId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId) || isPlatformAdmin();
+      allow create: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow update: if isManager(accountId);
+      allow delete: if false;
+    }
+
+    match /accounts/{accountId}/staff/{staffId}/pointsSummary/{summaryId} {
+      allow read: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow create, update: if belongsToSalon(accountId) || isStaffInSalon(accountId) || isKioskForSalon(accountId);
+      allow delete: if false;
     }
 
     // ===== TRAINING (root collections; each doc has salonId) =====
     match /trainingItems/{itemId} {
-      allow read: if userExists()
-        && resource.data.salonId == userDocData().salonId;
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        userExists()
+        && resource.data.salonId == userDocData().salonId
+      ) || isPlatformAdmin();
       allow create: if userExists()
         && request.resource.data.salonId == userDocData().salonId
         && request.resource.data.salonId is string
@@ -657,12 +1433,15 @@ service cloud.firestore {
     }
 
     match /trainingProgress/{progressId} {
-      allow read: if userExists()
+      // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
+      allow read: if (
+        userExists()
         && resource.data.salonId == userDocData().salonId
         && (
           isManager(resource.data.salonId)
           || (userStaffId() != '' && resource.data.staffId == userStaffId())
-        );
+        )
+      ) || isPlatformAdmin();
       allow create: if userExists()
         && request.resource.data.salonId == userDocData().salonId
         && request.resource.data.salonId is string
@@ -681,6 +1460,19 @@ service cloud.firestore {
           || (userStaffId() != '' && resource.data.staffId == userStaffId())
         );
       allow delete: if false;
+    }
+
+    // Forgot-password flow: anyone may queue a reset request (email only);
+    // the onPasswordResetRequestCreated trigger sends the branded reset email.
+    // Reads / updates / deletes are all denied to clients; only the Admin SDK
+    // (used by the trigger) can touch this collection.
+    match /passwordResetRequests/{requestId} {
+      allow create: if request.resource.data.keys().hasOnly(['email', 'createdAt'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() >= 3
+        && request.resource.data.email.size() <= 200
+        && request.resource.data.email.matches('.+@.+\\..+');
+      allow read, update, delete: if false;
     }
 
     // Default deny

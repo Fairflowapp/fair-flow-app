@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Fair Flow</string>
+    <string name="title_activity_main">Fair Flow</string>
+    <string name="package_name">com.fairflow.app</string>
+    <string name="custom_url_scheme">com.fairflow.app</string>
+</resources>

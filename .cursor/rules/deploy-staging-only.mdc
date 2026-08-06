@@ -1,0 +1,27 @@
+---
+description: All Firebase deploys (hosting, functions, rules, IAM) are staging-only unless production is explicitly approved
+alwaysApply: true
+---
+
+# פריסה – רק Staging (ברירת מחדל מחייבת)
+
+ה־production (`fairflowapp-db841` / app.fairflowapp.com) חי עם עובדים אמיתיים בסלונים.
+
+## כלל
+
+- **שום דבר** לא נפרס ל־production בלי **אישור מפורש** של המשתמשת, **כשלב נפרד** אחרי אימות ב־staging.
+- זה חל על: **hosting**, **functions**, **Firestore rules**, **storage rules**, **IAM**, וכל שינוי תשתית/הרשאות ב־GCP/Firebase.
+- כשהמשתמשת מבקשת **פריסה / deploy / רענון** בלי לומר production — הרץ **רק** ל־`fair-flow-staging`.
+- פיתוח נבנה ונבדק ב־staging עד הסוף; production רק אחרי אישור מפורש (למשל "תפרוס לפרודקשן" / "production עכשיו").
+
+## פקודות
+
+- Hosting staging: `firebase deploy --only hosting --project fair-flow-staging`
+- Functions / rules staging: תמיד עם `--project fair-flow-staging` (או פרויקט staging המפורש בקונטקסט)
+- **אל** תריץ deploy בלי `--project` אם ברירת המחדל עלולה לפגוע בפרודקשן
+- **אל** תפרוס ל־`fairflowapp-db841` אלא אם המשתמשת ביקשה production במפורש בהודעה הנוכחית
+
+## אחרי אישור production
+
+- רק אז: `--project fairflowapp-db841` (או שווה ערך מפורש)
+- העדף deploy מדורג / by-name כפי שעבדנו (לא "הכל בבת אחת" בלי צורך)

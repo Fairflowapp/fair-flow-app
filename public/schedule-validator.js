@@ -4,7 +4,14 @@ import {
   getEffectiveWeeklyHoursCap,
   assignmentDurationHoursFromTimes,
   parseScheduleTimeToMinutes,
-} from "./schedule-helpers.js?v=20260403_reception_split";
+  formatMinutesAsScheduleTime,
+  getDayNameFromDateKey,
+  getCustomSegmentOverlapCoverageGaps,
+  buildSegmentOverlapCoverageGapsFromSegments,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
+} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
 import {
   buildAvailabilityDirectory,
   getAvailabilityForStaffDate,
@@ -13,7 +20,7 @@ import {
   getStaffUid,
   getStaffDisplayName,
   generateWeeklySchedule,
-} from "./schedule-generator.js?v=20260416_modal_ensure_first";
+} from "./schedule-generator.js?v=20260420_cross_loc_busy";
 
 const WARNING_SEVERITY = Object.freeze({
   no_staff_assigned: "high",
@@ -22,7 +29,8 @@ const WARNING_SEVERITY = Object.freeze({
   manager_count_below_minimum: "high",
   assigned_staff_unavailable: "high",
   no_front_desk_assigned: "medium",
-  management_line_below_minimum: "medium",
+  assistant_manager_count_below_minimum: "medium",
+  segment_coverage_shortfall: "medium",
   no_technician_assigned: "medium",
   below_min_total_staff: "medium",
   weekly_hours_exceed_cap: "medium",
@@ -57,14 +65,6 @@ function countAssignmentsByRole(assignments) {
     technicians,
     frontDesk,
   };
-}
-
-/** Management line = admin/managers + front desk (one pool; settings “manager + front desk” apply together). */
-function countManagementLine(assignments) {
-  const list = Array.isArray(assignments) ? assignments : [];
-  return list.filter(
-    (a) => a.role === "admin" || a.role === "manager" || a.role === "front_desk"
-  ).length;
 }
 
 /**
@@ -153,14 +153,39 @@ function findStaffForAssignment(staffList, assignment) {
   }) || null;
 }
 
-function validateDraftDay({ day, staffList, availabilityDirectory, rules, coverageRules }) {
+function validateDraftDay({ day, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments } = {}) {
   const warnings = [];
   const date = day?.date || "";
   const normalizedRules = normalizeScheduleRules(rules);
-  const effectiveRules = getEffectiveScheduleRulesForDate(date, normalizedRules, coverageRules);
+  const bh = businessHours !== undefined ? businessHours : (typeof window !== "undefined" && window.settings?.businessHours);
+  const dss = dayShiftSegments !== undefined ? dayShiftSegments : (typeof window !== "undefined" && window.settings?.dayShiftSegments);
+  const covInput = coverageRules !== undefined && coverageRules !== null
+    ? coverageRules
+    : (typeof window !== "undefined" && window.settings?.coverageRules);
+  const effectiveRules = getEffectiveScheduleRulesForDate(date, normalizedRules, covInput, { businessHours: bh, dayShiftSegments: dss });
   const assignments = Array.isArray(day?.assignments) ? day.assignments : [];
   const counts = countAssignmentsByRole(assignments);
   const businessStatus = day?.businessStatus || null;
+  const dayName = getDayNameFromDateKey(date);
+  /** Must match `getBusinessStatusForDate` / board: same segment list as `applyBusinessSettingsToDraft`. */
+  let segmentOverlapGaps = null;
+  if (dayName && covInput && bh && dss) {
+    if (
+      businessStatus &&
+      businessStatus.isOpen !== false &&
+      Array.isArray(businessStatus.shiftSegments) &&
+      businessStatus.shiftSegments.length > 0
+    ) {
+      segmentOverlapGaps = buildSegmentOverlapCoverageGapsFromSegments(
+        dayName,
+        businessStatus.shiftSegments,
+        covInput,
+      );
+    } else {
+      segmentOverlapGaps = getCustomSegmentOverlapCoverageGaps(dayName, bh, dss, covInput);
+    }
+  }
+  const useOverlapSegmentValidation = Array.isArray(segmentOverlapGaps) && segmentOverlapGaps.length > 0;
 
   if (businessStatus && businessStatus.isOpen === false) {
     return {
@@ -177,37 +202,114 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
     ));
   }
 
-  const managementLineCount = countManagementLine(assignments);
-  const minManagementLine =
-    Math.max(0, Math.round(Number(effectiveRules.minManagersPerShift) || 0))
-    + Math.max(0, Math.round(Number(effectiveRules.minFrontDeskPerDay) || 0));
+  const minM = Math.max(0, Math.round(Number(effectiveRules.minManagersPerShift) || 0));
+  const minAsst = Math.max(0, Math.round(Number(effectiveRules.minFrontDeskPerDay) || 0));
 
-  if (counts.totalStaff > 0 && managementLineCount < minManagementLine) {
-    warnings.push(buildValidationWarning(
-      "management_line_below_minimum",
-      "Management line (managers + front desk) is below the configured minimum for this day.",
-      {
-        date,
-        minManagersPerShift: effectiveRules.minManagersPerShift,
-        minFrontDeskPerDay: effectiveRules.minFrontDeskPerDay,
-        minManagementLine,
-        actualManagementLine: managementLineCount,
+  if (counts.totalStaff > 0 && useOverlapSegmentValidation) {
+    segmentOverlapGaps.forEach((gap) => {
+      const parts = [];
+      if (gap.needFull > 0) {
+        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isFullManagerAssignmentForCoverage);
+        if (actual < gap.needFull) {
+          parts.push(`need ${gap.needFull} full manager(s), have ${actual}`);
+        }
       }
-    ));
+      if (gap.needAsst > 0) {
+        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, isAssistantManagerAssignmentForCoverage);
+        if (actual < gap.needAsst) {
+          parts.push(`need ${gap.needAsst} assistant manager(s), have ${actual}`);
+        }
+      }
+      if (gap.needTech > 0) {
+        const actual = countAssignmentsOverlappingMinuteRange(assignments, gap.startMin, gap.endMin, (a) => a.role === "technician");
+        if (actual < gap.needTech) {
+          parts.push(`need ${gap.needTech} service provider(s), have ${actual}`);
+        }
+      }
+      if (parts.length) {
+        const rangeLabel = `${formatMinutesAsScheduleTime(gap.startMin)}–${formatMinutesAsScheduleTime(gap.endMin)}`;
+        warnings.push(buildValidationWarning(
+          "segment_coverage_shortfall",
+          `Coverage below segment minimums ${rangeLabel}: ${parts.join("; ")}.`,
+          {
+            date,
+            rangeLabel,
+            startMin: gap.startMin,
+            endMin: gap.endMin,
+            needFull: gap.needFull,
+            needAsst: gap.needAsst,
+            needTech: gap.needTech,
+          }
+        ));
+      }
+    });
+  } else if (counts.totalStaff > 0) {
+    if (counts.fullManagers.length < minM) {
+      warnings.push(buildValidationWarning(
+        "manager_count_below_minimum",
+        "Full manager coverage (Manager or Admin, not Assistant Manager) is below the configured minimum for this day.",
+        {
+          date,
+          minManagersPerShift: effectiveRules.minManagersPerShift,
+          actualFullManagers: counts.fullManagers.length,
+        }
+      ));
+    }
+
+    if (counts.assistantManagers.length < minAsst) {
+      warnings.push(buildValidationWarning(
+        "assistant_manager_count_below_minimum",
+        "Assistant Manager coverage is below the configured minimum for this day.",
+        {
+          date,
+          minFrontDeskPerDay: effectiveRules.minFrontDeskPerDay,
+          actualAssistantManagers: counts.assistantManagers.length,
+        }
+      ));
+    }
   }
 
-  if (counts.assistantManagers.length > 0 && counts.fullManagers.length === 0 && effectiveRules.allowAssistantManagerAlone !== true) {
-    warnings.push(buildValidationWarning(
-      "assistant_manager_without_manager",
-      "Assistant Manager is scheduled without a full Manager.",
-      {
-        date,
-        assistantManagerStaffIds: counts.assistantManagers.map((assignment) => assignment.staffId).filter(Boolean),
-      }
-    ));
+  if (effectiveRules.allowAssistantManagerAlone !== true) {
+    if (useOverlapSegmentValidation && Array.isArray(segmentOverlapGaps) && segmentOverlapGaps.length > 0) {
+      segmentOverlapGaps.forEach((gap) => {
+        const asstN = countAssignmentsOverlappingMinuteRange(
+          assignments,
+          gap.startMin,
+          gap.endMin,
+          isAssistantManagerAssignmentForCoverage,
+        );
+        const fullN = countAssignmentsOverlappingMinuteRange(
+          assignments,
+          gap.startMin,
+          gap.endMin,
+          isFullManagerAssignmentForCoverage,
+        );
+        if (asstN > 0 && fullN === 0) {
+          const rangeLabel = `${formatMinutesAsScheduleTime(gap.startMin)}–${formatMinutesAsScheduleTime(gap.endMin)}`;
+          warnings.push(buildValidationWarning(
+            "assistant_manager_without_manager",
+            `Assistant Manager is scheduled without overlapping full Manager or Admin coverage during ${rangeLabel}.`,
+            {
+              date,
+              rangeLabel,
+              assistantManagerStaffIds: counts.assistantManagers.map((assignment) => assignment.staffId).filter(Boolean),
+            }
+          ));
+        }
+      });
+    } else if (counts.assistantManagers.length > 0 && counts.fullManagers.length === 0) {
+      warnings.push(buildValidationWarning(
+        "assistant_manager_without_manager",
+        "Assistant Manager is scheduled without a full Manager.",
+        {
+          date,
+          assistantManagerStaffIds: counts.assistantManagers.map((assignment) => assignment.staffId).filter(Boolean),
+        }
+      ));
+    }
   }
 
-  if (counts.technicians.length < effectiveRules.minTechniciansPerDay) {
+  if (!useOverlapSegmentValidation && counts.technicians.length < effectiveRules.minTechniciansPerDay) {
     warnings.push(buildValidationWarning(
       "no_technician_assigned",
       "Technician coverage is below the configured minimum for this day.",
@@ -219,7 +321,12 @@ function validateDraftDay({ day, staffList, availabilityDirectory, rules, covera
     ));
   }
 
-  if (counts.totalStaff < effectiveRules.minTotalStaffPerDay) {
+  /* Segment overlap mode already enforces concurrent staffing per sub-interval; the legacy
+     per-day minTotalStaff target often disagrees (e.g. min total 4 vs three roles covering segments). */
+  if (
+    !useOverlapSegmentValidation &&
+    counts.totalStaff < effectiveRules.minTotalStaffPerDay
+  ) {
     warnings.push(buildValidationWarning(
       "below_min_total_staff",
       "Total staff coverage is below the configured minimum for this day.",
@@ -349,6 +456,8 @@ function validateScheduleDraft({ draftSchedule, staffList = [], requests = [], r
     ? coverageRules
     : (typeof draft.coverageRules === "object" ? draft.coverageRules : undefined);
 
+  const businessHours = typeof window !== "undefined" && window.settings?.businessHours;
+  const dayShiftSegments = typeof window !== "undefined" && window.settings?.dayShiftSegments;
   const days = (Array.isArray(draft.days) ? draft.days : []).map((day) =>
     validateDraftDay({
       day,
@@ -356,6 +465,8 @@ function validateScheduleDraft({ draftSchedule, staffList = [], requests = [], r
       availabilityDirectory,
       rules: normalizedRules,
       coverageRules: coverageRulesInput,
+      businessHours,
+      dayShiftSegments,
     })
   );
 

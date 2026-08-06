@@ -1,0 +1,533 @@
+// schedule-helpers-core.js
+// Schedule helpers core — defaults, primitive normalization, time math, and
+// settings normalization (business hours, shift segments). Extracted verbatim
+// from schedule-helpers.js (schedule-helpers split T1).
+
+const DAY_KEYS = Object.freeze([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+]);
+
+const DEFAULT_DAY_SCHEDULE = Object.freeze({
+  enabled: false,
+  startTime: null,
+  endTime: null,
+});
+
+const DEFAULT_DEFAULT_SCHEDULE = Object.freeze(
+  DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = DEFAULT_DAY_SCHEDULE;
+    return acc;
+  }, {})
+);
+
+const DEFAULT_CONSTRAINTS = Object.freeze({
+  cannotWorkAlone: false,
+  requiresManager: false,
+  maxWeeklyHours: null,
+});
+
+const DEFAULT_MANAGER_TYPE = "manager";
+const DEFAULT_EMPLOYMENT_TYPE = null;
+
+const DEFAULT_ROLES_HIERARCHY = Object.freeze({
+  manager: 3,
+  assistant_manager: 2,
+  technician: 1,
+  front_desk: 1,
+});
+
+const DEFAULT_SCHEDULE_RULES = Object.freeze({
+  minManagersPerShift: 1,
+  minFrontDeskPerDay: 0,
+  minTechniciansPerDay: 0,
+  minTotalStaffPerDay: 0,
+  allowAssistantManagerAlone: false,
+});
+
+const DEFAULT_DAY_BUSINESS_HOURS = Object.freeze({
+  isOpen: false,
+  openTime: null,
+  closeTime: null,
+});
+
+const DEFAULT_BUSINESS_HOURS = Object.freeze(
+  DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      isOpen: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey),
+      openTime: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey) ? "09:00" : null,
+      closeTime: ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(dayKey) ? "18:00" : null,
+    };
+    return acc;
+  }, {})
+);
+
+const DEFAULT_DAY_COVERAGE_RULES = Object.freeze({
+  minTotalStaff: 0,
+  minManagers: 0,
+  minFrontDesk: 0,
+  minTechnicians: 0,
+});
+
+const DEFAULT_COVERAGE_RULES = Object.freeze(
+  DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = DEFAULT_DAY_COVERAGE_RULES;
+    return acc;
+  }, {})
+);
+
+const DEFAULT_SPECIAL_BUSINESS_DAYS = Object.freeze({});
+
+function cloneDefaultSchedule() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      enabled: DEFAULT_DAY_SCHEDULE.enabled,
+      startTime: DEFAULT_DAY_SCHEDULE.startTime,
+      endTime: DEFAULT_DAY_SCHEDULE.endTime,
+    };
+    return acc;
+  }, {});
+}
+
+function cloneDefaultConstraints() {
+  return {
+    cannotWorkAlone: DEFAULT_CONSTRAINTS.cannotWorkAlone,
+    requiresManager: DEFAULT_CONSTRAINTS.requiresManager,
+    maxWeeklyHours: DEFAULT_CONSTRAINTS.maxWeeklyHours,
+  };
+}
+
+function cloneDefaultRolesHierarchy() {
+  return { ...DEFAULT_ROLES_HIERARCHY };
+}
+
+function cloneDefaultScheduleRules() {
+  return { ...DEFAULT_SCHEDULE_RULES };
+}
+
+function cloneDefaultBusinessHours() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      isOpen: DEFAULT_BUSINESS_HOURS[dayKey].isOpen,
+      openTime: DEFAULT_BUSINESS_HOURS[dayKey].openTime,
+      closeTime: DEFAULT_BUSINESS_HOURS[dayKey].closeTime,
+    };
+    return acc;
+  }, {});
+}
+
+function cloneDefaultCoverageRules() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = {
+      minTotalStaff: DEFAULT_DAY_COVERAGE_RULES.minTotalStaff,
+      minManagers: DEFAULT_DAY_COVERAGE_RULES.minManagers,
+      minFrontDesk: DEFAULT_DAY_COVERAGE_RULES.minFrontDesk,
+      minTechnicians: DEFAULT_DAY_COVERAGE_RULES.minTechnicians,
+    };
+    return acc;
+  }, {});
+}
+
+function cloneDefaultSpecialBusinessDays() {
+  return {};
+}
+
+function normalizeDay(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeDayScheduleEntry(value, fallback = DEFAULT_DAY_SCHEDULE) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    enabled: source.enabled === true,
+    startTime: normalizeTimeString(source.startTime, fallback.startTime),
+    endTime: normalizeTimeString(source.endTime, fallback.endTime),
+  };
+}
+
+function normalizeTimeString(value, fallback) {
+  const candidate = String(value || "").trim();
+  return /^\d{2}:\d{2}$/.test(candidate) ? candidate : fallback;
+}
+
+function normalizeBusinessDayEntry(value, fallback = DEFAULT_DAY_BUSINESS_HOURS) {
+  const source = value && typeof value === "object" ? value : {};
+  let isOpen = source.isOpen === true;
+  let openTime = normalizeTimeString(source.openTime, fallback.openTime);
+  let closeTime = normalizeTimeString(source.closeTime, fallback.closeTime);
+
+  const o = parseScheduleTimeToMinutes(openTime);
+  let c = parseScheduleTimeToMinutes(closeTime);
+
+  if (isOpen && o != null && c != null && c <= o) {
+    const cEvening = c + 12 * 60;
+    if (cEvening > o && cEvening < 24 * 60) {
+      closeTime = formatMinutesAsScheduleTime(cEvening);
+      c = cEvening;
+    } else {
+      const openSwapped = normalizeTimeString(source.closeTime, fallback.closeTime);
+      const closeSwapped = normalizeTimeString(source.openTime, fallback.openTime);
+      const o2 = parseScheduleTimeToMinutes(openSwapped);
+      const c2 = parseScheduleTimeToMinutes(closeSwapped);
+      if (o2 != null && c2 != null && c2 > o2) {
+        openTime = openSwapped;
+        closeTime = closeSwapped;
+      } else {
+        isOpen = false;
+      }
+    }
+  }
+
+  return {
+    isOpen,
+    openTime,
+    closeTime,
+  };
+}
+
+function normalizeSpecialBusinessDayEntry(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const isClosed = source.isClosed === true;
+  if (isClosed) {
+    return {
+      isClosed: true,
+      openTime: null,
+      closeTime: null,
+      note: String(source.note || "").trim(),
+    };
+  }
+  let openTime = normalizeTimeString(source.openTime, null);
+  let closeTime = normalizeTimeString(source.closeTime, null);
+  const o = parseScheduleTimeToMinutes(openTime);
+  const c = parseScheduleTimeToMinutes(closeTime);
+  if (o != null && c != null && c <= o) {
+    const cEvening = c + 12 * 60;
+    if (cEvening > o && cEvening < 24 * 60) {
+      closeTime = formatMinutesAsScheduleTime(cEvening);
+    }
+  }
+  return {
+    isClosed: false,
+    openTime,
+    closeTime,
+    note: String(source.note || "").trim(),
+  };
+}
+
+function isValidDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || "").trim());
+}
+
+function normalizeRoleKey(value) {
+  const role = String(value || "").trim().toLowerCase();
+  if (!role) return "";
+  if (role === "assistant manager") return "assistant_manager";
+  if (role === "front desk" || role === "frontdesk" || role === "reception") return "front_desk";
+  return role.replace(/\s+/g, "_");
+}
+
+function normalizeManagerType(value, fallback = DEFAULT_MANAGER_TYPE) {
+  const managerType = normalizeRoleKey(value);
+  if (managerType === "assistant_manager") return "assistant_manager";
+  if (managerType === "manager") return "manager";
+  return fallback ?? null;
+}
+
+function normalizeEmploymentType(value, fallback = DEFAULT_EMPLOYMENT_TYPE) {
+  const employmentType = String(value || "").trim().toLowerCase();
+  if (employmentType === "full_time" || employmentType === "part_time" || employmentType === "flexible") {
+    return employmentType;
+  }
+  return fallback ?? null;
+}
+
+function normalizeWeeklyHoursTarget(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? Math.max(0, numericValue) : null;
+}
+
+function parseScheduleTimeToMinutes(value) {
+  const m = /^(\d{2}):(\d{2})$/.exec(String(value || "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function assignmentDurationHoursFromTimes(startTime, endTime) {
+  const s = parseScheduleTimeToMinutes(startTime);
+  const e = parseScheduleTimeToMinutes(endTime);
+  if (s == null || e == null || e <= s) return 0;
+  return (e - s) / 60;
+}
+
+function formatMinutesAsScheduleTime(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60) % 24;
+  const m = Math.round(totalMinutes % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Same role checks as schedule coverage validation (full manager vs assistant manager). */
+function isFullManagerAssignmentForCoverage(a) {
+  if (!a) return false;
+  if (a.role === "admin") return true;
+  if (a.role === "manager") return a.managerType !== "assistant_manager";
+  return false;
+}
+
+function isAssistantManagerAssignmentForCoverage(a) {
+  return Boolean(a && a.role === "manager" && a.managerType === "assistant_manager");
+}
+
+function countAssignmentsOverlappingMinuteRange(assignments, lo, hi, predicate) {
+  return (Array.isArray(assignments) ? assignments : []).filter((a) => {
+    if (!predicate(a)) return false;
+    const aS = parseScheduleTimeToMinutes(a.startTime);
+    const aE = parseScheduleTimeToMinutes(a.endTime);
+    if (aS == null || aE == null || aE <= aS) return false;
+    return Math.min(aE, hi) > Math.max(aS, lo);
+  }).length;
+}
+
+/** Builds a shift window of durationHours starting at availability open, without exceeding close. */
+function sliceTimeWindowFromStart(startTime, endTime, durationHours) {
+  const s = parseScheduleTimeToMinutes(startTime);
+  const e = parseScheduleTimeToMinutes(endTime);
+  if (s == null || e == null || e <= s) return null;
+  const maxMin = e - s;
+  const wantMin = Math.min(Math.round(durationHours * 60), maxMin);
+  if (wantMin <= 0) return null;
+  return {
+    startTime: formatMinutesAsScheduleTime(s),
+    endTime: formatMinutesAsScheduleTime(s + wantMin),
+  };
+}
+
+function normalizeDefaultSchedule(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const legacyWorkingDays = Array.isArray(source.workingDays)
+    ? [...new Set(source.workingDays.map(normalizeDay).filter(Boolean))]
+    : [];
+  const legacyStartTime = normalizeTimeString(source.startTime, DEFAULT_DAY_SCHEDULE.startTime);
+  const legacyEndTime = normalizeTimeString(source.endTime, DEFAULT_DAY_SCHEDULE.endTime);
+  const normalized = cloneDefaultSchedule();
+
+  DAY_KEYS.forEach((dayKey) => {
+    if (source[dayKey] && typeof source[dayKey] === "object") {
+      normalized[dayKey] = normalizeDayScheduleEntry(source[dayKey], DEFAULT_DAY_SCHEDULE);
+      return;
+    }
+    normalized[dayKey] = {
+      enabled: legacyWorkingDays.includes(dayKey),
+      startTime: legacyWorkingDays.includes(dayKey) ? legacyStartTime : null,
+      endTime: legacyWorkingDays.includes(dayKey) ? legacyEndTime : null,
+    };
+  });
+
+  return normalized;
+}
+
+function normalizeConstraints(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const maxWeeklyHours = source.maxWeeklyHours === null || source.maxWeeklyHours === undefined || source.maxWeeklyHours === ""
+    ? null
+    : Number(source.maxWeeklyHours);
+  return {
+    cannotWorkAlone: source.cannotWorkAlone === true,
+    requiresManager: source.requiresManager === true,
+    maxWeeklyHours: Number.isFinite(maxWeeklyHours) ? maxWeeklyHours : null,
+  };
+}
+
+function normalizeRolesHierarchy(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultRolesHierarchy();
+  Object.keys(source).forEach((key) => {
+    const roleKey = normalizeRoleKey(key);
+    const level = Number(source[key]);
+    if (roleKey && Number.isFinite(level)) normalized[roleKey] = level;
+  });
+  return normalized;
+}
+
+function normalizeScheduleRules(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const minManagersPerShift = Number(source.minManagersPerShift);
+  const minFrontDeskPerDay = Number(source.minFrontDeskPerDay);
+  const minTechniciansPerDay = Number(source.minTechniciansPerDay);
+  const minTotalStaffPerDay = Number(source.minTotalStaffPerDay);
+  return {
+    minManagersPerShift: Number.isFinite(minManagersPerShift)
+      ? Math.max(0, Math.round(minManagersPerShift))
+      : DEFAULT_SCHEDULE_RULES.minManagersPerShift,
+    minFrontDeskPerDay: Number.isFinite(minFrontDeskPerDay)
+      ? Math.max(0, Math.round(minFrontDeskPerDay))
+      : DEFAULT_SCHEDULE_RULES.minFrontDeskPerDay,
+    minTechniciansPerDay: Number.isFinite(minTechniciansPerDay)
+      ? Math.max(0, Math.round(minTechniciansPerDay))
+      : DEFAULT_SCHEDULE_RULES.minTechniciansPerDay,
+    minTotalStaffPerDay: Number.isFinite(minTotalStaffPerDay)
+      ? Math.max(0, Math.round(minTotalStaffPerDay))
+      : DEFAULT_SCHEDULE_RULES.minTotalStaffPerDay,
+    allowAssistantManagerAlone: source.allowAssistantManagerAlone === true,
+  };
+}
+
+function normalizeCoverageDayRules(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const minTotalStaff = Number(source.minTotalStaff);
+  const minManagers = Number(source.minManagers);
+  const minFrontDesk = Number(source.minFrontDesk);
+  const minTechnicians = Number(source.minTechnicians);
+  return {
+    minTotalStaff: Number.isFinite(minTotalStaff) ? Math.max(0, Math.round(minTotalStaff)) : DEFAULT_DAY_COVERAGE_RULES.minTotalStaff,
+    minManagers: Number.isFinite(minManagers) ? Math.max(0, Math.round(minManagers)) : DEFAULT_DAY_COVERAGE_RULES.minManagers,
+    minFrontDesk: Number.isFinite(minFrontDesk) ? Math.max(0, Math.round(minFrontDesk)) : DEFAULT_DAY_COVERAGE_RULES.minFrontDesk,
+    minTechnicians: Number.isFinite(minTechnicians) ? Math.max(0, Math.round(minTechnicians)) : DEFAULT_DAY_COVERAGE_RULES.minTechnicians,
+  };
+}
+
+function normalizeBusinessHours(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultBusinessHours();
+  DAY_KEYS.forEach((dayKey) => {
+    if (source[dayKey] && typeof source[dayKey] === "object") {
+      normalized[dayKey] = normalizeBusinessDayEntry(source[dayKey], DEFAULT_BUSINESS_HOURS[dayKey]);
+    }
+  });
+  return normalized;
+}
+
+function coerceOptionalNonNegCoverageInt(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v) || v < 0) return undefined;
+  return Math.min(99, Math.round(v));
+}
+
+/** One internal shift window (does not replace opening hours — refines scheduling inside the day). */
+function normalizeShiftSegmentEntry(value) {
+  const source = value && typeof value === "object" ? value : {};
+  let startTime = normalizeTimeString(source.startTime, null);
+  let endTime = normalizeTimeString(source.endTime, null);
+  const o = parseScheduleTimeToMinutes(startTime);
+  let c = parseScheduleTimeToMinutes(endTime);
+  if (o == null || c == null) return null;
+  if (c <= o) {
+    const cEvening = c + 12 * 60;
+    if (cEvening > o && cEvening < 24 * 60) {
+      endTime = formatMinutesAsScheduleTime(cEvening);
+      c = cEvening;
+    } else {
+      return null;
+    }
+  }
+  const out = { startTime, endTime };
+  const m = coerceOptionalNonNegCoverageInt(source.minManagers);
+  const f = coerceOptionalNonNegCoverageInt(source.minFrontDesk);
+  const t = coerceOptionalNonNegCoverageInt(source.minTechnicians);
+  if (m !== undefined) out.minManagers = m;
+  if (f !== undefined) out.minFrontDesk = f;
+  if (t !== undefined) out.minTechnicians = t;
+  return out;
+}
+
+function cloneDefaultDayShiftSegments() {
+  return DAY_KEYS.reduce((acc, dayKey) => {
+    acc[dayKey] = [];
+    return acc;
+  }, {});
+}
+
+/**
+ * Per weekday: list of { startTime, endTime } shift segments.
+ * Empty list = "not customized" — consumers fall back to business open/close as one segment.
+ */
+function normalizeDayShiftSegments(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalized = cloneDefaultDayShiftSegments();
+  DAY_KEYS.forEach((dayKey) => {
+    const raw = source[dayKey];
+    const arr = Array.isArray(raw) ? raw : [];
+    const segments = [];
+    arr.forEach((item) => {
+      const seg = normalizeShiftSegmentEntry(item);
+      if (seg) segments.push(seg);
+    });
+    segments.sort((a, b) => {
+      const ma = parseScheduleTimeToMinutes(a.startTime);
+      const mb = parseScheduleTimeToMinutes(b.startTime);
+      return (ma ?? 0) - (mb ?? 0);
+    });
+    normalized[dayKey] = segments;
+  });
+  return normalized;
+}
+
+/**
+ * Effective shift segments for a weekday: custom list if set, else single segment from business hours.
+ */
+function getEffectiveShiftSegmentsForDay(dayName, businessHours, dayShiftSegmentsRaw) {
+  const bhNorm = normalizeBusinessHours(businessHours || {});
+  const bh = bhNorm[dayName] || DEFAULT_DAY_BUSINESS_HOURS;
+  const segsNorm = normalizeDayShiftSegments(dayShiftSegmentsRaw || {});
+  const custom = segsNorm[dayName] || [];
+  if (!bh.isOpen) return [];
+  if (!Array.isArray(custom) || custom.length === 0) {
+    const o = bh.openTime;
+    const c = bh.closeTime;
+    const om = parseScheduleTimeToMinutes(o);
+    const cm = parseScheduleTimeToMinutes(c);
+    if (om != null && cm != null && cm > om) {
+      return [{ startTime: o, endTime: c }];
+    }
+    return [];
+  }
+  return custom;
+}
+
+export {
+  DAY_KEYS,
+  DEFAULT_DEFAULT_SCHEDULE,
+  DEFAULT_CONSTRAINTS,
+  DEFAULT_MANAGER_TYPE,
+  DEFAULT_EMPLOYMENT_TYPE,
+  DEFAULT_ROLES_HIERARCHY,
+  DEFAULT_SCHEDULE_RULES,
+  DEFAULT_BUSINESS_HOURS,
+  DEFAULT_COVERAGE_RULES,
+  DEFAULT_SPECIAL_BUSINESS_DAYS,
+  DEFAULT_DAY_COVERAGE_RULES,
+  cloneDefaultSchedule,
+  cloneDefaultConstraints,
+  cloneDefaultRolesHierarchy,
+  cloneDefaultScheduleRules,
+  cloneDefaultBusinessHours,
+  cloneDefaultDayShiftSegments,
+  cloneDefaultCoverageRules,
+  cloneDefaultSpecialBusinessDays,
+  normalizeEmploymentType,
+  normalizeWeeklyHoursTarget,
+  parseScheduleTimeToMinutes,
+  assignmentDurationHoursFromTimes,
+  formatMinutesAsScheduleTime,
+  isFullManagerAssignmentForCoverage,
+  isAssistantManagerAssignmentForCoverage,
+  countAssignmentsOverlappingMinuteRange,
+  sliceTimeWindowFromStart,
+  normalizeDefaultSchedule,
+  normalizeConstraints,
+  normalizeManagerType,
+  normalizeRolesHierarchy,
+  normalizeScheduleRules,
+  normalizeCoverageDayRules,
+  normalizeBusinessHours,
+  normalizeDayShiftSegments,
+  getEffectiveShiftSegmentsForDay,
+  isValidDateKey,
+  normalizeSpecialBusinessDayEntry,
+  normalizeRoleKey,
+};

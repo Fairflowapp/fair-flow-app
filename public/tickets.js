@@ -8,40 +8,115 @@
  */
 
 import {
-  collection, query, where, orderBy, limit,
-  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, onSnapshot,
-  serverTimestamp, Timestamp
+  collection, query, where, orderBy, limit, startAfter,
+  addDoc, updateDoc, setDoc, doc, getDoc, getDocFromServer, getDocs, deleteDoc, deleteField, onSnapshot,
+  serverTimestamp, Timestamp, writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js?v=20260806_sched_12h_picker";
+import { ticketsState, TICKETS_PAGE_SIZE, _ticketSummaryPageSize } from "./tickets-state.js?v=20260630_tickets_state_split";
+import { initTicketsPermissions, getAutoFrontDeskRecipients, getTicketVisibility, _ticketsCurrentStaffRow, canViewTicketsSummaryTab, canViewTicketsArchivedTab, canCurrentUserCloseTickets, updateTicketsTabsVisibility, ffTicketsSetTimePeriodFiltersVisible, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole, ffTicketsHideFrontDeskFiltersOnThisView, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician, updateTicketsEmployeeFilterVisibility, getActiveLocationIdForTickets, canSeeTicket } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { getTicketTaxConfig, isTicketProductLine, computeTicketTotalsFromLines } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
+import { initTicketsCatalogData, ffCanViewServices, ffCanManageServices, getTicketsAccountId, normalizeSharedCategoryName, sharedCategoryId, sharedServiceCatalogItemsRef, loadSharedServiceOverrides, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, seedSharedServiceCatalogFromLocationCatalogIfEmpty, _applyCatalogFilter, subscribeProductsCatalog, loadServices, saveService, deleteService, loadServiceCategories, saveServiceCategory, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
+import { initTicketsCrud, _rebuildCurrentTicketsMerged, ffTicketsPatchLocalTicket, updateTicketsLoadMoreUi, loadMoreTicketsOlder, subscribeTickets, updateTicketsNavBadge, getTicketCustomerPriceApprovedFromForm, createTicket, updateTicket, finalizeTicket, closeTicket, reopenTicket, archiveTicket, setTicketServiceUpgrade, awardTicketUpgradePoints, deleteTicketPermanently, markTicketSeenByFrontDesk } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { initTicketsHelpers, formatTicketDisplayDateTime, formatDate, ticketSubmittedAtDate, passesTicketsDateFilter, fetchClosedTicketsForSummary, _fmtYmdLocal, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, ticketMatchesEmployeeFilter, formatSummaryMoney, ffTicketMoney, ffTicketCurSym, formatSummaryInt, getSummaryFilterDateRangeFromDom, summaryDocMatchesLocation, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
+import { initTicketsList, ffTicketsBulkInit, renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
+import { initTicketsModal, openTicketModal, ffFormatReviewedAt, closeTicketModal, closeTicketDetailsModal, addServiceToTicket, addProductToTicket, saveTicket } from "./tickets-modal.js?v=20260708_ticket_list_fix";
+import { initTicketsCatalogUI, _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, openServicesModal, closeServicesModal, renderServicesCatalogV2, ffServiceStaffPermissionTrue, canStaffSendNewTicket, getStaffDefaultServiceCommission, getStaffDefaultSupplyDeduction, _ffCatalogEditorClose, addServiceCategoryV2, addSharedServiceV2 } from "./tickets-catalog-ui.js?v=20260630_tickets_catalog_ui_split3";
+import { initTicketsNav, goToTickets, goToServices } from "./tickets-nav.js?v=20260708_ticket_list_fix";
+import { loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod, setupTicketsDateFilters } from "./tickets-summary.js?v=20260708_ticket_list_fix";
+import { initTicketsPicker, setupTicketsUI, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, updateNewTicketButtonVisibility, ensureTicketsBackgroundSubscription } from "./tickets-picker.js?v=20260708_ticket_void_fix";
+
+initTicketsPermissions({ normalizeTicketTechName });
+initTicketsCrud({ getActiveTicketsSalonId, notifyTicketsAnalyticsDataChanged, ticketSubmittedAtDate, _fmtYmdLocal, showToast, renderTicketsList, closeTicketModal });
+initTicketsHelpers({ normalizeTicketTechName, getServiceStaffOverrides, getProductStaffOverrides, getStaffDefaultServiceCommission, getStaffDefaultSupplyDeduction });
+initTicketsList({ getTicketTechnicianAvatarUrl, ticketHasRealPostSendEdit, ffFormatReviewedAt, openTicketModal, showToast, ticketConfirm, getActiveTicketsSalonId, loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod });
+initTicketsModal({ showToast, ticketConfirm, computeDiff, ffTicketLinesChanged, ffRenderFrontDeskChangesHtml, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, setupTicketsUI, getTicketPriceForServiceAndCurrentStaff, getTicketPriceForProductAndActiveLocation });
+initTicketsCatalogUI({ showToast, ticketConfirm, setupTicketsUI, getServiceStaffOverrides, controlledStaffCanProvideService });
+initTicketsNav({ showToast, loadCurrentUserProfile, enrichTicketsProfileFromMemberDoc, loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility });
+initTicketsPicker({ doServiceSelect, getActiveTicketsSalonId, getProductsGroupedByCategory, getServicesGroupedByCategory, getTicketPriceForProductAndActiveLocation, isTicketPickerServiceAvailableForActiveLocation });
+initTicketsCatalogData({ renderServicesCatalogV2, setupTicketsUI });
 
 // =====================
 // State
 // =====================
-let currentUserProfile = null;
-let salonServices = [];
-let serviceCategories = [];
-let currentTickets = [];
-let ticketsUnsubscribe = null;
-let _ticketsDataReady = false; // cache flag — skip Firestore re-fetch on repeat visits
-let currentTicketsTab = 'ready';
-let editingTicketId = null;
-let ticketFormAsIsMode = false;
+// Retail products (salon-wide, with per-location + per-staff overrides) shown in the ticket picker.
+/** Real-time first page (newest). Older pages appended via Load more (not live-updated). */
+/** Page size for Summary: paginated fetch of CLOSED tickets. */
+/** When true, the ticket service/product picker shows the FULL catalog (used when a
+ * manager / front-desk receiver edits a ticket) instead of filtering by the current
+ * staff member's allowed services. Reset to false for the technician new-ticket flow. */
 /** When set, opening this ticket (e.g. from list) must not show Ticket Details – we just closed it. */
-let _justClosedTicketId = null;
 /** Cache for member avatars (uid/staffId -> { avatarUrl, avatarUpdatedAtMs }) for ticket list. */
-let _ticketsMembersAvatarCache = null;
 /** Secondary lookup by normalized display name (when older tickets lack technicianStaffId). */
-let _ticketsMembersAvatarByName = null;
+
+function getActiveTicketsSalonId() {
+  return (typeof window !== 'undefined' && window.currentSalonId)
+    || ticketsState.currentUserProfile?.salonId
+    || null;
+}
+
+function resetTicketsRuntimeCache() {
+  ticketsState.currentTickets = [];
+  ticketsState._ticketsFirstPageTickets = [];
+  ticketsState._ticketsExtraTickets = [];
+  ticketsState._ticketsNextPageCursor = null;
+  ticketsState._ticketsHasMoreOlder = false;
+  ticketsState._ticketsLoadingMore = false;
+  ticketsState._ticketsListSnapshotReady = false;
+  ticketsState._ticketsDataReady = false;
+  ticketsState._frontDeskCache = null;
+}
+
+window.ffGetCurrentTickets = function() {
+  return Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets.slice() : [];
+};
+
+// Live Desk (and other surfaces) open a ticket's details by id.
+window.ffOpenTicketModal = function(ticketId, appointmentData = null) {
+  return openTicketModal(ticketId, appointmentData);
+};
+
+// Currency formatter exposed so the Live Desk shows the same money format as tickets.
+window.ffTicketMoney = function(n, decimals) {
+  return ffTicketMoney(n, decimals);
+};
+
+window.ffLoadTicketsForAnalytics = async function() {
+  const salonId = getActiveTicketsSalonId();
+  if (!ticketsState.currentUserProfile) {
+    try { await loadCurrentUserProfile(); } catch (_) {}
+  }
+  const resolvedSalonId = getActiveTicketsSalonId() || salonId;
+  if (!resolvedSalonId) return [];
+  const qAnalytics = query(
+    collection(db, `salons/${resolvedSalonId}/tickets`),
+    orderBy('createdAt', 'desc'),
+    limit(500)
+  );
+  const snap = await getDocs(qAnalytics);
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return rows.filter((ticket) => {
+    if (ticket && ticket.deleted === true) return false;
+    try { return canSeeTicket(ticket); } catch (_) { return true; }
+  });
+};
+
+function notifyTicketsAnalyticsDataChanged() {
+  try {
+    document.dispatchEvent(new CustomEvent('ff-tickets-data-changed', {
+      detail: { count: Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets.length : 0 }
+    }));
+  } catch (_) {}
+}
 
 function normalizeTicketTechName(name) {
   if (!name || typeof name !== 'string') return '';
   return name.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 /** Ticket IDs opened this session (so badge count drops immediately without waiting for Firestore). */
-let _ticketsOpenedThisSession = new Set();
 /** After subscribeTickets, hide list until first Firestore snapshot (avoids empty→full flicker). */
-let _ticketsListSnapshotReady = false;
 
 // =====================
 // User Profile
@@ -49,17 +124,51 @@ let _ticketsListSnapshotReady = false;
 async function loadCurrentUserProfile() {
   const user = auth.currentUser;
   if (!user) return null;
-  _frontDeskCache = null; // reset on profile load
+  ticketsState._frontDeskCache = null; // reset on profile load
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
     if (userDoc.exists()) {
-      const data = userDoc.data();
-      currentUserProfile = { uid: user.uid, ...data };
-      if (!currentUserProfile.salonId && typeof window !== 'undefined' && window.currentSalonId) {
-        currentUserProfile.salonId = window.currentSalonId;
-        console.log('[Tickets] Using window.currentSalonId fallback:', window.currentSalonId);
+      const data = userDoc.data() || {};
+      // Multi-salon: prefer the salon picked from Choose Salon (or the single
+      // auto-selected membership) over users/{uid}.salonId. Previously this
+      // only fell back when salonId was missing, which still leaked legacy
+      // primary-salon tickets into the picked salon.
+      // staffId + role also need to follow the chosen membership so ticket
+      // permission checks (canViewTickets etc.) evaluate against the right
+      // salon's role rather than the legacy primary-salon role.
+      const w = (typeof window !== 'undefined') ? window : {};
+      const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
+      const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
+      const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      const resolvedSalonId = activeSalonId || data.salonId || null;
+      const resolvedStaffId = activeStaffId || data.staffId || null;
+      ticketsState.currentUserProfile = {
+        uid: user.uid,
+        ...data,
+        salonId: resolvedSalonId,
+        staffId: resolvedStaffId,
+        role: activeRole || data.role || '',
+      };
+      // Multi-salon: pull the technician name from the staff doc in the chosen
+      // salon. Otherwise tickets created from test_salon_001 are stored with
+      // technicianName = legacy primary-salon name instead of the salon-scoped
+      // staff name, and the wrong technician is credited / the ticket is hidden
+      // from the actual servicer's "my tickets" view (which filters by name).
+      if (resolvedSalonId && resolvedStaffId) {
+        try {
+          const staffSnap = await getDoc(doc(db, `salons/${resolvedSalonId}/staff`, resolvedStaffId));
+          if (staffSnap.exists()) {
+            const st = staffSnap.data() || {};
+            const staffName = String(st.name || '').trim();
+            if (staffName) ticketsState.currentUserProfile.name = staffName;
+            ticketsState.currentUserProfile.permissions = { ...(ticketsState.currentUserProfile.permissions || {}), ...(st.permissions || {}) };
+            if (st.managerType) ticketsState.currentUserProfile.managerType = st.managerType;
+          }
+        } catch (mergeErr) {
+          console.warn('[Tickets] Failed to merge staff doc into profile', mergeErr);
+        }
       }
-      return currentUserProfile;
+      return ticketsState.currentUserProfile;
     }
   } catch (err) {
     console.error('[Tickets] Failed to load user profile', err);
@@ -67,9 +176,25 @@ async function loadCurrentUserProfile() {
   return null;
 }
 
+/** If users/{uid} lacks staffId, copy from salons/{salonId}/members/{uid} so staff-store permission match works. */
+async function enrichTicketsProfileFromMemberDoc() {
+  if (!ticketsState.currentUserProfile?.uid) return;
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || ticketsState.currentUserProfile.salonId;
+  if (!salonId) return;
+  if (ticketsState.currentUserProfile.staffId != null && String(ticketsState.currentUserProfile.staffId).trim() !== '') return;
+  try {
+    const ms = await getDoc(doc(db, `salons/${salonId}/members`, ticketsState.currentUserProfile.uid));
+    if (!ms.exists()) return;
+    const sid = (ms.data() || {}).staffId;
+    if (sid != null && String(sid).trim() !== '') {
+      ticketsState.currentUserProfile.staffId = String(sid).trim();
+    }
+  } catch (_) {}
+}
+
 /** Load members with avatarUrl for ticket list avatars. */
 async function loadTicketsMembersForAvatars() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
+  const salonId = (typeof window !== 'undefined' && window.currentSalonId) || ticketsState.currentUserProfile?.salonId;
   if (!salonId) return;
   try {
     const snap = await getDocs(collection(db, `salons/${salonId}/members`));
@@ -89,12 +214,12 @@ async function loadTicketsMembersForAvatars() {
         if (nk && !byName[nk]) byName[nk] = entry;
       }
     });
-    _ticketsMembersAvatarCache = byKey;
-    _ticketsMembersAvatarByName = byName;
+    ticketsState._ticketsMembersAvatarCache = byKey;
+    ticketsState._ticketsMembersAvatarByName = byName;
   } catch (e) {
     console.warn('[Tickets] loadTicketsMembersForAvatars failed', e);
-    _ticketsMembersAvatarCache = {};
-    _ticketsMembersAvatarByName = {};
+    ticketsState._ticketsMembersAvatarCache = {};
+    ticketsState._ticketsMembersAvatarByName = {};
   }
 }
 
@@ -106,27 +231,27 @@ window.ticketsRefreshAvatars = async function() {
 
 /** Return avatar URL for the technician of ticket t (current user or from members cache). */
 function getTicketTechnicianAvatarUrl(t) {
-  if (!currentUserProfile) return null;
-  const isCreator = t.createdByUid === currentUserProfile.uid ||
-    t.technicianStaffId === currentUserProfile.staffId ||
-    t.technicianStaffId === currentUserProfile.uid ||
-    t.finalizedByUid === currentUserProfile.uid ||
+  if (!ticketsState.currentUserProfile) return null;
+  const isCreator = t.createdByUid === ticketsState.currentUserProfile.uid ||
+    t.technicianStaffId === ticketsState.currentUserProfile.staffId ||
+    t.technicianStaffId === ticketsState.currentUserProfile.uid ||
+    t.finalizedByUid === ticketsState.currentUserProfile.uid ||
     (t.technicianName && (
-      (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-      (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
+      (ticketsState.currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.email).toLowerCase())) ||
+      (ticketsState.currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(ticketsState.currentUserProfile.name).toLowerCase()))
     ));
   if (isCreator && typeof window.ffGetCurrentUserAvatarUrl === 'function') {
     const mine = window.ffGetCurrentUserAvatarUrl();
     if (mine) return mine;
   }
-  if (!_ticketsMembersAvatarCache) return null;
+  if (!ticketsState._ticketsMembersAvatarCache) return null;
   let entry = null;
   if (t.technicianStaffId) {
-    entry = _ticketsMembersAvatarCache[t.technicianStaffId];
+    entry = ticketsState._ticketsMembersAvatarCache[t.technicianStaffId];
   }
-  if ((!entry || !entry.avatarUrl) && _ticketsMembersAvatarByName) {
+  if ((!entry || !entry.avatarUrl) && ticketsState._ticketsMembersAvatarByName) {
     const nk = normalizeTicketTechName(t.technicianName || '');
-    if (nk) entry = _ticketsMembersAvatarByName[nk] || entry;
+    if (nk) entry = ticketsState._ticketsMembersAvatarByName[nk] || entry;
   }
   if (!entry || !entry.avatarUrl) return null;
   const v = entry.avatarUpdatedAtMs != null ? String(entry.avatarUpdatedAtMs) : '';
@@ -134,478 +259,303 @@ function getTicketTechnicianAvatarUrl(t) {
   return `${entry.avatarUrl}${sep}v=${encodeURIComponent(v)}`;
 }
 
-// =====================
-// Service Catalog
-// =====================
-async function loadServices() {
-  if (!currentUserProfile?.salonId) return [];
+function normalizeServiceProviderTypeText(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '').replace(/s$/, '');
+}
+
+function getStaffQueueProviderTypeIdsForTickets(staff) {
   try {
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/services`));
-    salonServices = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-    return salonServices;
-  } catch (err) {
-    console.warn('[Tickets] Failed to load services', err);
-    salonServices = [];
-    return [];
-  }
+    if (typeof window !== 'undefined' && typeof window.ffGetStaffQueueProviderTypeIds === 'function') {
+      return window.ffGetStaffQueueProviderTypeIds(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  const controlledRole = role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
+  const source = controlledRole ? staff?.queueJoinAsTechnicianTypes : staff?.technicianTypes;
+  return (Array.isArray(source) ? source : []).map((typeId) => String(typeId || '').trim()).filter(Boolean);
 }
 
-async function saveService(service) {
-  if (!currentUserProfile?.salonId) throw new Error('No salon');
-  const payload = {
-    name: String(service.name || '').trim(),
-    defaultPrice: Number(service.defaultPrice) || 0,
-    categoryId: service.categoryId || null,
-    sortOrder: Number(service.sortOrder) || 0,
-    updatedAt: serverTimestamp()
-  };
-  if (service.id) {
-    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, service.id), payload);
-    return service.id;
-  } else {
-    const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/services`), {
-      ...payload,
-      createdAt: serverTimestamp()
-    });
-    return ref.id;
-  }
-}
-
-async function deleteService(serviceId) {
-  if (!currentUserProfile?.salonId || !serviceId) return;
-  await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/services`, serviceId));
-}
-
-// =====================
-// Service Categories (managed objects)
-// =====================
-async function loadServiceCategories() {
-  if (!currentUserProfile?.salonId) return [];
+function staffUsesQueueJoinAsProviderTypes(staff) {
   try {
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`));
-    serviceCategories = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-    return serviceCategories;
-  } catch (err) {
-    console.warn('[Tickets] Failed to load service categories', err);
-    serviceCategories = [];
-    return [];
-  }
+    if (typeof window !== 'undefined' && typeof window.ffStaffRoleCanJoinQueueAsProviderType === 'function') {
+      return window.ffStaffRoleCanJoinQueueAsProviderType(staff);
+    }
+  } catch (_) {}
+  const role = String(staff?.role || '').toLowerCase().trim();
+  return role === 'manager' || role === 'admin' || role === 'owner' || staff?.isManager === true || staff?.isAdmin === true;
 }
 
-async function saveServiceCategory(cat) {
-  if (!currentUserProfile?.salonId) throw new Error('No salon');
-  const payload = {
-    name: String(cat.name || '').trim(),
-    sortOrder: Number(cat.sortOrder) || 0,
-    updatedAt: serverTimestamp()
-  };
-  if (cat.id) {
-    await updateDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, cat.id), payload);
-    return cat.id;
-  } else {
-    const ref = await addDoc(collection(db, `salons/${currentUserProfile.salonId}/serviceCategories`), {
-      ...payload,
-      createdAt: serverTimestamp()
-    });
-    return ref.id;
-  }
+function getServiceCategoryLabel(service) {
+  const categoryId = String(service?.categoryId || '').trim();
+  const cat = categoryId ? ticketsState.serviceCategories.find((c) => String(c.id || '').trim() === categoryId) : null;
+  return String(cat?.name || service?.category || '').trim();
 }
 
-async function deleteServiceCategory(categoryId) {
-  if (!currentUserProfile?.salonId || !categoryId) return;
-  const count = salonServices.filter(s => s.categoryId === categoryId).length;
-  if (count > 0) throw new Error(`Cannot delete: ${count} service(s) use this category. Move them first.`);
-  await deleteDoc(doc(db, `salons/${currentUserProfile.salonId}/serviceCategories`, categoryId));
+function serviceMatchesProviderTypeIds(service, typeIds) {
+  const ids = Array.isArray(typeIds) ? typeIds.map((id) => String(id || '').trim()).filter(Boolean) : [];
+  if (!ids.length) return false;
+  const serviceTokens = [
+    normalizeServiceProviderTypeText(getServiceCategoryLabel(service)),
+    normalizeServiceProviderTypeText(service?.name)
+  ].filter(Boolean);
+  if (!serviceTokens.length) return true;
+  const cachedTypes = (typeof window !== 'undefined' && Array.isArray(window.__ff_technician_types_cache))
+    ? window.__ff_technician_types_cache
+    : [];
+  return ids.some((typeId) => {
+    const type = cachedTypes.find((t) => t && String(t.id || '').trim() === typeId);
+    const typeTokens = [
+      normalizeServiceProviderTypeText(typeId),
+      normalizeServiceProviderTypeText(type?.name)
+    ].filter(Boolean);
+    return typeTokens.some((typeToken) => serviceTokens.some((serviceToken) => (
+      typeToken === serviceToken || typeToken.indexOf(serviceToken) !== -1 || serviceToken.indexOf(typeToken) !== -1
+    )));
+  });
+}
+
+function controlledStaffCanProvideService(staff, service) {
+  if (!staffUsesQueueJoinAsProviderTypes(staff)) return true;
+  const permissions = staff?.permissions && typeof staff.permissions === 'object' ? staff.permissions : {};
+  if (ffServiceStaffPermissionTrue(permissions.tickets_create)) return true;
+  const joinOn = typeof window !== 'undefined' && typeof window.ffStaffHasQueueJoinPermission === 'function'
+    ? window.ffStaffHasQueueJoinPermission(staff)
+    : ffServiceStaffPermissionTrue(permissions.queue_join);
+  if (!joinOn) return false;
+  return serviceMatchesProviderTypeIds(service, getStaffQueueProviderTypeIdsForTickets(staff));
 }
 
 /** Group services by category for MangoMint-style picker. Uses managed categories; Other for uncategorized. */
+function isTicketPickerServiceAvailableForActiveLocation(service) {
+  if (!service || !String(service.name || '').trim()) return false;
+  if (service.active === false || service.locationEnabled === false) return false;
+  // A manager / front-desk receiver editing a ticket should see the FULL catalog,
+  // so skip the per-staff override + controlled-staff provider filtering.
+  if (!ticketsState._ticketPickerShowAllCatalog) {
+    const staffOverride = getServiceStaffOverrideForCurrentTicketUser(service);
+    if (staffOverride && staffOverride.enabled === false) return false;
+    try {
+      const currentStaff = typeof window !== 'undefined' && typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      if (currentStaff && !controlledStaffCanProvideService(currentStaff, service)) return false;
+    } catch (_) {}
+  }
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return true;
+  const serviceLoc = typeof service.locationId === 'string' ? service.locationId.trim() : '';
+  if (serviceLoc && serviceLoc !== activeLoc) return false;
+  return true;
+}
+
+function getServiceStaffOverrides(service) {
+  return service && service.staffOverrides && typeof service.staffOverrides === 'object'
+    ? service.staffOverrides
+    : {};
+}
+
+function getCurrentTicketStaffIdCandidates() {
+  const out = [];
+  const add = (v) => {
+    const s = v == null ? '' : String(v).trim();
+    if (s && out.indexOf(s) === -1) out.push(s);
+  };
+  try { add(window.__ff_authedStaffId); } catch (_) {}
+  add(ticketsState.currentUserProfile?.staffId);
+  add(ticketsState.currentUserProfile?.uid);
+  try {
+    const staff = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+      ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+      : null;
+    add(staff?.id);
+    add(staff?.staffId);
+    add(staff?.uid);
+    add(staff?.firebaseUid);
+  } catch (_) {}
+  return out;
+}
+
+function getServiceStaffOverrideForCurrentTicketUser(service) {
+  const overrides = getServiceStaffOverrides(service);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getTicketPriceForServiceAndCurrentStaff(service) {
+  const base = Number(service?.defaultPrice) || 0;
+  const override = getServiceStaffOverrideForCurrentTicketUser(service);
+  const price = override && Number.isFinite(Number(override.price)) ? Number(override.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
 function getServicesGroupedByCategory() {
   const grouped = {};
-  if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => { grouped[c.id] = { label: c.name, services: [] }; });
+  if (ticketsState.serviceCategories.length > 0) {
+    ticketsState.serviceCategories.forEach((c) => { grouped[c.id] = { label: c.name, services: [] }; });
     grouped['__other__'] = { label: 'Other', services: [] };
   } else {
     grouped['__other__'] = { label: 'Other', services: [] };
   }
-  salonServices.forEach((s) => {
+  ticketsState.salonServices.filter(isTicketPickerServiceAvailableForActiveLocation).forEach((s) => {
     const catId = s.categoryId || null;
     const key = (catId && grouped[catId]) ? catId : '__other__';
     grouped[key].services.push(s);
   });
   const ordered = {};
-  if (serviceCategories.length > 0) {
-    serviceCategories.forEach((c) => { ordered[c.id] = grouped[c.id] || { label: c.name, services: [] }; });
-    ordered['__other__'] = grouped['__other__'];
+  if (ticketsState.serviceCategories.length > 0) {
+    ticketsState.serviceCategories.forEach((c) => {
+      const bucket = grouped[c.id] || { label: c.name, services: [] };
+      if ((bucket.services || []).length > 0) ordered[c.id] = bucket;
+    });
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   } else {
-    ordered['__other__'] = grouped['__other__'];
+    if ((grouped['__other__']?.services || []).length > 0) ordered['__other__'] = grouped['__other__'];
   }
   return ordered;
 }
 
 // =====================
-// Front Desk Recipients (Send To)
+// Products in the ticket picker
+// A product appears only when (a) it is active, (b) it is enabled for the active
+// location, and (c) the current staff member is allowed to sell it (per-product
+// Staff "Available" override). Price is pulled from the product (per-location
+// override if present, otherwise retailPrice).
 // =====================
-let _frontDeskCache = null;
-
-async function loadFrontDeskRecipients() {
-  if (!currentUserProfile?.salonId) return [];
-  if (_frontDeskCache) return _frontDeskCache;
-  try {
-    const snap = await getDocs(collection(db, `salons/${currentUserProfile.salonId}/members`));
-    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-    const staffList = store?.staff || [];
-    _frontDeskCache = snap.docs
-      .filter(d => d.id !== currentUserProfile.uid)
-      .map(d => {
-        const u = d.data() || {};
-        const role = (u.role || '').toLowerCase();
-        const staffId = u.staffId || '';
-        const memberEmail = (u.email || '').toLowerCase();
-        const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-        const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-        const isFrontDesk = ['admin', 'owner', 'manager'].includes(role) || hasReceivesTickets;
-        if (!isFrontDesk) return null;
-        return {
-          uid: d.id,
-          staffId,
-          name: (u.name || '').trim() || 'Front Desk'
-        };
-      })
-      .filter(Boolean);
-  } catch (e) {
-    console.warn('[Tickets] loadFrontDeskRecipients failed', e);
-    _frontDeskCache = [];
-  }
-  return _frontDeskCache;
+function getProductStaffOverrides(product) {
+  return product && product.staffOverrides && typeof product.staffOverrides === 'object'
+    ? product.staffOverrides
+    : {};
 }
 
-/** Auto recipients: creator + all Staff with Receives Tickets ON + Owner/Admin/Manager. No manual selection. */
-async function getAutoFrontDeskRecipients() {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
-  if (!salonId) return { uids: [], names: [] };
-  const seen = new Set();
-  const uids = []; const names = [];
-  const add = (uid, name) => {
-    if (!uid || seen.has(uid)) return;
-    seen.add(uid);
-    uids.push(uid);
-    names.push((name || '').trim() || 'Front Desk');
-  };
-  add(currentUserProfile.uid, currentUserProfile.name || currentUserProfile.email);
-  try {
-    const membersSnap = await getDocs(collection(db, `salons/${salonId}/members`));
-    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-    const staffList = store?.staff || [];
-    membersSnap.docs.forEach(d => {
-      const u = d.data() || {};
-      const role = (u.role || '').toLowerCase();
-      const staffId = u.staffId || '';
-      const memberEmail = (u.email || '').toLowerCase();
-      const staff = staffList.find(s => s.id === staffId) || staffList.find(s => memberEmail && (s.email || '').toLowerCase() === memberEmail);
-      const hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-      const isManagerOrAbove = ['owner', 'admin', 'manager'].includes(role);
-      const isRecipient = isManagerOrAbove || hasReceivesTickets;
-      if (isRecipient) add(d.id, (u.name || '').trim());
+function getProductStaffOverrideForCurrentTicketUser(product) {
+  const overrides = getProductStaffOverrides(product);
+  const ids = getCurrentTicketStaffIdCandidates();
+  for (const id of ids) {
+    if (overrides[id] && typeof overrides[id] === 'object') return overrides[id];
+  }
+  return null;
+}
+
+function getProductLocationOverrideForActiveLocation(product) {
+  const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc) return null;
+  const lo = product && product.locationOverrides && typeof product.locationOverrides === 'object'
+    ? product.locationOverrides
+    : {};
+  const o = lo[activeLoc];
+  return (o && typeof o === 'object') ? o : null;
+}
+
+function isTicketPickerProductAvailableForActiveLocation(product) {
+  if (!product || !String(product.name || '').trim()) return false;
+  if (product.active === false) return false;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  if (locOverride && locOverride.enabled === false) return false;
+  if (!ticketsState._ticketPickerShowAllCatalog) {
+    const staffOverride = getProductStaffOverrideForCurrentTicketUser(product);
+    if (staffOverride && staffOverride.enabled === false) return false;
+  }
+  return true;
+}
+
+function getTicketPriceForProductAndActiveLocation(product) {
+  const base = Number(product?.retailPrice) || 0;
+  const locOverride = getProductLocationOverrideForActiveLocation(product);
+  const price = locOverride && Number.isFinite(Number(locOverride.price)) ? Number(locOverride.price) : base;
+  return Number.isFinite(price) ? price : base;
+}
+
+function getProductsGroupedByCategory() {
+  const grouped = {};
+  if (ticketsState.productCategories.length > 0) {
+    ticketsState.productCategories.forEach((c) => { grouped[c.id] = { label: c.name, products: [] }; });
+  }
+  grouped['__other__'] = { label: 'Other', products: [] };
+  ticketsState.salonProducts.filter(isTicketPickerProductAvailableForActiveLocation).forEach((p) => {
+    const catId = p.categoryId || null;
+    const key = (catId && grouped[catId]) ? catId : '__other__';
+    grouped[key].products.push(p);
+  });
+  const ordered = {};
+  if (ticketsState.productCategories.length > 0) {
+    ticketsState.productCategories.forEach((c) => {
+      const bucket = grouped[c.id];
+      if (bucket && (bucket.products || []).length > 0) ordered[c.id] = bucket;
     });
-  } catch (_) {}
-  return { uids, names };
-}
-
-/** Returns { isPrimaryAdmin, hasReceivesTickets } for current user.
- *  ONLY uses PIN Actor system — whoever entered their PIN right now.
- *  Never falls back to Firebase Auth owner role. */
-function getTicketVisibility() {
-  // Use PIN Actor role exclusively
-  const actorRole = window.__ff_actorRole
-    || window.lastActorRole
-    || (typeof getCurrentActorRole === 'function' ? getCurrentActorRole() : null)
-    || 'Tech';
-
-  const isPrimaryAdmin = actorRole === 'Admin' || actorRole === 'Manager';
-
-  let hasReceivesTickets = false;
-  try {
-    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-    const staffList = store?.staff || [];
-    const staff = staffList.find(s =>
-      (currentUserProfile?.staffId && s.id === currentUserProfile.staffId) ||
-      (currentUserProfile?.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
-    );
-    hasReceivesTickets = staff?.permissions?.tickets_receives === true;
-  } catch (_) {}
-
-  return { isPrimaryAdmin, hasReceivesTickets };
-}
-
-/** Returns true if current user can see this ticket.
- *  Uses FIRESTORE profile role for admin/manager check — not PIN actor.
- *  This ensures admin always sees all tickets regardless of PIN state. */
-function canSeeTicket(ticket) {
-  if (!currentUserProfile) return false;
-  // Firestore role: admin/owner/manager always see all tickets
-  const profileRole = (currentUserProfile.role || '').toLowerCase();
-  if (['owner', 'admin', 'manager'].includes(profileRole)) return true;
-  // Technician: can see their own tickets
-  if (ticket.createdByUid === currentUserProfile.uid) return true;
-  // Staff with receives-tickets permission
-  const { hasReceivesTickets } = getTicketVisibility();
-  if (hasReceivesTickets) return true;
-  return false;
-}
-
-// =====================
-// Tickets CRUD
-// =====================
-function subscribeTickets(options) {
-  const resetLoading = !!(options && options.resetLoading);
-  const salonId = currentUserProfile?.salonId
-    || (typeof window !== 'undefined' && window.currentSalonId)
-    || null;
-  if (!salonId) {
-    console.warn('[Tickets] No salonId. Retrying in 1s...');
-    setTimeout(() => subscribeTickets(options), 1000);
-    return;
   }
-  if (ticketsUnsubscribe) ticketsUnsubscribe();
-  if (resetLoading) {
-    _ticketsListSnapshotReady = false;
-    const loadEl = document.getElementById('ticketsLoading');
-    const listEl = document.getElementById('ticketsList');
-    const emptyEl = document.getElementById('ticketsEmpty');
-    if (loadEl) loadEl.style.display = 'block';
-    if (emptyEl) emptyEl.style.display = 'none';
-    if (listEl) listEl.innerHTML = '';
-  }
-  const q = query(
-    collection(db, `salons/${salonId}/tickets`),
-    orderBy('createdAt', 'desc'),
-    limit(200)
-  );
-  ticketsUnsubscribe = onSnapshot(q, (snap) => {
-    currentTickets = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    _ticketsListSnapshotReady = true;
-    if (editingTicketId) {
-      const t = currentTickets.find(x => x.id === editingTicketId);
-      const s = t ? (t.status || '').toUpperCase() : '';
-      if (t && (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED')) {
-        const ticketModal = document.getElementById('ticketModal');
-        if (ticketModal && ticketModal.style.display === 'flex') {
-          closeTicketModal();
-          // Don't open Ticket Details after closing – user stays on the list. Details only when they click a closed ticket.
-        }
-      }
-    }
-    renderTicketsList();
-    updateTicketsNavBadge();
-  }, (err) => {
-    console.error('[Tickets] subscribe error', err);
-    _ticketsListSnapshotReady = true;
-    renderTicketsList();
+  if ((grouped['__other__']?.products || []).length > 0) ordered['__other__'] = grouped['__other__'];
+  return ordered;
+}
+
+function ticketHasRealPostSendEdit(ticket) {
+  if (!ticket || ticket.editedAfterFinalize !== true) return false;
+  const history = Array.isArray(ticket.history) ? ticket.history : [];
+  return history.some((entry) => {
+    const action = String(entry?.action || '').toLowerCase();
+    return action === 'edited_after_send';
   });
-}
-
-/** Red dot + number on TICKETS nav for manager/admin. Counts Ready tickets not yet opened (Firestore seenByFrontDeskAt OR opened this session). */
-function updateTicketsNavBadge() {
-  const badge = document.getElementById('ticketsNavBadge');
-  if (!badge) return;
-  // Badge only for admin/owner/manager by FIRESTORE role
-  const profileRole = (currentUserProfile?.role || '').toLowerCase();
-  const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-  if (!isFirebaseAdmin) {
-    badge.textContent = '';
-    badge.style.display = 'none';
-    return;
-  }
-  badge.style.display = '';
-  const readyUnread = (currentTickets || []).filter(t => {
-    if ((String(t.status || '').toUpperCase() !== 'READY_FOR_CHECKOUT') || !canSeeTicket(t)) return false;
-    if (_ticketsOpenedThisSession.has(t.id)) return false;
-    if (t.seenByFrontDeskAt) return false;
-    return true;
-  });
-  badge.textContent = readyUnread.length > 0 ? String(readyUnread.length) : '';
-}
-
-async function createTicket(payload) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
-  if (!salonId) throw new Error('No salon - ensure your account has salonId');
-  const status = payload.status === 'READY_FOR_CHECKOUT' ? 'READY_FOR_CHECKOUT' : 'OPEN';
-  const doc = {
-    status,
-    asIs: payload.asIs === true,
-    asIsMessage: payload.asIs === true ? (payload.asIsMessage || 'Service matches system billing') : null,
-    customerName: String(payload.customerName || '').trim(),
-    appointmentId: payload.appointmentId || null,
-    appointmentData: payload.appointmentData || null,
-    technicianStaffId: currentUserProfile.staffId || currentUserProfile.uid,
-    technicianName: currentUserProfile.name || currentUserProfile.email || 'Technician',
-    performedLines: Array.isArray(payload.performedLines) ? payload.performedLines : [],
-    total: Number(payload.total) || 0,
-    forUids: Array.isArray(payload.forUids) ? payload.forUids : [],
-    forNames: Array.isArray(payload.forNames) ? payload.forNames : [],
-    ...(status === 'READY_FOR_CHECKOUT' && { finalizedByUid: currentUserProfile.uid }),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    createdByUid: currentUserProfile.uid,
-    history: [{ at: Timestamp.now(), by: currentUserProfile.uid, byName: currentUserProfile.name || '', action: 'created', details: null }]
-  };
-  const ref = await addDoc(collection(db, `salons/${salonId}/tickets`), doc);
-  return ref.id;
-}
-
-async function updateTicket(ticketId, updates) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
-  if (!salonId || !ticketId) return;
-  const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
-  let snap;
-  try {
-    snap = await getDocFromServer(ticketRef);
-  } catch (_) {
-    snap = await getDoc(ticketRef);
-  }
-  const data = snap.data() || {};
-  const existingHist = Array.isArray(data.history) ? data.history : [];
-  const hist = [...existingHist, {
-    at: Timestamp.now(),
-    by: currentUserProfile.uid,
-    byName: currentUserProfile.name || '',
-    action: updates._action || 'updated',
-    details: updates._details || null
-  }];
-  delete updates._action;
-  delete updates._details;
-  delete updates.history;
-  const isOnlyMarkingSeen = Object.keys(updates).length === 1 && updates.seenByFrontDeskAt !== undefined;
-  const statusNow = (String(data.status || '')).toUpperCase();
-  if (!isOnlyMarkingSeen && statusNow === 'READY_FOR_CHECKOUT') {
-    updates.editedAfterFinalize = true;
-    updates.editedAt = serverTimestamp();
-  }
-  await updateDoc(ticketRef, {
-    ...updates,
-    history: hist,
-    updatedAt: serverTimestamp()
-  });
-}
-
-async function finalizeTicket(ticketId, forUids, forNames) {
-  const updates = { status: 'READY_FOR_CHECKOUT', finalizedByUid: currentUserProfile.uid, _action: 'finalized' };
-  if (Array.isArray(forUids) && forUids.length > 0) {
-    updates.forUids = forUids;
-    updates.forNames = Array.isArray(forNames) ? forNames : [];
-  }
-  await updateTicket(ticketId, updates);
-}
-
-async function closeTicket(ticketId) {
-  const closedByName = currentUserProfile?.name || currentUserProfile?.email || 'Manager';
-  await updateTicket(ticketId, {
-    status: 'CLOSED',
-    closedByUid: currentUserProfile.uid,
-    closedByName,
-    _action: 'closed'
-  });
-}
-
-async function voidTicket(ticketId) {
-  await updateTicket(ticketId, { status: 'VOID', _action: 'voided' });
-}
-
-async function archiveTicket(ticketId) {
-  await updateTicket(ticketId, { status: 'ARCHIVED', archivedByUid: currentUserProfile.uid, _action: 'archived' });
-}
-
-async function deleteTicketPermanently(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
-  if (!salonId || !ticketId) return;
-  const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
-  await deleteDoc(ticketRef);
-}
-
-/** Mark ticket as seen/acknowledged by Front Desk (removes "Edited" indicator). Call when FD opens the ticket. */
-async function markTicketSeenByFrontDesk(ticketId) {
-  const salonId = currentUserProfile?.salonId || (typeof window !== 'undefined' && window.currentSalonId);
-  if (!salonId || !ticketId) return;
-  const ticketRef = doc(db, `salons/${salonId}/tickets`, ticketId);
-  const snap = await getDoc(ticketRef);
-  if (!snap.exists() || snap.data().seenByFrontDeskAt) return;
-  await updateTicket(ticketId, { seenByFrontDeskAt: serverTimestamp() });
 }
 
 // =====================
 // Helpers
 // =====================
-function formatDate(ts) {
-  if (!ts) return '';
-  const d = ts?.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-/** Align the gear icon precisely under the user avatar circle — works on any screen/DPI */
-function _alignGearToAvatar() {
-  const gear = document.getElementById('ticketsManageServicesBtn');
-  // Target the circle itself, not the full button (which includes the ▼ arrow)
-  const avatarCircle = document.querySelector('.user-avatar-circle') || document.getElementById('userAvatarBtn');
-  if (!gear || !avatarCircle || gear.style.display === 'none') return;
-  const circleRect = avatarCircle.getBoundingClientRect();
-  const tabsRow = gear.parentElement;
-  if (!tabsRow) return;
-  const tabsRect = tabsRow.getBoundingClientRect();
-  // Center gear under the circle center
-  const circleCenterX = circleRect.left + circleRect.width / 2;
-  const gearHalfWidth = 18; // 36px / 2
-  const rightFromRow = tabsRect.right - (circleCenterX + gearHalfWidth);
-  gear.style.marginRight = Math.max(4, Math.round(rightFromRow - 20)) + 'px';
-}
-
-// Re-align on resize
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', () => {
-    const gear = document.getElementById('ticketsManageServicesBtn');
-    if (gear && gear.style.display !== 'none') _alignGearToAvatar();
-  });
-}
-
 function showToast(msg, type = 'info') {
-  // Remove existing toast
-  const existing = document.getElementById('ff-tickets-toast');
-  if (existing) existing.remove();
-
-  const colors = { success: '#059669', error: '#dc2626', info: '#2563eb', warning: '#d97706' };
-  const icons  = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
-  const bg = colors[type] || colors.info;
-  const icon = icons[type] || icons.info;
-
-  const toast = document.createElement('div');
-  toast.id = 'ff-tickets-toast';
-  toast.style.cssText = [
-    'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-    `background:${bg}`, 'color:#fff', 'padding:12px 22px',
-    'border-radius:999px', 'font-size:14px', 'font-weight:600',
-    'z-index:999999', 'box-shadow:0 4px 20px rgba(0,0,0,0.25)',
-    'display:flex', 'align-items:center', 'gap:8px',
-    'white-space:nowrap', 'pointer-events:none',
-    'animation:ffToastIn .2s ease'
-  ].join(';');
-  toast.innerHTML = `<span style="font-size:16px;">${icon}</span><span>${String(msg).replace(/</g,'&lt;')}</span>`;
-
-  // Add animation
-  if (!document.getElementById('ff-toast-style')) {
-    const s = document.createElement('style');
-    s.id = 'ff-toast-style';
-    s.textContent = '@keyframes ffToastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}';
-    document.head.appendChild(s);
+  if (typeof window !== 'undefined' && window.ffToast && typeof window.ffToast.show === 'function') {
+    const v =
+      type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';
+    window.ffToast.show(String(msg), { variant: v, durationMs: type === 'error' ? 6000 : 4000 });
+    return;
   }
-
-  document.body.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transition = 'opacity .3s';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  console.warn('[Tickets]', msg, type);
 }
 
 /** Custom confirm for tickets: always use in-app modal, never browser confirm. */
+/** Styled text-input prompt that matches the app theme (purple buttons).
+ *  Resolves to the trimmed string, or null if cancelled. */
+function ticketPrompt(message, title = 'Enter value', defaultValue = '') {
+  if (typeof window.ffPrompt === 'function') return window.ffPrompt(message, title, defaultValue);
+  return new Promise((resolve) => {
+    let overlay = document.getElementById('ff-prompt-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'ff-prompt-overlay';
+      overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
+      card.innerHTML = '<h3 id="ff-prompt-title" style="margin:0 0 10px;font-size:17px;font-weight:700;color:#111;"></h3><p id="ff-prompt-msg" style="margin:0 0 14px;font-size:13px;color:#6b7280;line-height:1.5;"></p><input id="ff-prompt-input" type="text" style="width:100%;box-sizing:border-box;padding:11px 13px;border:1px solid #e5e7eb;border-radius:8px;font-size:14px;margin-bottom:18px;outline:none;"><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-prompt-cancel" style="padding:10px 18px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-prompt-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save</button></div>';
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      const inputEl = card.querySelector('#ff-prompt-input');
+      const closeWith = (v) => {
+        overlay.style.display = 'none';
+        if (window._ffPromptResolve) { window._ffPromptResolve(v); window._ffPromptResolve = null; }
+      };
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeWith(null); });
+      card.querySelector('#ff-prompt-cancel').addEventListener('click', () => closeWith(null));
+      card.querySelector('#ff-prompt-ok').addEventListener('click', () => {
+        const v = (inputEl.value || '').trim();
+        closeWith(v || null);
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); card.querySelector('#ff-prompt-ok').click(); }
+        if (e.key === 'Escape') { e.preventDefault(); closeWith(null); }
+      });
+    }
+    window._ffPromptResolve = resolve;
+    const titleEl = overlay.querySelector('#ff-prompt-title');
+    const msgEl = overlay.querySelector('#ff-prompt-msg');
+    const inputEl = overlay.querySelector('#ff-prompt-input');
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    if (inputEl) { inputEl.value = defaultValue || ''; inputEl.placeholder = title; }
+    overlay.style.display = 'flex';
+    setTimeout(() => { try { inputEl.focus(); inputEl.select(); } catch (_) {} }, 30);
+  });
+}
+
 function ticketConfirm(message, title = 'Confirm') {
   if (typeof window.ffConfirm === 'function') return window.ffConfirm(message, title);
   return new Promise((resolve) => {
@@ -616,7 +566,7 @@ function ticketConfirm(message, title = 'Confirm') {
       overlay.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:300000;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;';
       const card = document.createElement('div');
       card.style.cssText = 'background:#fff;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);max-width:400px;width:100%;padding:24px;';
-      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#111;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:500;">OK</button></div>';
+      card.innerHTML = '<h3 id="ff-confirm-title" style="margin:0 0 12px;font-size:18px;font-weight:600;color:#111;"></h3><p id="ff-confirm-msg" style="margin:0 0 24px;font-size:14px;color:#374151;line-height:1.5;"></p><div style="display:flex;justify-content:flex-end;gap:10px;"><button type="button" id="ff-confirm-cancel" style="padding:10px 20px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:14px;color:#374151;">Cancel</button><button type="button" id="ff-confirm-ok" style="padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">OK</button></div>';
       overlay.appendChild(card);
       document.body.appendChild(overlay);
       overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.style.display = 'none'; if (window._ffConfirmResolve) { window._ffConfirmResolve(false); window._ffConfirmResolve = null; } } });
@@ -646,1341 +596,177 @@ function computeDiff(appointmentData, performedLines) {
   return { removed, added, changed };
 }
 
-// =====================
-// UI: List
-// =====================
-function formatLineForList(l) {
-  const name = escapeHtml(l.serviceName || '');
-  const base = Number(l.catalogPrice) || 0;
-  const adj = Number(l.ticketPrice) || 0;
-  if (l.isOverride && base !== adj) {
-    return `${name} <span style="font-size:11px;color:#d97706;" title="Price adjusted">(base $${base.toFixed(0)} → $${adj.toFixed(0)})</span>`;
-  }
-  return `${name} $${adj.toFixed(0)}`;
-}
-
-function getInitial(name) {
-  if (!name || typeof name !== 'string') return '?';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  return (parts[0][0] || '?').toUpperCase();
-}
-
-/** After first real list paint, remove boot cover (profile + toolbar + snapshot ready). */
-function endTicketsBootCover() {
-  const screen = document.getElementById('ticketsScreen');
-  if (!screen || !screen.classList.contains('ff-tickets-boot')) return;
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      screen.classList.remove('ff-tickets-boot');
-    });
-  });
-}
-
-function renderTicketsList() {
-  const listEl = document.getElementById('ticketsList');
-  const loadingEl = document.getElementById('ticketsLoading');
-  const emptyEl = document.getElementById('ticketsEmpty');
-  if (!listEl) return;
-
-  if (!_ticketsListSnapshotReady) {
-    if (loadingEl) loadingEl.style.display = 'block';
-    if (emptyEl) emptyEl.style.display = 'none';
-    listEl.innerHTML = '';
-    return;
-  }
-
-  const statusFilter = { ready: 'READY_FOR_CHECKOUT', closed: 'CLOSED', archived: 'ARCHIVED' }[currentTicketsTab] || 'READY_FOR_CHECKOUT';
-  let toShow = currentTicketsTab === 'archived'
-    ? currentTickets.filter(t => t.status === 'ARCHIVED')
-    : currentTicketsTab === 'closed'
-    ? currentTickets.filter(t => t.status === 'CLOSED' || t.status === 'VOID')
-    : currentTickets.filter(t => t.status === statusFilter);
-  toShow = toShow.filter(t => canSeeTicket(t));
-
-  if (loadingEl) loadingEl.style.display = 'none';
-  if (emptyEl) emptyEl.style.display = toShow.length === 0 ? 'block' : 'none';
-
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    archivedTab.style.display = (role === 'owner' || role === 'admin') ? 'inline-block' : 'none';
-  }
-
-  listEl.classList.toggle('tickets-list--closed', currentTicketsTab === 'closed');
-  listEl.classList.toggle('tickets-list--archived', currentTicketsTab === 'archived');
-
-  // Helper: status css key
-  const statusKey = (s) => {
-    if (s === 'READY_FOR_CHECKOUT') return 'ready';
-    if (s === 'CLOSED') return 'closed';
-    if (s === 'OPEN') return 'open';
-    if (s === 'VOID') return 'void';
-    if (s === 'ARCHIVED') return 'archived';
-    return 'open';
+// Diff between two sets of performed lines (used to show what the front desk
+// changed on a ticket vs the technician's original submission).
+function ffNormalizeLineForCompare(l) {
+  return {
+    name: String((l && l.serviceName) || '').trim(),
+    price: Number(l && l.ticketPrice) || 0,
+    note: String((l && l.note) || '').trim()
   };
-
-  listEl.innerHTML = toShow.map(t => {
-    const submittedAt = formatDate(t.createdAt);
-    const allLines = t.performedLines || [];
-    const lines = allLines.slice(0, 4);
-    const more = allLines.length > 4 ? allLines.length - 4 : 0;
-    const techName = escapeHtml(t.technicianName || '—');
-    const customerName = (t.customerName || '').trim();
-    const initial = getInitial(t.technicianName);
-    const sk = statusKey(t.status);
-    const statusLabel = { ready:'READY', closed:'CLOSED', open:'OPEN', void:'VOID', archived:'ARCHIVED' }[sk] || sk.toUpperCase();
-    const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-    const showDeleteBtn = currentTicketsTab === 'archived' && isAdminOrOwner;
-    const isCreator = currentUserProfile && (
-      t.createdByUid === currentUserProfile.uid ||
-      t.technicianStaffId === currentUserProfile.staffId ||
-      t.technicianStaffId === currentUserProfile.uid ||
-      t.finalizedByUid === currentUserProfile.uid ||
-      (t.technicianName && (
-        (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-        (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
-      ))
-    );
-    const canEdit = isCreator && t.status !== 'CLOSED' && t.status !== 'ARCHIVED' && t.status !== 'VOID';
-    const editBtnHtml = canEdit
-      ? `<button type="button" class="ticket-edit-btn" data-ticket-id="${t.id}" title="Edit ticket" style="padding:6px;background:none;border:none;cursor:pointer;flex-shrink:0;color:#9ca3af;line-height:0;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>`
-      : '';
-    const { hasReceivesTickets } = getTicketVisibility();
-    const isAdminOrManager = currentUserProfile && ['owner', 'admin', 'manager'].includes((currentUserProfile.role || '').toLowerCase());
-    const canSeeEditedFlag = isAdminOrManager || hasReceivesTickets;
-    const isReady = sk === 'ready';
-    const showEdited = canSeeEditedFlag && isReady && !!t.editedAfterFinalize;
-    const editedBadgeHtml = showEdited ? '<span class="ticket-edited-badge">Edited</span>' : '';
-    const technicianAvatarUrl = getTicketTechnicianAvatarUrl(t);
-    const avatarHtml = technicianAvatarUrl
-      ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="${String(technicianAvatarUrl).replace(/"/g,'&quot;')}" alt="" style="width:100%;height:100%;object-fit:cover;"></div>`
-      : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#9d68b9,#ff9580);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initial}</div>`;
-
-    // Service lines — bullet style matching screenshot
-    const linesHtml = lines.map(l => `<div style="font-size:13px;color:#374151;padding:2px 0;">${formatLineForList(l)}</div>`).join('');
-    const moreHtml = more > 0 ? `<div style="font-size:11px;color:#9ca3af;margin-top:2px;">+ ${more} more…</div>` : '';
-    const asIsHtml = t.asIs && t.asIsMessage
-      ? `<div style="font-size:12px;color:#059669;background:#d1fae5;padding:6px 8px;border-radius:6px;margin-top:6px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>`
-      : '';
-    const deleteBtnHtml = showDeleteBtn
-      ? `<div style="margin-top:10px;"><button type="button" class="ticket-delete-btn" data-ticket-id="${t.id}" style="padding:5px 12px;background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;">Delete permanently</button></div>`
-      : '';
-
-    const closedByHtml = (sk === 'closed' && t.closedByName)
-      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">✓ Closed by ${escapeHtml(t.closedByName)}</div>`
-      : '';
-
-    return `
-    <div class="ticket-card" data-ticket-id="${t.id}">
-      <!-- Header row -->
-      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
-        ${editBtnHtml}
-        ${avatarHtml}
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${techName}</div>
-          ${customerName ? `<div style="font-size:11px;color:#6b7280;margin-top:1px;">👤 ${escapeHtml(customerName)}</div>` : ''}
-          <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${submittedAt}</div>
-          ${closedByHtml}
-        </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
-          <span class="ticket-status-badge ${sk}">${statusLabel}</span>
-          ${editedBadgeHtml}
-        </div>
-      </div>
-      <!-- Dashed separator + services -->
-      <div style="border-top:1px dashed #e5e7eb;padding-top:10px;">
-        ${linesHtml || '<div style="font-size:12px;color:#9ca3af;">No services</div>'}
-        ${moreHtml}
-      </div>
-      ${asIsHtml}
-      ${deleteBtnHtml}
-    </div>
-  `}).join('');
-
-  listEl.querySelectorAll('.ticket-card').forEach(card => {
-    const ticketId = card.getAttribute('data-ticket-id');
-    card.onclick = (e) => {
-      if (e.target.closest('.ticket-delete-btn')) return;
-      openTicketModal(ticketId);
-    };
+}
+function computeLinesDiff(originalLines, currentLines) {
+  const orig = (Array.isArray(originalLines) ? originalLines : []).map(ffNormalizeLineForCompare);
+  const curr = (Array.isArray(currentLines) ? currentLines : []).map(ffNormalizeLineForCompare);
+  const removed = orig.filter(o => !curr.some(c => c.name === o.name));
+  const added = curr.filter(c => !orig.some(o => o.name === c.name));
+  const changed = [];
+  orig.forEach(o => {
+    const c = curr.find(x => x.name === o.name);
+    if (c && (c.price !== o.price || c.note !== o.note)) {
+      changed.push({ name: o.name, from: o.price, to: c.price });
+    }
   });
-  listEl.querySelectorAll('.ticket-delete-btn').forEach(btn => {
-    btn.onclick = async (e) => {
-      e.stopPropagation();
-      const id = btn.getAttribute('data-ticket-id');
-      const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket');
-      if (!id || !ok) return;
-      try {
-        await deleteTicketPermanently(id);
-        showToast('Ticket deleted', 'success');
-      } catch (err) {
-        showToast(err?.message || 'Failed to delete', 'error');
-      }
-    };
-  });
-
-  endTicketsBootCover();
+  return { removed, added, changed };
 }
-
-function statusBg(s) {
-  if (s === 'OPEN') return '#fef3c7';
-  if (s === 'READY_FOR_CHECKOUT') return '#dbeafe';
-  if (s === 'CLOSED') return '#d1fae5';
-  if (s === 'ARCHIVED') return '#e5e7eb';
-  return '#f3f4f6';
+function ffTicketLinesChanged(beforeLines, afterLines) {
+  const d = computeLinesDiff(beforeLines, afterLines);
+  return !!(d.removed.length || d.added.length || d.changed.length);
 }
-function statusColor(s) {
-  if (s === 'OPEN') return '#92400e';
-  if (s === 'READY_FOR_CHECKOUT') return '#1e40af';
-  if (s === 'CLOSED') return '#065f46';
-  if (s === 'ARCHIVED') return '#4b5563';
-  return '#6b7280';
-}
-
-function escapeHtml(s) {
-  if (s == null) return '';
-  const str = String(s);
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// Renders the "Edited by front desk" change summary (vs the technician's original).
+function ffRenderFrontDeskChangesHtml(t) {
+  if (!t || t.frontDeskEdited !== true || !Array.isArray(t.frontDeskOriginalLines)) return '';
+  const d = computeLinesDiff(t.frontDeskOriginalLines, t.performedLines || []);
+  if (!d.removed.length && !d.added.length && !d.changed.length) return '';
+  const who = escapeHtml(t.frontDeskEditedByName || 'Front desk');
+  const when = ffFormatReviewedAt(t.frontDeskEditedAt);
+  const parts = [];
+  d.removed.forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)} (${ffTicketMoney(r.price || 0)})</div>`));
+  d.added.forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} (${ffTicketMoney(a.price || 0)})</div>`));
+  d.changed.forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} — ${ffTicketMoney(c.from || 0)} → ${ffTicketMoney(c.to || 0)}</div>`));
+  return `<div style="margin-top:14px;padding:12px;border:1px solid #fde68a;background:#fffbeb;border-radius:8px;">
+    <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px;">Edited by front desk${who ? ' · ' + who : ''}${when ? ' · ' + when : ''} <span style="font-weight:500;color:#b45309;">(vs technician)</span></div>
+    ${parts.join('')}
+  </div>`;
 }
 
 // =====================
 // UI: Tabs
 // =====================
 function setTicketsTab(tab) {
-  currentTicketsTab = tab;
+  let t = tab;
+  if (t === 'summary' && !canViewTicketsSummaryTab()) t = 'ready';
+  if (t === 'archived' && !canViewTicketsArchivedTab()) t = 'ready';
+  ticketsState.currentTicketsTab = t;
   document.querySelectorAll('.tickets-tab').forEach(b => b.classList.remove('active'));
-  const btn = document.querySelector(`.tickets-tab[data-tab="${tab}"]`);
+  const btn = document.querySelector(`.tickets-tab[data-tab="${t}"]`);
   if (btn) btn.classList.add('active');
   renderTicketsList();
 }
 
-// =====================
-// UI: Ticket Modal (create/edit)
-// =====================
-function openTicketModal(ticketId, appointmentData = null) {
-  editingTicketId = ticketId || null;
-  window._ticketModalAppointmentData = appointmentData || null;
-  const modal = document.getElementById('ticketModal');
-  const title = document.getElementById('ticketModalTitle');
-  if (!modal || !title) return;
-
-  if (editingTicketId) {
-    const t = currentTickets.find(x => x.id === editingTicketId);
-    if (!t) return;
-    const s = (t.status || '').toUpperCase();
-    if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
-      if (_justClosedTicketId === editingTicketId) {
-        _justClosedTicketId = null;
-        return;
-      }
-      openTicketDetailsModal(t);
-      return;
-    }
-
-    // Admin/manager/owner viewing a READY ticket → simplified view with Close Ticket only
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrManager = ['owner', 'admin', 'manager'].includes(profileRole);
-    if (isAdminOrManager && s === 'READY_FOR_CHECKOUT') {
-      if (!t.seenByFrontDeskAt) {
-        _ticketsOpenedThisSession.add(t.id);
-        t.seenByFrontDeskAt = true;
-        updateTicketsNavBadge();
-        markTicketSeenByFrontDesk(t.id).catch(() => {});
-      }
-      openAdminTicketView(t);
-      return;
-    }
-
-    if (s === 'READY_FOR_CHECKOUT' && !t.seenByFrontDeskAt) {
-      _ticketsOpenedThisSession.add(t.id);
-      t.seenByFrontDeskAt = true;
-      updateTicketsNavBadge();
-      const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
-      if (isPrimaryAdmin || hasReceivesTickets) markTicketSeenByFrontDesk(t.id).catch(() => {});
-    }
-    title.textContent = 'Edit Ticket';
-    populateTicketForm(t);
-  } else {
-    title.textContent = 'New Ticket';
-    resetTicketForm();
-    if (appointmentData && appointmentData.services && appointmentData.services.length > 0) {
-      const block = document.getElementById('ticketAsBookedBlock');
-      const none = document.getElementById('ticketAsBookedNone');
-      const content = document.getElementById('ticketAsBookedContent');
-      if (block) block.style.display = 'block';
-      if (none) none.style.display = 'none';
-      if (content) {
-        const booked = appointmentData.services;
-        content.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
-        content.style.display = 'none';
-      }
-    }
-  }
-  modal.style.display = 'flex';
-}
-
-/** Admin/manager view: read-only ticket with ONLY Close Ticket button.
- *  Uses existing modal elements — does NOT replace innerHTML. */
-function openAdminTicketView(t) {
-  const modal = document.getElementById('ticketModal');
-  const title = document.getElementById('ticketModalTitle');
-  if (!modal || !title) return;
-
-  title.textContent = 'Ticket from ' + escapeHtml(t.technicianName || 'Technician');
-
-  const lines = t.performedLines || [];
-  const total = lines.reduce((s, l) => s + (Number(l.ticketPrice) || 0), 0);
-
-  // Build read-only service list in existing performed list area
-  const cont = document.getElementById('ticketPerformedList');
-  if (cont) {
-    cont.innerHTML = lines.map(l => {
-      const price = Number(l.ticketPrice) || 0;
-      const base = Number(l.catalogPrice) || 0;
-      const adjusted = base > 0 && price !== base;
-      return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:14px;">
-        <span style="color:#374151;">${escapeHtml(l.serviceName || '')}</span>
-        <span style="font-weight:700;color:${adjusted ? '#d97706' : '#111'};">$${price.toFixed(2)}${adjusted ? ` <small style="color:#9ca3af;">(base $${base.toFixed(2)})</small>` : ''}</span>
-      </div>`;
-    }).join('') || '<div style="color:#9ca3af;font-size:14px;padding:8px 0;">No services</div>';
-  }
-
-  // Hide lines data and service picker
-  const linesData = document.getElementById('ticketLinesData');
-  if (linesData) linesData.value = JSON.stringify(lines);
-
-  const picker = document.getElementById('ticketServicePickerContainer');
-  if (picker) picker.style.display = 'none';
-
-  // Customer name (read-only)
-  const custToggle = document.getElementById('ticketCustomerToggle');
-  if (custToggle) custToggle.style.display = 'none';
-  const custWrap = document.getElementById('ticketCustomerWrap');
-  const custInput = document.getElementById('ticketCustomerName');
-  if ((t.customerName || '').trim()) {
-    if (custWrap) custWrap.style.display = 'block';
-    if (custInput) { custInput.value = t.customerName; custInput.readOnly = true; }
-  } else {
-    if (custWrap) custWrap.style.display = 'none';
-  }
-
-  // AS IS message
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText  = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
-  // Show total
-  const totalBlock = document.getElementById('ticketTotalBlock');
-  const totalAmt   = document.getElementById('ticketTotalAmount');
-  if (totalBlock) totalBlock.style.display = lines.length > 0 ? 'block' : 'none';
-  if (totalAmt)   totalAmt.textContent = '$' + total.toFixed(2);
-
-  // Hide all action buttons except Close
-  ['ticketSendNewBtn','ticketSaveBtn','ticketFinalizeBtn','ticketArchiveBtn',
-   'ticketDeleteBtn','ticketAsIsBtn'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
-  });
-
-  // Show only Close Ticket button
-  const closeBtn = document.getElementById('ticketCloseBtn');
-  if (closeBtn) {
-    closeBtn.style.display = 'inline-block';
-    closeBtn.style.width = '100%';
-    closeBtn.style.padding = '14px';
-    closeBtn.style.fontSize = '16px';
-    closeBtn.style.fontWeight = '700';
-    closeBtn.style.borderRadius = '10px';
-    closeBtn.onclick = () => doCloseTicket(t.id);
-  }
-
-  // Hide as-booked block
-  const asBookedBlock = document.getElementById('ticketAsBookedBlock');
-  if (asBookedBlock) asBookedBlock.style.display = 'none';
-  const asBookedNone = document.getElementById('ticketAsBookedNone');
-  if (asBookedNone) asBookedNone.style.display = 'none';
-
-  modal.style.display = 'flex';
-  // Mark as admin view so closeTicketModal knows to reset
-  modal.dataset.adminView = '1';
-}
-
-function closeTicketModal() {
-  const modal = document.getElementById('ticketModal');
-  if (modal) {
-    modal.style.display = 'none';
-    // If we were in admin view, reset form so next open works correctly
-    if (modal.dataset.adminView === '1') {
-      delete modal.dataset.adminView;
-      resetTicketForm();
-      // Restore customer toggle visibility
-      const custToggle = document.getElementById('ticketCustomerToggle');
-      if (custToggle) custToggle.style.display = '';
-      // Restore customer input
-      const custInput = document.getElementById('ticketCustomerName');
-      if (custInput) custInput.readOnly = false;
-      // Restore close button style
-      const closeBtn = document.getElementById('ticketCloseBtn');
-      if (closeBtn) {
-        closeBtn.style.width = '';
-        closeBtn.style.padding = '';
-        closeBtn.style.fontSize = '';
-        closeBtn.style.fontWeight = '';
-        closeBtn.style.borderRadius = '';
-      }
-    }
-  }
-  editingTicketId = null;
-  requestAnimationFrame(() => updateTicketsNavBadge());
-}
-
-function openTicketDetailsModal(t) {
-  const modal = document.getElementById('ticketDetailsModal');
-  const contentEl = document.getElementById('ticketDetailsContent');
-  const actionsEl = document.getElementById('ticketDetailsActions');
-  const titleEl = document.getElementById('ticketDetailsTitle');
-  if (!modal || !contentEl || !actionsEl) {
-    console.warn('[Tickets] ticketDetailsModal elements missing');
-    return;
-  }
-  const lines = t.performedLines || [];
-  const diff = computeDiff(t.appointmentData, lines);
-  const hasDiff = (diff.removed?.length || 0) + (diff.added?.length || 0) + (diff.changed?.length || 0) > 0;
-  const createdDate = t.createdAt?.toDate ? t.createdAt.toDate() : (t.createdAt ? new Date(t.createdAt) : new Date());
-  const statusLabel = (t.status || '').replace(/_/g, ' ');
-  const performedHtml = lines.map((l) => {
-    const tickPrice = Number(l.ticketPrice) || 0;
-    const basePrice = Number(l.catalogPrice) || 0;
-    const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-    const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
-    const notePart = l.note ? ` <span style="color:#6b7280;font-size:12px;">— ${escapeHtml(l.note)}</span>` : '';
-    return `<div style="padding:10px;background:#f9fafb;border-radius:8px;margin-bottom:8px;font-size:14px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
-  }).join('');
-  let diffHtml = '';
-  if (hasDiff) {
-    const parts = [];
-    (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-    (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-    (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
-    diffHtml = `<div style="margin-top:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Changes vs booked</h3><div style="background:#f9fafb;border-radius:8px;padding:12px;">${parts.join('')}</div></div>`;
-  }
-  const asIsHtml = (t.asIs && t.asIsMessage) ? `<div style="margin-top:16px;font-size:13px;color:#059669;background:#d1fae5;padding:10px 12px;border-radius:8px;"><strong>AS IS:</strong> ${escapeHtml(t.asIsMessage)}</div>` : '';
-  contentEl.innerHTML = `
-    <div style="background:#f9fafb;border-radius:8px;padding:16px;margin-bottom:16px;">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;">
-        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted time</div><div style="font-weight:500;">${createdDate.toLocaleDateString()} ${createdDate.toLocaleTimeString()}</div></div>
-        <div><div style="color:#6b7280;margin-bottom:4px;">Submitted by</div><div style="font-weight:500;">${escapeHtml(t.technicianName || '—')}</div></div>
-        <div><div style="color:#6b7280;margin-bottom:4px;">Status</div><div style="font-weight:500;">${escapeHtml(statusLabel)}</div></div>
-        <div><div style="color:#6b7280;margin-bottom:4px;">Customer</div><div style="font-weight:500;">${escapeHtml(t.customerName || '—')}</div></div>
-      </div>
-    </div>
-    <div style="margin-bottom:16px;"><h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#374151;">Performed services</h3>${performedHtml || '<div style="color:#9ca3af;font-size:13px;">None</div>'}</div>
-    ${diffHtml}
-    ${asIsHtml}
-  `;
-  const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-  let actionsHtml = '';
-  if ((t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner) {
-    actionsHtml += `<button type="button" id="ticketDetailsArchiveBtn" style="padding:8px 16px;border:1px solid #9ca3af;border-radius:6px;background:#fff;cursor:pointer;font-size:14px;">Archive</button>`;
-  }
-  if (t.status === 'ARCHIVED' && isAdminOrOwner) {
-    actionsHtml += `<button type="button" id="ticketDetailsDeleteBtn" style="padding:8px 16px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:14px;">Delete</button>`;
-  }
-  actionsHtml += `<button type="button" id="ticketDetailsCloseBtn" style="padding:8px 16px;border:none;border-radius:6px;background:#111;color:#fff;cursor:pointer;font-size:14px;">Close</button>`;
-  actionsEl.innerHTML = actionsHtml;
-  const archiveBtn = document.getElementById('ticketDetailsArchiveBtn');
-  const deleteBtn = document.getElementById('ticketDetailsDeleteBtn');
-  const closeBtn = document.getElementById('ticketDetailsCloseBtn');
-  if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
-  if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketDetailsModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
-  if (closeBtn) closeBtn.onclick = () => closeTicketDetailsModal();
-  if (titleEl) titleEl.textContent = 'Ticket Details';
-  modal.style.display = 'flex';
-  modal.onclick = (e) => { if (e.target === modal) closeTicketDetailsModal(); };
-}
-
-function closeTicketDetailsModal() {
-  const modal = document.getElementById('ticketDetailsModal');
-  if (modal) {
-    modal.style.display = 'none';
-    modal.onclick = null;
-  }
-}
-
-function resetTicketForm() {
-  const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-  set('ticketCustomerName', el => { el.value = ''; });
-  set('ticketCustomerWrap', el => { el.style.display = 'none'; });
-  set('ticketCustomerToggle', el => { el.textContent = '+ Optional: Customer / Client'; });
-  set('ticketPerformedList', el => { el.innerHTML = ''; });
-  set('ticketLinesData', el => { el.value = '[]'; });
-  set('ticketAsBookedBlock', el => { el.style.display = 'none'; });
-  set('ticketAsBookedNone', el => { el.style.display = 'block'; });
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-  const finalizeBtn = document.getElementById('ticketFinalizeBtn');
-  const closeBtn = document.getElementById('ticketCloseBtn');
-  const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
-  const saveBtn = document.getElementById('ticketSaveBtn');
-  const archiveBtn = document.getElementById('ticketArchiveBtn');
-  const deleteBtn = document.getElementById('ticketDeleteBtn');
-  if (finalizeBtn) finalizeBtn.style.display = 'none';
-  if (closeBtn) closeBtn.style.display = 'none';
-  if (archiveBtn) archiveBtn.style.display = 'none';
-  if (deleteBtn) deleteBtn.style.display = 'none';
-  if (saveBtn) saveBtn.style.display = 'none';
-  if (sendNewBtn) {
-    sendNewBtn.style.display = 'inline-block';
-    sendNewBtn.onclick = () => doSendNewTicket();
-  }
-  if (asIsBtn) asIsBtn.style.display = 'none';
-  // Collapse all service category sections when opening a new ticket
-  const picker = document.getElementById('ticketServicePickerContainer');
-  if (picker) {
-    picker.querySelectorAll('.ticket-category-body').forEach((body) => { body.style.display = 'none'; });
-    picker.querySelectorAll('.ticket-cat-arrow').forEach((arrow) => { arrow.textContent = '▶'; });
-  }
-  setupTicketFormToggles();
-}
-
-function populateTicketForm(t) {
-  const s = (t.status || '').toUpperCase();
-  if (s === 'CLOSED' || s === 'VOID' || s === 'ARCHIVED') {
-    closeTicketModal();
-    openTicketDetailsModal(t);
-    return;
-  }
-  const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-  set('ticketCustomerName', el => { el.value = t.customerName || ''; });
-  const hasCustomer = !!(t.customerName || '').trim();
-  set('ticketCustomerWrap', el => { el.style.display = hasCustomer ? 'block' : 'none'; });
-  set('ticketCustomerToggle', el => { el.textContent = hasCustomer ? '− Hide Customer' : '+ Optional: Customer / Client'; });
-  const booked = t.appointmentData?.services || [];
-  const hasAppointment = !!(t.appointmentId || t.appointmentData) && booked.length > 0;
-  set('ticketAsBookedBlock', el => { el.style.display = hasAppointment ? 'block' : 'none'; });
-  set('ticketAsBookedNone', el => { el.style.display = hasAppointment ? 'none' : 'block'; });
-  set('ticketAsBookedContent', el => {
-    el.innerHTML = booked.map(s => `<div style="font-size:13px;">${escapeHtml(s.name || s.serviceName)} — $${(s.price || 0).toFixed(2)}</div>`).join('');
-    el.style.display = 'none';
-  });
-  set('ticketAsBookedToggle', el => { el.textContent = 'Show As Booked'; });
-  const lines = t.performedLines || [];
-  set('ticketLinesData', el => { el.value = JSON.stringify(lines); });
-  const isReadOnly = ['CLOSED', 'VOID', 'ARCHIVED'].includes((t.status || '').toUpperCase());
-  renderPerformedLines(lines, isReadOnly);
-  const servicePickerContainer = document.getElementById('ticketServicePickerContainer');
-  const customerToggle = document.getElementById('ticketCustomerToggle');
-  const customerInput = document.getElementById('ticketCustomerName');
-  if (servicePickerContainer) servicePickerContainer.style.display = isReadOnly ? 'none' : 'block';
-  if (customerToggle) customerToggle.style.display = isReadOnly ? 'none' : '';
-  if (customerInput) customerInput.readOnly = isReadOnly;
-  updateTicketTotal(lines);
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  if (asIsMsgBlock && asIsMsgText) {
-    if (t.asIs && t.asIsMessage) {
-      asIsMsgText.textContent = t.asIsMessage;
-      asIsMsgBlock.style.display = 'block';
-    } else {
-      asIsMsgBlock.style.display = 'none';
-    }
-  }
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
-
-  const isCreator = currentUserProfile && (
-    t.createdByUid === currentUserProfile.uid ||
-    t.technicianStaffId === currentUserProfile.staffId ||
-    t.technicianStaffId === currentUserProfile.uid ||
-    t.finalizedByUid === currentUserProfile.uid ||
-    (t.technicianName && (
-      (currentUserProfile.email && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.email).toLowerCase())) ||
-      (currentUserProfile.name && String(t.technicianName).toLowerCase().includes(String(currentUserProfile.name).toLowerCase()))
-    ))
-  );
-  const canViewTicket = canSeeTicket(t);
-  const canSaveEdits = (isCreator || canViewTicket) && (t.status === 'OPEN' || t.status === 'READY_FOR_CHECKOUT');
-  const isAdminOrOwner = currentUserProfile && ['owner', 'admin'].includes((currentUserProfile.role || '').toLowerCase());
-  // Only manager/admin/owner can close ticket; technicians must not see Close button (use role + staff isManager/isAdmin)
-  let canCloseTicket = false;
-  if (currentUserProfile) {
-    const role = (currentUserProfile.role || '').toLowerCase();
-    if (['owner', 'admin', 'manager'].includes(role)) canCloseTicket = true;
-    if (!canCloseTicket) {
-      try {
-        const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
-        const staffList = store?.staff || [];
-        const staff = staffList.find(s =>
-          (currentUserProfile.staffId && s.id === currentUserProfile.staffId) ||
-          (currentUserProfile.email && s.email && String(s.email).toLowerCase() === String(currentUserProfile.email).toLowerCase())
-        );
-        if (staff && (staff.isManager === true || staff.isAdmin === true)) canCloseTicket = true;
-      } catch (_) {}
-    }
-  }
-  const finalizeBtn = document.getElementById('ticketFinalizeBtn');
-  const closeBtn = document.getElementById('ticketCloseBtn');
-  const archiveBtn = document.getElementById('ticketArchiveBtn');
-  const deleteBtn = document.getElementById('ticketDeleteBtn');
-  const sendNewBtn = document.getElementById('ticketSendNewBtn');
-  const asIsBtn = document.getElementById('ticketAsIsBtn');
-  const saveBtn = document.getElementById('ticketSaveBtn');
-  if (finalizeBtn) finalizeBtn.style.display = (t.status === 'OPEN') ? 'inline-block' : 'none';
-  if (closeBtn) closeBtn.style.display = (t.status === 'READY_FOR_CHECKOUT' && canCloseTicket) ? 'inline-block' : 'none';
-  if (archiveBtn) archiveBtn.style.display = (t.status === 'CLOSED' || t.status === 'VOID') && isAdminOrOwner ? 'inline-block' : 'none';
-  if (deleteBtn) deleteBtn.style.display = t.status === 'ARCHIVED' && isAdminOrOwner ? 'inline-block' : 'none';
-  if (sendNewBtn) sendNewBtn.style.display = 'none';
-  if (asIsBtn) asIsBtn.style.display = 'none';
-  if (saveBtn) {
-    saveBtn.style.display = canSaveEdits ? 'inline-block' : 'none';
-    saveBtn.textContent = t.status === 'READY_FOR_CHECKOUT' ? 'Save changes' : 'Save';
-  }
-  if (finalizeBtn) finalizeBtn.onclick = () => doFinalizeTicket(t.id);
-  if (closeBtn) closeBtn.onclick = () => doCloseTicket(t.id);
-  if (archiveBtn) archiveBtn.onclick = async () => { try { await archiveTicket(t.id); showToast('Ticket archived', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
-  if (deleteBtn) deleteBtn.onclick = async () => { const ok = await ticketConfirm('Permanently delete this ticket? This cannot be undone.', 'Delete ticket'); if (!ok) return; try { await deleteTicketPermanently(t.id); showToast('Ticket deleted', 'success'); closeTicketModal(); } catch (e) { showToast(e?.message || 'Failed', 'error'); } };
-  setupTicketFormToggles();
-}
-
-function renderPerformedLines(lines, readOnly = false) {
-  const cont = document.getElementById('ticketPerformedList');
-  if (!cont) return;
-  if (readOnly) {
-    cont.innerHTML = lines.map((l) => {
-      const tickPrice = Number(l.ticketPrice) || 0;
-      const basePrice = Number(l.catalogPrice) || 0;
-      const hasOverride = basePrice > 0 && basePrice !== tickPrice;
-      const priceText = hasOverride ? `base $${basePrice.toFixed(2)} → $${tickPrice.toFixed(2)}` : `$${tickPrice.toFixed(2)}`;
-      const notePart = l.note ? ` <span style="color:#6b7280;font-size:11px;">— ${escapeHtml(l.note)}</span>` : '';
-      return `<div style="padding:6px 10px;background:#f9fafb;border-radius:6px;margin-bottom:4px;font-size:12px;">${escapeHtml(l.serviceName)} — ${priceText}${notePart}</div>`;
-    }).join('');
-    return;
-  }
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  cont.innerHTML = lines.map((l, i) => {
-    const catPrice = Number(l.catalogPrice) || 0;
-    const tickPrice = Number(l.ticketPrice) || 0;
-    const isOverride = tickPrice !== catPrice;
-    return `
-    <div class="ticket-line" data-idx="${i}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;background:#f9fafb;border-radius:6px;margin-bottom:4px;">
-      <span style="flex:1;min-width:100px;font-size:12px;font-weight:500;">${escapeHtml(l.serviceName)}</span>
-      <span style="font-size:10px;color:#9ca3af;">base $${catPrice.toFixed(2)}</span>
-      <label style="display:flex;align-items:center;gap:4px;font-size:12px;">
-        <span style="color:#6b7280;">$</span>
-        <input type="number" min="0" step="0.01" value="${tickPrice.toFixed(2)}" class="ticket-price-input" data-idx="${i}" style="width:60px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;">
-        ${isOverride ? '<span style="font-size:10px;color:#d97706;background:#fef3c7;padding:2px 6px;border-radius:4px;">Adjusted</span>' : ''}
-      </label>
-      <input type="text" placeholder="Note (optional)" class="ticket-note-input" data-idx="${i}" value="${escapeHtml(l.note || '')}" style="width:80px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:11px;">
-      <button type="button" class="ticket-remove-line" data-idx="${i}" style="padding:3px 6px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:11px;">Remove</button>
-    </div>
-  `;
-  }).join('');
-
-  cont.querySelectorAll('.ticket-remove-line').forEach(btn => {
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.getAttribute('data-idx'), 10);
-      const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-      lines.splice(idx, 1);
-      document.getElementById('ticketLinesData').value = JSON.stringify(lines);
-      renderPerformedLines(lines);
-      updateTicketDiff();
-    };
-  });
-
-  cont.querySelectorAll('.ticket-price-input').forEach(inp => {
-    inp.onchange = inp.onblur = () => {
-      const idx = parseInt(inp.getAttribute('data-idx'), 10);
-      const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-      const line = lines[idx];
-      if (!line) return;
-      const num = parseFloat(inp.value) || 0;
-      line.ticketPrice = num;
-      line.isOverride = num !== (Number(line.catalogPrice) || 0);
-      document.getElementById('ticketLinesData').value = JSON.stringify(lines);
-      renderPerformedLines(lines);
-      updateTicketDiff();
-    };
-  });
-
-  cont.querySelectorAll('.ticket-note-input').forEach(inp => {
-    inp.onchange = inp.onblur = () => {
-      const idx = parseInt(inp.getAttribute('data-idx'), 10);
-      const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-      const line = lines[idx];
-      if (!line) return;
-      line.note = (inp.value || '').trim() || null;
-      document.getElementById('ticketLinesData').value = JSON.stringify(lines);
-    };
-  });
-
-  updateTicketTotal(lines);
-}
-
-function renderDiff(diff, total, hasLines) {
-  const cont = document.getElementById('ticketDiff');
-  if (!cont) return;
-  const parts = [];
-  (diff.removed || []).forEach(r => parts.push(`<div style="color:#dc2626;font-size:13px;">Removed: ${escapeHtml(r.name)}</div>`));
-  (diff.added || []).forEach(a => parts.push(`<div style="color:#059669;font-size:13px;">Added: ${escapeHtml(a.name)} ($${(a.price || 0).toFixed(2)})</div>`));
-  (diff.changed || []).forEach(c => parts.push(`<div style="color:#d97706;font-size:13px;">Changed: ${escapeHtml(c.name)} → $${(c.to || 0).toFixed(2)}</div>`));
-  if (hasLines && typeof total === 'number') {
-    parts.push(`<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#166534;">Total: $${total.toFixed(2)}</div>`);
-  }
-  cont.innerHTML = parts.length ? parts.join('') : '<div style="color:#9ca3af;font-size:13px;">No changes</div>';
-}
-
-function addServiceToTicket(service) {
-  const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-  const price = Number(service.defaultPrice) || 0;
-  lines.push({
-    serviceId: service.id,
-    serviceName: service.name,
-    catalogPrice: price,
-    ticketPrice: price,
-    isOverride: false,
-    note: null
-  });
-  document.getElementById('ticketLinesData').value = JSON.stringify(lines);
-  renderPerformedLines(lines);
-  updateTicketDiff();
-  updateTicketTotal(lines);
-}
-
-function setupTicketFormToggles() {
-  const custToggle = document.getElementById('ticketCustomerToggle');
-  const custWrap = document.getElementById('ticketCustomerWrap');
-  if (custToggle && custWrap) {
-    custToggle.onclick = () => {
-      const show = custWrap.style.display !== 'block';
-      custWrap.style.display = show ? 'block' : 'none';
-      custToggle.textContent = show ? '− Hide Customer' : '+ Optional: Customer / Client';
-    };
-  }
-  const asBookedToggle = document.getElementById('ticketAsBookedToggle');
-  const asBookedContent = document.getElementById('ticketAsBookedContent');
-  if (asBookedToggle && asBookedContent) {
-    asBookedToggle.onclick = () => {
-      const show = asBookedContent.style.display !== 'block';
-      asBookedContent.style.display = show ? 'block' : 'none';
-      asBookedToggle.textContent = show ? 'Hide As Booked' : 'Show As Booked';
-    };
-  }
-}
-
-function updateTicketDiff() {
-  const lines = JSON.parse(document.getElementById('ticketLinesData').value || '[]');
-  updateTicketTotal(lines);
-}
-
-function updateTicketTotal(lines) {
-  const el = Array.isArray(lines) ? null : document.getElementById('ticketLinesData');
-  const arr = Array.isArray(lines) ? lines : (el ? JSON.parse(el.value || '[]') : []);
-  const total = arr.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  const block = document.getElementById('ticketTotalBlock');
-  const amountEl = document.getElementById('ticketTotalAmount');
-  if (block) block.style.display = arr.length > 0 ? 'block' : 'none';
-  if (amountEl) amountEl.textContent = '$' + total.toFixed(2);
-}
-
-async function saveTicket() {
-  const customerNameEl = document.getElementById('ticketCustomerName');
-  const customerName = customerNameEl ? customerNameEl.value.trim() : '';
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  const linesEl = document.getElementById('ticketLinesData');
-  const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-
-  try {
-    if (editingTicketId) {
-      await updateTicket(editingTicketId, {
-        customerName,
-        performedLines: lines,
-        total,
-        forUids,
-        forNames
-      });
-      const t = currentTickets.find(x => x.id === editingTicketId);
-      if (t && (String(t.status || '').toUpperCase() === 'READY_FOR_CHECKOUT') && !t.seenByFrontDeskAt) {
-        _ticketsOpenedThisSession.add(editingTicketId);
-        t.seenByFrontDeskAt = true;
-        updateTicketsNavBadge();
-        const { isPrimaryAdmin, hasReceivesTickets } = getTicketVisibility();
-        if (isPrimaryAdmin || hasReceivesTickets) markTicketSeenByFrontDesk(editingTicketId).catch(() => {});
-      }
-      showToast('Ticket updated', 'success');
-    } else {
-      await createTicket({
-        customerName,
-        performedLines: lines,
-        total,
-        forUids,
-        forNames
-      });
-      showToast('Ticket created', 'success');
-    }
-    closeTicketModal();
-  } catch (err) {
-    showToast(err?.message || 'Failed to save', 'error');
-  }
-}
-
-/** Called from modal AS IS button. Uses stored appointment if opened with one, else null. */
-async function doSendAsIsFromModal() {
-  if (!currentUserProfile?.salonId) {
-    showToast('Please wait – user profile loading…', 'error');
-    return;
-  }
-  const appointmentData = window._ticketModalAppointmentData || null;
-  const customerEl = document.getElementById('ticketCustomerName');
-  const customerName = customerEl ? customerEl.value.trim() : '';
-  const ok = await doSendAsIsTicket(appointmentData, customerName);
-  if (ok) closeTicketModal();
-}
-
-/** Quick AS IS: no manual entry. With appointment: copy As Booked to Performed. Without: empty performed. */
-async function doSendAsIsTicket(appointmentData = null, customerName = '') {
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  let performedLines = [];
-  let appointmentId = null;
-  const cust = (customerName || appointmentData?.customerName || '').trim();
-  if (appointmentData && Array.isArray(appointmentData.services) && appointmentData.services.length > 0) {
-    appointmentId = appointmentData.id || null;
-    performedLines = (appointmentData.services || []).map(s => ({
-      serviceId: s.id || null,
-      serviceName: s.name || s.serviceName,
-      catalogPrice: Number(s.price) || 0,
-      ticketPrice: Number(s.price) || 0,
-      isOverride: false,
-      note: null
-    }));
-  }
-  const total = performedLines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  try {
-    await createTicket({
-      customerName: cust,
-      performedLines,
-      total,
-      forUids,
-      forNames,
-      status: 'READY_FOR_CHECKOUT',
-      asIs: true,
-      appointmentId,
-      appointmentData: appointmentData || null
-    });
-    showToast('AS IS ticket sent to Front Desk', 'success');
-    return true;
-  } catch (err) {
-    showToast(err?.message || 'Failed', 'error');
-    return false;
-  }
-}
-
-async function doSendNewTicket() {
-  const customerNameEl = document.getElementById('ticketCustomerName');
-  const customerName = customerNameEl ? customerNameEl.value.trim() : '';
-  if (ticketFormAsIsMode) {
-    const ok = await doSendAsIsFromModal();
-    if (ok) closeTicketModal();
-    return;
-  }
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  const linesEl = document.getElementById('ticketLinesData');
-  const lines = linesEl ? JSON.parse(linesEl.value || '[]') : [];
-  if (lines.length === 0) {
-    showToast('Add at least one service or select "Services stay exactly as booked"', 'error');
-    return;
-  }
-  const total = lines.reduce((sum, l) => sum + (Number(l.ticketPrice) || 0), 0);
-  try {
-    await createTicket({
-      customerName,
-      performedLines: lines,
-      total,
-      forUids,
-      forNames,
-      status: 'READY_FOR_CHECKOUT'
-    });
-    showToast('Ticket sent to Front Desk', 'success');
-    closeTicketModal();
-  } catch (err) {
-    showToast(err?.message || 'Failed to send', 'error');
-  }
-}
-
-async function doFinalizeTicket(ticketId) {
-  const { uids: forUids, names: forNames } = await getAutoFrontDeskRecipients();
-  const ok = await ticketConfirm('Send this ticket to Front Desk?', 'Send to Front Desk');
-  if (!ok) return;
-  try {
-    await finalizeTicket(ticketId, forUids, forNames);
-    showToast('Ticket sent to Front Desk', 'success');
-    closeTicketModal();
-  } catch (err) {
-    showToast(err?.message || 'Failed', 'error');
-  }
-}
-
-async function doCloseTicket(ticketId) {
-  const ok = await ticketConfirm('Mark this ticket as Closed? (Checkout done)', 'Close ticket');
-  if (!ok) return;
-  _justClosedTicketId = ticketId;
-  closeTicketModal();
-  editingTicketId = null;
-  try {
-    await closeTicket(ticketId);
-    showToast('Ticket closed', 'success');
-  } catch (err) {
-    showToast(err?.message || 'Failed', 'error');
-    _justClosedTicketId = null;
-  }
-  setTimeout(() => { _justClosedTicketId = null; }, 1500);
-}
-
-// =====================
-// UI: Service Catalog Modal
-// =====================
-let editingServiceId = null;
-
-async function openServicesModal() {
-  const modal = document.getElementById('servicesModal');
-  if (!modal) return;
-  editingServiceId = null;
-  await loadServiceCategories();
-  showServicesCatalogPanel();
-  const nameEl = document.getElementById('serviceFormName');
-  const priceEl = document.getElementById('serviceFormPrice');
-  if (nameEl) nameEl.value = '';
-  if (priceEl) priceEl.value = '';
-  populateServiceCategoryDropdown(null);
-  renderServicesList();
-  modal.style.display = 'flex';
-  const catTab = document.getElementById('servicesCategoriesTab');
-  const svcTab = document.getElementById('servicesCatalogTab');
-  if (svcTab) svcTab.onclick = showServicesCatalogPanel;
-  if (catTab) catTab.onclick = () => { showCategoriesPanel(); };
-}
-
-function showServicesCatalogPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) { panel.style.display = 'block'; panel.style.flex = '1'; }
-  if (catPanel) catPanel.style.display = 'none';
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid #111'; tabBtn.style.fontWeight = '600'; tabBtn.style.color = '#111'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid transparent'; catTabBtn.style.fontWeight = '500'; catTabBtn.style.color = '#6b7280'; }
-}
-
-function showCategoriesPanel() {
-  const panel = document.getElementById('servicesCatalogPanel');
-  const catPanel = document.getElementById('servicesCategoriesPanel');
-  const tabBtn = document.getElementById('servicesCatalogTab');
-  const catTabBtn = document.getElementById('servicesCategoriesTab');
-  if (panel) panel.style.display = 'none';
-  if (catPanel) { catPanel.style.display = 'block'; catPanel.style.flex = '1'; }
-  if (tabBtn) { tabBtn.style.borderBottom = '2px solid transparent'; tabBtn.style.fontWeight = '500'; tabBtn.style.color = '#6b7280'; }
-  if (catTabBtn) { catTabBtn.style.borderBottom = '2px solid #111'; catTabBtn.style.fontWeight = '600'; catTabBtn.style.color = '#111'; }
-  renderCategoriesList();
-}
-
-function populateServiceCategoryDropdown(selectedId) {
-  const sel = document.getElementById('serviceFormCategory');
-  if (!sel) return;
-  const ADD_NEW = '__add_new__';
-  let opts = '<option value="">Other</option>';
-  serviceCategories.forEach((c) => { opts += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
-  opts += `<option value="${ADD_NEW}">+ Add new category</option>`;
-  sel.innerHTML = opts;
-  sel.value = selectedId || '';
-  sel.onchange = () => {
-    if (sel.value === ADD_NEW) {
-      const name = prompt('Category name:');
-      if (name && name.trim()) {
-        saveServiceCategory({ name: name.trim(), sortOrder: serviceCategories.length }).then(async (id) => {
-          await loadServiceCategories();
-          populateServiceCategoryDropdown(id);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category added', 'success');
-        }).catch((e) => showToast(e?.message || 'Failed', 'error'));
-      }
-      sel.value = '';
-    }
-  };
-}
-
-async function addServiceCategory() {
-  const inp = document.getElementById('newCategoryName');
-  const name = inp?.value?.trim();
-  if (!name) { showToast('Enter category name', 'error'); return; }
-  try {
-    await saveServiceCategory({ name, sortOrder: serviceCategories.length });
-    await loadServiceCategories();
-    if (inp) inp.value = '';
-    renderCategoriesList();
-    populateServiceCategoryDropdown(null);
-    setupTicketsUI();
-    showToast('Category added', 'success');
-  } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-}
-
-function renderCategoriesList() {
-  const list = document.getElementById('categoriesList');
-  if (!list) return;
-  if (serviceCategories.length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No categories. Add one above.</div>';
-  } else {
-    list.innerHTML = serviceCategories.map((c) => {
-      const count = salonServices.filter(s => s.categoryId === c.id).length;
-      const pencilSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid #eee;"><div><strong style="font-size:13px !important;">${escapeHtml(c.name)}</strong><span style="color:#9ca3af;font-size:13px;margin-left:8px;">${count} service(s)</span></div><div style="display:flex;gap:8px;"><button type="button" class="cat-edit-btn" data-id="${c.id}" title="Edit" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="cat-delete-btn" data-id="${c.id}" title="Delete" style="padding:6px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-    }).join('');
-    list.querySelectorAll('.cat-edit-btn').forEach((btn) => {
-      btn.onclick = () => {
-        const c = serviceCategories.find(x => x.id === btn.getAttribute('data-id'));
-        if (!c) return;
-        const name = prompt('Category name:', c.name);
-        if (name != null && name.trim()) {
-          saveServiceCategory({ id: c.id, name: name.trim(), sortOrder: c.sortOrder }).then(async () => {
-            await loadServiceCategories();
-            renderCategoriesList();
-            populateServiceCategoryDropdown(null);
-            renderServicesList();
-            setupTicketsUI();
-            showToast('Updated', 'success');
-          }).catch((e) => showToast(e?.message || 'Failed', 'error'));
-        }
-      };
-    });
-    list.querySelectorAll('.cat-delete-btn').forEach((btn) => {
-      btn.onclick = async () => {
-        const id = btn.getAttribute('data-id');
-        try {
-          await deleteServiceCategory(id);
-          await loadServiceCategories();
-          renderCategoriesList();
-          populateServiceCategoryDropdown(null);
-          renderServicesList();
-          setupTicketsUI();
-          showToast('Category deleted', 'success');
-        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
-      };
-    });
-  }
-}
-
-function closeServicesModal() {
-  const modal = document.getElementById('servicesModal');
-  if (modal) modal.style.display = 'none';
-}
-
-function renderServicesList() {
-  const list = document.getElementById('servicesList');
-  if (!list) return;
-  const grouped = getServicesGroupedByCategory();
-  if (Object.keys(grouped).length === 0) {
-    list.innerHTML = '<div style="padding:16px;color:#9ca3af;">No services yet. Add one below.</div>';
-  } else {
-    let html = '';
-    Object.entries(grouped).forEach(([key, data], idx) => {
-      const label = escapeHtml(data.label || 'Other');
-      const services = data.services || [];
-      html += `<div class="services-category-section" data-cat-idx="${idx}" style="margin-bottom:6px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">`;
-      html += `<div class="services-category-header" style="display:flex;align-items:center;gap:4px;padding:3px 6px;font-size:10px !important;font-weight:600;color:#374151;background:#f9fafb;">${label}</div>`;
-      html += '<div style="padding:2px 6px 4px;display:flex;flex-direction:column;gap:2px;">';
-      const pencilSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
-      const trashSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="display:block;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
-      services.forEach((s) => {
-        html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 4px;border-bottom:1px solid #f3f4f6;font-size:11px;"><div><strong style="font-size:11px !important;font-weight:600;">${escapeHtml(s.name)}</strong><span style="color:#6b7280;font-size:8px !important;margin-left:5px;">$${(s.defaultPrice || 0).toFixed(2)}</span></div><div style="display:flex;gap:9px;"><button type="button" class="services-edit-btn" data-id="${s.id}" title="Edit" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${pencilSvg}</button><button type="button" class="services-delete-btn" data-id="${s.id}" title="Delete" style="padding:2px;border:none;background:none;cursor:pointer;line-height:0;">${trashSvg}</button></div></div>`;
-      });
-      html += '</div></div>';
-    });
-    list.innerHTML = html;
-  }
-  list.querySelectorAll('.services-edit-btn').forEach(btn => {
-    btn.onclick = () => {
-      const s = salonServices.find(x => x.id === btn.getAttribute('data-id'));
-      if (s) {
-        editingServiceId = s.id;
-        const nameEl = document.getElementById('serviceFormName');
-        const catEl = document.getElementById('serviceFormCategory');
-        const priceEl = document.getElementById('serviceFormPrice');
-        if (nameEl) nameEl.value = s.name || '';
-        populateServiceCategoryDropdown(s.categoryId || '');
-        if (priceEl) priceEl.value = (s.defaultPrice || 0).toString();
-      }
-    };
-  });
-  list.querySelectorAll('.services-delete-btn').forEach(btn => {
-    btn.onclick = async () => {
-      const ok = await ticketConfirm('Delete this service?', 'Delete service');
-      if (!ok) return;
-      const id = btn.getAttribute('data-id');
-      try {
-        await deleteService(id);
-        await loadServices();
-        renderServicesList();
-        showToast('Service deleted', 'success');
-      } catch (e) {
-        showToast(e?.message || 'Failed', 'error');
-      }
-    };
-  });
-}
-
-async function saveServiceFromForm() {
-  const name = document.getElementById('serviceFormName').value.trim();
-  if (!name) { showToast('Enter service name', 'error'); return; }
-  const catSel = document.getElementById('serviceFormCategory');
-  const categoryId = (catSel?.value || '').trim() || null;
-  const defaultPrice = parseFloat(document.getElementById('serviceFormPrice').value) || 0;
-  const isEdit = !!editingServiceId;
-  try {
-    await saveService(editingServiceId ? { id: editingServiceId, name, categoryId, defaultPrice } : { name, categoryId, defaultPrice });
-    await loadServices();
-    renderServicesList();
-    const nameEl = document.getElementById('serviceFormName');
-    const catEl = document.getElementById('serviceFormCategory');
-    const priceEl = document.getElementById('serviceFormPrice');
-    if (nameEl) nameEl.value = '';
-    populateServiceCategoryDropdown(null);
-    if (priceEl) priceEl.value = '';
-    editingServiceId = null;
-    showToast(isEdit ? 'Updated' : 'Service added', 'success');
-    setupTicketsUI(); // refresh dropdown in ticket form
-  } catch (e) {
-    showToast(e?.message || 'Failed', 'error');
-  }
-}
-
-// =====================
-// Navigation
-// =====================
-export function goToTickets() {
-  if (typeof window.closeStaffMembersModal === 'function') {
-    window.closeStaffMembersModal();
-  }
-  const tasksScreen = document.getElementById('tasksScreen');
-  const ownerView = document.getElementById('owner-view');
-  const joinBar = document.querySelector('.joinBar');
-  const queueControls = document.getElementById('queueControls');
-  const userProfileScreen = document.getElementById('userProfileScreen');
-  const wrap = document.querySelector('.wrap');
-  const inboxScreen = document.getElementById('inboxScreen');
-  const chatScreen = document.getElementById('chatScreen');
-  const mediaScreen = document.getElementById('mediaScreen');
-  const trainingScreen = document.getElementById('trainingScreen');
-  const scheduleScreen = document.getElementById('scheduleScreen');
-  const ticketsScreen = document.getElementById('ticketsScreen');
-
-  const manageQueueScreen = document.getElementById('manageQueueScreen');
-  [tasksScreen, ownerView, joinBar, queueControls, userProfileScreen, inboxScreen, chatScreen, mediaScreen, trainingScreen, scheduleScreen, manageQueueScreen].forEach(el => {
-    if (el) el.style.display = 'none';
-  });
-  if (wrap) wrap.style.display = 'none';
-
-  const headerEl = document.querySelector('.header');
-  if (headerEl) {
-    document.documentElement.style.setProperty('--header-h', `${headerEl.offsetHeight}px`);
-  }
-
-  if (ticketsScreen) {
-    ticketsScreen.style.display = 'flex';
-    ticketsScreen.classList.add('ff-tickets-boot');
-  }
-
-  // When any other nav button is clicked:
-  // 1. Hide tickets screen
-  // 2. Unsubscribe from tickets if NOT admin (badge not needed)
-  const NAV_IDS = ['queueBtn','tasksBtn','chatBtn','inboxBtn','logBtn','appsBtn'];
-  NAV_IDS.forEach(id => {
-    const btn = document.getElementById(id);
-    if (btn && !btn._ffTicketsHideHandler) {
-      btn._ffTicketsHideHandler = () => {
-        if (ticketsScreen) ticketsScreen.style.display = 'none';
-        // For non-admins: unsubscribe so the nav badge doesn't update
-        const { isPrimaryAdmin } = getTicketVisibility();
-        if (!isPrimaryAdmin && typeof ticketsUnsubscribe === 'function') {
-          ticketsUnsubscribe();
-          ticketsUnsubscribe = null;
-          currentTickets = [];
-        }
-        // Always enforce badge state
-        updateTicketsNavBadge();
-      };
-      btn.addEventListener('click', btn._ffTicketsHideHandler, { capture: true });
-    }
-  });
-
-  document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
-  const ticketsBtn = document.getElementById('ticketsBtn');
-  if (ticketsBtn) ticketsBtn.classList.add('active');
-
-  if (_ticketsDataReady && currentUserProfile) {
-    // Data already cached — skip Firestore fetches, just re-subscribe and render
-    ticketsScreen.classList.remove('ff-tickets-boot');
-    setupTicketsUI().then(() => {
-      subscribeTickets({ resetLoading: true });
-      renderTicketsList();
-      updateTicketsNavBadge();
-    });
-  } else {
-    loadCurrentUserProfile().then(async () => {
-      await loadServiceCategories();
-      await loadServices();
-      await setupTicketsUI();
-      _ticketsDataReady = true;
-      subscribeTickets({ resetLoading: true });
-      loadTicketsMembersForAvatars().then(() => renderTicketsList());
-      updateTicketsNavBadge();
-    });
-  }
-}
-
-const AS_IS_OPTION_VALUE = '__as_is__';
-const AS_IS_OPTION_LABEL = 'Services stay exactly as booked — no changes';
-
-function doAsIsSelect() {
-  ticketFormAsIsMode = true;
-  document.getElementById('ticketLinesData').value = '[]';
-  document.getElementById('ticketPerformedList').innerHTML = '';
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsMsgText = document.getElementById('ticketAsIsMessageText');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock && asIsMsgText) {
-    asIsMsgText.textContent = 'Service matches system billing';
-    asIsMsgBlock.style.display = 'block';
-    if (asIsClearBtn) {
-      asIsClearBtn.style.display = 'inline-block';
-      asIsClearBtn.onclick = () => {
-        ticketFormAsIsMode = false;
-        asIsMsgBlock.style.display = 'none';
-        asIsClearBtn.style.display = 'none';
-      };
-    }
-  }
-}
-
 function doServiceSelect(svc) {
-  ticketFormAsIsMode = false;
-  const asIsMsgBlock = document.getElementById('ticketAsIsMessageBlock');
-  const asIsClearBtn = document.getElementById('ticketAsIsClearBtn');
-  if (asIsMsgBlock) asIsMsgBlock.style.display = 'none';
-  if (asIsClearBtn) asIsClearBtn.style.display = 'none';
   if (svc) addServiceToTicket(svc);
-}
-
-async function setupTicketsUI() {
-  const container = document.getElementById('ticketServicePickerContainer');
-  if (!container) return;
-  const grouped = getServicesGroupedByCategory();
-  let html = `<div style="padding:6px 8px;background:#f0fdf4;border-bottom:1px solid #e5e7eb;font-size:11px;font-weight:600;color:#166534;cursor:pointer;" onclick="window.ffDoAsIsSelect && window.ffDoAsIsSelect()">✓ ${AS_IS_OPTION_LABEL}</div>`;
-  Object.entries(grouped).forEach(([key, data], idx) => {
-    const label = escapeHtml(data.label || 'Other');
-    html += `<div class="ticket-category-section" data-cat-idx="${idx}" style="border-bottom:1px solid #e5e7eb;">`;
-    html += `<div class="ticket-category-header" role="button" tabindex="0" style="display:flex;align-items:center;gap:4px;padding:6px 8px;cursor:pointer;user-select:none;font-size:11px;font-weight:600;color:#374151;background:#f9fafb;"><span class="ticket-cat-arrow" style="font-size:9px;color:#6b7280;">▶</span><span>${label}</span></div>`;
-    html += `<div class="ticket-category-body" style="display:none;padding:4px 8px 8px 16px;background:#fff;">`;
-    (data.services || []).forEach((s) => {
-      html += `<button type="button" class="ticket-service-btn" data-id="${s.id}" style="display:block;width:100%;text-align:left;padding:5px 8px;margin-bottom:3px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;cursor:pointer;font-size:12px;transition:background 0.15s;">${escapeHtml(s.name)} <span style="color:#6b7280;font-size:11px;">$${(s.defaultPrice || 0).toFixed(2)}</span></button>`;
-    });
-    html += '</div></div>';
-  });
-  container.innerHTML = html;
-  container.querySelectorAll('.ticket-service-btn').forEach((btn) => {
-    btn.onclick = () => {
-      const id = btn.getAttribute('data-id');
-      const svc = salonServices.find((x) => x.id === id);
-      doServiceSelect(svc);
-    };
-  });
-  window.ffDoAsIsSelect = doAsIsSelect;
-  container.querySelectorAll('.ticket-category-header').forEach((header) => {
-    header.onclick = () => {
-      const section = header.closest('.ticket-category-section');
-      const body = section?.querySelector('.ticket-category-body');
-      const arrow = section?.querySelector('.ticket-cat-arrow');
-      if (!body || !arrow) return;
-      const isOpen = body.style.display === 'block';
-      body.style.display = isOpen ? 'none' : 'block';
-      arrow.textContent = isOpen ? '▶' : '▼';
-    };
-  });
-  const manageServicesBtn = document.getElementById('ticketsManageServicesBtn');
-  if (manageServicesBtn) {
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const canManage = ['admin', 'owner', 'manager'].includes(profileRole);
-    manageServicesBtn.style.display = canManage ? 'flex' : 'none';
-    manageServicesBtn.onclick = openServicesModal;
-    if (canManage) {
-      // Align gear precisely under user avatar on any screen/DPI
-      requestAnimationFrame(() => _alignGearToAvatar());
-    }
-  }
-  const archivedTab = document.getElementById('ticketsArchivedTab');
-  if (archivedTab) {
-    const role = (currentUserProfile?.role || '').toLowerCase();
-    const isAdminOrOwner = currentUserProfile && (role === 'owner' || role === 'admin');
-    archivedTab.style.display = isAdminOrOwner ? 'inline-block' : 'none';
-  }
-  const newTicketBtn = document.getElementById('ticketsNewBtn');
-  if (newTicketBtn) {
-    // Hide for admin/manager/owner based on FIRESTORE profile role
-    // (not PIN actor — the logged-in Firebase user determines this)
-    const profileRole = (currentUserProfile?.role || '').toLowerCase();
-    const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-    newTicketBtn.style.display = isFirebaseAdmin ? 'none' : 'inline-block';
-  }
 }
 
 // =====================
 // Init
 // =====================
 export function initTickets() {
+  setupTicketsDateFilters();
   document.querySelectorAll('.tickets-tab').forEach(btn => {
     btn.onclick = () => setTicketsTab(btn.getAttribute('data-tab'));
   });
+  ffTicketsBulkInit();
   const newBtn = document.getElementById('ticketsNewBtn');
   if (newBtn) newBtn.onclick = () => openTicketModal();
   window.goToTickets = goToTickets;
-  window.doSendAsIsTicket = doSendAsIsTicket;
-  window.doSendAsIsFromModal = doSendAsIsFromModal;
+  window.goToServices = goToServices;
   window.closeTicketModal = closeTicketModal;
   window.closeTicketDetailsModal = closeTicketDetailsModal;
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
-  window.saveServiceFromForm = saveServiceFromForm;
-  window.addServiceCategory = addServiceCategory;
+  window.openServicesModal = openServicesModal;
+  window.renderServicesCatalogV2 = renderServicesCatalogV2;
+  window.addServiceCategoryV2 = addServiceCategoryV2;
+  window.addSharedServiceV2 = addSharedServiceV2;
+  window.ffCloseCatalogEditor = _ffCatalogEditorClose;
   window.updateTicketsNavBadge = updateTicketsNavBadge;
+  window.ffRefreshTicketsTabVisibility = () => {
+    updateTicketsTabsVisibility();
+    ensureTicketsBackgroundSubscription();
+    const ts = document.getElementById('ticketsScreen');
+    if (ts && ts.style.display !== 'none' && ts.style.display !== '') {
+      renderTicketsList();
+    }
+  };
 
-  // Background subscription for badge — ONLY for admin/manager/owner (Firestore role)
-  // This shows the badge in real-time even when not on the Tickets screen
+  const loadMoreBtn = document.getElementById('ticketsLoadMoreBtn');
+  if (loadMoreBtn && !loadMoreBtn._ffTicketsLoadMoreWired) {
+    loadMoreBtn._ffTicketsLoadMoreWired = true;
+    loadMoreBtn.onclick = () => void loadMoreTicketsOlder();
+  }
+
+  // Re-render Tickets list, summary and badge whenever the active branch
+  // switches. The underlying Firestore subscription stays the same (we
+  // don't want to rebuild/refetch), only the client-side visibility gate
+  // (canSeeTicket + summaryDocMatchesLocation) changes.
+  if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
+    window.__ffTicketsLocationListenerBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      if (ticketsState.ticketsUnsubscribe) { try { ticketsState.ticketsUnsubscribe(); } catch (_) {} ticketsState.ticketsUnsubscribe = null; }
+      resetTicketsRuntimeCache();
+      if (typeof subscribeTickets === 'function') subscribeTickets({ resetLoading: true });
+      try { renderTicketsList(); } catch (_) {}
+      try { updateTicketsNavBadge(); } catch (_) {}
+      try {
+        if (ticketsState.currentTicketsTab === 'summary' && typeof loadAndRenderTicketsSummary === 'function') {
+          loadAndRenderTicketsSummary();
+        }
+      } catch (_) {}
+      // Service Catalog is per-branch. The raw caches already hold every
+      // doc for the salon — re-apply the filter against the new active
+      // branch (no Firestore roundtrip), then refresh anything on screen.
+      try {
+        const refreshCatalogForLocation = async () => {
+          if (ticketsState._catalogSource === 'shared') {
+            await loadSharedServiceOverrides(getTicketsAccountId(), getActiveLocationIdForTickets());
+          }
+          _applyCatalogFilter();
+          setupTicketsUI();
+          if (ticketsState._ffCatalogModalMode === 'shared') {
+            await loadSharedCatalogForManager();
+          }
+          const modal = document.getElementById('servicesModal');
+          const servicesScreen = document.getElementById('servicesScreen');
+          if ((modal && modal.style.display !== 'none' && modal.style.display !== '') ||
+              (servicesScreen && servicesScreen.style.display !== 'none' && servicesScreen.style.display !== '')) {
+            ticketsState._ffOpenCats.clear();
+            ticketsState._ffCatalogRenderedOnce = false;
+            renderServicesCatalogV2();
+          }
+        };
+        refreshCatalogForLocation().catch((e) => console.warn('[SharedServices] location refresh failed', e));
+      } catch (_) {}
+    });
+  }
+
+  // Staff permissions hydrate asynchronously: the staff store can finish loading
+  // (or change) AFTER the Tickets screen is already visible. Without this, the
+  // + New button stays stuck on the role-only fallback and ignores the
+  // "Can send new ticket" toggle. Re-evaluate it (and tab visibility) on every
+  // staff-store update so the permission-driven state is always correct.
+  if (typeof document !== 'undefined' && !window.__ffTicketsStaffListenerBound) {
+    window.__ffTicketsStaffListenerBound = true;
+    document.addEventListener('ff-staff-cloud-updated', function () {
+      try { updateNewTicketButtonVisibility(); } catch (_) {}
+      try { updateTicketsTabsVisibility(); } catch (_) {}
+    });
+  }
+
+  // Background subscription for badge: start as soon as the user can access Tickets,
+  // so new READY tickets show on the nav even before opening the Tickets module.
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
     setTimeout(() => {
       loadCurrentUserProfile().then(() => {
-        const profileRole = (currentUserProfile?.role || '').toLowerCase();
-        const isFirebaseAdmin = ['owner', 'admin', 'manager'].includes(profileRole);
-        if (isFirebaseAdmin) {
-          subscribeTickets(); // real-time badge for admin/manager
-        }
+        ensureTicketsBackgroundSubscription();
       }).catch(() => {});
     }, 1000);
   });
+
+  try {
+    updateTicketsTabsVisibility();
+  } catch (_) {}
 
   console.log('[Tickets] Initialized');
 }

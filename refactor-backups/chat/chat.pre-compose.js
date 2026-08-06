@@ -1,0 +1,1127 @@
+/**
+ * Chat Module — Structured Messages System
+ * WhatsApp-style Thread List → Conversation View
+ * Messages are normally sent via admin-defined templates/flows; staff with
+ * permissions.chat_free_text (or owner/admin session) may type freely.
+ *
+ * Firestore:
+ *   salons/{salonId}/chatTemplates/{templateId}
+ *   salons/{salonId}/conversations/{conversationId}
+ *     - participants: [uidA, uidB]
+ *     - unreadFor: { [uid]: number }
+ *     - lastMessageAt / lastTitle / lastMessage
+ *   salons/{salonId}/conversations/{conversationId}/messages/{messageId}
+ */
+
+import {
+  collection, query, where, orderBy, limit,
+  addDoc, setDoc, updateDoc, doc, getDoc, getDocs, deleteDoc, writeBatch, increment,
+  onSnapshot, serverTimestamp, arrayUnion
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js";
+import {
+  addFlowOptionAt,
+  addFlowOptionByStepId,
+  addFlowStep,
+  addFlowStepAndLinkAt,
+  addFlowStepAndLinkByStepId,
+  collectFlowStepsFromDom,
+  ensureFlowDraft,
+  removeFlowOptionAt,
+  removeFlowOptionByStepId,
+  removeFlowStepAt,
+  removeFlowStepById,
+  unlinkFlowOption
+} from "./flow-builder.js";
+import {
+  CHAT_DEFAULT_LOC_KEY,
+  isMgrPlus,
+  escHtml,
+  roleLabel,
+  buildConvId,
+  _chatOrderValue,
+  _chatSortByOrder,
+  _chatCategoryValue,
+  _chatGroupByCategory,
+  _chatUserMatchesAllowedSenders,
+  linkifyMessageHtml,
+  _convLocKey,
+  _itemMatchesLocation,
+  _trimStr,
+  _memberDisplayNameFromRow,
+  _otherUidFromParticipants,
+  timeAgo,
+  _chatDayKey,
+  _chatDaySeparatorLabel,
+} from "./chat-helpers.js?v=20260626_chat_helpers_split";
+import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+
+// ─── Data layer (Firestore reads + location scoping) — extracted to chat-data.js
+import {
+  _readActiveLocationId,
+  _activeLocKey,
+  _chatEffectiveLocKey,
+  _convMatchesLocation,
+  _cacheConversations,
+  loadChatUserProfile,
+  loadChatSalonUsers,
+  loadChatTemplates,
+  loadChatFlows,
+} from "./chat-data.js?v=20260628_chat_data_b0";
+
+// ─── UI module (presentation helpers + small renderers) — extracted to chat-ui.js
+import {
+  initChatUi,
+  ffBuildChatThreadCardHTML,
+  _userAllowedInActiveLocation,
+  _staffDisplayNameForUid,
+  _nameForUid,
+  _nameForUidForSend,
+  _avatarUrlForUid,
+  _conversationById,
+  fmtTime,
+  renderChatHeaderForRole,
+  _buildFlowRenderedText,
+  renderThreadList,
+  _rememberConversationForList,
+  _cacheVisibleThreadListHtml,
+  _restoreVisibleThreadListHtml,
+  renderConversation,
+  _setConversationHeader,
+  _renderEmptyConversation,
+  _syncChatConvFreeTextComposer,
+  _bindChatConvFreeTextComposer,
+  _openChatModal,
+  _chatGetFlowAccordion,
+  _chatRenderFlowWizard,
+  _updateChatSendBtn,
+  _updateRecipientSummary,
+} from "./chat-ui.js?v=20260628_chat_ui_u3";
+initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
+
+// ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
+import {
+  initChatSubscriptions,
+  subscribeToConversationList,
+  _subscribeToMessages,
+  _unreadCountForUid,
+  _computeChatNavUnreadFromSnapDocs,
+  _paintChatNavBadge,
+  subscribeToChatBadge,
+  subscribeToChatToastNotifications,
+} from "./chat-subscriptions.js?v=20260628_chat_subs_split";
+export { subscribeToChatBadge, subscribeToChatToastNotifications };
+initChatSubscriptions({
+  renderThreadList,
+  renderConversation,
+  _renderEmptyConversation,
+  markThreadRead,
+  goToChat,
+});
+
+// ─── Admin module (templates + flows) — extracted to chat-admin.js ──────────────
+import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260628_chat_admin_split";
+initChatAdmin({
+  _chatManageAllowed,
+  _chatWaitForManagePermission,
+  loadChatUserProfile,
+  loadChatTemplates,
+  loadChatFlows,
+  _chatEffectiveLocKey,
+  renderSendOptions: (typeof window !== 'undefined' ? window.renderSendOptions : undefined),
+});
+
+// Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
+// window level in capture phase to beat any other handler that might
+// stopPropagation. Idempotent.
+if (typeof document !== 'undefined' && !window.__ff_chatSendBtnDelegated) {
+  window.__ff_chatSendBtnDelegated = true;
+  window.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest && ev.target.closest('#chatSendBtn');
+    if (!btn) return;
+    if (typeof window.openSendMessageModal === 'function') {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] delegated openSendMessageModal threw', e); }
+    }
+  }, true);
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+/** Set true after first `loadChatSalonUsers` completes (success or empty). Used to show "Loading..." until members exist. */
+const CHAT_NAME_LOADING = 'Loading...';
+/** Perf: Chat screen open → first thread list paint (see [ChatBadgePerf] logs). */
+
+
+window._chatToggleSendCategory = function(categoryIdx) {
+  const section = document.querySelector(`[data-chat-send-category="${String(categoryIdx)}"]`);
+  if (!section) return;
+  const items = section.querySelector('.chat-category-section-items');
+  const arrow = section.querySelector('.chat-send-category-arrow');
+  const isOpen = items && items.style.display !== 'none';
+  if (items) items.style.display = isOpen ? 'none' : 'flex';
+  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+};
+// Live Desk reads the most recent conversations for its Chat card.
+// Returns the FULL conversation objects so the Live card can render the exact
+// same thread card as the Chat module (avatars, name, time, preview, unread).
+if (typeof window !== 'undefined') {
+  window.ffGetRecentConversations = function (limitN) {
+    var n = Number(limitN) > 0 ? Number(limitN) : 8;
+    var arr = Array.isArray(chatState.allConversations) ? chatState.allConversations.slice() : [];
+    arr.sort(function (a, b) {
+      var am = (a && (a.lastMessageAtMs || (a.lastMessageAt && a.lastMessageAt.toMillis && a.lastMessageAt.toMillis()))) || 0;
+      var bm = (b && (b.lastMessageAtMs || (b.lastMessageAt && b.lastMessageAt.toMillis && b.lastMessageAt.toMillis()))) || 0;
+      return bm - am;
+    });
+    return arr.slice(0, n);
+  };
+  // Build a single chat thread card with the EXACT same look as the Chat module.
+  window.ffRenderChatThreadCardHTML = function (conv) {
+    try { return conv ? ffBuildChatThreadCardHTML(conv, { forLive: true }) : ''; }
+    catch (_) { return ''; }
+  };
+  // Open a conversation from the Live Desk: switch to the Chat screen and open the thread.
+  window.ffOpenChatConversation = async function (convId) {
+    if (!convId) return;
+    try { if (typeof goToChat === 'function') await goToChat(); } catch (_) {}
+    try { if (typeof window._openThread === 'function') window._openThread(convId); } catch (_) {}
+  };
+}
+
+// Shared thread-card builder used by both the Chat module list and the Live Desk
+// so the two always look identical.
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
+/**
+ * Match users/{uid}.role to chat template/flow allowedSenders (checkbox values are
+ * technician | manager | admin). Owners are excluded unless we map owner↔admin.
+ */
+/** Plain text with https URLs → safe HTML with clickable links (expiry reminders, etc.). */
+/**
+ * Derive the location from a conversation document ID.
+ *
+ * `buildConvId` encodes location into the ID itself:
+ *   - default location → `{uidA}__{uidB}`
+ *   - other location  → `loc_{locKey}__{uidA}__{uidB}`
+ *
+ * The ID is set at document creation and never mutates, so it is the
+ * authoritative signal for which location the conversation belongs to.
+ */
+/**
+ * Resolve the location a conversation doc belongs to.
+ *
+ * Prefers the ID prefix for newer location-scoped conversations. Legacy
+ * conversation IDs have no prefix, so if Firestore has a locationId field,
+ * use that instead of treating them as permanently "default".
+ */
+
+/**
+ * True when a salon-scoped item (chat template, flow, …) belongs to the
+ * active location. Items without a `locationId` field are treated as
+ * belonging to the "default" (primary) location so legacy data stays
+ * visible where it originally lived.
+ */
+
+/**
+ * True when the given member/user row is allowed to work in the active location.
+ *
+ * Mirrors the staff list filter in index.html (search "STRICT client-side
+ * location filter"):
+ *   - No active location → allow everyone (initial load, single-location salons).
+ *   - Owner / Admin / Manager → always visible everywhere ("leadership must be
+ *     reachable in every branch").
+ *   - Everyone else → must have `allowedLocationIds` that includes the active
+ *     location id. Empty / missing means not assigned anywhere → hidden.
+ *
+ * Resolves the staff record for the member via `window.ffGetStaffStore()` and
+ * falls back to the member row's own fields if no staff match exists (covers
+ * the owner row which may not be in the staff store).
+ */
+
+/**
+ * Build the deterministic conversation id for a 1:1 chat between two users,
+ * scoped to a location. The "default" branch keeps the legacy `a__b` format
+ * so existing conversations (created before multi-location rollout) remain
+ * visible to users viewing the primary/default branch; all non-default
+ * locations use a prefixed id so the same pair gets a fresh thread per branch.
+ */
+/** displayName → name on a salon/members row (or similar). */
+/** Staff store row: displayName / name for a Firebase uid. */
+
+/**
+ * Human-readable label for UI (never raw uid). While salon members are still loading, show CHAT_NAME_LOADING for others.
+ * Order: displayName → name → staff (ff_staff_v1) → email (members row only).
+ */
+
+/** For persisted message fields: never use uid; avoid "Loading..." when possible. */
+
+
+
+/** Local calendar day key for grouping (YYYY-MM-DD). */
+/** WhatsApp-style separator: TODAY / YESTERDAY / weekday or date. */
+// ─── Header (gear): ffCurrentUserHasChatManagePermission (staff chat_manage + admin session) ───
+
+function _chatManageAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatManagePermission === 'function' &&
+    window.ffCurrentUserHasChatManagePermission()
+  );
+}
+
+// chat_manage resolves false until the staff store hydrates (or the admin-access
+// cache is set), so a first click on the gear used to silently no-op until the
+// 2nd/3rd attempt. Wait for the permission predicate to settle — re-checking on
+// each `ff-staff-cloud-updated` event plus a short poll — before deciding. The
+// timeout still returns the real (likely false) value, so genuine no-permission
+// users never open the modal.
+function _chatWaitForManagePermission(timeoutMs = 2500) {
+  if (_chatManageAllowed()) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('ff-staff-cloud-updated', onUpd);
+      clearInterval(poll);
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const check = () => { if (_chatManageAllowed()) finish(true); };
+    const onUpd = () => check();
+    document.addEventListener('ff-staff-cloud-updated', onUpd);
+    const poll = setInterval(check, 150);
+    const timer = setTimeout(() => finish(_chatManageAllowed()), timeoutMs);
+  });
+}
+
+function _chatFreeTextAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatFreeTextPermission === 'function' &&
+    window.ffCurrentUserHasChatFreeTextPermission()
+  );
+}
+
+function _getChatFreeTextTrimmed() {
+  if (!_chatFreeTextAllowed()) return '';
+  const el = document.getElementById('chatSendFreeTextInput');
+  return el ? String(el.value || '').trim() : '';
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+/**
+ * Attach a direct click listener to the New Message button. Idempotent — the
+ * flag on the element prevents double-binding. We also re-run this every time
+ * the chat screen opens so we recover if a parent re-render swaps the node.
+ */
+function _bindChatSendBtn() {
+  const btn = document.getElementById('chatSendBtn');
+  if (!btn) return;
+  if (btn.__ffSendBtnBound) return;
+  btn.__ffSendBtnBound = true;
+  btn.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (typeof window.openSendMessageModal === 'function') {
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] direct openSendMessageModal threw', e); }
+    } else {
+      setTimeout(() => {
+        if (typeof window.openSendMessageModal === 'function') {
+          try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] retry openSendMessageModal threw', e); }
+        }
+      }, 50);
+    }
+  });
+}
+
+// Bind ASAP — the button is already in the DOM when chat.js executes because
+// it's declared statically in index.html.
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bindChatSendBtn, { once: true });
+  } else {
+    _bindChatSendBtn();
+  }
+}
+
+async function goToChat() {
+  console.log('[ChatBadgePerf] screen-open', performance.now(), Date.now());
+  _bindChatSendBtn();
+  chatState._chatBadgePerfOpenMs = performance.now();
+  chatState._chatBadgePerfRenderLogged = false;
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
+  if (typeof window.closeStaffMembersModal === 'function') {
+    window.closeStaffMembersModal();
+  }
+  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'timeClockScreen', 'ticketsScreen'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  ['#joinBar', '.joinbar', '.wrap', '#queueControls'].forEach((sel) => {
+    const el = document.querySelector(sel);
+    if (el) el.style.display = 'none';
+  });
+  ['userProfileScreen', 'manageQueueScreen'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+
+  const chatScreen = document.getElementById('chatScreen');
+  if (chatScreen) chatScreen.style.display = 'flex';
+  chatScreen?.classList.remove('chat-mobile-open');
+
+  document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
+  document.getElementById('chatBtn')?.classList.add('active');
+
+  chatState.currentConvId = null;
+  _renderEmptyConversation();
+
+  // Deterministic: await profile before any Admin UI decisions
+  await initChatScreen();
+}
+
+async function initChatScreen() {
+  // Skip full re-init if already loaded — just re-render header & ensure listener
+  if (chatState._chatInitialized && chatState.chatUserProfile) {
+    renderChatHeaderForRole(chatState.chatUserProfile.role);
+    if (!chatState.chatConvsUnsub) subscribeToConversationList();
+    _bindChatConvFreeTextComposer();
+    _syncChatConvFreeTextComposer();
+    return;
+  }
+  await loadChatUserProfile();
+  if (!chatState.chatUserProfile) {
+    console.error('[Chat] No profile loaded — Gear hidden. Reason: auth.currentUser missing, Firestore doc not found, or load error. See loadChatUserProfile logs.');
+    renderChatHeaderForRole(null);
+    return;
+  }
+  renderChatHeaderForRole(chatState.chatUserProfile.role);
+  subscribeToConversationList();
+  _bindChatConvFreeTextComposer();
+  _syncChatConvFreeTextComposer();
+  chatState._chatInitialized = true;
+  Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()])
+    .then(() => {
+      if (chatState.allConversations.length) renderThreadList();
+      _syncChatConvFreeTextComposer();
+    })
+    .catch((err) => console.warn('[Chat] background preload failed', err));
+}
+
+
+
+// ─── Thread List ───────────────────────────────────────────────────────────────
+
+
+
+
+// ─── Open / Close Thread ───────────────────────────────────────────────────────
+window._openThread = async function(convId, sourceEl) {
+  _cacheVisibleThreadListHtml();
+  if (Array.isArray(chatState.allConversations) && chatState.allConversations.length > 0) {
+    chatState.lastNonEmptyConversations = chatState.allConversations.slice();
+    chatState.lastRenderedConversations = chatState.allConversations.slice();
+  }
+  const sourceOtherUid = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-uid') : '';
+  const sourceOtherNameAttr = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-name') : '';
+  const sourceOtherNameText = sourceEl && sourceEl.querySelector ? (sourceEl.querySelector('.ctc-name')?.textContent || '') : '';
+  const sourceOtherName = sourceOtherNameAttr && sourceOtherNameAttr !== CHAT_NAME_LOADING && sourceOtherNameAttr !== 'Unknown'
+    ? sourceOtherNameAttr
+    : sourceOtherNameText;
+  const cachedConv = _conversationById(convId);
+  chatState.currentThreadFallback = {
+    convId,
+    otherUid: sourceOtherUid || _otherUidFromParticipants(cachedConv?.participants, chatState.chatUserProfile?.uid || ''),
+    otherName: sourceOtherName || '',
+  };
+  chatState.currentConvId = convId;
+  // On narrow mobile screens, show the conversation view with a back button.
+  // Desktop/tablet keeps the left conversation list visible.
+  const shouldUseMobileChatView = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 860px)').matches;
+  document.getElementById('chatScreen')?.classList.toggle('chat-mobile-open', shouldUseMobileChatView);
+  // Update header title
+  _setConversationHeader(convId);
+  renderThreadList();
+  chatState.currentMessages = [];
+  chatState.chatMessagesLoading = true;
+  _subscribeToMessages(convId);
+  renderConversation(convId);
+  markThreadRead(convId)
+    .catch(() => {})
+    .finally(() => {
+      if (chatState.currentConvId === convId) renderThreadList();
+    });
+};
+
+window.closeConversation = function() {
+  if (chatState.chatMsgsUnsub) { chatState.chatMsgsUnsub(); chatState.chatMsgsUnsub = null; }
+  chatState.currentMessages = [];
+  chatState.currentConvId = null;
+  chatState.currentThreadFallback = null;
+  chatState.chatMessagesLoading = false;
+  document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
+  _restoreVisibleThreadListHtml();
+  renderThreadList();
+  _restoreVisibleThreadListHtml();
+  _renderEmptyConversation();
+  _syncChatConvFreeTextComposer();
+};
+
+// ─── Conversation View (bubbles) ───────────────────────────────────────────────
+
+
+
+/** Show inline free-text row only with permission and an open 1:1 thread. */
+
+
+/**
+ * Send one free-text chat message (title + message only). Used by inline composer and modal.
+ * @param {string|null} conversationIdOverride - when set (reply), use this conv id instead of deriving from uids.
+ */
+async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOverride, bodyTrimmed) {
+  if (!chatState.chatUserProfile?.salonId || !recipientUid) throw new Error('missing_context');
+  const trimmed = String(bodyTrimmed || '').trim();
+  if (!trimmed) throw new Error('empty_message');
+  const maxFree = 8000;
+  if (trimmed.length > maxFree) throw new Error('message_too_long');
+
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const title = (lines[0] || 'Message').slice(0, 120);
+  const message = trimmed;
+
+  const salonId = chatState.chatUserProfile.salonId;
+  const senderUid = chatState.chatUserProfile.uid;
+  const senderName =
+    _trimStr(chatState.chatUserProfile.displayName) ||
+    _trimStr(chatState.chatUserProfile.name) ||
+    (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+    '';
+  const senderRole = chatState.chatUserProfile.role || '';
+  const rUid = recipientUid;
+  const rName = recipientName || _nameForUidForSend(rUid);
+  const locKey = _chatEffectiveLocKey();
+  const convId = conversationIdOverride || buildConvId(senderUid, rUid, locKey);
+
+  const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+  await setDoc(
+    convRef,
+    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+    { merge: true }
+  );
+
+  const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+  const batch = writeBatch(db);
+  const msgData = {
+    senderUid,
+    senderName,
+    senderRole,
+    recipientUid: rUid,
+    recipientName: rName,
+    sentAt: serverTimestamp(),
+    readBy: [senderUid],
+    title,
+    message
+  };
+  batch.set(msgRef, msgData);
+  batch.set(
+    convRef,
+    {
+      lastMessageAt: serverTimestamp(),
+      lastMessageAtMs: Date.now(),
+      lastTitle: title,
+      lastMessage: message,
+      lastSenderUid: senderUid,
+      lastSenderName: senderName,
+      lastSenderRole: senderRole,
+      updatedAt: serverTimestamp(),
+      updatedAtMs: Date.now(),
+      unreadFor: { [rUid]: increment(1) }
+    },
+    { merge: true }
+  );
+  await batch.commit();
+  return convId;
+}
+
+window.sendChatConvFreeText = async function() {
+  if (!_chatFreeTextAllowed() || !chatState.chatUserProfile) return;
+  const ta = document.getElementById('chatConvFreeTextInput');
+  const body = String(ta?.value || '').trim();
+  if (!body) {
+    alert('Please type a message.');
+    return;
+  }
+  if (!chatState.currentConvId) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const replyBtn = document.getElementById('chatConvReplyBtn');
+  const otherUid = replyBtn?.getAttribute('data-other-uid') || '';
+  if (!otherUid) {
+    alert('Select a conversation first.');
+    return;
+  }
+  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
+  const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+  }
+  try {
+    await _sendFreeTextDirect(otherUid, otherName, chatState.currentConvId, body);
+    if (ta) ta.value = '';
+    renderConversation(chatState.currentConvId);
+  } catch (e) {
+    if (e && e.message === 'message_too_long') {
+      alert('Message is too long (max 8000 characters).');
+    } else {
+      console.error('[Chat] inline free-text send', e);
+      alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+    }
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+  }
+};
+
+// ─── Reply from inside thread ──────────────────────────────────────────────────
+window.openThreadReply = async function() {
+  if (chatState._chatSendModalOpening) return;
+  const btn = document.getElementById('chatConvReplyBtn');
+  let otherUid = btn?.getAttribute('data-other-uid') || '';
+  const convId = btn?.getAttribute('data-conv-id') || chatState.currentConvId;
+  if (!otherUid && convId && chatState.chatUserProfile?.uid) {
+    const conv = _conversationById(convId);
+    otherUid = _otherUidFromParticipants(conv?.participants, chatState.chatUserProfile.uid) || '';
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.ffOriginalText = btn.dataset.ffOriginalText || btn.textContent || 'Reply';
+    btn.textContent = 'Loading...';
+  }
+  chatState._chatSendModalOpening = true;
+  try {
+    if (!chatState.chatUserProfile) {
+      await loadChatUserProfile();
+    }
+    if (!otherUid && convId && chatState.chatUserProfile?.uid) {
+      const conv = _conversationById(convId);
+      otherUid = _otherUidFromParticipants(conv?.participants, chatState.chatUserProfile.uid) || '';
+    }
+    if (!otherUid || !chatState.chatUserProfile) {
+      console.warn('[Chat] openThreadReply: missing profile or recipient after load', { otherUid, convId });
+      return;
+    }
+    const resolvedOtherName = btn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
+    chatState.chatReplyContext = { uid: otherUid, name: resolvedOtherName, conversationId: convId };
+    await _openChatModal({
+      title: `↩ Reply to ${_nameForUid(otherUid) || 'Someone'}`,
+      showSendTo: false
+    });
+  } finally {
+    chatState._chatSendModalOpening = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.ffOriginalText || 'Reply';
+    }
+  }
+};
+
+// ─── Mark Thread Read ──────────────────────────────────────────────────────────
+async function markThreadRead(convId) {
+  if (!chatState.chatUserProfile?.salonId || !chatState.chatUserProfile?.uid || !convId) return;
+  const conv = chatState.cachedConversationsById[convId] || chatState.allConversations.find(c => c.id === convId) || null;
+  if (conv && Array.isArray(conv.participants) && !conv.participants.includes(chatState.chatUserProfile.uid)) return;
+  const currentUnread = _unreadCountForUid(conv || {}, chatState.chatUserProfile.uid);
+  if (currentUnread <= 0) return;
+  try {
+    await updateDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/conversations`, convId), {
+      [`unreadFor.${chatState.chatUserProfile.uid}`]: 0
+    });
+    if (conv) {
+      conv.unreadFor = { ...(conv.unreadFor || {}), [chatState.chatUserProfile.uid]: 0 };
+      _paintChatNavBadge(_computeChatNavUnreadFromSnapDocs(chatState.allConversations.map(c => ({ data: () => c })), chatState.chatUserProfile.uid));
+    }
+  } catch (err) {
+    console.warn('[Chat] markThreadRead failed', err);
+  }
+}
+
+// ─── Send Modal (new message from main screen) ────────────────────────────────
+window.openSendMessageModal = async function() {
+  if (chatState._chatSendModalOpening) return;
+  chatState._chatSendModalOpening = true;
+  const btn = document.getElementById('chatSendBtn');
+  const originalBtnHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Loading...';
+  }
+  try {
+    chatState.chatReplyContext = null;
+    // Make sure profile is ready — the Chat top bar is rendered as soon as the
+    // screen becomes visible, which means the New Message button can be clicked
+    // before initChatScreen() finishes. _openChatModal silently returns when
+    // chatUserProfile is null, which looks like "button does nothing".
+    if (!chatState.chatUserProfile) {
+      await loadChatUserProfile();
+    }
+    if (!chatState.chatUserProfile) {
+      console.warn('[Chat] openSendMessageModal: no chatUserProfile after load; aborting.');
+      if (typeof window.ffStyledAlert === 'function') {
+        window.ffStyledAlert('Unable to open New Message — please refresh and try again.');
+      }
+      return;
+    }
+    await _openChatModal({ title: 'New Message', showSendTo: true });
+  } catch (e) {
+    console.error('[Chat] openSendMessageModal error', e);
+  } finally {
+    chatState._chatSendModalOpening = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalBtnHtml || 'New Message';
+    }
+  }
+};
+
+// ─── Shared Modal Renderer ─────────────────────────────────────────────────────
+
+// Legacy: mode buttons removed; selection is via unified chatMessageRadio list
+window._chatSendMode = function(mode) {
+  chatState.chatSendMode = mode;
+  chatState.chatSelectedFlow = null;
+  chatState.chatFlowAnswers = [];
+  document.querySelectorAll('.chat-flow-accordion').forEach(acc => { acc.style.display = 'none'; acc.innerHTML = ''; });
+  document.querySelectorAll('.chat-option-caret').forEach(c => { c.textContent = '▼'; });
+  _updateChatSendBtn();
+};
+
+
+
+window._chatFlowBack = function() { chatState.chatFlowAnswers.pop(); _chatRenderFlowWizard(); _updateChatSendBtn(); };
+window._chatFlowResetWizard = function() {
+  chatState.chatFlowAnswers = [];
+  _chatRenderFlowWizard();
+  _updateChatSendBtn();
+};
+
+
+window._chatToggleAllRecipients = function(checked) {
+  document.querySelectorAll('input[name="chatRecipient"]').forEach(cb => { cb.checked = checked; });
+  _updateChatSendBtn();
+};
+
+
+window.closeSendMessageModal = function() {
+  const modal = document.getElementById('chatSendModal');
+  if (modal) modal.style.display = 'none';
+  const panel = document.getElementById('chatRecipientPanel');
+  if (panel) panel.style.display = 'none';
+  const freeIn = document.getElementById('chatSendFreeTextInput');
+  if (freeIn) freeIn.value = '';
+  chatState.chatReplyContext = null;
+};
+
+
+// ─── Confirm Send ──────────────────────────────────────────────────────────────
+window.confirmSendChatMessage = async function() {
+  if (!chatState.chatUserProfile) return;
+  let title, message, templateId = null, flowId = null, flowTitle = null, flowAnswers = null, renderedText = null;
+
+  const freeAllowed = _chatFreeTextAllowed();
+  const freeRaw = freeAllowed ? _getChatFreeTextTrimmed() : '';
+  if (freeRaw) {
+    const maxFree = 8000;
+    if (freeRaw.length > maxFree) {
+      alert(`Message is too long (max ${maxFree} characters).`);
+      return;
+    }
+    const lines = freeRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    title = (lines[0] || 'Message').slice(0, 120);
+    message = freeRaw;
+  } else if (chatState.chatSendMode === 'flow' && chatState.chatSelectedFlow && chatState.chatFlowAnswers?.length) {
+    const flow = chatState.chatSelectedFlow;
+    const steps = flow.steps || [];
+    const findStep = id => steps.find(s => String(s.id) === String(id));
+    const findOpt = (step, id) => step?.options?.find(o => String(o.id) === String(id));
+    let stepId = flow.startStepId || steps[0]?.id;
+    for (const a of chatState.chatFlowAnswers) {
+      const step = findStep(a.stepId);
+      const opt = findOpt(step, a.optionId) || (step?.options && a.label ? step.options.find(o => String(o.label || '').trim() === String(a.label || '').trim()) : null);
+      if (opt?.finish) { stepId = null; break; }
+      stepId = opt?.nextStepId ?? null;
+    }
+    if (stepId) { alert('Please complete the flow.'); return; }
+    title = flow.title;
+    renderedText = _buildFlowRenderedText(flow, chatState.chatFlowAnswers);
+    flowId = flow.id;
+    flowTitle = flow.title;
+    flowAnswers = chatState.chatFlowAnswers;
+    message = renderedText;
+  } else {
+    const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
+    if (!radio) { alert('Please select a message.'); return; }
+    const val = String(radio.value || '');
+    const templateIdRaw = val.startsWith('template:') ? val.slice(9) : val;
+    const template = chatState.chatTemplates.find(t => t.id === templateIdRaw);
+    if (!template) return;
+    title = template.title; message = template.message || ''; templateId = template.id;
+  }
+
+  let recipientUids = [], recipientNames = [];
+
+  if (chatState.chatReplyContext) {
+    recipientUids  = [chatState.chatReplyContext.uid];
+    recipientNames = [chatState.chatReplyContext.name];
+    if (!recipientUids[0] || recipientUids.length !== 1) {
+      console.warn('[Chat] blocked invalid reply recipient set', { recipientUids, chatReplyContext: chatState.chatReplyContext });
+      return;
+    }
+  } else {
+    const allChecked = document.getElementById('chatRecipientAll')?.checked;
+    if (allChecked) {
+      const pool = isMgrPlus(chatState.chatUserProfile.role)
+        ? chatState.chatSalonUsers
+        : chatState.chatSalonUsers.filter(u => isMgrPlus(u.role));
+      recipientUids  = pool.map(u => u.uid);
+      recipientNames = pool.map(
+        u =>
+          _memberDisplayNameFromRow(u) ||
+          _staffDisplayNameForUid(u.uid) ||
+          _trimStr(u.email) ||
+          'Someone'
+      );
+    } else {
+      document.querySelectorAll('input[name="chatRecipient"]:checked').forEach(cb => {
+        recipientUids.push(cb.value);
+        recipientNames.push(cb.getAttribute('data-name') || _nameForUidForSend(cb.value));
+      });
+    }
+    if (!recipientUids.length) {
+      const msg = 'Please select at least one recipient.';
+      if (typeof window.ffStyledAlert === 'function') {
+        await window.ffStyledAlert(msg, 'Choose recipient');
+      } else {
+        alert(msg);
+      }
+      return;
+    }
+  }
+
+  const btn = document.getElementById('chatSendConfirmBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  let firstSentConvId = null;
+
+  try {
+    if (freeRaw) {
+      const convOverride = chatState.chatReplyContext?.conversationId || null;
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
+        const sentConvId = await _sendFreeTextDirect(rUid, rName, convOverride, freeRaw);
+        if (!firstSentConvId) firstSentConvId = sentConvId;
+      }
+    } else {
+      const salonId = chatState.chatUserProfile.salonId;
+      const senderUid = chatState.chatUserProfile.uid;
+      const senderName =
+        _trimStr(chatState.chatUserProfile.displayName) ||
+        _trimStr(chatState.chatUserProfile.name) ||
+        (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+        '';
+      const senderRole = chatState.chatUserProfile.role || '';
+      const locKey = _chatEffectiveLocKey();
+
+      for (let i = 0; i < recipientUids.length; i++) {
+        const rUid = recipientUids[i];
+        const rName = recipientNames[i] || _nameForUidForSend(rUid);
+        const convId = chatState.chatReplyContext?.conversationId || buildConvId(senderUid, rUid, locKey);
+        if (!firstSentConvId) firstSentConvId = convId;
+        console.log('[Chat] send → locKey=', locKey, ' convId=', convId);
+
+        const convRef = doc(db, `salons/${salonId}/conversations`, convId);
+        await setDoc(
+          convRef,
+          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+          { merge: true }
+        );
+
+        const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
+        const batch = writeBatch(db);
+
+        const msgData = {
+          senderUid,
+          senderName,
+          senderRole,
+          recipientUid: rUid,
+          recipientName: rName,
+          sentAt: serverTimestamp(),
+          readBy: [senderUid]
+        };
+        if (flowId) {
+          msgData.flowId = flowId;
+          msgData.flowTitle = flowTitle;
+          msgData.renderedText = renderedText;
+          msgData.flowAnswers = flowAnswers;
+          msgData.title = title;
+          msgData.message = renderedText;
+        } else {
+          msgData.templateId = templateId;
+          msgData.title = title;
+          msgData.message = message;
+        }
+        batch.set(msgRef, msgData);
+
+        batch.set(
+          convRef,
+          {
+            lastMessageAt: serverTimestamp(),
+            lastMessageAtMs: Date.now(),
+            lastTitle: title,
+            lastMessage: message || renderedText,
+            lastSenderUid: senderUid,
+            lastSenderName: senderName,
+            lastSenderRole: senderRole,
+            updatedAt: serverTimestamp(),
+            updatedAtMs: Date.now(),
+            unreadFor: { [rUid]: increment(1) }
+          },
+          { merge: true }
+        );
+
+        await batch.commit();
+      }
+    }
+
+    const replyConvId = chatState.chatReplyContext?.conversationId || null;
+    window.closeSendMessageModal();
+    if (replyConvId && chatState.currentConvId === replyConvId) {
+      renderConversation(replyConvId);
+    } else if (firstSentConvId && recipientUids.length === 1) {
+      _rememberConversationForList({
+        id: firstSentConvId,
+        participants: [chatState.chatUserProfile.uid, recipientUids[0]].sort(),
+        locationId: _chatEffectiveLocKey(),
+        lastTitle: title,
+        lastMessage: message || renderedText || freeRaw || '',
+        lastSenderUid: chatState.chatUserProfile.uid,
+        lastSenderName:
+          _trimStr(chatState.chatUserProfile.displayName) ||
+          _trimStr(chatState.chatUserProfile.name) ||
+          (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
+          '',
+        lastSenderRole: chatState.chatUserProfile.role || '',
+        lastMessageAtMs: Date.now(),
+        updatedAtMs: Date.now()
+      });
+      renderThreadList();
+      window._openThread(firstSentConvId);
+    }
+  } catch(e) {
+    console.error('[Chat] send error', e);
+    alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+  }
+};
+
+
+
+// ─── Settings Section ──────────────────────────────────────────────────────────
+async function initChatSettingsSection() {
+  if (!chatState.chatUserProfile) await loadChatUserProfile();
+  const s = document.getElementById('chatSettingsSection');
+  if (s) {
+    const show =
+      typeof window.ffCurrentUserHasChatManagePermission === 'function'
+        ? window.ffCurrentUserHasChatManagePermission()
+        : isAdmin(chatState.chatUserProfile?.role);
+    s.style.display = show ? 'block' : 'none';
+  }
+}
+
+window.ffRefreshChatManageUi = function () {
+  try {
+    if (chatState.chatUserProfile) renderChatHeaderForRole(chatState.chatUserProfile.role);
+    else renderChatHeaderForRole(null);
+  } catch (e) {}
+  void initChatSettingsSection();
+};
+
+if (typeof document !== 'undefined' && !window.__ff_chatStaffPermListener) {
+  window.__ff_chatStaffPermListener = true;
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+  });
+}
+
+// ─── Auth Listener ─────────────────────────────────────────────────────────────
+onAuthStateChanged(auth, async user => {
+  if (user) {
+    // Defer chat badge subscriptions until salon is resolved. When the user has
+    // multiple memberships, currentSalonId is null until they pick one in the
+    // Choose Salon screen — subscribing here with the legacy users/{uid}.salonId
+    // would race with the salon selection and could attach to the wrong salon.
+    if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+      return;
+    }
+    try {
+      const snap = await getDoc(doc(db, 'users', user.uid));
+      if (snap.exists()) {
+        const p = { uid: user.uid, ...snap.data() };
+        // Multi-salon: same reason as loadChatUserProfile — prefer the salon
+        // the user actively picked, otherwise badge/toast subscriptions point
+        // at the legacy primary salon and cross-salon notifications leak in.
+        const activeSalonId = (typeof window !== 'undefined' && window.currentSalonId)
+          ? String(window.currentSalonId).trim()
+          : '';
+        const targetSalonId = activeSalonId || p.salonId || '';
+        if (targetSalonId) {
+          subscribeToChatBadge(user.uid, targetSalonId);
+          subscribeToChatToastNotifications(user.uid, targetSalonId);
+        }
+      }
+    } catch(e) {}
+  } else {
+    chatState._chatAuthUid = null;
+    chatState._chatAuthSalonId = null;
+    if (chatState.chatBadgeUnsub) { chatState.chatBadgeUnsub(); chatState.chatBadgeUnsub = null; }
+    if (chatState.chatToastUnsub) { chatState.chatToastUnsub(); chatState.chatToastUnsub = null; }
+    chatState._lastChatToastLastMsgMsByConv.clear();
+    const badge = document.getElementById('chatNavBadge');
+    if (badge) {
+      badge.textContent = '';
+      badge.style.removeProperty('display');
+    }
+  }
+});
+
+// ─── Location-change Listener (per-location chat isolation) ────────────────────
+// When the active location changes, reset thread UI and re-attach listeners that
+// depend on location filtering. The nav chat badge subscription is intentionally
+// NOT restarted: it already sums unread for the whole salon participant set, and
+// tearing it down + clearing the DOM produced a flash-then-empty badge after load.
+if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
+  window.__ff_chatLocationListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    try {
+      console.log('[Chat] location changed → resetting chat state, new loc=', _activeLocKey());
+      if (chatState.chatConvsUnsub) { chatState.chatConvsUnsub(); chatState.chatConvsUnsub = null; }
+      if (chatState.chatMsgsUnsub)  { chatState.chatMsgsUnsub();  chatState.chatMsgsUnsub  = null; }
+      if (chatState.chatToastUnsub) { chatState.chatToastUnsub(); chatState.chatToastUnsub = null; }
+      chatState._lastChatToastLastMsgMsByConv.clear();
+
+      chatState.allConversations = [];
+      chatState.lastNonEmptyConversations = [];
+      chatState.currentMessages  = [];
+      chatState.currentConvId    = null;
+
+      try { renderThreadList(); } catch (_) {}
+      try { _renderEmptyConversation(); } catch (_) {}
+
+      if (chatState._chatAuthUid && chatState._chatAuthSalonId) {
+        subscribeToChatToastNotifications(chatState._chatAuthUid, chatState._chatAuthSalonId);
+      }
+      if (chatState.chatUserProfile?.salonId) {
+        subscribeToConversationList();
+        // Also reload per-location salon data (templates, flows) so the
+        // settings modal and the "New Message" picker show only what the
+        // currently active location has configured.
+        (async () => {
+          try {
+            await loadChatTemplates();
+            await loadChatFlows();
+            try { if (typeof _renderTmplList === 'function') _renderTmplList(); } catch (_) {}
+            try { if (typeof _renderFlowsAdminList === 'function') _renderFlowsAdminList(); } catch (_) {}
+          } catch (err) {
+            console.warn('[Chat] reload templates/flows after loc change failed', err);
+          }
+        })();
+      }
+    } catch (e) {
+      console.warn('[Chat] location change handler error', e);
+    }
+  });
+}
+
+/**
+ * Sends a Chat free-text reminder with a Training deep link (?ff_training=).
+ * Wired from Training → Reports admin "Send Reminder" (index.html).
+ */
+window.ffSendTrainingReminderChat = async function (payload = {}) {
+  await loadChatUserProfile();
+  if (!chatState.chatUserProfile?.salonId || !chatState.chatUserProfile?.uid) {
+    throw new Error(
+      chatState.chatUserProfile == null
+        ? 'Chat profile could not be loaded (users document missing or network error). Refresh and try again, or open the Chat tab once.'
+        : 'Sign in is required to send chat reminders.'
+    );
+  }
+  const salonId = chatState.chatUserProfile.salonId;
+
+  let rUid = String(payload.recipientFirebaseUid || payload.recipientUid || '').trim();
+  const staffId = String(payload.staffId || '').trim();
+
+  if (!rUid && staffId) {
+    try {
+      const staffSnap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+      if (staffSnap.exists()) {
+        const d = staffSnap.data() || {};
+        rUid = String(d.firebaseUid || d.uid || d.firebaseAuthUid || d.userUid || '').trim();
+      }
+    } catch (e) {
+      console.warn('[Chat] Training reminder: staff lookup failed', e);
+    }
+  }
+
+  if (!rUid && payload.recipientEmail) {
+    const email = String(payload.recipientEmail || '').trim().toLowerCase();
+    if (email && typeof window.ffGetStaffStore === 'function') {
+      const row =
+        (window.ffGetStaffStore()?.staff || []).find((s) => String(s.email || '').trim().toLowerCase() === email) ||
+        null;
+      if (row) rUid = String(row.firebaseUid || row.uid || '').trim();
+    }
+  }
+
+  if (!rUid) {
+    throw new Error(
+      'This employee needs a Fair Flow login linked on their staff profile before Chat reminders work.'
+    );
+  }
+
+  const trainingId = String(payload.trainingId || '').trim();
+  const title = String(payload.trainingTitle || 'Training').trim() || 'Training';
+  const recipientName =
+    String(payload.recipientName || payload.staffName || '').trim() || _nameForUidForSend(rUid);
+
+  let deepLink = '';
+  try {
+    const u = new URL(window.location.href);
+    u.hash = '';
+    if (trainingId) u.searchParams.set('ff_training', trainingId);
+    deepLink = u.toString();
+  } catch (_) {
+    deepLink = window.location.href;
+  }
+
+  const intro = String(payload.leadInText || 'Please complete this assigned training when you can.').trim();
+  const body = `${intro}\n\n${title}\n\nOpen training:\n${deepLink}`;
+
+  await _sendFreeTextDirect(rUid, recipientName, null, body);
+};
+
+// ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
+window.goToChat = goToChat;
+window.initChatSettingsSection = initChatSettingsSection;

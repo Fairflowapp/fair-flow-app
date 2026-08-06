@@ -1,7 +1,8 @@
 /**
  * Chat Module — Structured Messages System
  * WhatsApp-style Thread List → Conversation View
- * Messages sent via Admin-defined templates only (no free text).
+ * Messages are normally sent via admin-defined templates/flows; staff with
+ * permissions.chat_free_text (or owner/admin session) may type freely.
  *
  * Firestore:
  *   salons/{salonId}/chatTemplates/{templateId}
@@ -15,97 +16,757 @@
 import {
   collection, query, where, orderBy, limit,
   addDoc, setDoc, updateDoc, doc, getDoc, getDocs, deleteDoc, writeBatch, increment,
-  onSnapshot, serverTimestamp, arrayUnion
+  onSnapshot, serverTimestamp, arrayUnion, deleteField
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "./app.js";
+import { db, auth } from "/app.js?v=20260610_force_lp_ios";
+import "./format-utils.js?v=20260806_sched_12h_picker";
+import {
+  addFlowOptionAt,
+  addFlowOptionByStepId,
+  addFlowStep,
+  addFlowStepAndLinkAt,
+  addFlowStepAndLinkByStepId,
+  collectFlowStepsFromDom,
+  ensureFlowDraft,
+  removeFlowOptionAt,
+  removeFlowOptionByStepId,
+  removeFlowStepAt,
+  removeFlowStepById,
+  unlinkFlowOption
+} from "./flow-builder.js";
+import {
+  CHAT_DEFAULT_LOC_KEY,
+  isMgrPlus,
+  escHtml,
+  roleLabel,
+  buildConvId,
+  _chatOrderValue,
+  _chatSortByOrder,
+  _chatCategoryValue,
+  _chatGroupByCategory,
+  _chatUserMatchesAllowedSenders,
+  linkifyMessageHtml,
+  _convLocKey,
+  _itemMatchesLocation,
+  _trimStr,
+  _memberDisplayNameFromRow,
+  _otherUidFromParticipants,
+  timeAgo,
+  _chatDayKey,
+  _chatDaySeparatorLabel,
+} from "./chat-helpers.js?v=20260626_chat_helpers_split";
+import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+
+// ─── Data layer (Firestore reads + location scoping) — extracted to chat-data.js
+import {
+  _readActiveLocationId,
+  _activeLocKey,
+  _chatEffectiveLocKey,
+  _convMatchesLocation,
+  _cacheConversations,
+  loadChatUserProfile,
+  loadChatSalonUsers,
+  loadChatTemplates,
+  loadChatFlows,
+} from "./chat-data.js?v=20260628_chat_data_b0";
+
+// ─── UI module (presentation helpers + small renderers) — extracted to chat-ui.js
+import {
+  initChatUi,
+  ffReactionChipsHtml,
+  ffBuildChatThreadCardHTML,
+  _userAllowedInActiveLocation,
+  _staffDisplayNameForUid,
+  _nameForUid,
+  _nameForUidForSend,
+  _avatarUrlForUid,
+  _conversationById,
+  fmtTime,
+  renderChatHeaderForRole,
+  _buildFlowRenderedText,
+  renderThreadList,
+  _rememberConversationForList,
+  _cacheVisibleThreadListHtml,
+  _restoreVisibleThreadListHtml,
+  renderConversation,
+  _setConversationHeader,
+  _renderEmptyConversation,
+  _syncChatConvFreeTextComposer,
+  _bindChatConvFreeTextComposer,
+  _openChatModal,
+  _chatGetFlowAccordion,
+  _chatRenderFlowWizard,
+  _updateChatSendBtn,
+  _updateRecipientSummary,
+} from "./chat-ui.js?v=20260728_reactions";
+initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
+
+// ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
+import {
+  initChatSubscriptions,
+  subscribeToConversationList,
+  _subscribeToMessages,
+  _unreadCountForUid,
+  _computeChatNavUnreadFromSnapDocs,
+  _paintChatNavBadge,
+  subscribeToChatBadge,
+  subscribeToChatToastNotifications,
+} from "./chat-subscriptions.js?v=20260628_chat_subs_split";
+export { subscribeToChatBadge, subscribeToChatToastNotifications };
+initChatSubscriptions({
+  renderThreadList,
+  renderConversation,
+  _renderEmptyConversation,
+  markThreadRead,
+  goToChat,
+});
+
+// ─── Admin module (templates + flows) — extracted to chat-admin.js ──────────────
+import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260701_chat_admin_flows_split";
+initChatAdmin({
+  _chatManageAllowed,
+  _chatWaitForManagePermission,
+  loadChatUserProfile,
+  loadChatTemplates,
+  loadChatFlows,
+  _chatEffectiveLocKey,
+  renderSendOptions: (typeof window !== 'undefined' ? window.renderSendOptions : undefined),
+});
+
+// ─── Compose module (conversation view + send/reply/confirm flow) — extracted to chat-compose.js
+import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260728_reactions";
+initChatCompose({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
+
+// Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
+// window level in capture phase to beat any other handler that might
+// stopPropagation. Idempotent.
+if (typeof document !== 'undefined' && !window.__ff_chatSendBtnDelegated) {
+  window.__ff_chatSendBtnDelegated = true;
+  window.addEventListener('click', function (ev) {
+    const btn = ev.target && ev.target.closest && ev.target.closest('#chatSendBtn');
+    if (!btn) return;
+    if (typeof window.openSendMessageModal === 'function') {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] delegated openSendMessageModal threw', e); }
+    }
+  }, true);
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let chatUserProfile    = null;
-let chatTemplates      = [];
-let chatFlows          = [];     // { id, title, allowedSenders, startStepId, steps: [{id,prompt,order,options:[{id,label,nextStepId,finish}]}] }
-let chatSalonUsers     = [];
-let chatConvsUnsub     = null;
-let _chatInitialized   = false;  // cache flag — skip re-fetching on repeat visits
-let chatMsgsUnsub      = null;
-let chatBadgeUnsub     = null;
-let chatToastUnsub     = null;
-let chatEditingTmplId  = null;
-let chatEditingFlowId  = null;
-let chatFlowDraft      = null;   // { title, allowedSenders, steps } for builder
-let chatReplyContext   = null;   // { uid, name, conversationId }
-let allConversations   = [];     // kept in sync by onSnapshot
-let currentMessages    = [];     // kept in sync by onSnapshot for open conversation
-let currentConvId      = null;   // currently open thread
-let chatSendMode       = 'template';
-let chatSelectedFlow   = null;
-let chatFlowAnswers    = [];     // during wizard: [{ stepId, prompt, optionId, label }]
+/** Set true after first `loadChatSalonUsers` completes (success or empty). Used to show "Loading..." until members exist. */
+const CHAT_NAME_LOADING = 'Loading...';
+/** Perf: Chat screen open → first thread list paint (see [ChatBadgePerf] logs). */
+
+
+window._chatToggleSendCategory = function(categoryIdx) {
+  const section = document.querySelector(`[data-chat-send-category="${String(categoryIdx)}"]`);
+  if (!section) return;
+  const items = section.querySelector('.chat-category-section-items');
+  const arrow = section.querySelector('.chat-send-category-arrow');
+  const isOpen = items && items.style.display !== 'none';
+  if (items) items.style.display = isOpen ? 'none' : 'flex';
+  if (arrow) arrow.textContent = isOpen ? '▼' : '▲';
+};
+// Live Desk reads the most recent conversations for its Chat card.
+// Returns the FULL conversation objects so the Live card can render the exact
+// same thread card as the Chat module (avatars, name, time, preview, unread).
+if (typeof window !== 'undefined') {
+  window.ffGetRecentConversations = function (limitN) {
+    var n = Number(limitN) > 0 ? Number(limitN) : 8;
+    var arr = Array.isArray(chatState.allConversations) ? chatState.allConversations.slice() : [];
+    arr.sort(function (a, b) {
+      var am = (a && (a.lastMessageAtMs || (a.lastMessageAt && a.lastMessageAt.toMillis && a.lastMessageAt.toMillis()))) || 0;
+      var bm = (b && (b.lastMessageAtMs || (b.lastMessageAt && b.lastMessageAt.toMillis && b.lastMessageAt.toMillis()))) || 0;
+      return bm - am;
+    });
+    return arr.slice(0, n);
+  };
+  // Build a single chat thread card with the EXACT same look as the Chat module.
+  window.ffRenderChatThreadCardHTML = function (conv) {
+    try { return conv ? ffBuildChatThreadCardHTML(conv, { forLive: true }) : ''; }
+    catch (_) { return ''; }
+  };
+  // Open a conversation from the Live Desk: switch to the Chat screen and open the thread.
+  window.ffOpenChatConversation = async function (convId) {
+    if (!convId) return;
+    try { if (typeof goToChat === 'function') await goToChat(); } catch (_) {}
+    try { if (typeof window._openThread === 'function') window._openThread(convId); } catch (_) {}
+  };
+}
+
+// ─── Emoji picker (Live popup + full-chat free-text composer) ────────────────
+const FF_CHAT_EMOJIS = [
+  '😊','😀','😁','😂','🤣','😍','🥰','😘','😎','🤗','😉','😅',
+  '😢','😭','😮','😬','🙄','😴','🤒','😷','🙏','👍','👎','👏',
+  '🙌','💪','🤝','👌','✌️','👋','❤️','💜','💖','💕','💯','🔥',
+  '✨','🎉','🥳','🎂','💅','💇‍♀️','🌸','🌺','🌟','☕','🍰','🍕',
+  '⏰','📅','✅','❌','❓','❗','💬','🚗'
+];
+let _ffEmojiPopEl = null;
+let _ffEmojiTargetInput = null;
+
+function _ffCloseEmojiPop() {
+  if (_ffEmojiPopEl) _ffEmojiPopEl.style.display = 'none';
+  _ffEmojiTargetInput = null;
+}
+
+function _ffEnsureEmojiPop() {
+  if (_ffEmojiPopEl) return _ffEmojiPopEl;
+  const pop = document.createElement('div');
+  pop.id = 'ffChatEmojiPop';
+  pop.style.cssText = 'display:none;position:fixed;z-index:100200;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,0.25);padding:8px;width:248px;flex-wrap:wrap;gap:2px;max-height:220px;overflow-y:auto;';
+  pop.innerHTML = FF_CHAT_EMOJIS.map(e =>
+    `<button type="button" data-ff-emoji="${e}" style="border:none;background:none;font-size:20px;line-height:1;padding:5px;cursor:pointer;border-radius:6px;">${e}</button>`
+  ).join('');
+  pop.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('[data-ff-emoji]') : null;
+    if (!b || !_ffEmojiTargetInput) return;
+    const ta = _ffEmojiTargetInput;
+    const emoji = b.getAttribute('data-ff-emoji') || '';
+    const start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+    const end = ta.selectionEnd != null ? ta.selectionEnd : ta.value.length;
+    ta.value = ta.value.slice(0, start) + emoji + ta.value.slice(end);
+    const pos = start + emoji.length;
+    try { ta.setSelectionRange(pos, pos); } catch (_) {}
+    ta.focus();
+  });
+  document.addEventListener('click', ev => {
+    if (!_ffEmojiPopEl || _ffEmojiPopEl.style.display === 'none') return;
+    const t = ev.target;
+    if (t && t.closest && (t.closest('#ffChatEmojiPop') || t.closest('[data-ff-emoji-btn]'))) return;
+    _ffCloseEmojiPop();
+  }, true);
+  document.body.appendChild(pop);
+  _ffEmojiPopEl = pop;
+  return pop;
+}
+
+function _ffToggleEmojiPop(btn, inputEl) {
+  const pop = _ffEnsureEmojiPop();
+  if (pop.style.display !== 'none' && _ffEmojiTargetInput === inputEl) { _ffCloseEmojiPop(); return; }
+  _ffEmojiTargetInput = inputEl;
+  pop.style.display = 'flex';
+  const r = btn.getBoundingClientRect();
+  const w = 248;
+  const h = pop.offsetHeight || 200;
+  const left = Math.min(Math.max(8, r.right - w), Math.max(8, window.innerWidth - w - 8));
+  let top = r.top - h - 8;
+  if (top < 8) top = r.bottom + 8;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+function _ffMakeEmojiBtn(inputId) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-ff-emoji-btn', '1');
+  btn.setAttribute('aria-label', 'Insert emoji');
+  btn.textContent = '😊';
+  btn.style.cssText = 'flex:none;background:none;border:1px solid #e5e7eb;border-radius:10px;font-size:17px;line-height:1;padding:8px 10px;cursor:pointer;align-self:flex-end;';
+  btn.addEventListener('click', ev => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const input = document.getElementById(inputId);
+    if (input) _ffToggleEmojiPop(btn, input);
+  });
+  return btn;
+}
+
+// Add the emoji button to the full-chat inline composer (static markup in
+// index.html). Idempotent — safe to call on every chat init.
+function _ffEnsureChatComposerEmojiButton() {
+  try {
+    const row = document.querySelector('#chatConvFreeTextBar .chat-conv-free-row');
+    if (!row || row.__ffEmojiBtn) return;
+    row.__ffEmojiBtn = true;
+    const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
+    row.insertBefore(_ffMakeEmojiBtn('chatConvFreeTextInput'), sendBtn || null);
+  } catch (_) {}
+}
+
+// ─── WhatsApp-style message reactions ────────────────────────────────────────
+// Clicking a bubble (full Chat thread or the Live popup) opens a quick
+// reaction bar; the choice is stored on the message doc as reactions.{uid}
+// (one per user, click the same emoji again to remove). Firestore rules only
+// allow each user to touch their own reactions key.
+const FF_QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '💅'];
+let _ffReactPopEl = null;
+let _ffReactTarget = null; // { convId, msgId }
+
+function _ffCloseReactPop() {
+  if (_ffReactPopEl) _ffReactPopEl.style.display = 'none';
+  _ffReactTarget = null;
+}
+
+function _ffEnsureReactPop() {
+  if (_ffReactPopEl) return _ffReactPopEl;
+  const pop = document.createElement('div');
+  pop.id = 'ffChatReactPop';
+  pop.style.cssText = 'display:none;position:fixed;z-index:100210;background:#fff;border:1px solid #e5e7eb;border-radius:999px;box-shadow:0 10px 28px rgba(15,23,42,0.25);padding:5px 8px;gap:2px;align-items:center;';
+  pop.innerHTML = FF_QUICK_REACTIONS.map(e =>
+    `<button type="button" data-ff-react="${e}" style="border:none;background:none;font-size:22px;line-height:1;padding:4px 5px;cursor:pointer;border-radius:50%;">${e}</button>`
+  ).join('');
+  pop.addEventListener('click', ev => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('[data-ff-react]') : null;
+    if (!b || !_ffReactTarget) return;
+    const t = _ffReactTarget;
+    _ffCloseReactPop();
+    void ffReactToChatMessage(t.convId, t.msgId, b.getAttribute('data-ff-react') || '');
+  });
+  document.body.appendChild(pop);
+  _ffReactPopEl = pop;
+  return pop;
+}
+
+function _ffOpenReactPop(anchorEl, target) {
+  const pop = _ffEnsureReactPop();
+  _ffReactTarget = target;
+  pop.style.display = 'flex';
+  const r = anchorEl.getBoundingClientRect();
+  const w = pop.offsetWidth || 300;
+  const h = pop.offsetHeight || 42;
+  const left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8));
+  let top = r.top - h - 6;
+  if (top < 8) top = r.bottom + 6;
+  pop.style.left = left + 'px';
+  pop.style.top = top + 'px';
+}
+
+/** Which conversation a rendered message row belongs to (Live popup vs Chat). */
+function _ffMsgContextFor(row) {
+  if (!row) return null;
+  const msgId = row.getAttribute('data-ff-msg');
+  if (!msgId) return null;
+  if (row.closest('#liveChatPopupMessages')) return _livePopupConvId ? { convId: _livePopupConvId, msgId } : null;
+  if (row.closest('#chatConvMessages')) return chatState.currentConvId ? { convId: chatState.currentConvId, msgId } : null;
+  return null;
+}
+
+async function ffReactToChatMessage(convId, msgId, emoji) {
+  try {
+    const salonId = chatState.chatUserProfile?.salonId;
+    const uid = chatState.chatUserProfile?.uid;
+    if (!salonId || !uid || !convId || !msgId || !emoji) return;
+    const list = (_livePopupConvId === convId && Array.isArray(_livePopupMsgs) && _livePopupMsgs.length)
+      ? _livePopupMsgs
+      : (chatState.currentMessages || []);
+    const msg = list.find(m => m && m.id === msgId);
+    const mine = msg && msg.reactions ? String(msg.reactions[uid] || '') : '';
+    await updateDoc(doc(db, `salons/${salonId}/conversations/${convId}/messages`, msgId), {
+      ['reactions.' + uid]: mine === emoji ? deleteField() : emoji
+    });
+  } catch (e) {
+    console.error('[Chat] reaction failed', e);
+  }
+}
+
+if (typeof document !== 'undefined' && !window.__ff_chatReactionsBound) {
+  window.__ff_chatReactionsBound = true;
+  document.addEventListener('click', function (ev) {
+    const t = ev.target;
+    if (!t || typeof t.closest !== 'function') return;
+    // Close an open reaction bar on any click outside it (bubble clicks below
+    // just move/reopen it on the new message).
+    if (_ffReactPopEl && _ffReactPopEl.style.display !== 'none' && !t.closest('#ffChatReactPop')) {
+      _ffCloseReactPop();
+    }
+    // Chip click → toggle that reaction directly.
+    const chip = t.closest('[data-ff-react-chip]');
+    if (chip) {
+      ev.preventDefault();
+      const ctx = _ffMsgContextFor(chip.closest('[data-ff-msg]'));
+      if (ctx) void ffReactToChatMessage(ctx.convId, ctx.msgId, chip.getAttribute('data-ff-react-chip') || '');
+      return;
+    }
+    // Bubble click → open the quick reaction bar (links keep working).
+    if (t.closest('a')) return;
+    const bubble = t.closest('.cb-bubble');
+    if (!bubble) return;
+    const ctx = _ffMsgContextFor(bubble.closest('[data-ff-msg]'));
+    if (!ctx) return;
+    _ffOpenReactPop(bubble, ctx);
+  });
+}
+
+// ─── Live Desk: in-place conversation popup ─────────────────────────────────
+// Clicking a thread on the Live CHAT card opens the conversation in a small
+// popup ABOVE the Live screen (reply included) instead of leaving Live for the
+// Chat module. Own snapshot listener + state so the Chat tab is untouched.
+let _livePopupUnsub = null;
+let _livePopupConvId = null;
+let _livePopupMsgs = [];
+let _livePopupLoading = false;
+
+function _livePopupOtherUid() {
+  const uid = chatState.chatUserProfile?.uid || '';
+  const conv = _conversationById(_livePopupConvId);
+  return _otherUidFromParticipants(conv?.participants, uid) || '';
+}
+
+function _renderLivePopupMessages() {
+  const box = document.getElementById('liveChatPopupMessages');
+  if (!box) return;
+  const msgs = _livePopupMsgs;
+  if (!msgs.length) {
+    box.innerHTML = `<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">${_livePopupLoading ? 'Loading messages...' : 'No messages yet.'}</div>`;
+    return;
+  }
+  const uid = chatState.chatUserProfile?.uid || '';
+  const otherAvatarUrl = _avatarUrlForUid(_livePopupOtherUid());
+  // Bubble markup mirrors renderConversation() in chat-ui.js so the popup
+  // looks identical to the full Chat thread view.
+  let lastDayKey = '';
+  const parts = [];
+  for (let i = 0; i < msgs.length; i++) {
+    const ev = msgs[i];
+    const dk = _chatDayKey(ev.sentAt);
+    if (dk && dk !== lastDayKey) {
+      lastDayKey = dk;
+      const lab = _chatDaySeparatorLabel(ev.sentAt);
+      if (lab) parts.push(`<div class="cb-day-sep" role="separator" aria-label="${escHtml(lab)}"><span>${escHtml(lab)}</span></div>`);
+    }
+    const mine = ev.senderUid === uid;
+    const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
+    const otherAvatarHtml = !mine && otherAvatarUrl
+      ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+      : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
+    // Free-text messages store title = first line of the message; hide the
+    // title when the body repeats it (same rule as renderConversation).
+    const titleText = String(ev.title || '').trim();
+    const bodyText = String(ev.message || '').trim();
+    const titleIsDup = !!titleText && !!bodyText &&
+      (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
+    parts.push(`
+      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}" data-ff-msg="${escHtml(ev.id || '')}">
+        ${otherAvatarHtml}
+        <div class="cb-col">
+          ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
+          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}" style="cursor:pointer;">
+            ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
+            ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
+          </div>
+          ${ffReactionChipsHtml(ev, uid, mine)}
+          <span class="cb-time">${fmtTime(ev.sentAt)}</span>
+        </div>
+      </div>
+    `);
+  }
+  box.innerHTML = parts.join('');
+  setTimeout(() => { box.scrollTop = box.scrollHeight; }, 30);
+}
+
+async function _livePopupSend() {
+  if (!_chatFreeTextAllowed() || !chatState.chatUserProfile || !_livePopupConvId) return;
+  const ta = document.getElementById('liveChatPopupInput');
+  const body = String(ta?.value || '').trim();
+  if (!body) return;
+  const otherUid = _livePopupOtherUid();
+  if (!otherUid) return;
+  const btn = document.getElementById('liveChatPopupSend');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    await _sendFreeTextDirect(otherUid, _nameForUidForSend(otherUid), _livePopupConvId, body);
+    if (ta) { ta.value = ''; ta.focus(); }
+  } catch (e) {
+    if (e && e.message === 'message_too_long') alert('Message is too long (max 8000 characters).');
+    else {
+      console.error('[Chat] live popup send failed', e);
+      alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+  }
+}
+
+function _ensureLiveChatPopupDom() {
+  let pop = document.getElementById('liveChatThreadPopup');
+  if (pop) return pop;
+  pop = document.createElement('div');
+  pop.id = 'liveChatThreadPopup';
+  // z-index: above the Live screen (9870), below full modals (100000+).
+  pop.style.cssText = 'display:none;position:fixed;right:24px;bottom:24px;width:400px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 130px);background:#fff;border-radius:16px;box-shadow:0 18px 50px rgba(15,23,42,0.35);z-index:9940;flex-direction:column;overflow:hidden;';
+  pop.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #eef0f4;background:#fafbfc;">
+      <span id="liveChatPopupAvatar" class="cb-avatar" style="flex:none;overflow:hidden;"></span>
+      <div style="flex:1;min-width:0;">
+        <div id="liveChatPopupName" style="font-weight:800;font-size:14px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Conversation</div>
+        <button type="button" id="liveChatPopupOpenFull" style="background:none;border:none;padding:0;font-size:11px;color:#7c3aed;cursor:pointer;font-weight:700;">Open full chat</button>
+      </div>
+      <button type="button" id="liveChatPopupClose" aria-label="Close conversation" style="flex:none;background:none;border:none;font-size:24px;line-height:1;color:#6b7280;cursor:pointer;padding:2px 6px;">&times;</button>
+    </div>
+    <div id="liveChatPopupMessages" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:12px;background:#fff;"></div>
+    <div id="liveChatPopupComposer" style="display:none;gap:8px;padding:10px 12px;border-top:1px solid #eef0f4;background:#fafbfc;align-items:flex-end;">
+      <textarea id="liveChatPopupInput" rows="1" placeholder="Type a reply..." style="flex:1;resize:none;border:1px solid #e5e7eb;border-radius:10px;padding:9px 10px;font-size:13px;font-family:inherit;min-height:38px;max-height:96px;"></textarea>
+      <button type="button" id="liveChatPopupSend" style="flex:none;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;">Send</button>
+    </div>
+    <div id="liveChatPopupNoPerm" style="display:none;padding:10px 12px;border-top:1px solid #eef0f4;background:#fafbfc;font-size:12px;color:#6b7280;text-align:center;">Replies use templates — tap "Open full chat" to reply.</div>
+  `;
+  document.body.appendChild(pop);
+  pop.querySelector('#liveChatPopupClose').addEventListener('click', () => window.ffCloseLiveChatThread());
+  pop.querySelector('#liveChatPopupOpenFull').addEventListener('click', () => {
+    const convId = _livePopupConvId;
+    window.ffCloseLiveChatThread();
+    if (typeof window.ffCloseLiveScreen === 'function') window.ffCloseLiveScreen();
+    if (convId && typeof window.ffOpenChatConversation === 'function') window.ffOpenChatConversation(convId);
+  });
+  pop.querySelector('#liveChatPopupSend').addEventListener('click', () => { void _livePopupSend(); });
+  pop.querySelector('#liveChatPopupInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void _livePopupSend(); }
+  });
+  const composerRow = pop.querySelector('#liveChatPopupComposer');
+  if (composerRow) composerRow.insertBefore(_ffMakeEmojiBtn('liveChatPopupInput'), pop.querySelector('#liveChatPopupSend'));
+  return pop;
+}
+
+window.ffOpenLiveChatThread = async function (convId) {
+  if (!convId) return;
+  try {
+    if (!chatState.chatUserProfile) await loadChatUserProfile();
+    const salonId = chatState.chatUserProfile?.salonId;
+    if (!salonId) return;
+    const pop = _ensureLiveChatPopupDom();
+    if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
+    _livePopupConvId = convId;
+    _livePopupMsgs = [];
+    _livePopupLoading = true;
+
+    const otherUid = _livePopupOtherUid();
+    const nameEl = document.getElementById('liveChatPopupName');
+    if (nameEl) nameEl.textContent = _nameForUid(otherUid) || 'Conversation';
+    const avatarEl = document.getElementById('liveChatPopupAvatar');
+    if (avatarEl) {
+      const url = _avatarUrlForUid(otherUid);
+      avatarEl.innerHTML = url
+        ? `<img src="${String(url).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
+        : escHtml((_nameForUid(otherUid) || '?').charAt(0).toUpperCase());
+    }
+    const composer = document.getElementById('liveChatPopupComposer');
+    const noPerm = document.getElementById('liveChatPopupNoPerm');
+    const canType = _chatFreeTextAllowed();
+    if (composer) composer.style.display = canType ? 'flex' : 'none';
+    if (noPerm) noPerm.style.display = canType ? 'none' : 'block';
+
+    pop.style.display = 'flex';
+    _renderLivePopupMessages();
+
+    const msgQuery = query(
+      collection(db, `salons/${salonId}/conversations/${convId}/messages`),
+      orderBy('sentAt', 'asc'),
+      limit(300)
+    );
+    _livePopupUnsub = onSnapshot(
+      msgQuery,
+      snap => {
+        if (_livePopupConvId !== convId) return;
+        _livePopupMsgs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _livePopupLoading = false;
+        _renderLivePopupMessages();
+        markThreadRead(convId).catch(() => {});
+      },
+      err => {
+        if (_livePopupConvId !== convId) return;
+        _livePopupLoading = false;
+        _renderLivePopupMessages();
+        console.error('[Chat] live popup messages snapshot error', err);
+      }
+    );
+  } catch (e) {
+    console.error('[Chat] ffOpenLiveChatThread failed', e);
+  }
+};
+
+window.ffCloseLiveChatThread = function () {
+  _ffCloseEmojiPop();
+  _ffCloseReactPop();
+  if (_livePopupUnsub) { try { _livePopupUnsub(); } catch (_) {} _livePopupUnsub = null; }
+  _livePopupConvId = null;
+  _livePopupMsgs = [];
+  const pop = document.getElementById('liveChatThreadPopup');
+  if (pop) pop.style.display = 'none';
+};
+
+// Shared thread-card builder used by both the Chat module list and the Live Desk
+// so the two always look identical.
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const isAdmin   = r => ['admin','owner'].includes((r||'').toLowerCase());
-const isMgrPlus = r => ['manager','admin','owner'].includes((r||'').toLowerCase());
-const escHtml   = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const roleLabel = r => ({technician:'Service Provider',manager:'Manager',admin:'Admin',owner:'Owner'}[(r||'').toLowerCase()] || r || '');
-const buildConvId = (a, b) => [a, b].sort().join('__');
+/**
+ * Match users/{uid}.role to chat template/flow allowedSenders (checkbox values are
+ * technician | manager | admin). Owners are excluded unless we map owner↔admin.
+ */
+/** Plain text with https URLs → safe HTML with clickable links (expiry reminders, etc.). */
+/**
+ * Derive the location from a conversation document ID.
+ *
+ * `buildConvId` encodes location into the ID itself:
+ *   - default location → `{uidA}__{uidB}`
+ *   - other location  → `loc_{locKey}__{uidA}__{uidB}`
+ *
+ * The ID is set at document creation and never mutates, so it is the
+ * authoritative signal for which location the conversation belongs to.
+ */
+/**
+ * Resolve the location a conversation doc belongs to.
+ *
+ * Prefers the ID prefix for newer location-scoped conversations. Legacy
+ * conversation IDs have no prefix, so if Firestore has a locationId field,
+ * use that instead of treating them as permanently "default".
+ */
 
-function _nameForUid(uid) {
-  if (!uid) return '';
-  if (uid === chatUserProfile?.uid) return chatUserProfile?.name || chatUserProfile?.displayName || '';
-  const u = chatSalonUsers.find(x => x.uid === uid);
-  return (u && (u.name || u.email || u.uid)) || uid;
-}
-function _avatarUrlForUid(uid) {
-  if (!uid) return null;
-  if (uid === chatUserProfile?.uid) return (typeof window.ffGetCurrentUserAvatarUrl === 'function') ? window.ffGetCurrentUserAvatarUrl() : null;
-  const u = chatSalonUsers.find(x => x.uid === uid);
-  if (!u || !u.avatarUrl) return null;
-  const v = u.avatarUpdatedAtMs != null ? String(u.avatarUpdatedAtMs) : '';
-  const sep = u.avatarUrl.includes('?') ? '&' : '?';
-  return `${u.avatarUrl}${sep}v=${encodeURIComponent(v)}`;
-}
-function _otherUidFromParticipants(parts, myUid) {
-  if (!Array.isArray(parts)) return '';
-  return parts.find(u => u && u !== myUid) || '';
+/**
+ * True when a salon-scoped item (chat template, flow, …) belongs to the
+ * active location. Items without a `locationId` field are treated as
+ * belonging to the "default" (primary) location so legacy data stays
+ * visible where it originally lived.
+ */
+
+/**
+ * True when the given member/user row is allowed to work in the active location.
+ *
+ * Mirrors the staff list filter in index.html (search "STRICT client-side
+ * location filter"):
+ *   - No active location → allow everyone (initial load, single-location salons).
+ *   - Owner / Admin / Manager → always visible everywhere ("leadership must be
+ *     reachable in every branch").
+ *   - Everyone else → must have `allowedLocationIds` that includes the active
+ *     location id. Empty / missing means not assigned anywhere → hidden.
+ *
+ * Resolves the staff record for the member via `window.ffGetStaffStore()` and
+ * falls back to the member row's own fields if no staff match exists (covers
+ * the owner row which may not be in the staff store).
+ */
+
+/**
+ * Build the deterministic conversation id for a 1:1 chat between two users,
+ * scoped to a location. The "default" branch keeps the legacy `a__b` format
+ * so existing conversations (created before multi-location rollout) remain
+ * visible to users viewing the primary/default branch; all non-default
+ * locations use a prefixed id so the same pair gets a fresh thread per branch.
+ */
+/** displayName → name on a salon/members row (or similar). */
+/** Staff store row: displayName / name for a Firebase uid. */
+
+/**
+ * Human-readable label for UI (never raw uid). While salon members are still loading, show CHAT_NAME_LOADING for others.
+ * Order: displayName → name → staff (ff_staff_v1) → email (members row only).
+ */
+
+/** For persisted message fields: never use uid; avoid "Loading..." when possible. */
+
+
+
+/** Local calendar day key for grouping (YYYY-MM-DD). */
+/** WhatsApp-style separator: TODAY / YESTERDAY / weekday or date. */
+// ─── Header (gear): ffCurrentUserHasChatManagePermission (staff chat_manage + admin session) ───
+
+function _chatManageAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatManagePermission === 'function' &&
+    window.ffCurrentUserHasChatManagePermission()
+  );
 }
 
-function timeAgo(ts) {
-  if (!ts) return '';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-  const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60)    return 'Just now';
-  if (s < 3600)  return `${Math.floor(s/60)}m ago`;
-  if (s < 86400) return `${Math.floor(s/3600)}h ago`;
-  return d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-}
-function fmtTime(ts) {
-  if (!ts) return '';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-  return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+// chat_manage resolves false until the staff store hydrates (or the admin-access
+// cache is set), so a first click on the gear used to silently no-op until the
+// 2nd/3rd attempt. Wait for the permission predicate to settle — re-checking on
+// each `ff-staff-cloud-updated` event plus a short poll — before deciding. The
+// timeout still returns the real (likely false) value, so genuine no-permission
+// users never open the modal.
+function _chatWaitForManagePermission(timeoutMs = 2500) {
+  if (_chatManageAllowed()) return Promise.resolve(true);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (val) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('ff-staff-cloud-updated', onUpd);
+      clearInterval(poll);
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const check = () => { if (_chatManageAllowed()) finish(true); };
+    const onUpd = () => check();
+    document.addEventListener('ff-staff-cloud-updated', onUpd);
+    const poll = setInterval(check, 150);
+    const timer = setTimeout(() => finish(_chatManageAllowed()), timeoutMs);
+  });
 }
 
-// ─── Header (gear) visibility by role ─────────────────────────────────────────
-// Uses chatUserProfile.role (Firestore). Fallback: ff_is_admin_cached from app.js (set on login).
-function renderChatHeaderForRole(role) {
-  const gear = document.getElementById('chatSettingsGearBtn');
-  if (!gear) return;
-  const showGear = isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
-  gear.style.display = showGear ? 'flex' : 'none';
+function _chatFreeTextAllowed() {
+  return (
+    typeof window.ffCurrentUserHasChatFreeTextPermission === 'function' &&
+    window.ffCurrentUserHasChatFreeTextPermission()
+  );
+}
+
+function _getChatFreeTextTrimmed() {
+  if (!_chatFreeTextAllowed()) return '';
+  const el = document.getElementById('chatSendFreeTextInput');
+  return el ? String(el.value || '').trim() : '';
 }
 
 // ─── Navigation ───────────────────────────────────────────────────────────────
+/**
+ * Attach a direct click listener to the New Message button. Idempotent — the
+ * flag on the element prevents double-binding. We also re-run this every time
+ * the chat screen opens so we recover if a parent re-render swaps the node.
+ */
+function _bindChatSendBtn() {
+  const btn = document.getElementById('chatSendBtn');
+  if (!btn) return;
+  if (btn.__ffSendBtnBound) return;
+  btn.__ffSendBtnBound = true;
+  btn.addEventListener('click', function (ev) {
+    ev.preventDefault();
+    if (typeof window.openSendMessageModal === 'function') {
+      try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] direct openSendMessageModal threw', e); }
+    } else {
+      setTimeout(() => {
+        if (typeof window.openSendMessageModal === 'function') {
+          try { window.openSendMessageModal(); } catch (e) { console.error('[Chat] retry openSendMessageModal threw', e); }
+        }
+      }, 50);
+    }
+  });
+}
+
+// Bind ASAP — the button is already in the DOM when chat.js executes because
+// it's declared statically in index.html.
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _bindChatSendBtn, { once: true });
+  } else {
+    _bindChatSendBtn();
+  }
+}
+
 async function goToChat() {
+  console.log('[ChatBadgePerf] screen-open', performance.now(), Date.now());
+  _bindChatSendBtn();
+  chatState._chatBadgePerfOpenMs = performance.now();
+  chatState._chatBadgePerfRenderLogged = false;
+  try {
+    if (typeof window.ffDismissQueueBootSkeleton === 'function') window.ffDismissQueueBootSkeleton();
+  } catch (_) {}
+  if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
+    try {
+      window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
   if (typeof window.closeStaffMembersModal === 'function') {
     window.closeStaffMembersModal();
   }
-  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'ticketsScreen'].forEach((id) => {
+  ['tasksScreen', 'inboxScreen', 'owner-view', 'mediaScreen', 'trainingScreen', 'scheduleScreen', 'timeClockScreen', 'ticketsScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
-  ['.joinBar', '.wrap'].forEach((sel) => {
+  ['#joinBar', '.joinbar', '.wrap', '#queueControls'].forEach((sel) => {
     const el = document.querySelector(sel);
     if (el) el.style.display = 'none';
   });
-  ['queueControls', 'userProfileScreen', 'manageQueueScreen'].forEach((id) => {
+  ['userProfileScreen', 'manageQueueScreen'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
@@ -117,7 +778,7 @@ async function goToChat() {
   document.querySelectorAll('.btn-pill').forEach(b => b.classList.remove('active'));
   document.getElementById('chatBtn')?.classList.add('active');
 
-  currentConvId = null;
+  chatState.currentConvId = null;
   _renderEmptyConversation();
 
   // Deterministic: await profile before any Admin UI decisions
@@ -125,1456 +786,308 @@ async function goToChat() {
 }
 
 async function initChatScreen() {
+  _ffEnsureChatComposerEmojiButton();
   // Skip full re-init if already loaded — just re-render header & ensure listener
-  if (_chatInitialized && chatUserProfile) {
-    renderChatHeaderForRole(chatUserProfile.role);
-    if (!chatConvsUnsub) subscribeToConversationList();
+  if (chatState._chatInitialized && chatState.chatUserProfile) {
+    renderChatHeaderForRole(chatState.chatUserProfile.role);
+    if (!chatState.chatConvsUnsub) subscribeToConversationList();
+    _bindChatConvFreeTextComposer();
+    _syncChatConvFreeTextComposer();
     return;
   }
   await loadChatUserProfile();
-  if (!chatUserProfile) {
+  if (!chatState.chatUserProfile) {
     console.error('[Chat] No profile loaded — Gear hidden. Reason: auth.currentUser missing, Firestore doc not found, or load error. See loadChatUserProfile logs.');
     renderChatHeaderForRole(null);
     return;
   }
-  await Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()]);
-  renderChatHeaderForRole(chatUserProfile.role);
+  renderChatHeaderForRole(chatState.chatUserProfile.role);
   subscribeToConversationList();
-  _chatInitialized = true;
+  _bindChatConvFreeTextComposer();
+  _syncChatConvFreeTextComposer();
+  chatState._chatInitialized = true;
+  Promise.all([loadChatSalonUsers(), loadChatTemplates(), loadChatFlows()])
+    .then(() => {
+      if (chatState.allConversations.length) renderThreadList();
+      _syncChatConvFreeTextComposer();
+    })
+    .catch((err) => console.warn('[Chat] background preload failed', err));
 }
 
-// ─── Profile / Users / Templates ──────────────────────────────────────────────
-async function loadChatUserProfile() {
-  const user = auth.currentUser;
-  if (!user) {
-    console.error('[Chat] loadChatUserProfile failed — no auth.currentUser. Gear hidden.');
-    chatUserProfile = null;
-    return;
-  }
-  try {
-    const snap = await getDoc(doc(db, 'users', user.uid));
-    if (snap.exists()) {
-      chatUserProfile = { uid: user.uid, ...snap.data() };
-    } else {
-      console.error('[Chat] loadChatUserProfile failed — Firestore doc users/' + user.uid + ' not found. Gear hidden.');
-      chatUserProfile = null;
-    }
-  } catch (e) {
-    console.error('[Chat] loadChatUserProfile failed — Firestore error:', e);
-    chatUserProfile = null;
-  }
-}
 
-async function loadChatSalonUsers() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const snap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/members`));
-    chatSalonUsers = snap.docs.map(d => ({ uid: d.id, ...d.data() }))
-                              .filter(u => u.uid !== chatUserProfile.uid);
-  } catch(e) { chatSalonUsers = []; }
-}
-
-async function loadChatTemplates() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-      orderBy('order','asc')
-    ));
-    chatTemplates = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  } catch(e) { chatTemplates = []; }
-}
-
-async function loadChatFlows() {
-  if (!chatUserProfile?.salonId) return;
-  try {
-    const flowsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows`));
-    const flows = [];
-    for (const fd of flowsSnap.docs) {
-      const flowData = { id: fd.id, ...fd.data() };
-      const stepsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
-      flowData.steps = [];
-      for (const sd of stepsSnap.docs) {
-        const stepData = { id: sd.id, ...sd.data() };
-        const optsSnap = await getDocs(collection(db, `salons/${chatUserProfile.salonId}/chatFlows/${fd.id}/steps/${sd.id}/options`));
-        stepData.options = optsSnap.docs.map(od => ({ id: od.id, ...od.data() }));
-        flowData.steps.push(stepData);
-      }
-      flowData.steps.sort((a,b) => (a.order||0) - (b.order||0));
-      if ((flowData.status || 'active') !== 'archived') flows.push(flowData);
-    }
-    chatFlows = flows;
-  } catch(e) { chatFlows = []; }
-}
-
-// ─── Conversation List Subscription (PRIVATE) ──────────────────────────────────
-function subscribeToConversationList() {
-  if (!chatUserProfile?.salonId) return;
-  if (chatConvsUnsub) { chatConvsUnsub(); chatConvsUnsub = null; }
-  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
-
-  const uid  = chatUserProfile.uid;
-
-  chatConvsUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations`),
-      where('participants', 'array-contains', uid)
-    ),
-    snap => {
-      allConversations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // Sort client-side (avoid composite index requirements)
-      allConversations.sort((a, b) => {
-        const aMs = a.lastMessageAt?.toMillis?.()
-          || (typeof a.lastMessageAtMs === 'number' ? a.lastMessageAtMs : 0)
-          || a.updatedAt?.toMillis?.()
-          || (typeof a.updatedAtMs === 'number' ? a.updatedAtMs : 0)
-          || a.createdAt?.toMillis?.()
-          || 0;
-        const bMs = b.lastMessageAt?.toMillis?.()
-          || (typeof b.lastMessageAtMs === 'number' ? b.lastMessageAtMs : 0)
-          || b.updatedAt?.toMillis?.()
-          || (typeof b.updatedAtMs === 'number' ? b.updatedAtMs : 0)
-          || b.createdAt?.toMillis?.()
-          || 0;
-        return bMs - aMs;
-      });
-
-      renderThreadList();
-      if (currentConvId) renderConversation(currentConvId);
-      else _renderEmptyConversation();
-    },
-    err => console.error('[Chat] conversations snapshot error', err)
-  );
-}
 
 // ─── Thread List ───────────────────────────────────────────────────────────────
-function renderThreadList() {
-  const loading = document.getElementById('chatFeedLoading');
-  const empty   = document.getElementById('chatFeedEmpty');
-  const list    = document.getElementById('chatFeedList');
-  if (!list) return;
-  if (loading) loading.style.display = 'none';
 
-  const uid = chatUserProfile?.uid || '';
 
-  if (!Array.isArray(allConversations) || allConversations.length === 0) {
-    if (empty) empty.style.display = 'block';
-    list.innerHTML = '';
-    return;
-  }
-  if (empty) empty.style.display = 'none';
 
-  list.innerHTML = allConversations.map(conv => {
-    const convId = conv.id;
-    const otherUid = _otherUidFromParticipants(conv.participants, uid);
-    const otherName = _nameForUid(otherUid) || 'Unknown';
-    const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
-    const myInitial  = (chatUserProfile?.name || '?').charAt(0).toUpperCase();
-    const otherInitial = otherName.charAt(0).toUpperCase();
-    const myAvatarUrl = _avatarUrlForUid(uid);
-    const otherAvatarUrl = _avatarUrlForUid(otherUid);
-    const myAvatarHtml = myAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
-    const otherAvatarHtml = otherAvatarUrl
-      ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
-
-    const selected = (currentConvId === convId) ? 'is-selected' : '';
-    return `
-      <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
-           onclick="window._openThread('${escHtml(convId)}')">
-        <div class="ctc-avatars">
-          ${myAvatarHtml}
-          ${otherAvatarHtml}
-        </div>
-        <div class="ctc-body">
-          <div class="ctc-top">
-            <span class="ctc-name">${escHtml(otherName)}</span>
-            <span class="ctc-time">${timeAgo(conv?.lastMessageAt)}</span>
-          </div>
-          <div class="ctc-preview">
-            ${conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : ''}
-            ${escHtml(conv?.lastTitle || conv?.lastMessage || '')}
-          </div>
-        </div>
-        ${unread > 0 ? `<span class="ctc-badge">${unread}</span>` : ''}
-      </div>
-    `;
-  }).join('');
-}
 
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
-window._openThread = async function(convId) {
-  currentConvId = convId;
-  // Mobile: open conversation view (hide list)
-  document.getElementById('chatScreen')?.classList.add('chat-mobile-open');
+window._openThread = async function(convId, sourceEl) {
+  _cacheVisibleThreadListHtml();
+  if (Array.isArray(chatState.allConversations) && chatState.allConversations.length > 0) {
+    chatState.lastNonEmptyConversations = chatState.allConversations.slice();
+    chatState.lastRenderedConversations = chatState.allConversations.slice();
+  }
+  const sourceOtherUid = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-uid') : '';
+  const sourceOtherNameAttr = sourceEl && sourceEl.getAttribute ? sourceEl.getAttribute('data-other-name') : '';
+  const sourceOtherNameText = sourceEl && sourceEl.querySelector ? (sourceEl.querySelector('.ctc-name')?.textContent || '') : '';
+  const sourceOtherName = sourceOtherNameAttr && sourceOtherNameAttr !== CHAT_NAME_LOADING && sourceOtherNameAttr !== 'Unknown'
+    ? sourceOtherNameAttr
+    : sourceOtherNameText;
+  const cachedConv = _conversationById(convId);
+  chatState.currentThreadFallback = {
+    convId,
+    otherUid: sourceOtherUid || _otherUidFromParticipants(cachedConv?.participants, chatState.chatUserProfile?.uid || ''),
+    otherName: sourceOtherName || '',
+  };
+  chatState.currentConvId = convId;
+  // On narrow mobile screens, show the conversation view with a back button.
+  // Desktop/tablet keeps the left conversation list visible.
+  const shouldUseMobileChatView = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 860px)').matches;
+  document.getElementById('chatScreen')?.classList.toggle('chat-mobile-open', shouldUseMobileChatView);
   // Update header title
   _setConversationHeader(convId);
+  renderThreadList();
+  chatState.currentMessages = [];
+  chatState.chatMessagesLoading = true;
   _subscribeToMessages(convId);
   renderConversation(convId);
-  await markThreadRead(convId);
-  renderThreadList();
+  markThreadRead(convId)
+    .catch(() => {})
+    .finally(() => {
+      if (chatState.currentConvId === convId) renderThreadList();
+    });
 };
 
 window.closeConversation = function() {
-  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
-  currentMessages = [];
-  currentConvId = null;
+  if (chatState.chatMsgsUnsub) { chatState.chatMsgsUnsub(); chatState.chatMsgsUnsub = null; }
+  chatState.currentMessages = [];
+  chatState.currentConvId = null;
+  chatState.currentThreadFallback = null;
+  chatState.chatMessagesLoading = false;
   document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
+  _restoreVisibleThreadListHtml();
   renderThreadList();
+  _restoreVisibleThreadListHtml();
   _renderEmptyConversation();
-};
-
-// ─── Conversation View (bubbles) ───────────────────────────────────────────────
-function renderConversation(convId) {
-  _setConversationHeader(convId);
-  const msgs = Array.isArray(currentMessages) ? currentMessages.slice() : [];
-
-  const uid      = chatUserProfile?.uid || '';
-  const container= document.getElementById('chatConvMessages');
-  if (!container) return;
-
-  if (!convId) {
-    _renderEmptyConversation();
-    return;
-  }
-
-  if (msgs.length === 0) {
-    container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
-    return;
-  }
-
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  const otherAvatarUrl = _avatarUrlForUid(otherUid);
-
-  container.innerHTML = msgs.map(ev => {
-    const mine = ev.senderUid === uid;
-    const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
-    const otherAvatarHtml = !mine && otherAvatarUrl
-      ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-      : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
-    return `
-      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}">
-        ${otherAvatarHtml}
-        <div class="cb-col">
-          ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
-          <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}">
-            <div class="cb-title">${escHtml(ev.title||'')}</div>
-            ${ev.message ? `<div class="cb-body">${escHtml(ev.message)}</div>` : ''}
-          </div>
-          <span class="cb-time">${fmtTime(ev.sentAt)}</span>
-        </div>
-      </div>
-    `;
-  }).join('');
-
-  // Scroll to bottom
-  setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
-
-  // Store other participant for reply (conv, otherUid already declared above)
-  const otherName = _nameForUid(otherUid);
-  const replyBtn  = document.getElementById('chatConvReplyBtn');
-  if (replyBtn) {
-    replyBtn.setAttribute('data-other-uid',  otherUid);
-    replyBtn.setAttribute('data-other-name', otherName);
-    replyBtn.setAttribute('data-conv-id',    convId);
-  }
-}
-
-function _setConversationHeader(convId) {
-  const title = document.getElementById('chatConvTitle');
-  if (!title) return;
-  if (!convId) {
-    title.textContent = 'Select a conversation';
-    return;
-  }
-  const uid  = chatUserProfile?.uid || '';
-  const conv = allConversations.find(c => c.id === convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid);
-  title.textContent = _nameForUid(otherUid) || 'Conversation';
-}
-
-function _renderEmptyConversation() {
-  _setConversationHeader(null);
-  const container = document.getElementById('chatConvMessages');
-  if (!container) return;
-  container.innerHTML = `
-    <div style="text-align:center;padding:60px 20px;color:#9ca3af;">
-      <div style="font-size:15px;font-weight:700;color:#6b7280;margin-bottom:6px;">Select a chat</div>
-      <div style="font-size:13px;color:#9ca3af;">Choose a name from the left to view messages.</div>
-    </div>
-  `;
-}
-
-// ─── Reply from inside thread ──────────────────────────────────────────────────
-window.openThreadReply = async function() {
-  const btn      = document.getElementById('chatConvReplyBtn');
-  const otherUid = btn?.getAttribute('data-other-uid')  || '';
-  const otherName= btn?.getAttribute('data-other-name') || '';
-  const convId   = btn?.getAttribute('data-conv-id')    || currentConvId;
-
-  chatReplyContext = { uid: otherUid, name: otherName, conversationId: convId };
-  await _openChatModal({ title: `↩ Reply to ${otherName || otherUid}`, showSendTo: false });
-};
-
-// ─── Mark Thread Read ──────────────────────────────────────────────────────────
-async function markThreadRead(convId) {
-  if (!chatUserProfile?.salonId || !chatUserProfile?.uid) return;
-  const uid = chatUserProfile.uid;
-  try {
-    // Reset unread counter on conversation doc
-    await updateDoc(
-      doc(db, `salons/${chatUserProfile.salonId}/conversations`, convId),
-      { [`unreadFor.${uid}`]: 0 }
-    );
-  } catch(e) {}
-
-  // Best-effort: mark recent messages as read (last 60)
-  try {
-    const snap = await getDocs(query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt', 'desc'),
-      limit(60)
-    ));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => {
-      const data = d.data() || {};
-      const rb = Array.isArray(data.readBy) ? data.readBy : [];
-      if (!rb.includes(uid)) {
-        batch.update(d.ref, { readBy: arrayUnion(uid) });
-      }
-    });
-    await batch.commit();
-  } catch(e) {}
-}
-
-// ─── Send Modal (new message from main screen) ────────────────────────────────
-window.openSendMessageModal = async function() {
-  chatReplyContext = null;
-  await _openChatModal({ title: 'New Message', showSendTo: true });
-};
-
-// ─── Shared Modal Renderer ─────────────────────────────────────────────────────
-async function _openChatModal({ title, showSendTo }) {
-  if (!chatUserProfile) return;
-  await loadChatTemplates();
-  await loadChatFlows();
-  await loadChatSalonUsers();
-
-  chatSendMode = 'template';
-  chatSelectedFlow = null;
-  chatFlowAnswers = [];
-
-  const role = (chatUserProfile.role || '').toLowerCase();
-  const roleForFilter = role === 'staff' ? 'technician' : role;
-
-  const sendableTemplates = chatTemplates.filter(t => {
-    if (!Array.isArray(t.allowedSenders) || t.allowedSenders.length === 0) return true;
-    return t.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
-  const sendableFlows = chatFlows.filter(f => {
-    if (!Array.isArray(f.allowedSenders) || f.allowedSenders.length === 0) return true;
-    return f.allowedSenders.some(s => s.toLowerCase() === roleForFilter);
-  });
-
-  const modal         = document.getElementById('chatSendModal');
-  const messageList   = document.getElementById('chatSendMessageList');
-  const recipientList = document.getElementById('chatSendRecipientList');
-  const sendToSection = document.getElementById('chatSendToSection');
-  const pickerBtn     = document.getElementById('chatRecipientPickerBtn');
-  const pickerLabel   = document.getElementById('chatRecipientPickerLabel');
-  const panel         = document.getElementById('chatRecipientPanel');
-  const searchInput   = document.getElementById('chatRecipientSearch');
-  if (!modal || !messageList || !recipientList) return;
-
-  modal.querySelector('.chat-modal-title').textContent = title;
-  if (sendToSection) sendToSection.style.display = showSendTo ? 'block' : 'none';
-  if (!showSendTo && panel) panel.style.display = 'none';
-
-  const items = [];
-  sendableTemplates.forEach(t => items.push({ type: 'template', id: t.id, title: t.title, preview: t.message }));
-  sendableFlows.forEach(f => items.push({
-    type: 'flow',
-    id: f.id,
-    title: f.title,
-    preview: f.steps?.[0]?.prompt || ''
-  }));
-
-  if (items.length === 0) {
-    messageList.innerHTML = '<div style="padding:16px;color:#6b7280;text-align:center;font-size:14px;">No messages available.<br>Ask an Admin to add messages.</div>';
-  } else {
-    messageList.innerHTML = items.map(it => {
-      const isFlow = it.type === 'flow';
-      const caretHtml = isFlow
-        ? `<span class="chat-option-caret" aria-hidden="true" style="flex-shrink:0;font-size:10px;color:#9ca3af;transition:transform 0.2s;">▼</span>`
-        : '';
-      return `
-        <div class="chat-message-option-block" data-type="${it.type}" data-id="${escHtml(it.id)}" style="margin-bottom:4px;">
-          <label class="chat-message-option" style="display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;background:#fff;">
-            <input type="radio" name="chatMessageRadio" value="${it.type}:${escHtml(it.id)}" style="margin-top:1px;accent-color:#7c3aed;">
-            <div style="flex:1;min-width:0;">
-              <div style="font-size:12px;font-weight:600;color:#111827;">${escHtml(it.title)}</div>
-              ${it.preview ? `<div style="font-size:11px;color:#6b7280;margin-top:0;">${escHtml(it.preview)}</div>` : ''}
-            </div>
-            ${caretHtml}
-          </label>
-          ${isFlow ? `<div class="chat-flow-accordion" data-flow-id="${escHtml(it.id)}" style="display:none;margin-top:4px;margin-left:0;padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;"></div>` : ''}
-        </div>
-      `;
-    }).join('');
-
-    messageList.querySelectorAll('input[name="chatMessageRadio"]').forEach(r => {
-      r.addEventListener('change', () => {
-        const v = r.value;
-        const [type, id] = v.includes(':') ? v.split(/:(.+)/).slice(0, 2) : ['template', v];
-        const block = r.closest('.chat-message-option-block');
-        document.querySelectorAll('.chat-message-option-block').forEach(b => {
-          const acc = b.querySelector('.chat-flow-accordion');
-          const caret = b.querySelector('.chat-option-caret');
-          if (acc) {
-            acc.style.display = 'none';
-            acc.innerHTML = '';
-            if (caret) caret.textContent = '▼';
-          }
-        });
-        if (type === 'flow') {
-          chatSendMode = 'flow';
-          chatSelectedFlow = chatFlows.find(x => x.id === id) || null;
-          chatFlowAnswers = [];
-          const acc = block?.querySelector('.chat-flow-accordion');
-          const caret = block?.querySelector('.chat-option-caret');
-          if (acc) {
-            acc.style.display = 'block';
-            if (caret) caret.textContent = '▲';
-            _chatRenderFlowWizard(acc);
-            setTimeout(() => acc.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-          }
-        } else {
-          chatSendMode = 'template';
-          chatSelectedFlow = null;
-          chatFlowAnswers = [];
-        }
-        _updateChatSendBtn();
-      });
-    });
-  }
-
-  // Recipients
-  if (showSendTo) {
-    const pool = isMgrPlus(role) ? chatSalonUsers : chatSalonUsers.filter(u => isMgrPlus(u.role));
-    // Reset UI
-    if (searchInput) searchInput.value = '';
-    if (panel) panel.style.display = 'none';
-    const allCb = document.getElementById('chatRecipientAll');
-    if (allCb) allCb.checked = false;
-
-    recipientList.innerHTML = pool.length === 0
-      ? '<div style="padding:10px;color:#6b7280;font-size:13px;">No recipients available.</div>'
-      : pool.map(u => {
-          const displayName = (u.name || u.email || u.uid || '').trim();
-          const search = `${displayName} ${u.email || ''} ${roleLabel(u.role)}`.toLowerCase();
-          const avatarUrl = _avatarUrlForUid(u.uid);
-          const avatarHtml = avatarUrl
-            ? `<span class="chat-rcpt-avatar-sm" style="overflow:hidden;padding:0;"><img src="${String(avatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-            : `<span class="chat-rcpt-avatar-sm">${escHtml((displayName||'?').charAt(0).toUpperCase())}</span>`;
-          return `
-            <label class="chat-recipient-row" data-search="${escHtml(search)}"
-              style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:#374151;">
-              <input type="checkbox" name="chatRecipient" value="${escHtml(u.uid)}" data-name="${escHtml(displayName)}" style="accent-color:#7c3aed;">
-              ${avatarHtml}
-              <span style="font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(displayName)}</span>
-              <span style="color:#9ca3af;font-size:12px;flex-shrink:0;">${roleLabel(u.role)}</span>
-            </label>
-          `;
-        }).join('');
-
-    // Bind picker behavior (once)
-    if (pickerBtn && panel && !pickerBtn.__ffBound) {
-      pickerBtn.__ffBound = true;
-      pickerBtn.onclick = function(e) {
-        e.preventDefault();
-        const open = panel.style.display !== 'block';
-        panel.style.display = open ? 'block' : 'none';
-        if (open) setTimeout(() => searchInput?.focus(), 0);
-      };
-      // Close when clicking outside the picker
-      document.addEventListener('click', function(ev) {
-        const isOpen = panel.style.display === 'block';
-        if (!isOpen) return;
-        if (panel.contains(ev.target) || pickerBtn.contains(ev.target)) return;
-        panel.style.display = 'none';
-      });
-    }
-
-    // Search filter
-    if (searchInput && !searchInput.__ffBound) {
-      searchInput.__ffBound = true;
-      searchInput.addEventListener('input', function() {
-        const q = (searchInput.value || '').trim().toLowerCase();
-        document.querySelectorAll('#chatSendRecipientList .chat-recipient-row').forEach(row => {
-          const s = (row.getAttribute('data-search') || '').toLowerCase();
-          row.style.display = (!q || s.includes(q)) ? 'flex' : 'none';
-        });
-      });
-    }
-
-    // Summary label
-    _updateRecipientSummary();
-    if (pickerLabel) pickerLabel.textContent = pickerLabel.textContent || 'Select recipients…';
-  }
-
-  modal.style.display = 'flex';
-  const sendBtn = document.getElementById('chatSendConfirmBtn');
-  if (sendBtn) sendBtn.disabled = true;
-
-  if (showSendTo) {
-    modal.querySelectorAll('input[name="chatRecipient"]').forEach(r =>
-      r.addEventListener('change', _updateChatSendBtn)
-    );
-    document.getElementById('chatRecipientAll')?.addEventListener('change', _updateChatSendBtn);
-  }
-}
-
-// Legacy: mode buttons removed; selection is via unified chatMessageRadio list
-window._chatSendMode = function(mode) {
-  chatSendMode = mode;
-  chatSelectedFlow = null;
-  chatFlowAnswers = [];
-  document.querySelectorAll('.chat-flow-accordion').forEach(acc => { acc.style.display = 'none'; acc.innerHTML = ''; });
-  document.querySelectorAll('.chat-option-caret').forEach(c => { c.textContent = '▼'; });
-  _updateChatSendBtn();
-};
-
-function _chatGetFlowAccordion() {
-  if (!chatSelectedFlow?.id) return null;
-  const block = document.querySelector(`.chat-message-option-block[data-type="flow"][data-id="${chatSelectedFlow.id}"]`);
-  return block?.querySelector('.chat-flow-accordion') || null;
-}
-
-function _chatRenderFlowWizard(container) {
-  const wizard = container || _chatGetFlowAccordion();
-  if (!wizard || !chatSelectedFlow) return;
-  const flow = chatSelectedFlow;
-  const steps = flow.steps || [];
-  const startId = flow.startStepId || steps[0]?.id;
-  if (!startId || !steps.length) {
-    wizard.innerHTML = '<div style="padding:12px;color:#6b7280;font-size:13px;">This flow has no questions yet.</div>';
-    return;
-  }
-  let stepId = startId;
-  for (const a of chatFlowAnswers) {
-    const step = steps.find(s => String(s.id) === String(a.stepId));
-    const opt = step?.options?.find(o => String(o.id) === String(a.optionId));
-    if (!opt) { stepId = null; break; }
-    if (opt.finish) { stepId = null; break; }
-    stepId = opt.nextStepId || null;
-  }
-  if (!stepId) {
-    const rendered = _buildFlowRenderedText(flow, chatFlowAnswers);
-    wizard.innerHTML = `
-      <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">✓ Summary</div>
-      <div style="font-size:14px;color:#6b7280;white-space:pre-wrap;">${escHtml(rendered)}</div>
-      <button type="button" onclick="window._chatFlowResetWizard && window._chatFlowResetWizard()" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#7c3aed;background:none;border:none;cursor:pointer;">Change answers</button>
-    `;
-    _updateChatSendBtn();
-    return;
-  }
-  const step = steps.find(s => String(s.id) === String(stepId));
-  if (!step || !step.options?.length) {
-    wizard.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">No options for this step.</div>
-      <button type="button" onclick="window._chatFlowResetWizard && window._chatFlowResetWizard()" style="margin-top:8px;padding:6px 12px;font-size:12px;color:#7c3aed;background:none;border:none;cursor:pointer;">Start over</button>`;
-    return;
-  }
-  wizard.innerHTML = `
-    <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:10px;">${escHtml(step.prompt || 'Choose an option:')}</div>
-    <div style="display:flex;flex-direction:column;gap:6px;" id="chatFlowStepOptions">
-      ${step.options.map(o => `
-        <button type="button" class="chat-flow-opt-btn" data-step-id="${escHtml(step.id)}" data-opt-id="${escHtml(o.id)}" data-opt-label="${escHtml(o.label || '')}"
-          style="padding:10px 14px;text-align:left;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:14px;color:#111827;">${escHtml(o.label || '(no label)')}</button>
-      `).join('')}
-    </div>
-    ${chatFlowAnswers.length ? '<button type="button" class="chat-flow-back-btn" style="margin-top:10px;padding:6px 12px;font-size:12px;color:#6b7280;background:none;border:none;cursor:pointer;">← Back</button>' : ''}
-  `;
-  wizard.querySelectorAll('.chat-flow-opt-btn').forEach(btn => {
-    btn.onclick = () => {
-      chatFlowAnswers.push({
-        stepId: btn.getAttribute('data-step-id'),
-        prompt: step.prompt || '',
-        optionId: btn.getAttribute('data-opt-id'),
-        label: btn.getAttribute('data-opt-label') || btn.textContent.trim()
-      });
-      _chatRenderFlowWizard();
-      _updateChatSendBtn();
-      setTimeout(() => wizard.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80);
-    };
-  });
-  const backBtn = wizard.querySelector('.chat-flow-back-btn');
-  if (backBtn) backBtn.onclick = () => { window._chatFlowBack && window._chatFlowBack(); };
-  _updateChatSendBtn();
-}
-
-window._chatFlowBack = function() { chatFlowAnswers.pop(); _chatRenderFlowWizard(); _updateChatSendBtn(); };
-window._chatFlowResetWizard = function() {
-  chatFlowAnswers = [];
-  _chatRenderFlowWizard();
-  _updateChatSendBtn();
-};
-
-function _buildFlowRenderedText(flow, answers) {
-  if (!answers?.length) return '';
-  const lines = answers.map(a => {
-    const q = (a.prompt || '').trim();
-    const a2 = (a.label || '').trim();
-    return q ? `${q}: ${a2}` : a2;
-  }).filter(Boolean);
-  return lines.join('\n');
-}
-
-window._chatToggleAllRecipients = function(checked) {
-  document.querySelectorAll('input[name="chatRecipient"]').forEach(cb => { cb.checked = checked; });
-  _updateChatSendBtn();
-};
-
-function _updateChatSendBtn() {
-  let ready = false;
-  const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
-  if (chatSendMode === 'flow') {
-    if (chatSelectedFlow && chatFlowAnswers.length) {
-      const flow = chatSelectedFlow;
-      const steps = flow.steps || [];
-      const findStep = id => steps.find(s => String(s.id) === String(id));
-      const findOpt = (step, id) => step?.options?.find(o => String(o.id) === String(id));
-      let stepId = flow.startStepId || steps[0]?.id;
-      for (const a of chatFlowAnswers) {
-        const step = findStep(a.stepId);
-        const opt = findOpt(step, a.optionId) || (step?.options && a.label ? step.options.find(o => String(o.label || '').trim() === String(a.label || '').trim()) : null);
-        if (!opt || opt.finish) { stepId = null; break; }
-        stepId = opt.nextStepId ?? null;
-      }
-      ready = !stepId;
-    }
-  } else {
-    ready = !!(radio && String(radio.value || '').startsWith('template:'));
-  }
-  let rcpt = true;
-  if (!chatReplyContext) {
-    rcpt = document.getElementById('chatRecipientAll')?.checked
-        || !!document.querySelector('input[name="chatRecipient"]:checked');
-  }
-  const btn = document.getElementById('chatSendConfirmBtn');
-  if (btn) {
-    btn.disabled = !ready;
-    btn.title = ready && !rcpt ? 'Select at least one recipient' : '';
-  }
-  _updateRecipientSummary();
-}
-
-window.closeSendMessageModal = function() {
-  const modal = document.getElementById('chatSendModal');
-  if (modal) modal.style.display = 'none';
-  const panel = document.getElementById('chatRecipientPanel');
-  if (panel) panel.style.display = 'none';
-  chatReplyContext = null;
-};
-
-function _updateRecipientSummary() {
-  const label = document.getElementById('chatRecipientPickerLabel');
-  if (!label) return;
-  // Reply flow has no send-to
-  if (chatReplyContext) return;
-
-  const all = document.getElementById('chatRecipientAll')?.checked;
-  if (all) {
-    label.textContent = 'Everyone';
-    return;
-  }
-  const checked = Array.from(document.querySelectorAll('input[name="chatRecipient"]:checked'));
-  if (checked.length === 0) {
-    label.textContent = 'Select recipients…';
-    return;
-  }
-  const firstName = checked[0].getAttribute('data-name') || checked[0].value;
-  label.textContent = checked.length === 1 ? firstName : `${firstName} +${checked.length - 1}`;
-}
-
-// ─── Confirm Send ──────────────────────────────────────────────────────────────
-window.confirmSendChatMessage = async function() {
-  if (!chatUserProfile) return;
-  let title, message, templateId = null, flowId = null, flowTitle = null, flowAnswers = null, renderedText = null;
-
-  if (chatSendMode === 'flow' && chatSelectedFlow && chatFlowAnswers?.length) {
-    const flow = chatSelectedFlow;
-    const steps = flow.steps || [];
-    const findStep = id => steps.find(s => String(s.id) === String(id));
-    const findOpt = (step, id) => step?.options?.find(o => String(o.id) === String(id));
-    let stepId = flow.startStepId || steps[0]?.id;
-    for (const a of chatFlowAnswers) {
-      const step = findStep(a.stepId);
-      const opt = findOpt(step, a.optionId) || (step?.options && a.label ? step.options.find(o => String(o.label || '').trim() === String(a.label || '').trim()) : null);
-      if (opt?.finish) { stepId = null; break; }
-      stepId = opt?.nextStepId ?? null;
-    }
-    if (stepId) { alert('Please complete the flow.'); return; }
-    title = flow.title;
-    renderedText = _buildFlowRenderedText(flow, chatFlowAnswers);
-    flowId = flow.id;
-    flowTitle = flow.title;
-    flowAnswers = chatFlowAnswers;
-    message = renderedText;
-  } else {
-    const radio = document.querySelector('input[name="chatMessageRadio"]:checked');
-    if (!radio) { alert('Please select a message.'); return; }
-    const val = String(radio.value || '');
-    const templateIdRaw = val.startsWith('template:') ? val.slice(9) : val;
-    const template = chatTemplates.find(t => t.id === templateIdRaw);
-    if (!template) return;
-    title = template.title; message = template.message || ''; templateId = template.id;
-  }
-
-  let recipientUids = [], recipientNames = [];
-
-  if (chatReplyContext) {
-    recipientUids  = [chatReplyContext.uid];
-    recipientNames = [chatReplyContext.name];
-  } else {
-    const allChecked = document.getElementById('chatRecipientAll')?.checked;
-    if (allChecked) {
-      const pool = isMgrPlus(chatUserProfile.role)
-        ? chatSalonUsers
-        : chatSalonUsers.filter(u => isMgrPlus(u.role));
-      recipientUids  = pool.map(u => u.uid);
-      recipientNames = pool.map(u => u.name || u.uid);
-    } else {
-      document.querySelectorAll('input[name="chatRecipient"]:checked').forEach(cb => {
-        recipientUids.push(cb.value);
-        recipientNames.push(cb.getAttribute('data-name') || cb.value);
-      });
-    }
-    if (!recipientUids.length) { alert('Please select at least one recipient.'); return; }
-  }
-
-  const btn = document.getElementById('chatSendConfirmBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-
-  try {
-    const salonId = chatUserProfile.salonId;
-    const senderUid  = chatUserProfile.uid;
-    const senderName = chatUserProfile.name || chatUserProfile.displayName || '';
-    const senderRole = chatUserProfile.role || '';
-
-    for (let i = 0; i < recipientUids.length; i++) {
-      const rUid  = recipientUids[i];
-      const rName = recipientNames[i] || _nameForUid(rUid) || rUid;
-      const convId = chatReplyContext?.conversationId || buildConvId(senderUid, rUid);
-
-      const convRef = doc(db, `salons/${salonId}/conversations`, convId);
-      // IMPORTANT: security rules for messages verify participants by reading the
-      // conversation doc. So we must ensure the conversation exists BEFORE writing messages.
-      await setDoc(
-        convRef,
-        { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp() },
-        { merge: true }
-      );
-
-      const msgRef  = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
-      const batch   = writeBatch(db);
-
-      const msgData = {
-        senderUid, senderName, senderRole, recipientUid: rUid, recipientName: rName,
-        sentAt: serverTimestamp(), readBy: [senderUid]
-      };
-      if (flowId) {
-        msgData.flowId = flowId; msgData.flowTitle = flowTitle; msgData.renderedText = renderedText;
-        msgData.flowAnswers = flowAnswers; msgData.title = title; msgData.message = renderedText;
-      } else {
-        msgData.templateId = templateId; msgData.title = title; msgData.message = message;
-      }
-      batch.set(msgRef, msgData);
-
-      // Update conversation summary + unread count for recipient (merge-safe)
-      batch.set(convRef, {
-        lastMessageAt: serverTimestamp(),
-        lastMessageAtMs: Date.now(),
-        lastTitle: title,
-        lastMessage: message || renderedText,
-        lastSenderUid: senderUid,
-        lastSenderName: senderName,
-        lastSenderRole: senderRole,
-        updatedAt: serverTimestamp(),
-        updatedAtMs: Date.now(),
-        unreadFor: { [rUid]: increment(1) }
-      }, { merge: true });
-
-      await batch.commit();
-    }
-
-    window.closeSendMessageModal();
-    if (chatReplyContext?.conversationId && currentConvId === chatReplyContext.conversationId) {
-      renderConversation(chatReplyContext.conversationId);
-    }
-  } catch(e) {
-    console.error('[Chat] send error', e);
-    alert('Failed to send: ' + (e?.code || e?.message || 'unknown'));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
-  }
-};
-
-// ─── Badge ─────────────────────────────────────────────────────────────────────
-export function subscribeToChatBadge(uid, salonId) {
-  if (!uid || !salonId) return;
-  if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
-  chatBadgeUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${salonId}/conversations`),
-      where('participants', 'array-contains', uid)
-    ),
-    snap => {
-      const unread = snap.docs.reduce((sum, d) => {
-        const data = d.data() || {};
-        const n = (data.unreadFor && data.unreadFor[uid]) ? Number(data.unreadFor[uid]) : 0;
-        return sum + (isNaN(n) ? 0 : n);
-      }, 0);
-      const badge = document.getElementById('chatNavBadge');
-      if (!badge) return;
-      badge.textContent = unread > 99 ? '99+' : String(unread);
-      badge.style.display = unread > 0 ? 'inline-flex' : 'none';
-    }
-  );
-}
-
-// ─── Toast Notifications ───────────────────────────────────────────────────────
-const CHAT_TOAST_DURATION_MS = 5000;
-
-function isChatScreenVisible() {
-  const cs = document.getElementById('chatScreen');
-  return !!(cs && (cs.style.display === 'flex' || (cs.style.display === '' && getComputedStyle(cs).display === 'flex')));
-}
-
-function showChatToast({ senderName, role, preview, convId }) {
-  const container = document.getElementById('chatToastContainer');
-  if (!container) return;
-  const toast = document.createElement('div');
-  toast.className = 'chat-toast';
-  toast.setAttribute('data-conv-id', convId);
-  const roleText = roleLabel(role) || role || '';
-  const previewText = (preview || '').trim().slice(0, 80) || 'New message';
-  const senderLine = roleText ? `${escHtml(senderName || 'Someone')} · ${escHtml(roleText)}` : escHtml(senderName || 'Someone');
-  toast.innerHTML = `
-    <div class="chat-toast-header">
-      <div class="chat-toast-sender">${senderLine}</div>
-      <button type="button" class="chat-toast-close" aria-label="Close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-      </button>
-    </div>
-    <div class="chat-toast-preview">${escHtml(previewText)}</div>
-  `;
-  let timeoutId = null;
-  const dismiss = () => {
-    if (timeoutId) clearTimeout(timeoutId);
-    toast.classList.add('chat-toast-dismissing');
-    setTimeout(() => toast.remove(), 220);
-  };
-  const openThread = async () => {
-    dismiss();
-    await goToChat();
-    if (typeof window._openThread === 'function') window._openThread(convId);
-  };
-  toast.querySelector('.chat-toast-close').onclick = e => { e.stopPropagation(); dismiss(); };
-  toast.onclick = () => openThread();
-  container.appendChild(toast);
-  timeoutId = setTimeout(dismiss, CHAT_TOAST_DURATION_MS);
-}
-
-export function subscribeToChatToastNotifications(myUid, salonId) {
-  if (!myUid || !salonId) return;
-  if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
-  chatToastUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${salonId}/conversations`),
-      where('participants', 'array-contains', myUid)
-    ),
-    snap => {
-      snap.docChanges().forEach(change => {
-        if (change.type !== 'modified') return;
-        const data = change.doc.data() || {};
-        const convId = change.doc.id;
-        const lastSenderUid = data.lastSenderUid;
-        if (!lastSenderUid || lastSenderUid === myUid) return;
-        if (currentConvId === convId && isChatScreenVisible()) return;
-        showChatToast({
-          senderName: data.lastSenderName || 'Someone',
-          role: data.lastSenderRole || '',
-          preview: data.lastTitle || data.lastMessage || '',
-          convId
-        });
-      });
-    },
-    err => console.error('[Chat] toast snapshot error', err)
-  );
-}
-
-function _subscribeToMessages(convId) {
-  if (!chatUserProfile?.salonId) return;
-  if (chatMsgsUnsub) { chatMsgsUnsub(); chatMsgsUnsub = null; }
-
-  chatMsgsUnsub = onSnapshot(
-    query(
-      collection(db, `salons/${chatUserProfile.salonId}/conversations/${convId}/messages`),
-      orderBy('sentAt','asc'),
-      limit(300)
-    ),
-    snap => {
-      currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      if (currentConvId === convId) renderConversation(convId);
-    },
-    err => console.error('[Chat] messages snapshot error', err)
-  );
-}
-
-// ─── Admin Templates + Flows Settings ───────────────────────────────────────────
-window.openChatTemplatesSettings = async function() {
-  if (!chatUserProfile) await loadChatUserProfile();
-  if (!isAdmin(chatUserProfile?.role)) return;
-  await loadChatTemplates();
-  await loadChatFlows();
-  _renderTmplList();
-  _chatSettingsTab('templates');
-  document.getElementById('chatTemplatesModal').style.display = 'flex';
-};
-window.closeChatTemplatesModal = function() {
-  document.getElementById('chatTemplatesModal').style.display = 'none';
-  chatEditingTmplId = null;
-  chatEditingFlowId = null;
-  chatFlowDraft = null;
-};
-
-window._chatSettingsTab = function(tab) {
-  document.querySelectorAll('.chat-settings-tab').forEach(b => { b.classList.remove('active'); });
-  const t = document.getElementById('chatSettingsTab' + (tab === 'templates' ? 'Templates' : 'Flows'));
-  if (t) t.classList.add('active');
-  document.getElementById('chatSettingsTemplatesPane').style.display = tab === 'templates' ? 'flex' : 'none';
-  const fp = document.getElementById('chatSettingsFlowsPane');
-  if (fp) {
-    fp.style.display = tab === 'flows' ? 'flex' : 'none';
-    if (tab === 'flows') {
-      _renderFlowsAdminList();
-      _renderFlowBuilder();
-    }
-  }
-};
-
-window._chatFlowAddStep = function() {
-  _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const id = 's' + Date.now();
-  chatFlowDraft.steps.push({ id, prompt: '', order: 0, options: [{ id: 'o' + Date.now(), label: '', finish: true }] });
-  _renderFlowBuilder();
-};
-
-window._chatFlowRemoveStep = function(idx) {
-  _syncFlowDraftFromUI();
-  if (chatFlowDraft?.steps?.[idx] === undefined) return;
-  chatFlowDraft.steps.splice(idx, 1);
-  _renderFlowBuilder();
-};
-
-window._chatFlowRemoveStepById = function(stepId) {
-  _syncFlowDraftFromUI();
-  const idx = chatFlowDraft?.steps?.findIndex(s => s.id === stepId);
-  if (idx === undefined || idx < 0) return;
-  chatFlowDraft.steps.splice(idx, 1);
-  _renderFlowBuilder();
-};
-
-window._chatFlowAddOption = function(stepIdx) {
-  _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]) return;
-  const step = chatFlowDraft.steps[stepIdx];
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
-  _renderFlowBuilder();
-};
-
-window._chatFlowAddOptionById = function(stepId) {
-  _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step) return;
-  if (!step.options) step.options = [];
-  step.options.push({ id: 'o' + Date.now(), label: '', finish: true });
-  _renderFlowBuilder();
-};
-
-window._chatFlowRemoveOption = function(stepIdx, optIdx) {
-  _syncFlowDraftFromUI();
-  if (!chatFlowDraft?.steps?.[stepIdx]?.options) return;
-  chatFlowDraft.steps[stepIdx].options.splice(optIdx, 1);
-  _renderFlowBuilder();
-};
-
-window._chatFlowRemoveOptionByIdx = function(stepId, optIdx) {
-  _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  if (!step?.options) return;
-  step.options.splice(optIdx, 1);
-  _renderFlowBuilder();
-};
-
-// Add a new step and link the given option to it (for branching)
-window._chatFlowAddStepAndLink = function(stepIdx, optIdx) {
-  _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const opt = chatFlowDraft.steps[stepIdx]?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
-  _renderFlowBuilder();
-};
-
-window._chatFlowAddStepAndLinkById = function(stepId, optIdx) {
-  _syncFlowDraftFromUI();
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (!chatFlowDraft.steps) chatFlowDraft.steps = [];
-  const newId = 's' + Date.now();
-  const newStep = { id: newId, prompt: '', order: chatFlowDraft.steps.length, options: [{ id: 'o' + Date.now(), label: '', finish: true }] };
-  chatFlowDraft.steps.push(newStep);
-  const step = chatFlowDraft.steps.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (opt) {
-    opt.nextStepId = newId;
-    opt.finish = false;
-  }
-  _renderFlowBuilder();
-};
-
-window._chatFlowUnlinkStep = function(stepId, optIdx) {
-  _syncFlowDraftFromUI();
-  const step = chatFlowDraft?.steps?.find(s => s.id === stepId);
-  const opt = step?.options?.[optIdx];
-  if (!opt) return;
-  opt.nextStepId = null;
-  opt.finish = true;
-  _renderFlowBuilder();
-};
-
-// Collect steps from tree DOM (depth-first, root first)
-function _collectStepsFromTreeDOM() {
-  const steps = [];
-  const seen = new Set();
-  function collect(node) {
-    if (!node || node.classList?.contains?.('chat-flow-answer-block')) return;
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || seen.has(stepId)) return;
-    seen.add(stepId);
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block, oidx) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const existingStep = chatFlowDraft?.steps?.find(s => s.id === stepId);
-        const existingOpt = existingStep?.options?.[oidx];
-        options.push({
-          id: existingOpt?.id || 'o' + Date.now() + '_' + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
-      });
-    }
-    steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node').forEach(collect);
-  return steps;
-}
-
-// Sync current form values from DOM into chatFlowDraft (tree structure)
-function _syncFlowDraftFromUI() {
-  if (!chatFlowDraft) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  chatFlowDraft.title = document.getElementById('chatFlowTitle')?.value ?? '';
-  chatFlowDraft.allowedSenders = ['technician','manager','admin'].filter((_, i) =>
-    document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
-  const treeNodes = document.querySelectorAll?.('.chat-flow-node');
-  if (treeNodes?.length) {
-    chatFlowDraft.steps = _collectStepsFromTreeDOM();
-  }
-}
-
-function _collectFlowDraftFromUI() {
-  if (!chatFlowDraft) return null;
-  const title = document.getElementById('chatFlowTitle')?.value?.trim();
-  if (!title) return null;
-  const allowedSenders = ['technician','manager','admin'].filter((_,i) =>
-    document.getElementById(['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'][i])?.checked);
-  const treeNodes = document.querySelectorAll?.('#chatFlowStepsList > .chat-flow-node');
-  if (!treeNodes?.length) return null;
-  const steps = [];
-  const stepIds = new Set();
-  function collect(node) {
-    const stepId = node.getAttribute?.('data-step-id');
-    if (!stepId || stepIds.has(stepId)) return;
-    stepIds.add(stepId);
-    const promptEl = node.querySelector?.('.chat-flow-step-prompt');
-    const prompt = (promptEl?.value ?? '').trim();
-    const options = [];
-    const nestedNodes = [];
-    const optsContainer = node.querySelector?.('.chat-flow-options');
-    if (optsContainer) {
-      Array.from(optsContainer.children || []).filter(c => c.classList?.contains?.('chat-flow-answer-block')).forEach((block) => {
-        const labelEl = block.querySelector?.('.chat-flow-opt-label');
-        const label = (labelEl?.value ?? '').trim();
-        const nestedNode = block.querySelector?.('.chat-flow-node');
-        const nextStepId = nestedNode?.getAttribute?.('data-step-id') || null;
-        const step = chatFlowDraft.steps.find(s => s.id === stepId);
-        const oidx = options.length;
-        options.push({
-          id: step?.options?.[oidx]?.id || 'o' + Date.now() + oidx,
-          label,
-          nextStepId: nextStepId || null,
-          finish: !nextStepId
-        });
-        if (nestedNode) nestedNodes.push(nestedNode);
-      });
-    }
-    steps.push({ id: stepId, prompt, order: steps.length, options });
-    nestedNodes.forEach(n => collect(n));
-  }
-  treeNodes.forEach(n => collect(n));
-  if (steps.length === 0) return null;
-  const root = steps[0];
-  if (!root?.prompt?.trim()) { alert('Please fill in the first question.'); return null; }
-  if (!root?.options?.length || root.options.every(o => !(o.label || '').trim())) { alert('Please add at least one answer to the first question.'); return null; }
-  return { title, allowedSenders, steps };
-}
-
-window.saveChatFlow = async function() {
-  const draft = _collectFlowDraftFromUI();
-  if (!draft) { alert('Please add at least one step with options, and fill flow title.'); return; }
-  const btn = document.getElementById('chatFlowSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-  try {
-    const salonId = chatUserProfile.salonId;
-    const flowsRef = collection(db, `salons/${salonId}/chatFlows`);
-    let flowId = chatEditingFlowId;
-    if (flowId) {
-      await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), {
-        title: draft.title, allowedSenders: draft.allowedSenders, updatedAt: serverTimestamp()
-      });
-      // Delete old steps/options and recreate (simplest)
-      const oldSteps = await getDocs(collection(db, `salons/${salonId}/chatFlows/${flowId}/steps`));
-      for (const sd of oldSteps.docs) {
-        const opts = await getDocs(collection(db, `salons/${salonId}/chatFlows/${flowId}/steps/${sd.id}/options`));
-        for (const od of opts.docs) await deleteDoc(od.ref);
-        await deleteDoc(sd.ref);
-      }
-    } else {
-      const ref = await addDoc(flowsRef, {
-        title: draft.title, allowedSenders: draft.allowedSenders, status: 'active',
-        startStepId: draft.steps[0]?.id, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid
-      });
-      flowId = ref.id;
-    }
-    const stepsRef = collection(db, `salons/${salonId}/chatFlows/${flowId}/steps`);
-    const stepIdMap = {}; // draft step id -> firestore step id
-    for (let i = 0; i < draft.steps.length; i++) {
-      const s = draft.steps[i];
-      const stepRef = await addDoc(stepsRef, { prompt: s.prompt, order: i });
-      stepIdMap[s.id] = stepRef.id;
-    }
-    for (let i = 0; i < draft.steps.length; i++) {
-      const s = draft.steps[i];
-      const firestoreStepId = stepIdMap[s.id];
-      const optsRef = collection(db, 'salons', salonId, 'chatFlows', flowId, 'steps', firestoreStepId, 'options');
-      for (const o of s.options) {
-        const nextId = o.nextStepId ? (stepIdMap[o.nextStepId] || o.nextStepId) : null;
-        await addDoc(optsRef, { label: o.label, nextStepId: nextId, finish: !!o.finish });
-      }
-      if (i === 0) await updateDoc(doc(db, `salons/${salonId}/chatFlows`, flowId), { startStepId: firestoreStepId });
-    }
-    window.cancelEditChatFlow();
-    await loadChatFlows();
-    _renderFlowsAdminList();
-    alert('Saved! Flow appears in the list above.');
-    document.getElementById('chatFlowsSavedSection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch(e) {
-    console.error('[Chat] save flow error', e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingFlowId ? 'Update Flow' : 'Create Flow'; }
-  }
-};
-
-window.cancelEditChatFlow = function() {
-  chatEditingFlowId = null;
-  chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  document.getElementById('chatFlowTitle').value = '';
-  ['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'].forEach(id => {
-    const cb = document.getElementById(id);
-    if (cb) cb.checked = false;
-  });
-  document.getElementById('chatFlowFormLabel').textContent = 'Create Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Create Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'none';
-  _renderFlowBuilder();
-  _renderFlowsAdminList();
-};
-
-window.editChatFlow = function(id) {
-  const f = chatFlows.find(x => x.id === id);
-  if (!f) return;
-  chatEditingFlowId = id;
-  let stepList = (f.steps || []).map(s => ({
-    id: s.id,
-    prompt: s.prompt,
-    order: s.order,
-    options: (s.options || []).map(o => ({ id: o.id, label: o.label, nextStepId: o.nextStepId, finish: !!o.finish }))
-  }));
-  const rootId = f.startStepId;
-  if (rootId && stepList.length > 1) {
-    const rootIdx = stepList.findIndex(s => s.id === rootId);
-    if (rootIdx > 0) {
-      const [root] = stepList.splice(rootIdx, 1);
-      stepList = [root, ...stepList];
-    }
-  }
-  chatFlowDraft = { title: f.title, allowedSenders: f.allowedSenders || [], steps: stepList };
-  document.getElementById('chatFlowTitle').value = f.title || '';
-  ['chatFlowSenderTech','chatFlowSenderMgr','chatFlowSenderAdmin'].forEach((id, i) => {
-    const cb = document.getElementById(id);
-    if (cb) cb.checked = Array.isArray(f.allowedSenders) && f.allowedSenders.includes(['technician','manager','admin'][i]);
-  });
-  document.getElementById('chatFlowFormLabel').textContent = 'Edit Flow';
-  document.getElementById('chatFlowSaveBtn').textContent = 'Update Flow';
-  document.getElementById('chatFlowCancelBtn').style.display = 'inline-block';
-  _renderFlowBuilder();
-};
-
-window.deleteChatFlow = async function(id) {
-  if (!confirm('Delete this flow?')) return;
-  try {
-    const flow = chatFlows.find(x => x.id === id);
-    if (flow?.steps) {
-      for (const s of flow.steps) {
-        if (s.options) for (const o of s.options) {
-          const ref = doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps/${s.id}/options`, o.id);
-          try { await deleteDoc(ref); } catch(_) {}
-        }
-        try { await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows/${id}/steps`, s.id)); } catch(_) {}
-      }
-    }
-    await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatFlows`, id));
-    await loadChatFlows();
-    _renderFlowsAdminList();
-  } catch(e) {
-    console.error('[Chat] delete flow error', e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
-  }
-};
-
-function _renderFlowsAdminList() {
-  const el = document.getElementById('chatFlowsAdminList');
-  if (!el) return;
-  el.innerHTML = chatFlows.length === 0
-    ? '<div style="padding:12px;color:#6b7280;font-size:13px;">No saved flows. Fill in below and click Create Flow — it will appear here.</div>'
-    : chatFlows.map(f => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(f.title)}</div>
-            <div style="font-size:11px;color:#9ca3af;">${(f.steps||[]).length} steps · Can use: ${Array.isArray(f.allowedSenders) && f.allowedSenders.length ? f.allowedSenders.map(roleLabel).join(', ') : 'Everyone'}</div>
-          </div>
-          <div style="display:flex;gap:6px;">
-            <button type="button" onclick="window.editChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;">Edit</button>
-            <button type="button" onclick="window.deleteChatFlow('${escHtml(f.id)}')" style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
-        </div>
-      `).join('');
-}
-
-function _renderFlowBuilder() {
-  if (!chatFlowDraft && !chatEditingFlowId) chatFlowDraft = { title: '', allowedSenders: [], steps: [] };
-  if (chatEditingFlowId && !chatFlowDraft) {
-    const f = chatFlows.find(x => x.id === chatEditingFlowId);
-    if (f) chatFlowDraft = { title: f.title, allowedSenders: f.allowedSenders || [], steps: (f.steps||[]).map(s => ({ ...s, options: s.options||[] })) };
-  }
-  const list = document.getElementById('chatFlowStepsList');
-  if (!list) return;
-  const steps = chatFlowDraft?.steps || [];
-
-  function renderStepNode(s, depth, parentStepId, parentOptIdx) {
-    if (!s) return '';
-    const indent = depth * 20;
-    const opts = s.options || [];
-    const isNested = parentStepId != null;
-    return `
-    <div class="chat-flow-node" data-step-id="${escHtml(s.id)}" data-depth="${depth}" style="margin-left:${indent}px;margin-bottom:1px;">
-      <div style="display:flex;gap:4px;align-items:center;padding:3px 6px;border-left:2px solid #c4b5fd;border-radius:2px;background:#faf5ff;margin-bottom:2px;">
-        <span style="font-size:10px;font-weight:600;color:#7c3aed;">Q</span>
-        <input type="text" class="chat-flow-step-prompt" data-step-id="${escHtml(s.id)}" placeholder="Question..." value="${escHtml(s.prompt||'')}"
-          style="flex:1;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;min-width:0;">
-        ${isNested ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(parentStepId)}',${parentOptIdx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>` : `<button type="button" onclick="window._chatFlowRemoveStepById('${escHtml(s.id)}')" title="Delete" style="padding:1px 5px;font-size:9px;color:#b91c1c;background:#fef2f2;border:none;border-radius:2px;cursor:pointer;">×</button>`}
-      </div>
-      <div class="chat-flow-options" data-step-id="${escHtml(s.id)}" style="margin-left:12px;">
-        ${opts.map((o, oidx) => {
-          const nextStep = o.nextStepId ? steps.find(x => x.id === o.nextStepId) : null;
-          return `
-          <div class="chat-flow-answer-block" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" style="margin-bottom:1px;">
-            <div class="chat-flow-option-row" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:2px 0;">
-              <span style="color:#059669;font-size:10px;">→</span>
-              <input type="text" class="chat-flow-opt-label" data-step-id="${escHtml(s.id)}" data-opt-idx="${oidx}" placeholder="Answer" value="${escHtml(o.label||'')}" style="min-width:70px;padding:2px 5px;border:1px solid #e5e7eb;border-radius:2px;font-size:11px;">
-              ${nextStep
-                ? `<button type="button" onclick="window._chatFlowUnlinkStep('${escHtml(s.id)}',${oidx})" title="Remove branch" style="padding:1px 4px;font-size:9px;color:#6b7280;background:#f3f4f6;border:none;border-radius:2px;cursor:pointer;">−</button>`
-                : `<button type="button" onclick="window._chatFlowAddStepAndLinkById('${escHtml(s.id)}',${oidx})" style="padding:1px 5px;font-size:9px;color:#7c3aed;background:#ede9fe;border:none;border-radius:2px;cursor:pointer;">↳ Add next question</button>`}
-              <button type="button" onclick="window._chatFlowRemoveOptionByIdx('${escHtml(s.id)}',${oidx})" title="Remove answer" style="padding:1px 4px;color:#9ca3af;cursor:pointer;font-size:9px;background:none;border:none;">×</button>
-            </div>
-            ${nextStep ? `<div style="margin-left:16px;margin-top:1px;border-left:1px solid #e5e7eb;">${renderStepNode(nextStep, depth + 1, s.id, oidx)}</div>` : ''}
-          </div>
-          `;
-        }).join('')}
-        <button type="button" class="chat-flow-add-opt" data-step-id="${escHtml(s.id)}" onclick="window._chatFlowAddOptionById('${escHtml(s.id)}')" style="margin:1px 0;padding:1px 5px;font-size:9px;color:#7c3aed;background:none;border:none;cursor:pointer;">+ Add answer</button>
-      </div>
-    </div>
-    `;
-  }
-
-  const rootStep = steps[0];
-  const stepHtml = rootStep ? renderStepNode(rootStep, 0, null, null) : '';
-  list.innerHTML = stepHtml || '<div style="color:#9ca3af;font-size:12px;padding:8px;">No questions yet. Click "+ Add first question" below.</div>';
-
-  const addBtn = document.getElementById('chatFlowAddStepBtn');
-  if (addBtn) addBtn.style.display = steps.length ? 'none' : 'inline-block';
-}
-
-function _renderTmplList() {
-  const el = document.getElementById('chatTemplatesAdminList');
-  if (!el) return;
-  el.innerHTML = chatTemplates.length === 0
-    ? '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:14px;">No templates yet.</div>'
-    : chatTemplates.map(t => `
-        <div style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;background:#fff;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:14px;font-weight:600;color:#111827;">${escHtml(t.title)}</div>
-            ${t.message ? `<div style="font-size:13px;color:#6b7280;margin-bottom:4px;">${escHtml(t.message)}</div>` : ''}
-            <div style="font-size:11px;color:#9ca3af;">Can send: ${
-              Array.isArray(t.allowedSenders) && t.allowedSenders.length
-                ? t.allowedSenders.map(roleLabel).join(', ') : 'Everyone'
-            }</div>
-          </div>
-          <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" onclick="window.editChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#374151;">Edit</button>
-            <button type="button" onclick="window.deleteChatTemplate('${escHtml(t.id)}')"
-              style="padding:6px 12px;border:1px solid #fca5a5;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;color:#b91c1c;">Delete</button>
-          </div>
-        </div>
-      `).join('');
-}
-window.editChatTemplate = function(id) {
-  const t = chatTemplates.find(x => x.id === id);
-  if (!t) return;
-  chatEditingTmplId = id;
-  document.getElementById('chatTmplTitle').value   = t.title   || '';
-  document.getElementById('chatTmplMessage').value = t.message || '';
-  ['Tech','Mgr','Admin'].forEach((s,i) => {
-    const cb = document.getElementById(`chatTmplSender${s}`);
-    if (cb) cb.checked = Array.isArray(t.allowedSenders) && t.allowedSenders.includes(['technician','manager','admin'][i]);
-  });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Update Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Edit Template';
-  document.getElementById('chatTmplForm')?.scrollIntoView({ behavior:'smooth' });
-};
-window.cancelEditChatTemplate = function() {
-  chatEditingTmplId = null;
-  document.getElementById('chatTmplTitle').value   = '';
-  document.getElementById('chatTmplMessage').value = '';
-  ['Tech','Mgr','Admin'].forEach(s => {
-    const cb = document.getElementById(`chatTmplSender${s}`);
-    if (cb) cb.checked = false;
-  });
-  document.getElementById('chatTmplSaveBtn').textContent   = 'Create Template';
-  document.getElementById('chatTmplFormLabel').textContent = 'Create Structured Message Template';
-};
-window.saveChatTemplate = async function() {
-  const title   = document.getElementById('chatTmplTitle')?.value.trim();
-  const message = document.getElementById('chatTmplMessage')?.value.trim() || '';
-  const allowedSenders = ['technician','manager','admin'].filter((_,i) => {
-    return document.getElementById(`chatTmplSender${['Tech','Mgr','Admin'][i]}`)?.checked;
-  });
-  if (!title) { alert('Please enter a title.'); return; }
-  const btn = document.getElementById('chatTmplSaveBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-  try {
-    if (chatEditingTmplId) {
-      await updateDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, chatEditingTmplId),
-        { title, message, allowedSenders, updatedAt: serverTimestamp() });
-    } else {
-      await addDoc(collection(db, `salons/${chatUserProfile.salonId}/chatTemplates`),
-        { title, message, allowedSenders, order: chatTemplates.length, createdAt: serverTimestamp(), createdBy: chatUserProfile.uid });
-    }
-    window.cancelEditChatTemplate();
-    await loadChatTemplates();
-    _renderTmplList();
-  } catch(e) {
-    console.error('[Chat] save template error', e?.code, e?.message, e);
-    alert('Failed to save: ' + (e?.code || e?.message || 'unknown'));
-  }
-  finally {
-    if (btn) { btn.disabled = false; btn.textContent = chatEditingTmplId ? 'Update Template' : 'Create Template'; }
-  }
-};
-window.deleteChatTemplate = async function(id) {
-  if (!confirm('Delete this template?')) return;
-  try {
-    await deleteDoc(doc(db, `salons/${chatUserProfile.salonId}/chatTemplates`, id));
-    await loadChatTemplates();
-    _renderTmplList();
-  } catch(e) {
-    console.error('[Chat] delete template error', e?.code, e?.message, e);
-    alert('Failed to delete: ' + (e?.code || e?.message || 'unknown'));
-  }
+  _syncChatConvFreeTextComposer();
 };
 
 // ─── Settings Section ──────────────────────────────────────────────────────────
 async function initChatSettingsSection() {
-  if (!chatUserProfile) await loadChatUserProfile();
+  if (!chatState.chatUserProfile) await loadChatUserProfile();
   const s = document.getElementById('chatSettingsSection');
-  if (s) s.style.display = isAdmin(chatUserProfile?.role) ? 'block' : 'none';
+  if (s) {
+    const show =
+      typeof window.ffCurrentUserHasChatManagePermission === 'function'
+        ? window.ffCurrentUserHasChatManagePermission()
+        : isAdmin(chatState.chatUserProfile?.role);
+    s.style.display = show ? 'block' : 'none';
+  }
+}
+
+window.ffRefreshChatManageUi = function () {
+  try {
+    if (chatState.chatUserProfile) renderChatHeaderForRole(chatState.chatUserProfile.role);
+    else renderChatHeaderForRole(null);
+  } catch (e) {}
+  void initChatSettingsSection();
+};
+
+if (typeof document !== 'undefined' && !window.__ff_chatStaffPermListener) {
+  window.__ff_chatStaffPermListener = true;
+  document.addEventListener('ff-staff-cloud-updated', function () {
+    if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
+  });
 }
 
 // ─── Auth Listener ─────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, async user => {
   if (user) {
+    // Defer chat badge subscriptions until salon is resolved. When the user has
+    // multiple memberships, currentSalonId is null until they pick one in the
+    // Choose Salon screen — subscribing here with the legacy users/{uid}.salonId
+    // would race with the salon selection and could attach to the wrong salon.
+    if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) {
+      return;
+    }
     try {
       const snap = await getDoc(doc(db, 'users', user.uid));
       if (snap.exists()) {
         const p = { uid: user.uid, ...snap.data() };
-        if (p.salonId) {
-          subscribeToChatBadge(user.uid, p.salonId);
-          subscribeToChatToastNotifications(user.uid, p.salonId);
+        // Multi-salon: same reason as loadChatUserProfile — prefer the salon
+        // the user actively picked, otherwise badge/toast subscriptions point
+        // at the legacy primary salon and cross-salon notifications leak in.
+        const activeSalonId = (typeof window !== 'undefined' && window.currentSalonId)
+          ? String(window.currentSalonId).trim()
+          : '';
+        const targetSalonId = activeSalonId || p.salonId || '';
+        if (targetSalonId) {
+          subscribeToChatBadge(user.uid, targetSalonId);
+          subscribeToChatToastNotifications(user.uid, targetSalonId);
+          void bootChatConversationList();
         }
       }
     } catch(e) {}
   } else {
-    if (chatBadgeUnsub) { chatBadgeUnsub(); chatBadgeUnsub = null; }
-    if (chatToastUnsub) { chatToastUnsub(); chatToastUnsub = null; }
+    chatState._chatAuthUid = null;
+    chatState._chatAuthSalonId = null;
+    if (chatState.chatBadgeUnsub) { chatState.chatBadgeUnsub(); chatState.chatBadgeUnsub = null; }
+    if (chatState.chatToastUnsub) { chatState.chatToastUnsub(); chatState.chatToastUnsub = null; }
+    chatState._lastChatToastLastMsgMsByConv.clear();
     const badge = document.getElementById('chatNavBadge');
-    if (badge) badge.style.display = 'none';
+    if (badge) {
+      badge.textContent = '';
+      badge.style.removeProperty('display');
+    }
   }
 });
+
+// ─── Location-change Listener (per-location chat isolation) ────────────────────
+// When the active location changes, reset thread UI and re-attach listeners that
+// depend on location filtering. The nav chat badge subscription is intentionally
+// NOT restarted: it already sums unread for the whole salon participant set, and
+// tearing it down + clearing the DOM produced a flash-then-empty badge after load.
+if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
+  window.__ff_chatLocationListener = true;
+  document.addEventListener('ff-active-location-changed', () => {
+    try {
+      console.log('[Chat] location changed → resetting chat state, new loc=', _activeLocKey());
+      if (chatState.chatConvsUnsub) { chatState.chatConvsUnsub(); chatState.chatConvsUnsub = null; }
+      if (chatState.chatMsgsUnsub)  { chatState.chatMsgsUnsub();  chatState.chatMsgsUnsub  = null; }
+      if (chatState.chatToastUnsub) { chatState.chatToastUnsub(); chatState.chatToastUnsub = null; }
+      chatState._lastChatToastLastMsgMsByConv.clear();
+
+      chatState.allConversations = [];
+      chatState.lastNonEmptyConversations = [];
+      chatState.currentMessages  = [];
+      chatState.currentConvId    = null;
+
+      try { renderThreadList(); } catch (_) {}
+      try { _renderEmptyConversation(); } catch (_) {}
+
+      if (chatState._chatAuthUid && chatState._chatAuthSalonId) {
+        subscribeToChatToastNotifications(chatState._chatAuthUid, chatState._chatAuthSalonId);
+      }
+      if (chatState.chatUserProfile?.salonId) {
+        subscribeToConversationList();
+        // Also reload per-location salon data (templates, flows) so the
+        // settings modal and the "New Message" picker show only what the
+        // currently active location has configured.
+        (async () => {
+          try {
+            await loadChatTemplates();
+            await loadChatFlows();
+            try { if (typeof _renderTmplList === 'function') _renderTmplList(); } catch (_) {}
+            try { if (typeof _renderFlowsAdminList === 'function') _renderFlowsAdminList(); } catch (_) {}
+          } catch (err) {
+            console.warn('[Chat] reload templates/flows after loc change failed', err);
+          }
+        })();
+      }
+    } catch (e) {
+      console.warn('[Chat] location change handler error', e);
+    }
+  });
+}
+
+/**
+ * Sends a Chat free-text reminder with a Training deep link (?ff_training=).
+ * Wired from Training → Reports admin "Send Reminder" (index.html).
+ */
+window.ffSendTrainingReminderChat = async function (payload = {}) {
+  await loadChatUserProfile();
+  if (!chatState.chatUserProfile?.salonId || !chatState.chatUserProfile?.uid) {
+    throw new Error(
+      chatState.chatUserProfile == null
+        ? 'Chat profile could not be loaded (users document missing or network error). Refresh and try again, or open the Chat tab once.'
+        : 'Sign in is required to send chat reminders.'
+    );
+  }
+  const salonId = chatState.chatUserProfile.salonId;
+
+  let rUid = String(payload.recipientFirebaseUid || payload.recipientUid || '').trim();
+  const staffId = String(payload.staffId || '').trim();
+
+  if (!rUid && staffId) {
+    try {
+      const staffSnap = await getDoc(doc(db, `salons/${salonId}/staff`, staffId));
+      if (staffSnap.exists()) {
+        const d = staffSnap.data() || {};
+        rUid = String(d.firebaseUid || d.uid || d.firebaseAuthUid || d.userUid || '').trim();
+      }
+    } catch (e) {
+      console.warn('[Chat] Training reminder: staff lookup failed', e);
+    }
+  }
+
+  if (!rUid && payload.recipientEmail) {
+    const email = String(payload.recipientEmail || '').trim().toLowerCase();
+    if (email && typeof window.ffGetStaffStore === 'function') {
+      const row =
+        (window.ffGetStaffStore()?.staff || []).find((s) => String(s.email || '').trim().toLowerCase() === email) ||
+        null;
+      if (row) rUid = String(row.firebaseUid || row.uid || '').trim();
+    }
+  }
+
+  if (!rUid) {
+    throw new Error(
+      'This employee needs a Fair Flow login linked on their staff profile before Chat reminders work.'
+    );
+  }
+
+  const trainingId = String(payload.trainingId || '').trim();
+  const title = String(payload.trainingTitle || 'Training').trim() || 'Training';
+  const recipientName =
+    String(payload.recipientName || payload.staffName || '').trim() || _nameForUidForSend(rUid);
+
+  let deepLink = '';
+  try {
+    const u = new URL(window.location.href);
+    u.hash = '';
+    if (trainingId) u.searchParams.set('ff_training', trainingId);
+    deepLink = u.toString();
+  } catch (_) {
+    deepLink = window.location.href;
+  }
+
+  const intro = String(payload.leadInText || 'Please complete this assigned training when you can.').trim();
+  const body = `${intro}\n\n${title}\n\nOpen training:\n${deepLink}`;
+
+  await _sendFreeTextDirect(rUid, recipientName, null, body);
+};
+
+// Boot the conversation-list listener at app load — not only when the Chat tab
+// is opened. The Live Desk CHAT card reads chatState.allConversations; before
+// this boot it stayed empty after a page refresh until the user visited the
+// Chat tab once ("No recent messages" on Live). Safe to call repeatedly: it
+// no-ops when the listener is already attached. Privacy unchanged — the
+// listener only returns conversations the signed-in user participates in.
+export async function bootChatConversationList() {
+  try {
+    if (chatState.chatConvsUnsub) return;
+    if (!chatState.chatUserProfile) await loadChatUserProfile();
+    if (chatState.chatUserProfile?.salonId && !chatState.chatConvsUnsub) {
+      subscribeToConversationList();
+      // Names resolve via the salon members list (chatState.chatSalonUsers).
+      // Without this, every card on the Live CHAT panel shows "Loading..."
+      // until the user opens the Chat tab once (which is what loads members).
+      if (!chatState._chatMembersLoaded) {
+        loadChatSalonUsers()
+          .then(() => {
+            if (chatState.allConversations.length) renderThreadList();
+            else if (typeof window.ffLiveRefreshChatCard === 'function') window.ffLiveRefreshChatCard();
+          })
+          .catch((err) => console.warn('[Chat] boot salon-users load failed', err));
+      }
+    }
+  } catch (e) {
+    console.warn('[Chat] bootChatConversationList failed', e);
+  }
+}
 
 // ─── Global Exports (no export keywords - avoids parse errors in some envs) ───
 window.goToChat = goToChat;

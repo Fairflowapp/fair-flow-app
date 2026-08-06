@@ -3,3 +3,5 @@ node_modules/
 *-sa.json
 serviceAccount*.json
 .env
+.env.*
+!.env.example

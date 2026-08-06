@@ -15,6 +15,17 @@ service firebase.storage {
       return doc == null ? null : doc.data;
     }
 
+    function userRoleLower() {
+      return userDoc() != null && userDoc().role is string ? userDoc().role.lower() : '';
+    }
+
+    function isManagerSalonStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && userRoleLower() in ['manager', 'admin', 'owner'];
+    }
+
     // User private files
     match /users/{userId}/{allFiles=**} {
       allow read, write: if signedIn() && uid() == userId;
@@ -26,10 +37,11 @@ service firebase.storage {
       allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
     }
 
-    // Training module images (same salon as authenticated user)
+    // Training images/videos — same as mediaWorks: any signed-in user can read/write.
+    // PIN / multi-salon flows often lack users.salonId or role on members; strict checks caused storage/unauthorized.
+    // Who may edit training *content* is enforced in Firestore (trainingItems), not here.
     match /salons/{salonId}/training/{allPaths=**} {
-      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
-      allow write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow read, write: if signedIn();
     }
 
     // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)
@@ -40,6 +52,18 @@ service firebase.storage {
     // Inbox response documents (manager uploads response file for document requests)
     match /salons/{salonId}/inboxDocuments/{allPaths=**} {
       allow read, write: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+    }
+
+    // Inventory order receipts / invoices (managers upload; salon members read)
+    match /salons/{salonId}/inventory-order-documents/{docId}/{fileName} {
+      allow read: if signedIn() && userDoc() != null && userDoc().salonId == salonId;
+      allow write: if isManagerSalonStorage(salonId);
+    }
+
+    // Per-order receipts (multiple files under each order). Loose rule: any signed-in user of the salon
+    // can upload; if userDoc is missing (PIN sessions etc.), signedIn is enough (matches staff-docs pattern).
+    match /salons/{salonId}/inventoryOrders/{orderId}/receipts/{receiptId}/{fileName} {
+      allow read, write: if signedIn();
     }
 
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...
@@ -55,6 +79,75 @@ service firebase.storage {
     // Some clients / error URLs show lowercase path segment — allow same access
     match /salons/{salonId}/mediaworks/{workId}/{allPaths=**} {
       allow read, write: if signedIn();
+    }
+
+    // ===== EMPLOYEE WRITE-UPS (confidential incident attachments) =====
+    // Deliberately NOT under salons/{salonId}/staff/{staffId}/... — that path
+    // above allows ANY signed-in user read/write, which must never apply to
+    // write-up evidence. Access: owner / admin / permissions.writeups_manage
+    // only (checked against Firestore). Managers and employees: no access.
+    function writeupsStaffDocData(salonId) {
+      return firestore.get(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId)).data;
+    }
+
+    function canManageWriteupsStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && (
+          userRoleLower() in ['admin', 'owner']
+          || (
+            userDoc().staffId is string
+            && firestore.exists(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId))
+            && writeupsStaffDocData(salonId).get('permissions', {}) is map
+            && writeupsStaffDocData(salonId).get('permissions', {}).get('writeups_manage', false) == true
+          )
+        );
+    }
+
+    match /salons/{salonId}/staffWriteups/{staffId}/incidents/{incidentId}/{fileName} {
+      allow read: if canManageWriteupsStorage(salonId);
+      // Uploads only — no client deletes/overwrites of evidence (request.resource
+      // is null on delete, so deletes always fail). PDF or images, max 10 MB.
+      allow write: if canManageWriteupsStorage(salonId)
+        && request.resource != null
+        && request.resource.size <= 10 * 1024 * 1024
+        && (
+          request.resource.contentType == 'application/pdf'
+          || request.resource.contentType.matches('image/(jpeg|png|webp|heic|heif)')
+        );
+    }
+
+    // ===== TIME CLOCK PUNCH PHOTOS (Stage B) =====
+    // Deliberately OUTSIDE salons/{salonId}/... — the staff/media paths above
+    // allow ANY signed-in user read/write, which must never apply here.
+    // Written ONLY by the timeClockPunch callable via the Admin SDK (bypasses
+    // these rules); clients — including the kiosk and the photographed
+    // employee — can never upload, replace or delete a punch photo.
+    // Read: owner/admin or time_clock_manage holders (same audience as the
+    // photo-failed alerts), following the writeups storage pattern.
+    function timeClockStaffDocData(salonId) {
+      return firestore.get(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId)).data;
+    }
+
+    function canManageTimeClockStorage(salonId) {
+      return signedIn()
+        && userDoc() != null
+        && userDoc().salonId == salonId
+        && (
+          userRoleLower() in ['admin', 'owner']
+          || (
+            userDoc().staffId is string
+            && firestore.exists(/databases/(default)/documents/salons/$(salonId)/staff/$(userDoc().staffId))
+            && timeClockStaffDocData(salonId).get('permissions', {}) is map
+            && timeClockStaffDocData(salonId).get('permissions', {}).get('time_clock_manage', false) == true
+          )
+        );
+    }
+
+    match /timeClockPhotos/{salonId}/{entryId}/{fileName} {
+      allow read: if canManageTimeClockStorage(salonId);
+      allow write: if false;
     }
 
     // deny everything else
