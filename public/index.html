@@ -2199,7 +2199,7 @@
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
               <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
                 <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Calls</h4>
-                <div style="font-size:11px;color:#6b7280;line-height:1.45;">Messages for calls sent to technicians from Available and In Service. The Message is spoken on phone calls; Subtext is for the on-screen call only.</div>
+                <div style="font-size:11px;color:#6b7280;line-height:1.45;">What technicians hear when you call them from Available or In Service.</div>
               </div>
               <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:10px;"></div>
               <div style="display:flex;justify-content:flex-end;margin-top:10px;">
@@ -2870,7 +2870,7 @@
 
         <div id="staffCallMessagesSection" style="margin-top:24px;">
           <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:700;color:#111827;text-transform:uppercase;letter-spacing:0.4px;">Staff Calls</h4>
-          <div class="row small" style="margin-bottom:12px;">Choose preset text or customize what technicians hear on phone calls and see on screen when called from Available or In Service.</div>
+          <div class="row small" style="margin-bottom:12px;">What technicians hear when you call them from Available or In Service.</div>
           <div id="staffCallMessageTemplatesBox" style="display:flex;flex-direction:column;gap:14px;"></div>
         </div>
 
@@ -13908,32 +13908,179 @@ function renderSettings(){
 
 }
 
-function renderStaffCallMessageSettings() {
-  const box = document.getElementById("staffCallMessageTemplatesBox");
+/**
+ * Shared Staff Calls settings form (Preferences + legacy Settings).
+ * Top: Message fields. Bottom: collapsed "If the phone call fails" (Subtext + timeout).
+ * Preset UI removed; stored presetId in Firestore is left alone / re-derived on normalize.
+ */
+function buildStaffCallSettingsForm(box, options = {}) {
   if (!box) return;
+  const isProfile = options.variant === "profile";
+  const pad = isProfile ? "10px" : "14px";
+  const radius = isProfile ? "10px" : "12px";
+  const titleSize = isProfile ? "12px" : "13px";
+  const bodySize = isProfile ? "11px" : "12px";
+  const inputH = isProfile ? "32px" : "36px";
+  const inputPad = isProfile ? "0 8px" : "0 10px";
+  const inputFont = isProfile ? "12px" : "13px";
+
+  const messageId = (key) => (isProfile ? `userProfileStaffCallMessage_${key}` : `staffCallMessage_${key}`);
+  const detailId = (key) => (isProfile ? `userProfileStaffCallDetail_${key}` : `staffCallDetail_${key}`);
+  const timeoutSelectId = isProfile ? "userProfileStaffCallTimeoutSeconds" : "staffCallTimeoutSeconds";
+  const timeoutCustomRowId = isProfile ? "userProfileStaffCallTimeoutCustomRow" : "staffCallTimeoutCustomRow";
+  const timeoutCustomValueId = isProfile ? "userProfileStaffCallTimeoutCustomValue" : "staffCallTimeoutCustomValue";
+  const timeoutCustomUnitId = isProfile ? "userProfileStaffCallTimeoutCustomUnit" : "staffCallTimeoutCustomUnit";
+
   settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
   settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
+  const wasFailOpen = !!(box.__ffStaffCallFailOpen);
   box.innerHTML = "";
   const timeoutUi = getStaffCallTimeoutUiValue(settings.staffCallTimeoutSeconds);
 
+  const kinds = [
+    { key: "available", label: "Available", hint: "When calling a technician from the Available queue." },
+    { key: "inService", label: "In Service", hint: "When calling a technician who is already In Service." }
+  ];
+
+  const phoneBlock = document.createElement("div");
+  phoneBlock.style.cssText = "display:flex;flex-direction:column;gap:10px;";
+
+  const phoneHeading = document.createElement("div");
+  phoneHeading.style.cssText = `font-size:${titleSize};font-weight:700;color:#111827;`;
+  phoneHeading.textContent = "What the phone call says";
+
+  const phoneSub = document.createElement("div");
+  phoneSub.style.cssText = `font-size:${bodySize};color:#6b7280;line-height:1.45;margin-top:-4px;`;
+  phoneSub.textContent = "Spoken on the phone call. Keep it short.";
+  phoneBlock.append(phoneHeading, phoneSub);
+
+  const detailInputs = {};
+
+  kinds.forEach((kind) => {
+    const template = settings.staffCallTemplates[kind.key];
+    const presets = STAFF_CALL_TEMPLATE_PRESETS[kind.key] || [];
+    const defaultPreset = presets[0] || { message: template.message, detail: template.detail };
+
+    const card = document.createElement("div");
+    card.style.cssText = `padding:${pad};border:1px solid #e5e7eb;border-radius:${radius};background:#fafafa;display:flex;flex-direction:column;gap:8px;`;
+
+    const title = document.createElement("div");
+    title.style.cssText = `font-size:${titleSize};font-weight:700;color:#111827;`;
+    title.textContent = kind.label;
+
+    const hint = document.createElement("div");
+    hint.style.cssText = `font-size:${bodySize};color:#6b7280;line-height:1.45;`;
+    hint.textContent = kind.hint;
+
+    const messageLabel = document.createElement("label");
+    messageLabel.style.cssText = `display:flex;flex-direction:column;gap:6px;font-size:${bodySize};color:#374151;`;
+    messageLabel.textContent = "Message";
+
+    const messageInput = document.createElement("input");
+    messageInput.type = "text";
+    messageInput.id = messageId(kind.key);
+    messageInput.value = template.message;
+    messageInput.maxLength = 90;
+    messageInput.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
+    messageLabel.appendChild(messageInput);
+
+    const detailInput = document.createElement("input");
+    detailInput.type = "text";
+    detailInput.id = detailId(kind.key);
+    detailInput.value = template.detail;
+    detailInput.maxLength = 140;
+    detailInput.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
+    detailInputs[kind.key] = detailInput;
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.textContent = "Reset to default";
+    resetBtn.style.cssText = `padding:${isProfile ? "6px 10px" : "8px 12px"};border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:${isProfile ? "11px" : "12px"};font-weight:600;cursor:pointer;align-self:flex-end;`;
+
+    function syncFromInputs() {
+      settings.staffCallTemplates[kind.key] = normalizeStaffCallTemplateEntry(kind.key, {
+        message: messageInput.value,
+        detail: detailInput.value
+      });
+    }
+
+    function applyDefault() {
+      const normalized = normalizeStaffCallTemplateEntry(kind.key, defaultPreset);
+      settings.staffCallTemplates[kind.key] = normalized;
+      messageInput.value = normalized.message;
+      detailInput.value = normalized.detail;
+    }
+
+    messageInput.addEventListener("input", syncFromInputs);
+    detailInput.addEventListener("input", syncFromInputs);
+    resetBtn.addEventListener("click", applyDefault);
+
+    card.append(title, hint, messageLabel, resetBtn);
+    phoneBlock.appendChild(card);
+  });
+
+  box.appendChild(phoneBlock);
+
+  // Collapsed by default; inputs stay in the DOM so load/save work while closed.
+  const failDetails = document.createElement("details");
+  failDetails.style.cssText = `margin-top:4px;border:1px solid #e5e7eb;border-radius:${radius};background:#fff;`;
+  if (wasFailOpen) failDetails.open = true;
+
+  const failSummary = document.createElement("summary");
+  failSummary.style.cssText = `cursor:pointer;list-style:none;padding:${pad};font-size:${titleSize};font-weight:700;color:#111827;user-select:none;`;
+  const syncFailSummary = () => {
+    failSummary.textContent = failDetails.open ? "If the phone call fails ▴" : "If the phone call fails ▸";
+  };
+  syncFailSummary();
+  failDetails.addEventListener("toggle", () => {
+    box.__ffStaffCallFailOpen = !!failDetails.open;
+    syncFailSummary();
+  });
+
+  const failBody = document.createElement("div");
+  failBody.style.cssText = `padding:0 ${pad} ${pad};display:flex;flex-direction:column;gap:10px;border-top:1px solid #f3f4f6;`;
+
+  const failIntro = document.createElement("div");
+  failIntro.style.cssText = `font-size:${bodySize};color:#6b7280;line-height:1.45;padding-top:10px;`;
+  failIntro.textContent = "These settings apply only when the phone call can’t go through and the call opens on the technician’s screen.";
+
+  failBody.appendChild(failIntro);
+
+  kinds.forEach((kind) => {
+    const card = document.createElement("div");
+    card.style.cssText = `padding:${pad};border:1px solid #e5e7eb;border-radius:${radius};background:#fafafa;display:flex;flex-direction:column;gap:8px;`;
+
+    const title = document.createElement("div");
+    title.style.cssText = `font-size:${titleSize};font-weight:700;color:#111827;`;
+    title.textContent = `${kind.label} — on-screen subtext`;
+
+    const detailLabel = document.createElement("label");
+    detailLabel.style.cssText = `display:flex;flex-direction:column;gap:6px;font-size:${bodySize};color:#374151;`;
+    detailLabel.textContent = "Subtext";
+    detailLabel.appendChild(detailInputs[kind.key]);
+
+    card.append(title, detailLabel);
+    failBody.appendChild(card);
+  });
+
   const timeoutCard = document.createElement("div");
-  timeoutCard.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
+  timeoutCard.style.cssText = `padding:${pad};border:1px solid #e5e7eb;border-radius:${radius};background:#fafafa;display:flex;flex-direction:column;gap:8px;`;
 
   const timeoutTitle = document.createElement("div");
-  timeoutTitle.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
+  timeoutTitle.style.cssText = `font-size:${titleSize};font-weight:700;color:#111827;`;
   timeoutTitle.textContent = "On-screen call timeout";
 
   const timeoutDescription = document.createElement("div");
-  timeoutDescription.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
-  timeoutDescription.textContent = "How long the on-screen call stays open when the phone call can’t go through, and when you see No response. This does not control how long the phone rings.";
+  timeoutDescription.style.cssText = `font-size:${bodySize};color:#6b7280;line-height:1.45;`;
+  timeoutDescription.textContent = "How long the on-screen call stays open, and when you see No response. This does not control how long the phone rings.";
 
   const timeoutLabel = document.createElement("label");
-  timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
+  timeoutLabel.style.cssText = `display:flex;flex-direction:column;gap:6px;font-size:${bodySize};color:#374151;`;
   timeoutLabel.textContent = "How long should the on-screen call stay active?";
 
   const timeoutSelect = document.createElement("select");
-  timeoutSelect.id = "staffCallTimeoutSeconds";
-  timeoutSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  timeoutSelect.id = timeoutSelectId;
+  timeoutSelect.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
   STAFF_CALL_TIMEOUT_OPTIONS.forEach((option) => {
     const optionEl = document.createElement("option");
     optionEl.value = String(option.value);
@@ -13949,20 +14096,20 @@ function renderStaffCallMessageSettings() {
   timeoutLabel.appendChild(timeoutSelect);
 
   const customTimeoutRow = document.createElement("div");
-  customTimeoutRow.id = "staffCallTimeoutCustomRow";
+  customTimeoutRow.id = timeoutCustomRowId;
   customTimeoutRow.style.cssText = `display:${timeoutUi.mode === "custom" ? "flex" : "none"};align-items:center;gap:8px;flex-wrap:wrap;`;
 
   const customTimeoutInput = document.createElement("input");
   customTimeoutInput.type = "number";
-  customTimeoutInput.id = "staffCallTimeoutCustomValue";
+  customTimeoutInput.id = timeoutCustomValueId;
   customTimeoutInput.min = "1";
   customTimeoutInput.step = "1";
   customTimeoutInput.value = timeoutUi.customValue || "1";
-  customTimeoutInput.style.cssText = "width:110px;height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  customTimeoutInput.style.cssText = `width:${isProfile ? "100px" : "110px"};height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
 
   const customTimeoutUnit = document.createElement("select");
-  customTimeoutUnit.id = "staffCallTimeoutCustomUnit";
-  customTimeoutUnit.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
+  customTimeoutUnit.id = timeoutCustomUnitId;
+  customTimeoutUnit.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
   [
     { value: "seconds", label: "Seconds" },
     { value: "minutes", label: "Minutes" }
@@ -13975,7 +14122,7 @@ function renderStaffCallMessageSettings() {
   });
 
   const customTimeoutHint = document.createElement("div");
-  customTimeoutHint.style.cssText = "font-size:12px;color:#6b7280;";
+  customTimeoutHint.style.cssText = `font-size:${bodySize};color:#6b7280;`;
   customTimeoutHint.textContent = "Custom range: 10 seconds to 60 minutes.";
 
   timeoutSelect.addEventListener("change", () => {
@@ -13984,123 +14131,16 @@ function renderStaffCallMessageSettings() {
 
   customTimeoutRow.append(customTimeoutInput, customTimeoutUnit, customTimeoutHint);
   timeoutCard.append(timeoutTitle, timeoutDescription, timeoutLabel, customTimeoutRow);
-  box.appendChild(timeoutCard);
+  failBody.appendChild(timeoutCard);
 
-  const sections = [
-    {
-      key: "available",
-      label: "Available Worker Message",
-      description: "Sent when calling a technician from the Available queue."
-    },
-    {
-      key: "inService",
-      label: "In Service Worker Message",
-      description: "Sent when calling a technician who is already In Service."
-    }
-  ];
+  failDetails.append(failSummary, failBody);
+  box.appendChild(failDetails);
+}
 
-  sections.forEach((section) => {
-    const template = settings.staffCallTemplates[section.key];
-    const presets = STAFF_CALL_TEMPLATE_PRESETS[section.key] || [];
-
-    const card = document.createElement("div");
-    card.style.cssText = "padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;display:flex;flex-direction:column;gap:10px;";
-
-    const title = document.createElement("div");
-    title.style.cssText = "font-size:13px;font-weight:700;color:#111827;";
-    title.textContent = section.label;
-
-    const description = document.createElement("div");
-    description.style.cssText = "font-size:12px;color:#6b7280;line-height:1.5;";
-    description.textContent = section.description;
-
-    const selectLabel = document.createElement("label");
-    selectLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    selectLabel.textContent = "Preset";
-
-    const presetSelect = document.createElement("select");
-    presetSelect.id = `staffCallPreset_${section.key}`;
-    presetSelect.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
-    presets.forEach((preset) => {
-      const option = document.createElement("option");
-      option.value = preset.id;
-      option.textContent = preset.label;
-      if (template.presetId === preset.id) option.selected = true;
-      presetSelect.appendChild(option);
-    });
-    const customOption = document.createElement("option");
-    customOption.value = "custom";
-    customOption.textContent = "Custom";
-    if (template.presetId === "custom") customOption.selected = true;
-    presetSelect.appendChild(customOption);
-    selectLabel.appendChild(presetSelect);
-
-    const messageLabel = document.createElement("label");
-    messageLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    messageLabel.textContent = "Message";
-
-    const messageInput = document.createElement("input");
-    messageInput.type = "text";
-    messageInput.id = `staffCallMessage_${section.key}`;
-    messageInput.value = template.message;
-    messageInput.maxLength = 90;
-    messageInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
-    messageLabel.appendChild(messageInput);
-
-    const detailLabel = document.createElement("label");
-    detailLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    detailLabel.textContent = "Subtext";
-
-    const detailInput = document.createElement("input");
-    detailInput.type = "text";
-    detailInput.id = `staffCallDetail_${section.key}`;
-    detailInput.value = template.detail;
-    detailInput.maxLength = 140;
-    detailInput.style.cssText = "height:36px;padding:0 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:13px;";
-    detailLabel.appendChild(detailInput);
-
-    const actions = document.createElement("div");
-    actions.style.cssText = "display:flex;justify-content:flex-end;";
-
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.textContent = "Reset to default";
-    resetBtn.style.cssText = "padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;";
-
-    function applyTemplate(nextTemplate) {
-      const normalized = normalizeStaffCallTemplateEntry(section.key, nextTemplate);
-      settings.staffCallTemplates[section.key] = normalized;
-      presetSelect.value = normalized.presetId;
-      messageInput.value = normalized.message;
-      detailInput.value = normalized.detail;
-    }
-
-    function markCustomFromInputs() {
-      settings.staffCallTemplates[section.key] = normalizeStaffCallTemplateEntry(section.key, {
-        presetId: "custom",
-        message: messageInput.value,
-        detail: detailInput.value
-      });
-      presetSelect.value = settings.staffCallTemplates[section.key].presetId;
-    }
-
-    presetSelect.addEventListener("change", () => {
-      if (presetSelect.value === "custom") {
-        markCustomFromInputs();
-        return;
-      }
-      const preset = presets.find((item) => item.id === presetSelect.value) || presets[0];
-      applyTemplate(preset);
-    });
-
-    messageInput.addEventListener("input", markCustomFromInputs);
-    detailInput.addEventListener("input", markCustomFromInputs);
-    resetBtn.addEventListener("click", () => applyTemplate(presets[0]));
-
-    actions.appendChild(resetBtn);
-    card.append(title, description, selectLabel, messageLabel, detailLabel, actions);
-    box.appendChild(card);
-  });
+function renderStaffCallMessageSettings() {
+  const box = document.getElementById("staffCallMessageTemplatesBox");
+  if (!box) return;
+  buildStaffCallSettingsForm(box, { variant: "settings" });
 }
 
 const SCHEDULE_SETTINGS_DAY_OPTIONS = [
@@ -14684,202 +14724,18 @@ function renderUserProfileStaffCallMessageSettings() {
   section.style.display = canEdit ? "block" : "none";
   if (!canEdit) return;
 
-  settings.staffCallTemplates = normalizeStaffCallTemplates(settings.staffCallTemplates);
-  settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(settings.staffCallTimeoutSeconds);
-  box.innerHTML = "";
-  const timeoutUi = getStaffCallTimeoutUiValue(settings.staffCallTimeoutSeconds);
-
-  const timeoutCard = document.createElement("div");
-  timeoutCard.style.cssText = "padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;display:flex;flex-direction:column;gap:8px;";
-
-  const timeoutTitle = document.createElement("div");
-  timeoutTitle.style.cssText = "font-size:12px;font-weight:700;color:#111827;";
-  timeoutTitle.textContent = "On-screen call timeout";
-
-  const timeoutDescription = document.createElement("div");
-  timeoutDescription.style.cssText = "font-size:11px;color:#6b7280;line-height:1.45;";
-  timeoutDescription.textContent = "How long the on-screen call stays open when the phone call can’t go through, and when you see No response. This does not control how long the phone rings.";
-
-  const timeoutLabel = document.createElement("label");
-  timeoutLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-  timeoutLabel.textContent = "How long should the on-screen call stay active?";
-
-  const timeoutSelect = document.createElement("select");
-  timeoutSelect.id = "userProfileStaffCallTimeoutSeconds";
-  timeoutSelect.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-  STAFF_CALL_TIMEOUT_OPTIONS.forEach((option) => {
-    const optionEl = document.createElement("option");
-    optionEl.value = String(option.value);
-    optionEl.textContent = option.label;
-    if (String(option.value) === timeoutUi.mode) optionEl.selected = true;
-    timeoutSelect.appendChild(optionEl);
-  });
-  const customTimeoutOption = document.createElement("option");
-  customTimeoutOption.value = "custom";
-  customTimeoutOption.textContent = "Custom time";
-  if (timeoutUi.mode === "custom") customTimeoutOption.selected = true;
-  timeoutSelect.appendChild(customTimeoutOption);
-  timeoutLabel.appendChild(timeoutSelect);
-
-  const customTimeoutRow = document.createElement("div");
-  customTimeoutRow.id = "userProfileStaffCallTimeoutCustomRow";
-  customTimeoutRow.style.cssText = `display:${timeoutUi.mode === "custom" ? "flex" : "none"};align-items:center;gap:8px;flex-wrap:wrap;`;
-
-  const customTimeoutInput = document.createElement("input");
-  customTimeoutInput.type = "number";
-  customTimeoutInput.id = "userProfileStaffCallTimeoutCustomValue";
-  customTimeoutInput.min = "1";
-  customTimeoutInput.step = "1";
-  customTimeoutInput.value = timeoutUi.customValue || "1";
-  customTimeoutInput.style.cssText = "width:100px;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-
-  const customTimeoutUnit = document.createElement("select");
-  customTimeoutUnit.id = "userProfileStaffCallTimeoutCustomUnit";
-  customTimeoutUnit.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-  [
-    { value: "seconds", label: "Seconds" },
-    { value: "minutes", label: "Minutes" }
-  ].forEach((unit) => {
-    const unitOption = document.createElement("option");
-    unitOption.value = unit.value;
-    unitOption.textContent = unit.label;
-    if (timeoutUi.customUnit === unit.value) unitOption.selected = true;
-    customTimeoutUnit.appendChild(unitOption);
-  });
-
-  const customTimeoutHint = document.createElement("div");
-  customTimeoutHint.style.cssText = "font-size:11px;color:#6b7280;";
-  customTimeoutHint.textContent = "Custom range: 10 seconds to 60 minutes.";
-
-  timeoutSelect.addEventListener("change", () => {
-    customTimeoutRow.style.display = timeoutSelect.value === "custom" ? "flex" : "none";
-  });
-
-  customTimeoutRow.append(customTimeoutInput, customTimeoutUnit, customTimeoutHint);
-  timeoutCard.append(timeoutTitle, timeoutDescription, timeoutLabel, customTimeoutRow);
-  box.appendChild(timeoutCard);
-
-  const sections = [
-    {
-      key: "available",
-      label: "Available Worker Message",
-      description: "Sent when calling a technician from the Available queue."
-    },
-    {
-      key: "inService",
-      label: "In Service Worker Message",
-      description: "Sent when calling a technician who is already In Service."
-    }
-  ];
-
-  sections.forEach((sectionConfig) => {
-    const template = settings.staffCallTemplates[sectionConfig.key];
-    const presets = STAFF_CALL_TEMPLATE_PRESETS[sectionConfig.key] || [];
-    const card = document.createElement("div");
-    card.style.cssText = "padding:10px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;display:flex;flex-direction:column;gap:8px;";
-
-    const title = document.createElement("div");
-    title.style.cssText = "font-size:12px;font-weight:700;color:#111827;";
-    title.textContent = sectionConfig.label;
-
-    const description = document.createElement("div");
-    description.style.cssText = "font-size:11px;color:#6b7280;line-height:1.45;";
-    description.textContent = sectionConfig.description;
-
-    const presetSelect = document.createElement("select");
-    presetSelect.id = `userProfileStaffCallPreset_${sectionConfig.key}`;
-    presetSelect.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-    presets.forEach((preset) => {
-      const option = document.createElement("option");
-      option.value = preset.id;
-      option.textContent = preset.label;
-      if (template.presetId === preset.id) option.selected = true;
-      presetSelect.appendChild(option);
-    });
-    const customOption = document.createElement("option");
-    customOption.value = "custom";
-    customOption.textContent = "Custom";
-    if (template.presetId === "custom") customOption.selected = true;
-    presetSelect.appendChild(customOption);
-
-    const messageInput = document.createElement("input");
-    messageInput.type = "text";
-    messageInput.id = `userProfileStaffCallMessage_${sectionConfig.key}`;
-    messageInput.value = template.message;
-    messageInput.maxLength = 90;
-    messageInput.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-
-    const detailInput = document.createElement("input");
-    detailInput.type = "text";
-    detailInput.id = `userProfileStaffCallDetail_${sectionConfig.key}`;
-    detailInput.value = template.detail;
-    detailInput.maxLength = 140;
-    detailInput.style.cssText = "height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:12px;";
-
-    function applyTemplate(nextTemplate) {
-      const normalized = normalizeStaffCallTemplateEntry(sectionConfig.key, nextTemplate);
-      settings.staffCallTemplates[sectionConfig.key] = normalized;
-      presetSelect.value = normalized.presetId;
-      messageInput.value = normalized.message;
-      detailInput.value = normalized.detail;
-    }
-
-    function markCustomFromInputs() {
-      settings.staffCallTemplates[sectionConfig.key] = normalizeStaffCallTemplateEntry(sectionConfig.key, {
-        presetId: "custom",
-        message: messageInput.value,
-        detail: detailInput.value
-      });
-      presetSelect.value = settings.staffCallTemplates[sectionConfig.key].presetId;
-    }
-
-    presetSelect.addEventListener("change", () => {
-      if (presetSelect.value === "custom") {
-        markCustomFromInputs();
-        return;
-      }
-      const preset = presets.find((item) => item.id === presetSelect.value) || presets[0];
-      applyTemplate(preset);
-    });
-    messageInput.addEventListener("input", markCustomFromInputs);
-    detailInput.addEventListener("input", markCustomFromInputs);
-
-    const resetBtn = document.createElement("button");
-    resetBtn.type = "button";
-    resetBtn.textContent = "Reset to default";
-    resetBtn.style.cssText = "padding:6px 10px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:11px;font-weight:600;cursor:pointer;align-self:flex-end;";
-    resetBtn.addEventListener("click", () => applyTemplate(presets[0]));
-
-    const presetLabel = document.createElement("label");
-    presetLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    presetLabel.textContent = "Preset";
-    presetLabel.appendChild(presetSelect);
-
-    const messageLabel = document.createElement("label");
-    messageLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    messageLabel.textContent = "Message";
-    messageLabel.appendChild(messageInput);
-
-    const detailLabel = document.createElement("label");
-    detailLabel.style.cssText = "display:flex;flex-direction:column;gap:6px;font-size:12px;color:#374151;";
-    detailLabel.textContent = "Subtext";
-    detailLabel.appendChild(detailInput);
-
-    card.append(title, description, presetLabel, messageLabel, detailLabel, resetBtn);
-    box.appendChild(card);
-  });
+  buildStaffCallSettingsForm(box, { variant: "profile" });
 
   if (!saveBtn.__ffBound) {
     saveBtn.__ffBound = true;
     saveBtn.addEventListener("click", async () => {
+      // Read Message + Subtext + timeout from the DOM even if the fail section is collapsed.
       settings.staffCallTemplates = normalizeStaffCallTemplates({
         available: {
-          presetId: document.getElementById("userProfileStaffCallPreset_available")?.value || "custom",
           message: document.getElementById("userProfileStaffCallMessage_available")?.value || "",
           detail: document.getElementById("userProfileStaffCallDetail_available")?.value || ""
         },
         inService: {
-          presetId: document.getElementById("userProfileStaffCallPreset_inService")?.value || "custom",
           message: document.getElementById("userProfileStaffCallMessage_inService")?.value || "",
           detail: document.getElementById("userProfileStaffCallDetail_inService")?.value || ""
         }
@@ -16007,12 +15863,10 @@ async function saveSettings(e){
 
   settings.staffCallTemplates = normalizeStaffCallTemplates({
     available: {
-      presetId: document.getElementById("staffCallPreset_available")?.value || "custom",
       message: document.getElementById("staffCallMessage_available")?.value || "",
       detail: document.getElementById("staffCallDetail_available")?.value || ""
     },
     inService: {
-      presetId: document.getElementById("staffCallPreset_inService")?.value || "custom",
       message: document.getElementById("staffCallMessage_inService")?.value || "",
       detail: document.getElementById("staffCallDetail_inService")?.value || ""
     }
