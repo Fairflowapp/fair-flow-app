@@ -110,17 +110,22 @@ function normalizeStaffCallTemplates(value) {
   if (typeof window !== "undefined" && typeof window.ffNormalizeStaffCallTemplates === "function") {
     return window.ffNormalizeStaffCallTemplates(value);
   }
+  // Fallback if index helpers are not loaded yet — still prefer messageId.
   const raw = value && typeof value === "object" ? value : {};
+  const availableId = String(raw?.available?.messageId || "available_client_waiting").trim() || "available_client_waiting";
+  const inServiceId = String(raw?.inService?.messageId || "inservice_reception_calling").trim() || "inservice_reception_calling";
   return {
     available: {
-      presetId: String(raw?.available?.presetId || "available_default"),
+      messageId: availableId,
       message: String(raw?.available?.message || "Your client is waiting"),
-      detail: String(raw?.available?.detail || "Please return to the queue.")
+      detail: String(raw?.available?.detail || "Please return to the queue."),
+      ...(raw?.available?.messageLegacy ? { messageLegacy: String(raw.available.messageLegacy) } : {})
     },
     inService: {
-      presetId: String(raw?.inService?.presetId || "inservice_default"),
+      messageId: inServiceId,
       message: String(raw?.inService?.message || "Reception is calling you"),
-      detail: String(raw?.inService?.detail || "Please come to reception.")
+      detail: String(raw?.inService?.detail || "Please come to reception."),
+      ...(raw?.inService?.messageLegacy ? { messageLegacy: String(raw.inService.messageLegacy) } : {})
     }
   };
 }

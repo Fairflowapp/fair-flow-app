@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions/v2");
+const staffCallMessages = require("./staff-call-messages");
 
 const REGION = "us-central1";
 const STAGING_PROJECT_ID = "fair-flow-staging";
@@ -75,13 +76,6 @@ function escapeXml(value) {
     .replace(/'/g, "&apos;");
 }
 
-/** Hardcoded TTS when no staffCallTemplates.message is configured. */
-function defaultSpokenMessage(callType) {
-  return callType === "front_desk"
-    ? "Hello, this is Fair Flow. Please come to the front desk. Press 1 to confirm."
-    : "Hello, this is Fair Flow. Your client is waiting for you. Please come to the front desk. Press 1 to accept.";
-}
-
 /**
  * Sanitize text before it is stored on the call log / spoken via <Say>.
  * Subtext (template.detail) is intentionally never used for TTS.
@@ -99,13 +93,23 @@ function sanitizeSpokenMessage(raw) {
   return value;
 }
 
+function withPressInstruction(callType, canonicalText) {
+  let cleaned = sanitizeSpokenMessage(canonicalText);
+  if (!cleaned) {
+    cleaned = sanitizeSpokenMessage(staffCallMessages.resolveCanonicalMessage(callType, null).text);
+  }
+  if (!cleaned) return "Your client is waiting. Press 1 to accept.";
+  if (/\bpress\s*1\b/i.test(cleaned)) return cleaned;
+  const suffix = callType === "front_desk" ? "Press 1 to confirm." : "Press 1 to accept.";
+  return sanitizeSpokenMessage(`${cleaned.replace(/[.!?]+$/, "")}. ${suffix}`) || cleaned;
+}
+
 /**
- * Resolve TTS text from per-location staffCallTemplates, then salon-wide
- * legacy staffCallTemplates. Uses message only (not detail/subtext).
- * callType client_waiting → available; front_desk → inService.
+ * Resolve TTS from closed messageId catalog (never free-text Firestore message).
+ * Per-location staffCallTemplates, then salon-wide legacy. Subtext ignored.
  */
 async function resolveSpokenMessage(db, businessId, locationId, callType) {
-  let templateMessage = "";
+  let entry = null;
   try {
     const settingsSnap = await db.doc(`salons/${businessId}/settings/main`).get();
     if (settingsSnap.exists) {
@@ -119,11 +123,9 @@ async function resolveSpokenMessage(db, businessId, locationId, callType) {
         (locPrefs && typeof locPrefs === "object" && locPrefs.staffCallTemplates) ||
         data.staffCallTemplates ||
         null;
-      const kind = callType === "front_desk" ? "inService" : "available";
-      const entry = templates && typeof templates === "object" ? templates[kind] : null;
-      if (entry && typeof entry === "object") {
-        templateMessage = sanitizeSpokenMessage(entry.message);
-      }
+      const kind = staffCallMessages.kindForCallType(callType);
+      const raw = templates && typeof templates === "object" ? templates[kind] : null;
+      if (raw && typeof raw === "object") entry = raw;
     }
   } catch (err) {
     logger.warn("[twilioVoice] failed to load staffCallTemplates", {
@@ -132,14 +134,12 @@ async function resolveSpokenMessage(db, businessId, locationId, callType) {
       message: err && err.message ? err.message : String(err),
     });
   }
-  if (!templateMessage) return defaultSpokenMessage(callType);
-
-  // Template message is screen-oriented and usually omits the digit prompt.
-  // Append a short Press-1 instruction so Gather remains usable, unless the
-  // configured message already tells the listener to press 1.
-  if (/\bpress\s*1\b/i.test(templateMessage)) return templateMessage;
-  const suffix = callType === "front_desk" ? "Press 1 to confirm." : "Press 1 to accept.";
-  return sanitizeSpokenMessage(`${templateMessage.replace(/[.!?]+$/, "")}. ${suffix}`) || templateMessage;
+  const resolved = staffCallMessages.resolveCanonicalMessage(callType, entry);
+  return {
+    spokenMessage: withPressInstruction(callType, resolved.text),
+    messageId: resolved.messageId,
+    resolveSource: resolved.source,
+  };
 }
 
 function twimlSay(message) {
@@ -307,7 +307,7 @@ exports.callStaff = onCall(
     if (!staffPhone) throw new HttpsError("failed-precondition", "Staff member does not have a phone number.");
 
     const fromTwilioNumber = TWILIO_PHONE_NUMBER.value();
-    const spokenMessage = await resolveSpokenMessage(db, businessId, locationId, callType);
+    const spoken = await resolveSpokenMessage(db, businessId, locationId, callType);
     const logRef = db.collection(`salons/${businessId}/staffCallLogs`).doc();
     const now = admin.firestore.FieldValue.serverTimestamp();
     await logRef.set({
@@ -317,7 +317,8 @@ exports.callStaff = onCall(
       staffId,
       queueEntryId: queueEntryId || null,
       callType,
-      spokenMessage,
+      messageId: spoken.messageId,
+      spokenMessage: spoken.spokenMessage,
       toPhoneMasked: maskPhone(staffPhone),
       fromTwilioNumber: maskPhone(fromTwilioNumber),
       twilioCallSid: null,
@@ -373,10 +374,11 @@ exports.twilioVoicePrompt = onRequest({ region: REGION, invoker: "public", secre
   const callType = cleanId(getRequestParam(req, "callType"));
   const businessId = cleanId(getRequestParam(req, "businessId"));
   const callLogId = cleanId(getRequestParam(req, "callLogId"));
-  let message = defaultSpokenMessage(callType);
+  const catalogDefault = staffCallMessages.resolveCanonicalMessage(callType, null);
+  let message = withPressInstruction(callType, catalogDefault.text);
 
-  // Prefer spokenMessage written on the call log by callStaff (template message,
-  // or the hardcoded default). Do not trust a long free-text query param.
+  // Prefer spokenMessage written on the call log by callStaff (from closed
+  // messageId catalog). Do not trust free-text query params.
   if (businessId && callLogId) {
     try {
       const logSnap = await admin.firestore().doc(`salons/${businessId}/staffCallLogs/${callLogId}`).get();

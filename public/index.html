@@ -3741,19 +3741,33 @@ if (settings.showIncompleteTasksBadge === undefined) {
   settings.showIncompleteTasksBadge = false; // Default to disabled
 }
 
-const STAFF_CALL_TEMPLATE_PRESETS = {
+/**
+ * Closed phone-message catalog. IDs + text must match
+ * functions/staff-call-messages.js (server enforces TTS from messageId only).
+ */
+const STAFF_CALL_MESSAGE_OPTIONS = {
   available: [
-    { id: "available_default", label: "Default", message: "Your client is waiting", detail: "Please return to the queue." },
-    { id: "available_next_client", label: "Next client ready", message: "Your next client is ready", detail: "Please come back to the queue." },
-    { id: "available_client_waiting", label: "Client waiting", message: "Client waiting for you", detail: "Please return now." },
-    { id: "available_reception_ready", label: "Front desk needs you", message: "Front desk needs you", detail: "Please come back to the queue." },
-    { id: "available_front_desk_waiting", label: "Front desk waiting", message: "Front desk is waiting for you", detail: "Please return to the queue now." }
+    { id: "available_client_waiting", text: "Your client is waiting" },
+    { id: "available_client_arrived", text: "Your client has arrived" },
+    { id: "available_return_to_floor", text: "Please return to the floor" },
+    { id: "available_waiting_at_reception", text: "You have a client waiting at reception" }
   ],
   inService: [
-    { id: "inservice_default", label: "Default", message: "Reception is calling you", detail: "Please come to reception." },
-    { id: "inservice_front_desk", label: "Front desk needs you", message: "Front desk needs you", detail: "Please come to the front desk." },
-    { id: "inservice_client_waiting", label: "Reception waiting", message: "Please come to reception", detail: "A client is waiting for you there." }
+    { id: "inservice_reception_calling", text: "Reception is calling you" },
+    { id: "inservice_front_desk_when_you_can", text: "Please come to the front desk when you can" },
+    { id: "inservice_call_reception", text: "Please call reception" },
+    { id: "inservice_needed_at_reception", text: "You're needed at reception" }
   ]
+};
+
+const STAFF_CALL_DEFAULT_MESSAGE_ID = {
+  available: "available_client_waiting",
+  inService: "inservice_reception_calling"
+};
+
+const STAFF_CALL_DEFAULT_DETAIL = {
+  available: "Please return to the queue.",
+  inService: "Please come to reception."
 };
 
 const STAFF_CALL_TIMEOUT_OPTIONS = [
@@ -3763,10 +3777,26 @@ const STAFF_CALL_TIMEOUT_OPTIONS = [
   { value: 300, label: "5 minutes" }
 ];
 
+function ffStaffCallMessageList(kind) {
+  return STAFF_CALL_MESSAGE_OPTIONS[kind] || STAFF_CALL_MESSAGE_OPTIONS.available;
+}
+
+function ffStaffCallMessageById(kind, messageId) {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  return ffStaffCallMessageList(kind).find((row) => row.id === id) || null;
+}
+
+function ffStaffCallMessageByText(kind, message) {
+  const needle = String(message || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!needle) return null;
+  return ffStaffCallMessageList(kind).find((row) => row.text.toLowerCase() === needle) || null;
+}
+
 function ffGetDefaultStaffCallTemplates() {
   return {
-    available: { ...STAFF_CALL_TEMPLATE_PRESETS.available[0] },
-    inService: { ...STAFF_CALL_TEMPLATE_PRESETS.inService[0] }
+    available: normalizeStaffCallTemplateEntry("available", { messageId: STAFF_CALL_DEFAULT_MESSAGE_ID.available }),
+    inService: normalizeStaffCallTemplateEntry("inService", { messageId: STAFF_CALL_DEFAULT_MESSAGE_ID.inService })
   };
 }
 
@@ -3799,20 +3829,34 @@ function resolveStaffCallTimeoutSecondsFromInputs(selectValue, customValue, cust
 }
 
 function normalizeStaffCallTemplateEntry(kind, value) {
-  const defaults = ffGetDefaultStaffCallTemplates();
-  const presetList = STAFF_CALL_TEMPLATE_PRESETS[kind] || [];
-  const fallback = defaults[kind];
   const raw = value && typeof value === "object" ? value : {};
-  const message = String(raw.message || "").trim() || fallback.message;
-  const detail = String(raw.detail || "").trim() || fallback.detail;
-  const presetId = String(raw.presetId || "").trim();
-  const matchingPreset = presetList.find((preset) => preset.id === presetId && preset.message === message && preset.detail === detail)
-    || presetList.find((preset) => preset.message === message && preset.detail === detail);
-  return {
-    presetId: matchingPreset ? matchingPreset.id : "custom",
-    message,
+  const defaultId = STAFF_CALL_DEFAULT_MESSAGE_ID[kind] || STAFF_CALL_DEFAULT_MESSAGE_ID.available;
+  const defaultDetail = STAFF_CALL_DEFAULT_DETAIL[kind] || STAFF_CALL_DEFAULT_DETAIL.available;
+  const byId = ffStaffCallMessageById(kind, raw.messageId);
+  const byText = byId ? null : ffStaffCallMessageByText(kind, raw.message);
+  const chosen = byId || byText || ffStaffCallMessageById(kind, defaultId);
+  const detail = String(raw.detail || "").trim() || defaultDetail;
+  const out = {
+    messageId: chosen.id,
+    // Canonical text for screen fallback + legacy readers (server ignores this for TTS).
+    message: chosen.text,
     detail
   };
+  // Keep unmatched free-text as backup once; never delete an existing legacy backup.
+  const legacyIn = String(raw.messageLegacy || "").trim();
+  if (legacyIn) {
+    out.messageLegacy = legacyIn;
+  } else {
+    const prior = String(raw.message || "").replace(/\s+/g, " ").trim();
+    if (prior && prior.toLowerCase() !== chosen.text.toLowerCase()) {
+      out.messageLegacy = prior;
+    }
+  }
+  // Preserve unused legacy presetId if present (not used by UI anymore).
+  if (raw.presetId != null && String(raw.presetId).trim()) {
+    out.presetId = String(raw.presetId).trim();
+  }
+  return out;
 }
 
 function normalizeStaffCallTemplates(value) {
@@ -13951,15 +13995,16 @@ function buildStaffCallSettingsForm(box, options = {}) {
 
   const phoneSub = document.createElement("div");
   phoneSub.style.cssText = `font-size:${bodySize};color:#6b7280;line-height:1.45;margin-top:-4px;`;
-  phoneSub.textContent = "Spoken on the phone call. Keep it short.";
+  phoneSub.textContent = "Choose one of the fixed lines spoken on the phone call.";
   phoneBlock.append(phoneHeading, phoneSub);
 
   const detailInputs = {};
+  const messageSelects = {};
 
   kinds.forEach((kind) => {
     const template = settings.staffCallTemplates[kind.key];
-    const presets = STAFF_CALL_TEMPLATE_PRESETS[kind.key] || [];
-    const defaultPreset = presets[0] || { message: template.message, detail: template.detail };
+    const options = ffStaffCallMessageList(kind.key);
+    const defaultId = STAFF_CALL_DEFAULT_MESSAGE_ID[kind.key];
 
     const card = document.createElement("div");
     card.style.cssText = `padding:${pad};border:1px solid #e5e7eb;border-radius:${radius};background:#fafafa;display:flex;flex-direction:column;gap:8px;`;
@@ -13976,13 +14021,21 @@ function buildStaffCallSettingsForm(box, options = {}) {
     messageLabel.style.cssText = `display:flex;flex-direction:column;gap:6px;font-size:${bodySize};color:#374151;`;
     messageLabel.textContent = "Message";
 
-    const messageInput = document.createElement("input");
-    messageInput.type = "text";
-    messageInput.id = messageId(kind.key);
-    messageInput.value = template.message;
-    messageInput.maxLength = 90;
-    messageInput.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
-    messageLabel.appendChild(messageInput);
+    const messageSelect = document.createElement("select");
+    messageSelect.id = messageId(kind.key);
+    messageSelect.style.cssText = `height:${inputH};padding:${inputPad};border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:${inputFont};`;
+    options.forEach((option) => {
+      const optionEl = document.createElement("option");
+      optionEl.value = option.id;
+      optionEl.textContent = option.text;
+      if (option.id === template.messageId) optionEl.selected = true;
+      messageSelect.appendChild(optionEl);
+    });
+    if (!ffStaffCallMessageById(kind.key, template.messageId) && options[0]) {
+      messageSelect.value = options[0].id;
+    }
+    messageLabel.appendChild(messageSelect);
+    messageSelects[kind.key] = messageSelect;
 
     const detailInput = document.createElement("input");
     detailInput.type = "text";
@@ -13998,20 +14051,29 @@ function buildStaffCallSettingsForm(box, options = {}) {
     resetBtn.style.cssText = `padding:${isProfile ? "6px 10px" : "8px 12px"};border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:${isProfile ? "11px" : "12px"};font-weight:600;cursor:pointer;align-self:flex-end;`;
 
     function syncFromInputs() {
+      const prev = settings.staffCallTemplates[kind.key] || {};
       settings.staffCallTemplates[kind.key] = normalizeStaffCallTemplateEntry(kind.key, {
-        message: messageInput.value,
-        detail: detailInput.value
+        messageId: messageSelect.value,
+        detail: detailInput.value,
+        messageLegacy: prev.messageLegacy,
+        presetId: prev.presetId
       });
     }
 
     function applyDefault() {
-      const normalized = normalizeStaffCallTemplateEntry(kind.key, defaultPreset);
+      const prev = settings.staffCallTemplates[kind.key] || {};
+      const normalized = normalizeStaffCallTemplateEntry(kind.key, {
+        messageId: defaultId,
+        detail: STAFF_CALL_DEFAULT_DETAIL[kind.key],
+        messageLegacy: prev.messageLegacy,
+        presetId: prev.presetId
+      });
       settings.staffCallTemplates[kind.key] = normalized;
-      messageInput.value = normalized.message;
+      messageSelect.value = normalized.messageId;
       detailInput.value = normalized.detail;
     }
 
-    messageInput.addEventListener("input", syncFromInputs);
+    messageSelect.addEventListener("change", syncFromInputs);
     detailInput.addEventListener("input", syncFromInputs);
     resetBtn.addEventListener("click", applyDefault);
 
@@ -14729,15 +14791,20 @@ function renderUserProfileStaffCallMessageSettings() {
   if (!saveBtn.__ffBound) {
     saveBtn.__ffBound = true;
     saveBtn.addEventListener("click", async () => {
-      // Read Message + Subtext + timeout from the DOM even if the fail section is collapsed.
+      // Read messageId + Subtext + timeout from the DOM even if the fail section is collapsed.
+      const prevTpl = settings.staffCallTemplates || {};
       settings.staffCallTemplates = normalizeStaffCallTemplates({
         available: {
-          message: document.getElementById("userProfileStaffCallMessage_available")?.value || "",
-          detail: document.getElementById("userProfileStaffCallDetail_available")?.value || ""
+          messageId: document.getElementById("userProfileStaffCallMessage_available")?.value || "",
+          detail: document.getElementById("userProfileStaffCallDetail_available")?.value || "",
+          messageLegacy: prevTpl.available && prevTpl.available.messageLegacy,
+          presetId: prevTpl.available && prevTpl.available.presetId
         },
         inService: {
-          message: document.getElementById("userProfileStaffCallMessage_inService")?.value || "",
-          detail: document.getElementById("userProfileStaffCallDetail_inService")?.value || ""
+          messageId: document.getElementById("userProfileStaffCallMessage_inService")?.value || "",
+          detail: document.getElementById("userProfileStaffCallDetail_inService")?.value || "",
+          messageLegacy: prevTpl.inService && prevTpl.inService.messageLegacy,
+          presetId: prevTpl.inService && prevTpl.inService.presetId
         }
       });
       settings.staffCallTimeoutSeconds = resolveStaffCallTimeoutSecondsFromInputs(
@@ -15861,16 +15928,23 @@ async function saveSettings(e){
 
   if(!settings.brandPalette) settings.brandPalette = DEFAULTS.brandPalette.slice();
 
-  settings.staffCallTemplates = normalizeStaffCallTemplates({
-    available: {
-      message: document.getElementById("staffCallMessage_available")?.value || "",
-      detail: document.getElementById("staffCallDetail_available")?.value || ""
-    },
-    inService: {
-      message: document.getElementById("staffCallMessage_inService")?.value || "",
-      detail: document.getElementById("staffCallDetail_inService")?.value || ""
-    }
-  });
+  {
+    const prevTpl = settings.staffCallTemplates || {};
+    settings.staffCallTemplates = normalizeStaffCallTemplates({
+      available: {
+        messageId: document.getElementById("staffCallMessage_available")?.value || "",
+        detail: document.getElementById("staffCallDetail_available")?.value || "",
+        messageLegacy: prevTpl.available && prevTpl.available.messageLegacy,
+        presetId: prevTpl.available && prevTpl.available.presetId
+      },
+      inService: {
+        messageId: document.getElementById("staffCallMessage_inService")?.value || "",
+        detail: document.getElementById("staffCallDetail_inService")?.value || "",
+        messageLegacy: prevTpl.inService && prevTpl.inService.messageLegacy,
+        presetId: prevTpl.inService && prevTpl.inService.presetId
+      }
+    });
+  }
   settings.staffCallTimeoutSeconds = resolveStaffCallTimeoutSecondsFromInputs(
     document.getElementById("staffCallTimeoutSeconds")?.value,
     document.getElementById("staffCallTimeoutCustomValue")?.value,
