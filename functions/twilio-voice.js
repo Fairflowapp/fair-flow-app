@@ -16,6 +16,7 @@ const TWILIO_AUTH_TOKEN = defineSecret("TWILIO_AUTH_TOKEN");
 const TWILIO_PHONE_NUMBER = defineSecret("TWILIO_PHONE_NUMBER");
 
 const VALID_CALL_TYPES = new Set(["client_waiting", "front_desk"]);
+const SPOKEN_MESSAGE_MAX_CHARS = 280;
 const STATUS_TIMESTAMPS = {
   queued: "queuedAt",
   ringing: "ringingAt",
@@ -72,6 +73,73 @@ function escapeXml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+/** Hardcoded TTS when no staffCallTemplates.message is configured. */
+function defaultSpokenMessage(callType) {
+  return callType === "front_desk"
+    ? "Hello, this is Fair Flow. Please come to the front desk. Press 1 to confirm."
+    : "Hello, this is Fair Flow. Your client is waiting for you. Please come to the front desk. Press 1 to accept.";
+}
+
+/**
+ * Sanitize text before it is stored on the call log / spoken via <Say>.
+ * Subtext (template.detail) is intentionally never used for TTS.
+ */
+function sanitizeSpokenMessage(raw) {
+  if (typeof raw !== "string") return "";
+  let value = raw
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!value) return "";
+  if (value.length > SPOKEN_MESSAGE_MAX_CHARS) {
+    value = value.slice(0, SPOKEN_MESSAGE_MAX_CHARS).trim();
+  }
+  return value;
+}
+
+/**
+ * Resolve TTS text from per-location staffCallTemplates, then salon-wide
+ * legacy staffCallTemplates. Uses message only (not detail/subtext).
+ * callType client_waiting → available; front_desk → inService.
+ */
+async function resolveSpokenMessage(db, businessId, locationId, callType) {
+  let templateMessage = "";
+  try {
+    const settingsSnap = await db.doc(`salons/${businessId}/settings/main`).get();
+    if (settingsSnap.exists) {
+      const data = settingsSnap.data() || {};
+      const locId = cleanId(locationId) || "default";
+      const locPrefs =
+        data.locationPreferences && typeof data.locationPreferences === "object"
+          ? data.locationPreferences[locId]
+          : null;
+      const templates =
+        (locPrefs && typeof locPrefs === "object" && locPrefs.staffCallTemplates) ||
+        data.staffCallTemplates ||
+        null;
+      const kind = callType === "front_desk" ? "inService" : "available";
+      const entry = templates && typeof templates === "object" ? templates[kind] : null;
+      if (entry && typeof entry === "object") {
+        templateMessage = sanitizeSpokenMessage(entry.message);
+      }
+    }
+  } catch (err) {
+    logger.warn("[twilioVoice] failed to load staffCallTemplates", {
+      businessId,
+      locationId: cleanId(locationId) || "default",
+      message: err && err.message ? err.message : String(err),
+    });
+  }
+  if (!templateMessage) return defaultSpokenMessage(callType);
+
+  // Template message is screen-oriented and usually omits the digit prompt.
+  // Append a short Press-1 instruction so Gather remains usable, unless the
+  // configured message already tells the listener to press 1.
+  if (/\bpress\s*1\b/i.test(templateMessage)) return templateMessage;
+  const suffix = callType === "front_desk" ? "Press 1 to confirm." : "Press 1 to accept.";
+  return sanitizeSpokenMessage(`${templateMessage.replace(/[.!?]+$/, "")}. ${suffix}`) || templateMessage;
 }
 
 function twimlSay(message) {
@@ -239,6 +307,7 @@ exports.callStaff = onCall(
     if (!staffPhone) throw new HttpsError("failed-precondition", "Staff member does not have a phone number.");
 
     const fromTwilioNumber = TWILIO_PHONE_NUMBER.value();
+    const spokenMessage = await resolveSpokenMessage(db, businessId, locationId, callType);
     const logRef = db.collection(`salons/${businessId}/staffCallLogs`).doc();
     const now = admin.firestore.FieldValue.serverTimestamp();
     await logRef.set({
@@ -248,6 +317,7 @@ exports.callStaff = onCall(
       staffId,
       queueEntryId: queueEntryId || null,
       callType,
+      spokenMessage,
       toPhoneMasked: maskPhone(staffPhone),
       fromTwilioNumber: maskPhone(fromTwilioNumber),
       twilioCallSid: null,
@@ -293,22 +363,40 @@ exports.callStaff = onCall(
   }
 );
 
-exports.twilioVoicePrompt = onRequest({ region: REGION, invoker: "public", secrets: [TWILIO_AUTH_TOKEN] }, (req, res) => {
+exports.twilioVoicePrompt = onRequest({ region: REGION, invoker: "public", secrets: [TWILIO_AUTH_TOKEN] }, async (req, res) => {
   if (!isAllowedProject()) {
     res.type("text/xml").send(twimlSay("Thank you. Goodbye."));
     return;
   }
   if (rejectInvalidTwilioSignature(req, res, "twilioVoicePrompt")) return;
+
   const callType = cleanId(getRequestParam(req, "callType"));
-  const message = callType === "front_desk"
-    ? "Hello, this is Fair Flow. Please come to the front desk. Press 1 to confirm."
-    : "Hello, this is Fair Flow. Your client is waiting for you. Please come to the front desk. Press 1 to accept.";
+  const businessId = cleanId(getRequestParam(req, "businessId"));
+  const callLogId = cleanId(getRequestParam(req, "callLogId"));
+  let message = defaultSpokenMessage(callType);
+
+  // Prefer spokenMessage written on the call log by callStaff (template message,
+  // or the hardcoded default). Do not trust a long free-text query param.
+  if (businessId && callLogId) {
+    try {
+      const logSnap = await admin.firestore().doc(`salons/${businessId}/staffCallLogs/${callLogId}`).get();
+      const fromLog = logSnap.exists ? sanitizeSpokenMessage((logSnap.data() || {}).spokenMessage) : "";
+      if (fromLog) message = fromLog;
+    } catch (err) {
+      logger.warn("[twilioVoice] failed to load spokenMessage from call log", {
+        businessId,
+        callLogId,
+        message: err && err.message ? err.message : String(err),
+      });
+    }
+  }
+
   const responseUrl = `${publicFunctionUrl("twilioVoiceResponse")}?${new URLSearchParams({
-    businessId: cleanId(getRequestParam(req, "businessId")),
+    businessId,
     locationId: cleanId(getRequestParam(req, "locationId")),
     staffId: cleanId(getRequestParam(req, "staffId")),
     queueEntryId: cleanId(getRequestParam(req, "queueEntryId")),
-    callLogId: cleanId(getRequestParam(req, "callLogId")),
+    callLogId,
     callType,
   }).toString()}`;
 
