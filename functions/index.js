@@ -16,6 +16,12 @@ const {
 } = require("./kiosk/seed");
 const { TECHNICIAN_KIOSK_ROLE_ID } = require("./kiosk/permissions");
 
+// Twilio Voice staff calls (callStaff + webhook handlers). Source restored
+// to match prod-deployed webhooks (twilioVoicePrompt/Response/Status).
+// Deploy by name only when changing this module:
+//   firebase deploy --only "functions:callStaff,functions:twilioVoicePrompt,functions:twilioVoiceResponse,functions:twilioCallStatus" --project fair-flow-staging
+Object.assign(exports, require("./twilio-voice"));
+
 // Stripe billing integration (createStripeCheckoutSession,
 // createStripePortalSession, stripeWebhook). Lives in its own file so this
 // module stays focused on existing concerns.
