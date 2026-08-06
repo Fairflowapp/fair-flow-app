@@ -31,11 +31,15 @@ import {
 let _salonId = null;
 let _unsubUi = null;
 let _unsubMain = null;
+let _unsubSalonRoot = null;
 let _unsubTechnicianTypes = null;
 // Cached last snapshot of settings/main. Used so we can re-apply schedule
 // fields (which are now per-location) when the active location changes
 // WITHOUT doing another round-trip to Firestore.
 let _lastMainSnapshot = null;
+// Mirror of salons/{salonId}.timezone — what server jobs / Schedule enforcement
+// use when a location has no per-location salonTimeZone.
+let _salonRootTimezone = null;
 
 function _ffActiveLocationIdForSettings() {
   try {
@@ -164,6 +168,35 @@ function subscribeMain(salonId) {
     _lastMainSnapshot = data;
     _applyMainSnapshot(data);
   }, (err) => console.warn("[SettingsCloud] main subscribe error", err));
+}
+
+function _setSalonRootTimezone(raw) {
+  const tz = normalizeSalonTimeZone(raw);
+  const next = tz || null;
+  if (_salonRootTimezone === next) return;
+  _salonRootTimezone = next;
+  if (typeof window !== "undefined") {
+    window.__ffSalonRootTimezone = next || "";
+  }
+  try {
+    if (typeof document !== "undefined" && typeof CustomEvent === "function") {
+      document.dispatchEvent(new CustomEvent("ff-salon-root-timezone-changed", {
+        detail: { timezone: next || "" },
+      }));
+    }
+  } catch (_) {}
+}
+
+function subscribeSalonRoot(salonId) {
+  if (_unsubSalonRoot) { _unsubSalonRoot(); _unsubSalonRoot = null; }
+  if (!salonId) {
+    _setSalonRootTimezone("");
+    return;
+  }
+  _unsubSalonRoot = onSnapshot(doc(db, "salons", salonId), (snap) => {
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    _setSalonRootTimezone(data.timezone);
+  }, (err) => console.warn("[SettingsCloud] salon root subscribe error", err));
 }
 
 // Extracted body of the subscribeMain handler so we can re-apply when the
@@ -334,14 +367,12 @@ function _applyMainSnapshot(data) {
       }
     }
 
-    // requireCustomerNameOnTicket — when true, staff must enter a customer
-    // name before sending a ticket to the front desk. Per-location first,
-    // fallback to legacy salon-wide preferences. Defaults to false (optional).
+    // requireCustomerNameOnTicket — per-location when set; otherwise legacy /
+    // any-location fallback (same rules as ffGetRequireCustomerNameOnTicket).
+    // Important: missing on the active location must NOT force false — that was
+    // flipping the Preferences toggle back off after Save / location switch.
     {
-      const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'requireCustomerNameOnTicket');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'requireCustomerNameOnTicket');
-      const raw = hasLoc ? _locPrefs.requireCustomerNameOnTicket : (hasLegacy ? data.preferences.requireCustomerNameOnTicket : undefined);
-      nextPreferences.requireCustomerNameOnTicket = (raw === true);
+      nextPreferences.requireCustomerNameOnTicket = _resolveRequireCustomerNameOnTicket(data, _prefsActiveLoc);
     }
     // Notifications → Birthday reminders "Days in advance" is PER-LOCATION.
     // Stored under `locationNotifications.{locationId}.birthdayReminderDaysBefore`.
@@ -479,6 +510,12 @@ function _applyMainSnapshot(data) {
           ...(stored.preferences && typeof stored.preferences === 'object' ? stored.preferences : {}),
           weekStartsOn: nextPreferences.weekStartsOn
         };
+        if (nextPreferences.timeFormat) {
+          stored.preferences.timeFormat = nextPreferences.timeFormat;
+        } else {
+          delete stored.preferences.timeFormat;
+        }
+        delete stored.preferences.scheduleDisplay;
         if (nextPreferences.salonTimeZone) {
           stored.preferences.salonTimeZone = nextPreferences.salonTimeZone;
         } else {
@@ -702,6 +739,7 @@ function ffSavePreferencesSettings(preferences) {
 
   // Mirror IANA zone onto salons/{salonId}.timezone for scheduled queue auto-reset.
   if (salonRootTimezone) {
+    _setSalonRootTimezone(salonRootTimezone);
     setDoc(doc(db, "salons", _salonId), {
       timezone: salonRootTimezone,
       updatedAt: serverTimestamp(),
@@ -709,6 +747,43 @@ function ffSavePreferencesSettings(preferences) {
       console.warn("[SettingsCloud] mirror salon timezone failed", e);
     });
   }
+}
+
+/**
+ * Resolve requireCustomerNameOnTicket from a settings/main snapshot:
+ * 1) active location explicit value
+ * 2) legacy salon-wide preferences
+ * 3) any location with true (so a saved ON is not lost when another branch
+ *    has not been written yet)
+ * 4) in-memory window.settings (covers the gap before the write lands)
+ */
+function _resolveRequireCustomerNameOnTicket(data, locationId) {
+  const snap = data && typeof data === "object" ? data : {};
+  const locationPreferences = snap.locationPreferences && typeof snap.locationPreferences === "object"
+    ? snap.locationPreferences
+    : {};
+  const loc = typeof locationId === "string" ? locationId.trim() : "";
+  const activePrefs = loc && locationPreferences[loc] && typeof locationPreferences[loc] === "object"
+    ? locationPreferences[loc]
+    : null;
+  if (activePrefs && Object.prototype.hasOwnProperty.call(activePrefs, "requireCustomerNameOnTicket")) {
+    return activePrefs.requireCustomerNameOnTicket === true;
+  }
+  if (snap.preferences && Object.prototype.hasOwnProperty.call(snap.preferences, "requireCustomerNameOnTicket")) {
+    return snap.preferences.requireCustomerNameOnTicket === true;
+  }
+  if (Object.values(locationPreferences).some((prefs) => (
+    prefs && typeof prefs === "object" && prefs.requireCustomerNameOnTicket === true
+  ))) {
+    return true;
+  }
+  try {
+    if (typeof window !== "undefined" && window.settings && window.settings.preferences
+        && window.settings.preferences.requireCustomerNameOnTicket === true) {
+      return true;
+    }
+  } catch (_) {}
+  return false;
 }
 
 /**
@@ -721,9 +796,18 @@ function ffSaveTicketPreferences(requireCustomerName) {
   if (!_salonId) return Promise.resolve(false);
   const locationId = _ffActiveLocationIdForSettings();
   const basePath = locationId ? `locationPreferences.${locationId}` : 'preferences';
+  const on = requireCustomerName === true;
+  // Keep UI/enforcement stable across the write→snapshot gap.
+  try {
+    if (typeof window !== "undefined") {
+      if (!window.settings) window.settings = {};
+      if (!window.settings.preferences) window.settings.preferences = {};
+      window.settings.preferences.requireCustomerNameOnTicket = on;
+    }
+  } catch (_) {}
   const payload = {
     updatedAt: serverTimestamp(),
-    [`${basePath}.requireCustomerNameOnTicket`]: requireCustomerName === true,
+    [`${basePath}.requireCustomerNameOnTicket`]: on,
   };
   return updateDoc(settingsMainRef(_salonId), payload)
     .catch((e) => {
@@ -741,25 +825,7 @@ function ffGetRequireCustomerNameOnTicket() {
   try {
     if (typeof window === "undefined") return false;
     const data = _lastMainSnapshot && typeof _lastMainSnapshot === "object" ? _lastMainSnapshot : {};
-    const locationId = _ffActiveLocationIdForSettings();
-    const locationPreferences = data.locationPreferences && typeof data.locationPreferences === "object"
-      ? data.locationPreferences
-      : {};
-    const activePrefs = locationId && locationPreferences[locationId] && typeof locationPreferences[locationId] === "object"
-      ? locationPreferences[locationId]
-      : null;
-    if (activePrefs && Object.prototype.hasOwnProperty.call(activePrefs, "requireCustomerNameOnTicket")) {
-      return activePrefs.requireCustomerNameOnTicket === true;
-    }
-    if (data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, "requireCustomerNameOnTicket")) {
-      return data.preferences.requireCustomerNameOnTicket === true;
-    }
-    if (window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true) {
-      return true;
-    }
-    return Object.values(locationPreferences).some((prefs) => (
-      prefs && typeof prefs === "object" && prefs.requireCustomerNameOnTicket === true
-    ));
+    return _resolveRequireCustomerNameOnTicket(data, _ffActiveLocationIdForSettings());
   } catch (e) {
     return false;
   }
@@ -1439,12 +1505,15 @@ function tryConnect() {
       _salonId = sid;
       subscribeUi(sid);
       subscribeMain(sid);
+      subscribeSalonRoot(sid);
       console.log("[SettingsCloud] Subscribed to salon", sid);
     } else if (!sid) {
       _salonId = null;
       ffInvalidateTimeClockSettingsCache();
       if (_unsubUi) { _unsubUi(); _unsubUi = null; }
       if (_unsubMain) { _unsubMain(); _unsubMain = null; }
+      if (_unsubSalonRoot) { _unsubSalonRoot(); _unsubSalonRoot = null; }
+      _setSalonRootTimezone("");
     }
   });
 }

@@ -22,12 +22,12 @@ import {
   buildMyShiftsIcsForCurrentWeek,
   downloadMyShiftsIcsForCurrentWeek,
 } from "./schedule-ics.js?v=20260702_schedule_ics";
-import { getWeekRange } from "./schedule-format.js?v=20260702_schedule_format";
+import { getWeekRange } from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 import { initScheduleRenderModals } from "./schedule-render-modals.js?v=20260703_schedule_render_split";
 import {
   initScheduleRenderBoard,

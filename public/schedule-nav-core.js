@@ -21,11 +21,11 @@ import {
   getScheduleStaffKey,
   getScheduleStaffRole,
   normalizeTimeValue,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 
 // -- injected via initScheduleNavCore() (wired in schedule-nav-runtime.js) --
 let renderScheduleBoard;

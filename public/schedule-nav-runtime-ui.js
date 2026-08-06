@@ -2,7 +2,7 @@
 // Schedule UI runtime — week filter, navigation, event binding, window hooks.
 // Extracted verbatim from schedule-nav-runtime.js (nav-runtime split T2).
 
-import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260704_schedule_nav_runtime_viewtabs_fix";
+import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260806_sched_12h_picker";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
@@ -28,14 +28,14 @@ import {
   getStartOfWeek,
   isTechnicianScheduleStaff,
   syncScheduleWeekFilterUi,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   ffScheduleAppToast,
   submitScheduleWeekAck,
   teardownScheduleAckListener,
   teardownScheduleChangePingListener,
 } from "./schedule-ack.js?v=20260702_schedule_ack";
-import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 import {
   renderScheduleCrossLocationConflictBanner,
   renderScheduleViewTabs,

@@ -29,12 +29,12 @@ import {
 import {
   formatWeekLabel,
   getWeekRange,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 
 // -- injected via initScheduleCloud() (wired in schedule-ui.js after storage constants initialize) --
 let SCHEDULE_DRAFT_OVERRIDE_KEY_VER;

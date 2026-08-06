@@ -14215,13 +14215,25 @@ const SCHEDULE_SETTINGS_DAY_OPTIONS = [
   { value: 'sunday', label: 'Sun' }
 ];
 
+/** True when Business Format → Time format is 24-hour. Radios win (what user just picked). */
 function ffScheduleSettingsPrefers24HourInputs() {
   try {
+    const r24 = document.getElementById('userProfileTimeFormat24h');
+    if (r24 && r24.checked) return true;
+    const r12 = document.getElementById('userProfileTimeFormat12h');
+    if (r12 && r12.checked) return false;
+  } catch (_) {}
+  try {
     const tf = window.settings && window.settings.preferences && window.settings.preferences.timeFormat;
-    return tf === '24h' || tf === '24hour' || tf === 24;
-  } catch (_) {
-    return false;
-  }
+    if (tf === '24h' || tf === '24hour' || tf === 24) return true;
+    if (tf === '12h' || tf === '12hour' || tf === 12) return false;
+  } catch (_) {}
+  try {
+    if (typeof window.ffGetDisplayTimeFormat === 'function') {
+      return window.ffGetDisplayTimeFormat() === '24h';
+    }
+  } catch (_) {}
+  return false;
 }
 
 function ffScheduleSettingsNormalizeHHMM(value) {
@@ -14234,30 +14246,75 @@ function ffScheduleSettingsNormalizeHHMM(value) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-function ffScheduleSettingsTimeInputAttrs(value) {
-  const normalized = ffScheduleSettingsNormalizeHHMM(value);
-  const safeValue = escapeHtmlAttr(normalized || String(value || '').trim());
-  if (!ffScheduleSettingsPrefers24HourInputs()) {
-    return `type="time" value="${safeValue}"`;
+/** Minute options for Settings → Schedule time pickers (5-min steps + current). */
+function ffScheduleSettingsMinuteOptions(curMin) {
+  const mins = [];
+  for (let m = 0; m < 60; m += 5) mins.push(m);
+  if (curMin != null && Number.isFinite(curMin) && !mins.includes(curMin)) {
+    mins.push(curMin);
+    mins.sort((a, b) => a - b);
   }
-  return `type="text" value="${safeValue}" inputmode="numeric" maxlength="5" pattern="[0-9]{2}:[0-9]{2}" placeholder="HH:mm" data-ff-schedule-hhmm="true" data-ff-schedule-last-valid="${safeValue}"`;
+  return mins;
+}
+
+/**
+ * Settings → Schedule open/close/shift times.
+ * 12h → compact hour/min/AM-PM selects (native <input type="time"> ignores
+ * Preferences and often looks 24h). 24h → single HH:mm text field.
+ * Canonical store is always HH:mm on the input with data-ff-schedule-time-store.
+ */
+function ffScheduleSettingsTimeControlHtml(value, attrs) {
+  const prefers24h = ffScheduleSettingsPrefers24HourInputs();
+  const normalized = ffScheduleSettingsNormalizeHHMM(value);
+  const safeValue = escapeHtmlAttr(normalized);
+  const attrStr = attrs ? (' ' + String(attrs).trim()) : '';
+  const fieldStyle = 'width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;';
+
+  // 24h: one HH:mm field (e.g. 09:00 / 18:00) — no AM/PM.
+  if (prefers24h) {
+    return `<input type="text" value="${safeValue}" inputmode="numeric" maxlength="5" placeholder="09:00" title="24-hour time (HH:mm)" data-ff-schedule-time-store="1" data-ff-schedule-hhmm="true" data-ff-schedule-last-valid="${safeValue}"${attrStr} style="${fieldStyle}">`;
+  }
+
+  const m = normalized.match(/^(\d{2}):(\d{2})$/);
+  const h24 = m ? Number(m[1]) : null;
+  const minute = m ? Number(m[2]) : null;
+  const hasVal = h24 != null;
+  let h12 = hasVal ? (h24 % 12) : 9;
+  if (hasVal && h12 === 0) h12 = 12;
+  if (!hasVal) h12 = 9;
+  const ampm = hasVal ? (h24 >= 12 ? 'PM' : 'AM') : 'AM';
+  // Fixed widths — flex:1 + min-width:0 collapsed hour/min to 0px in the grid.
+  const selBase = 'height:30px;border:1px solid #d1d5db;border-radius:8px;padding:0 2px;box-sizing:border-box;background:#fff;font-size:11px;font-family:inherit;color:#111827;cursor:pointer;outline:none;flex:0 0 auto;';
+  const hourOpts = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map((h) => `<option value="${h}" ${h12 === h ? 'selected' : ''}>${h}</option>`)
+    .join('');
+  const minOpts = ffScheduleSettingsMinuteOptions(hasVal ? minute : 0)
+    .map((min) => `<option value="${min}" ${(hasVal ? minute : 0) === min ? 'selected' : ''}>${String(min).padStart(2, '0')}</option>`)
+    .join('');
+  const ampmOpts = `<option value="AM" ${ampm === 'AM' ? 'selected' : ''}>AM</option><option value="PM" ${ampm === 'PM' ? 'selected' : ''}>PM</option>`;
+  const hidden = `<input type="hidden" value="${safeValue}" data-ff-schedule-time-store="1"${attrStr}>`;
+  return `<span data-ff-schedule-time-picker="12h" style="display:inline-flex;align-items:center;gap:4px;max-width:100%;box-sizing:border-box;flex-wrap:nowrap;">${hidden}<select data-ff-role="hour" aria-label="Hour" style="${selBase}width:46px;">${hourOpts}</select><span style="color:#9ca3af;font-weight:700;flex:0 0 auto;">:</span><select data-ff-role="min" aria-label="Minute" style="${selBase}width:52px;">${minOpts}</select><select data-ff-role="ampm" aria-label="AM or PM" style="${selBase}width:58px;font-weight:600;">${ampmOpts}</select></span>`;
 }
 
 function ffScheduleSettingsReadTimeInputValue(input) {
   if (!input) return null;
-  const raw = String(input.value || '').trim();
+  const store = input.matches && input.matches('[data-ff-schedule-time-store="1"]')
+    ? input
+    : (input.querySelector && input.querySelector('[data-ff-schedule-time-store="1"]')) || input;
+  const raw = String(store.value || '').trim();
   if (!raw) return null;
   const normalized = ffScheduleSettingsNormalizeHHMM(raw);
   if (normalized) {
-    input.value = normalized;
-    if (input.dataset) input.dataset.ffScheduleLastValid = normalized;
+    store.value = normalized;
+    if (store.dataset) store.dataset.ffScheduleLastValid = normalized;
     return normalized;
   }
   return null;
 }
 
-function ffBindScheduleSettingsTimeTextInputs(scope) {
+function ffBindScheduleSettingsTimePickers(scope) {
   const root = scope || document;
+  // 24h text HH:mm fields
   root.querySelectorAll('input[data-ff-schedule-hhmm="true"]').forEach((input) => {
     if (!input.dataset.ffScheduleLastValid) {
       input.dataset.ffScheduleLastValid = ffScheduleSettingsNormalizeHHMM(input.value) || '';
@@ -14266,16 +14323,44 @@ function ffBindScheduleSettingsTimeTextInputs(scope) {
     input.__ffScheduleHhmmBound = true;
     input.addEventListener('input', () => {
       const normalized = ffScheduleSettingsNormalizeHHMM(input.value);
-      if (normalized && input.dataset) input.dataset.ffScheduleLastValid = normalized;
+      if (normalized) input.dataset.ffScheduleLastValid = normalized;
     });
     input.addEventListener('blur', () => {
       const normalized = ffScheduleSettingsNormalizeHHMM(input.value);
       if (normalized) {
         input.value = normalized;
-        if (input.dataset) input.dataset.ffScheduleLastValid = normalized;
+        input.dataset.ffScheduleLastValid = normalized;
         return;
       }
       input.value = input.dataset.ffScheduleLastValid || '';
+    });
+  });
+  // 12h composite pickers
+  root.querySelectorAll('[data-ff-schedule-time-picker="12h"]').forEach((pick) => {
+    if (pick.__ffScheduleTimePickerBound) return;
+    pick.__ffScheduleTimePickerBound = true;
+    const hidden = pick.querySelector('input[data-ff-schedule-time-store="1"]');
+    const recompute = () => {
+      if (!hidden) return;
+      const hourSel = pick.querySelector('[data-ff-role="hour"]');
+      const minSel = pick.querySelector('[data-ff-role="min"]');
+      const ampmSel = pick.querySelector('[data-ff-role="ampm"]');
+      const min = parseInt(minSel && minSel.value, 10);
+      let h12 = parseInt(hourSel && hourSel.value, 10) % 12;
+      if (!Number.isFinite(h12) || !Number.isFinite(min)) return;
+      const h = (ampmSel && ampmSel.value === 'PM') ? h12 + 12 : h12;
+      hidden.value = `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+      try {
+        hidden.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch (_) {}
+    };
+    // Keep hidden in sync with visible selects when a value already exists,
+    // and seed empty stores from the default select state only after user edits.
+    if (hidden && ffScheduleSettingsNormalizeHHMM(hidden.value)) {
+      recompute();
+    }
+    pick.querySelectorAll('select').forEach((sel) => {
+      sel.addEventListener('change', recompute);
     });
   });
 }
@@ -14289,8 +14374,8 @@ function ffCreateShiftSegmentRowEl(day, start, end, cov) {
   div.className = 'ff-shift-row';
   div.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:nowrap;margin-bottom:6px;width:100%;box-sizing:border-box;';
   div.innerHTML =
-    '<input ' + ffScheduleSettingsTimeInputAttrs(start) + ' class="ff-shift-start" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
-    '<input ' + ffScheduleSettingsTimeInputAttrs(end) + ' class="ff-shift-end" style="flex:1 1 108px;min-width:0;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
+    '<div class="ff-shift-start-wrap" style="flex:1 1 108px;min-width:0;box-sizing:border-box;">' + ffScheduleSettingsTimeControlHtml(start, 'class="ff-shift-start"') + '</div>' +
+    '<div class="ff-shift-end-wrap" style="flex:1 1 108px;min-width:0;box-sizing:border-box;">' + ffScheduleSettingsTimeControlHtml(end, 'class="ff-shift-end"') + '</div>' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-mgr" value="' + m + '" placeholder="0" title="Managers" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-fd" value="' + f + '" placeholder="0" title="Assistant Manager (Manager + Assistant Manager type)" style="flex:0 0 52px;width:52px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
     '<input type="number" min="0" step="1" class="ff-shift-cov-sp" value="' + t + '" placeholder="0" title="Service providers" style="flex:0 0 64px;width:64px;height:30px;padding:0 4px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;" />' +
@@ -14334,7 +14419,7 @@ function ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverage
         var c = box.querySelector('[data-' + attrPrefix + '-shift-container="' + d + '"]');
         if (c) {
           c.appendChild(ffCreateShiftSegmentRowEl(d, '', '', {}));
-          ffBindScheduleSettingsTimeTextInputs(c);
+          ffBindScheduleSettingsTimePickers(c);
         }
         return;
       }
@@ -14365,7 +14450,7 @@ function ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverage
       }
     });
   }
-  ffBindScheduleSettingsTimeTextInputs(box);
+  ffBindScheduleSettingsTimePickers(box);
 }
 
 function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverageRulesValue, dayShiftSegmentsValue, attrPrefix) {
@@ -14381,8 +14466,10 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
     ? window.ffScheduleHelpers.normalizeDayShiftSegments(dayShiftSegmentsValue)
     : (dayShiftSegmentsValue || {});
 
+  // Wide enough for 12h hour:min AM/PM (~170px) without crushing selects.
+  const dayGrid = 'grid-template-columns:36px 56px minmax(168px,1fr) minmax(168px,1fr);gap:8px;';
   const header = `
-    <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:end;padding:0 8px 4px 8px;max-width:100%;box-sizing:border-box;">
+    <div style="display:grid;${dayGrid}align-items:end;padding:0 8px 4px 8px;max-width:100%;box-sizing:border-box;">
       <div></div>
       <div></div>
       <div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.03em;">Open</div>
@@ -14394,14 +14481,14 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
     const hoursEntry = businessHours[day.value] || { isOpen: false, openTime: null, closeTime: null };
     return `
       <div style="border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:8px;overflow:hidden;max-width:100%;box-sizing:border-box;">
-        <div style="display:grid;grid-template-columns:36px 60px minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:center;padding:8px 8px;">
+        <div style="display:grid;${dayGrid}align-items:center;padding:8px 8px;">
           <div style="font-size:11px;font-weight:600;color:#111827;">${day.label}</div>
           <label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#374151;cursor:pointer;min-width:0;">
             <input type="checkbox" data-${attrPrefix}-business-open="${day.value}" ${hoursEntry.isOpen ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
             <span>Open</span>
           </label>
-          <input ${ffScheduleSettingsTimeInputAttrs(hoursEntry.openTime)} data-${attrPrefix}-business-open-time="${day.value}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-          <input ${ffScheduleSettingsTimeInputAttrs(hoursEntry.closeTime)} data-${attrPrefix}-business-close-time="${day.value}" style="width:100%;min-width:0;max-width:100%;height:30px;padding:0 6px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+          ${ffScheduleSettingsTimeControlHtml(hoursEntry.openTime, `data-${attrPrefix}-business-open-time="${day.value}"`)}
+          ${ffScheduleSettingsTimeControlHtml(hoursEntry.closeTime, `data-${attrPrefix}-business-close-time="${day.value}"`)}
         </div>
         <button type="button" data-${attrPrefix}-shift-toggle="${day.value}" aria-expanded="false" style="width:100%;text-align:left;padding:8px 12px;border:none;border-top:1px solid #f3f4f6;background:#fafafa;font-size:11px;font-weight:600;color:#5b21b6;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <span>Shift segments &amp; coverage</span>
@@ -14425,7 +14512,7 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
   }).join('');
 
   box.innerHTML = header + rows;
-  ffBindScheduleSettingsTimeTextInputs(box);
+  ffBindScheduleSettingsTimePickers(box);
   ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverageRules);
 }
 
@@ -14595,8 +14682,8 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
         <input type="checkbox" data-${attrPrefix}-special-closed="${dateKey}" ${entry.isClosed ? 'checked' : ''} style="width:14px;height:14px;accent-color:#7c3aed;cursor:pointer;">
         <span>Closed</span>
       </label>
-      <input ${ffScheduleSettingsTimeInputAttrs(entry.openTime)} data-${attrPrefix}-special-open="${dateKey}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
-      <input ${ffScheduleSettingsTimeInputAttrs(entry.closeTime)} data-${attrPrefix}-special-close="${dateKey}" ${entry.isClosed ? 'disabled' : ''} style="width:100%;min-width:0;height:32px;padding:0 8px;border:1px solid #d1d5db;border-radius:8px;background:#fff;font-size:11px;box-sizing:border-box;">
+      ${ffScheduleSettingsTimeControlHtml(entry.openTime, `data-${attrPrefix}-special-open="${dateKey}"`)}
+      ${ffScheduleSettingsTimeControlHtml(entry.closeTime, `data-${attrPrefix}-special-close="${dateKey}"`)}
       <input type="hidden" data-${attrPrefix}-special-note="${dateKey}" value="${escapeHtmlAttr(noteVal)}">
       <button type="button" data-${attrPrefix}-special-note-btn="${dateKey}" class="ff-special-day-note-btn" style="width:36px;height:32px;border:1px solid ${hasNote ? '#7c3aed' : '#e5e7eb'};border-radius:8px;background:${hasNote ? '#f5f3ff' : '#fff'};color:${hasNote ? '#5b21b6' : '#9ca3af'};font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;" title="${hasNote ? 'Edit schedule note' : 'Add schedule note (shown on Schedule board)'}">*</button>
       <button type="button" title="Remove special day" aria-label="Remove special day" data-${attrPrefix}-special-remove="${dateKey}" style="width:36px;height:32px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">
@@ -14611,15 +14698,27 @@ function renderSpecialBusinessDaysInto(containerId, specialBusinessDaysValue, at
     </div>
   `;
   }).join('');
-  ffBindScheduleSettingsTimeTextInputs(box);
+  ffBindScheduleSettingsTimePickers(box);
 
+  const setSpecialDayTimeDisabled = (dateKey, disabled) => {
+    [box.querySelector(`[data-${attrPrefix}-special-open="${dateKey}"]`),
+     box.querySelector(`[data-${attrPrefix}-special-close="${dateKey}"]`)].forEach((store) => {
+      if (!store) return;
+      const pick = store.closest('[data-ff-schedule-time-picker]');
+      if (pick) {
+        pick.querySelectorAll('select').forEach((sel) => {
+          sel.disabled = !!disabled;
+          sel.style.opacity = disabled ? '0.6' : '';
+          sel.style.cursor = disabled ? 'not-allowed' : 'pointer';
+        });
+      }
+    });
+  };
   box.querySelectorAll(`[data-${attrPrefix}-special-closed]`).forEach((checkbox) => {
+    const dateKey = checkbox.getAttribute(`data-${attrPrefix}-special-closed`);
+    if (checkbox.checked) setSpecialDayTimeDisabled(dateKey, true);
     checkbox.addEventListener('change', () => {
-      const dateKey = checkbox.getAttribute(`data-${attrPrefix}-special-closed`);
-      const openInput = box.querySelector(`[data-${attrPrefix}-special-open="${dateKey}"]`);
-      const closeInput = box.querySelector(`[data-${attrPrefix}-special-close="${dateKey}"]`);
-      if (openInput) openInput.disabled = checkbox.checked;
-      if (closeInput) closeInput.disabled = checkbox.checked;
+      setSpecialDayTimeDisabled(checkbox.getAttribute(`data-${attrPrefix}-special-closed`), checkbox.checked);
     });
   });
 
@@ -14681,16 +14780,19 @@ function renderUserProfileScheduleSettings() {
   }
 }
 
-// Re-render the Schedule settings card when the active location changes or
-// when the settings subscriber re-applies a snapshot (schedule fields are
-// per-location now - see settings-cloud.js). We only repaint if the card is
-// visible so we don't thrash the DOM on background branch switches.
+// Re-render Settings → Schedule when location/settings change, and when Time
+// format switches (12h AM/PM pickers ↔ 24h HH:mm field).
 if (typeof document !== 'undefined' && !document.__ffScheduleSettingsRefreshBound) {
   document.__ffScheduleSettingsRefreshBound = true;
-  const refreshScheduleProfileCard = () => {
+  const refreshScheduleProfileCard = (evt) => {
     try {
+      const box = document.getElementById('userProfileScheduleCombinedBox');
+      if (!box) return;
+      const isTimeFormatEvent = evt && evt.type === 'ff-time-format-changed';
       const card = document.getElementById('userProfileCardSchedule');
-      if (!card || card.style.display === 'none') return;
+      // Time-format changes rebuild even if the card is hidden so the next open
+      // already matches Preferences. Other events only repaint when visible.
+      if (!isTimeFormatEvent && (!card || card.style.display === 'none')) return;
       if (typeof renderUserProfileScheduleSettings === 'function') {
         renderUserProfileScheduleSettings();
       }
@@ -14700,6 +14802,7 @@ if (typeof document !== 'undefined' && !document.__ffScheduleSettingsRefreshBoun
   };
   document.addEventListener('ff-active-location-changed', refreshScheduleProfileCard);
   document.addEventListener('ff-schedule-settings-changed', refreshScheduleProfileCard);
+  document.addEventListener('ff-time-format-changed', refreshScheduleProfileCard);
 }
 
 window.ffSaveScheduleSettingsProfile = async function() {
@@ -26927,7 +27030,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260704_schedule_nav_runtime_viewtabs_fix')
+              import('/schedule-ui.js?v=20260806_sched_12h_picker')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -43183,7 +43286,9 @@ function initializeUserProfileMenu() {
   function ffRenderTicketPreferences() {
     const cb = document.getElementById('ticketsRequireCustomerName');
     if (!cb) return;
-    const cur = !!(window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true);
+    const cur = (typeof window.ffGetRequireCustomerNameOnTicket === 'function')
+      ? window.ffGetRequireCustomerNameOnTicket() === true
+      : !!(window.settings && window.settings.preferences && window.settings.preferences.requireCustomerNameOnTicket === true);
     cb.checked = cur;
     if (!cb.__ffWired) {
       cb.__ffWired = true;
@@ -43195,11 +43300,14 @@ function initializeUserProfileMenu() {
         if (typeof window.ffSaveTicketPreferences === 'function') {
           window.ffSaveTicketPreferences(val)
             .then(function () {
+              // Re-sync from the resolver after save (survives snapshot re-apply).
+              try { ffRenderTicketPreferences(); } catch (_) {}
               if (window.ffToast && typeof window.ffToast.show === 'function') {
                 window.ffToast.show(val ? 'Customer name is now required' : 'Customer name is now optional', { variant: 'success', durationMs: 2000 });
               }
             })
             .catch(function () {
+              try { ffRenderTicketPreferences(); } catch (_) {}
               if (window.ffToast && typeof window.ffToast.show === 'function') {
                 window.ffToast.show('Could not save setting', { variant: 'error', durationMs: 2500 });
               }
@@ -43209,6 +43317,20 @@ function initializeUserProfileMenu() {
     }
   }
   window.ffRenderTicketPreferences = ffRenderTicketPreferences;
+
+  // Tickets prefs are per-location with salon fallback — refresh when branch changes.
+  if (typeof document !== 'undefined' && !document.__ffTicketPrefsLocRefreshBound) {
+    document.__ffTicketPrefsLocRefreshBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      try {
+        const pane = document.querySelector('#userProfileCardPreferences .ff-pref-pane[data-pref-pane="tickets"]');
+        if (!pane || pane.style.display === 'none') return;
+        if (typeof ffRenderTicketPreferences === 'function') ffRenderTicketPreferences();
+      } catch (e) {
+        console.warn('[Ticket Preferences] refresh on location change failed', e);
+      }
+    });
+  }
 
   // Menu item click handler
   function handleMenuClick(section, opts) {
@@ -43623,6 +43745,24 @@ function initializeUserProfileMenu() {
     });
   }
 
+  // Business Format (timezone, schedule display, etc.) is per-location.
+  // Refresh the Preferences controls when the active branch changes, and when
+  // the salon-root timezone mirror arrives/updates.
+  if (typeof document !== 'undefined' && !document.__ffBusinessFormatPrefsRefreshBound) {
+    document.__ffBusinessFormatPrefsRefreshBound = true;
+    const refreshBusinessFormatPrefs = function () {
+      try {
+        const card = document.getElementById('userProfileCardPreferences');
+        if (!card || card.style.display === 'none') return;
+        if (typeof loadPreferences === 'function') loadPreferences();
+      } catch (e) {
+        console.warn('[Business Format] refresh failed', e);
+      }
+    };
+    document.addEventListener('ff-active-location-changed', refreshBusinessFormatPrefs);
+    document.addEventListener('ff-salon-root-timezone-changed', refreshBusinessFormatPrefs);
+  }
+
   const ffTestBirthdayInboxBtn = document.getElementById('ffTestBirthdayInboxBtn');
   if (ffTestBirthdayInboxBtn && !ffTestBirthdayInboxBtn.__ffBound) {
     ffTestBirthdayInboxBtn.__ffBound = true;
@@ -43727,6 +43867,16 @@ function initializeUserProfileMenu() {
       const z = (window.settings && window.settings.preferences && typeof window.settings.preferences.salonTimeZone === 'string')
         ? window.settings.preferences.salonTimeZone.trim()
         : '';
+      const mirrorTz = (typeof window.__ffSalonRootTimezone === 'string')
+        ? window.__ffSalonRootTimezone.trim()
+        : '';
+      const autoOpt = salonTimeZoneSelect.options && salonTimeZoneSelect.options[0];
+      if (autoOpt && autoOpt.value === '') {
+        // Reflect what the server uses: location TZ, else salon mirror, else true Auto.
+        autoOpt.textContent = (!z && mirrorTz)
+          ? (mirrorTz + ' (salon default)')
+          : 'Auto (this device)';
+      }
       const hasOption = Array.from(salonTimeZoneSelect.options).some(function(o) { return o.value === z; });
       if (z && !hasOption) {
         const opt = document.createElement('option');
@@ -43802,6 +43952,7 @@ function initializeUserProfileMenu() {
         weekStartsOn: nextWeekStartsOn,
         timeFormat: prefs.preferences.timeFormat
       };
+      delete currentSettings.preferences.scheduleDisplay;
       if (salonTz) {
         currentSettings.preferences.salonTimeZone = salonTz;
       } else {
@@ -43827,6 +43978,7 @@ function initializeUserProfileMenu() {
         weekStartsOn: nextWeekStartsOn,
         timeFormat: prefs.preferences.timeFormat
       };
+      delete settings.preferences.scheduleDisplay;
       if (salonTz) {
         settings.preferences.salonTimeZone = salonTz;
       } else {
@@ -43888,6 +44040,14 @@ function initializeUserProfileMenu() {
     try {
       window.dispatchEvent(new CustomEvent('ff-currency-changed', { detail: { currency: salonCur || 'USD' } }));
     } catch (_) {}
+    // Refresh timezone Auto label (salon default vs device) after save/clear.
+    try { loadPreferences(); } catch (_) {}
+    // Rebuild Settings → Schedule pickers for the new Time format (12h AM/PM vs 24h HH:mm).
+    try {
+      document.dispatchEvent(new CustomEvent('ff-time-format-changed', {
+        detail: { timeFormat: prefs.preferences.timeFormat }
+      }));
+    } catch (_) {}
     setTimeout(function() {
       if (typeof window.ffRunBirthdayChatRemindersSoon === 'function') {
         window.ffRunBirthdayChatRemindersSoon();
@@ -43897,11 +44057,15 @@ function initializeUserProfileMenu() {
   
   if (timeFormat12h && !timeFormat12h.__ffBound) {
     timeFormat12h.__ffBound = true;
-    timeFormat12h.addEventListener('change', savePreferences);
+    timeFormat12h.addEventListener('change', function () {
+      savePreferences();
+    });
   }
   if (timeFormat24h && !timeFormat24h.__ffBound) {
     timeFormat24h.__ffBound = true;
-    timeFormat24h.addEventListener('change', savePreferences);
+    timeFormat24h.addEventListener('change', function () {
+      savePreferences();
+    });
   }
   if (weekStartsOnMonday && !weekStartsOnMonday.__ffBound) {
     weekStartsOnMonday.__ffBound = true;

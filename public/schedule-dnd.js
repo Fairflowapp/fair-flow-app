@@ -15,7 +15,7 @@ import {
   getScheduleStaffKey,
   getScheduleStaffRole,
   getWeekRange,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   cloneScheduleDraft,
   dayHasManualOff,
@@ -29,7 +29,7 @@ import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 
 // -- injected via initScheduleDnd() (wired in schedule-ui.js) --
 let renderScheduleBoard;

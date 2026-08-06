@@ -27,7 +27,7 @@ import {
   getScheduleStaffKey,
   getValidationByDate,
   getWeekRange,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   bindScheduleBoardManualAdd,
   bindScheduleShiftEditButtons,
@@ -36,7 +36,7 @@ import {
   formatLunchBreakCellSubtitle,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 import {
   bindScheduleCoverageDayClick,
   bindScheduleStandByPen,

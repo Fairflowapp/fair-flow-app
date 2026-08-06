@@ -12,7 +12,7 @@ import {
 import {
   formatScheduleTimeRangeDisplay,
   getScheduleStaffKey,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 
 function _ffIcsFormatLocalDateTime(dateKey, timeHHmm) {
   const d = String(dateKey || "").replace(/-/g, "");

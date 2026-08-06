@@ -30,13 +30,13 @@ import {
   formatWeekLabel,
   getScheduleStaffKey,
   getWeekRange,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   closeScheduleShiftEdit,
   ensureScheduleRebuildConfirmModal,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 
 // -- injected via initScheduleDraft() (wired in schedule-ui.js) --
 let _ffActiveLocationNameForIcs;

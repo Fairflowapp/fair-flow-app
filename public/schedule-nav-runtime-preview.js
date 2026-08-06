@@ -30,7 +30,7 @@ import {
   isApprovedRequest,
 } from "./schedule-availability.js?v=20260615_default_schedule_source";
 import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
-import "./format-utils.js";
+import "./format-utils.js?v=20260806_sched_12h_picker";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   initScheduleRender,
@@ -203,7 +203,7 @@ import {
   syncScheduleWeekFilterUi,
   toDateKey,
   warningAppliesToStaffRow,
-} from "./schedule-format.js?v=20260702_schedule_format";
+} from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   _ffSchedActiveLocId,
   _ffSchedPerLocDocId,
@@ -233,7 +233,7 @@ import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260702_schedule_shift_edit";
+} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
 import {
   STAND_BY_SLOTS,
   SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY,
