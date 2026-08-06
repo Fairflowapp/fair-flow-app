@@ -7615,6 +7615,8 @@ function ffStaffCallUserErrorText(err){
 
 window.__ffTwilioVoiceLogUnsubs = window.__ffTwilioVoiceLogUnsubs || {};
 window.__ffTwilioVoiceRecentCalls = window.__ffTwilioVoiceRecentCalls || {};
+window.__ffTwilioVoiceFallbackDone = window.__ffTwilioVoiceFallbackDone || {};
+window.__ffStaffCallInFlight = window.__ffStaffCallInFlight || {};
 
 function ffTwilioVoiceCallKey(staffId, queueEntryId, callType){
   return [
@@ -7626,7 +7628,7 @@ function ffTwilioVoiceCallKey(staffId, queueEntryId, callType){
 
 function ffTwilioVoiceRememberCall({ staffId, queueEntryId, callType, callLogId, status }){
   const key = ffTwilioVoiceCallKey(staffId, queueEntryId, callType);
-  if (!key || key === '||' || !callLogId) return;
+  if (!key || key === '||') return;
   window.__ffTwilioVoiceRecentCalls[key] = {
     staffId: String(staffId || '').trim(),
     queueEntryId: String(queueEntryId || '').trim(),
@@ -7648,8 +7650,161 @@ function ffTwilioVoiceRecentStatus(staffId, queueEntryId, callType){
   return rec.status;
 }
 
+function ffNormalizeStaffCallType(callType){
+  return callType === 'front_desk' ? 'front_desk' : 'client_waiting';
+}
+
+function ffStaffCallTemplateKind(callType){
+  return ffNormalizeStaffCallType(callType) === 'front_desk' ? 'inService' : 'available';
+}
+
+function ffStaffCallAllowedQueueStatuses(callType){
+  return ffNormalizeStaffCallType(callType) === 'front_desk'
+    ? ['in_service']
+    : ['available', 'held'];
+}
+
+function ffResolveStaffRecordForCall(staffId){
+  const id = String(staffId || '').trim();
+  if (!id) return null;
+  try {
+    const raw = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
+    const list = Array.isArray(raw.staff) ? raw.staff : [];
+    return list.find((row) => String((row && row.id) || '').trim() === id) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function ffResolveStaffPhoneForCall(staffId){
+  const row = ffResolveStaffRecordForCall(staffId);
+  const phone = String((row && row.phone) || '').trim();
+  const digits = phone.replace(/\D/g, '');
+  return digits.length >= 7 ? phone : '';
+}
+
+function ffStaffCallDisplayName(staffId){
+  const row = ffResolveStaffRecordForCall(staffId);
+  return String((row && row.name) || '').trim();
+}
+
+function ffStaffCallTemplateForType(callType){
+  const kind = ffStaffCallTemplateKind(callType);
+  try {
+    if (typeof window.ffGetStaffCallTemplate === 'function') {
+      return window.ffGetStaffCallTemplate(kind) || {};
+    }
+  } catch (_) {}
+  return kind === 'inService'
+    ? { message: 'Reception is calling you', detail: 'Please come to reception.' }
+    : { message: 'Your client is waiting', detail: 'Please return to the queue.' };
+}
+
+function ffShouldFallbackVoiceError(err){
+  const code = String((err && err.code) || '').toLowerCase();
+  if (
+    code.includes('permission-denied') ||
+    code.includes('unauthenticated') ||
+    code.includes('invalid-argument') ||
+    code.includes('not-found')
+  ) {
+    return false;
+  }
+  if (
+    code.includes('failed-precondition') ||
+    code.includes('internal') ||
+    code.includes('unavailable') ||
+    code.includes('deadline-exceeded') ||
+    code.includes('resource-exhausted')
+  ) {
+    return true;
+  }
+  const msg = String((err && err.message) || '').toLowerCase();
+  if (/phone number|twilio|network|failed to fetch|load failed/.test(msg)) return true;
+  // Prefer an on-screen attempt over a silent admin-only failure.
+  return true;
+}
+
+function ffStaffCallBothFailedMessage(staffId, screenReason){
+  const name = ffStaffCallDisplayName(staffId);
+  const who = name ? name : 'staff';
+  if (screenReason === 'offline') {
+    return `Couldn’t reach ${who} by phone or on-screen (offline).`;
+  }
+  if (screenReason === 'not-eligible') {
+    return `Couldn’t reach ${who} by phone or on-screen.`;
+  }
+  return `Couldn’t reach ${who} by phone or on-screen.`;
+}
+
+async function ffFallbackStaffCallToScreen({ staffId, queueEntryId, callType, statusEl, reason }){
+  const cleanStaffId = String(staffId || '').trim();
+  const normalizedType = ffNormalizeStaffCallType(callType);
+  const template = ffStaffCallTemplateForType(normalizedType);
+  if (!cleanStaffId || typeof window.ffSendStaffCall !== 'function') {
+    const userMessage = ffStaffCallBothFailedMessage(cleanStaffId, 'missing-target');
+    if (statusEl) {
+      statusEl.textContent = 'Unavailable';
+      statusEl.style.display = 'inline';
+    }
+    return { ok: false, reason: 'no-screen-fn', userMessage };
+  }
+
+  try {
+    const screenResult = await window.ffSendStaffCall(cleanStaffId, {
+      message: String(template.message || '').trim() || 'Your client is waiting',
+      detail: String(template.detail || '').trim() || 'Please return to the queue.',
+      allowedQueueStatuses: ffStaffCallAllowedQueueStatuses(normalizedType)
+    });
+    if (screenResult && screenResult.ok === true) {
+      const status = 'On device';
+      if (statusEl) {
+        statusEl.textContent = status;
+        statusEl.style.display = 'inline';
+        statusEl.setAttribute('title', reason === 'no-phone'
+          ? 'No phone on file — sent to screen'
+          : 'Phone unavailable — sent to screen');
+      }
+      ffTwilioVoiceRememberCall({
+        staffId: cleanStaffId,
+        queueEntryId: String(queueEntryId || '').trim(),
+        callType: normalizedType,
+        callLogId: screenResult.callId || '',
+        status
+      });
+      return { ok: true, via: 'screen', reason: reason || 'fallback', ...screenResult };
+    }
+    const screenReason = screenResult && screenResult.reason ? screenResult.reason : 'screen-failed';
+    const userMessage = ffStaffCallBothFailedMessage(cleanStaffId, screenReason);
+    if (statusEl) {
+      statusEl.textContent = screenReason === 'offline' ? 'Offline' : 'Unavailable';
+      statusEl.style.display = 'inline';
+      statusEl.setAttribute('title', userMessage);
+    }
+    return { ok: false, reason: screenReason, userMessage, screenResult };
+  } catch (err) {
+    console.error('[StaffCall] on-screen fallback failed', err);
+    const userMessage = ffStaffCallBothFailedMessage(cleanStaffId, 'screen-failed');
+    if (statusEl) {
+      statusEl.textContent = 'Unavailable';
+      statusEl.style.display = 'inline';
+    }
+    return { ok: false, reason: 'screen-failed', userMessage, error: err };
+  }
+}
+
+function ffStaffCallNotifyFailure(result){
+  if (!result || result.ok === true) return;
+  if (result.reason === 'in-flight') return;
+  if (result.reason === 'missing-context') {
+    alert('Call could not be sent because the staff or business context is missing.');
+    return;
+  }
+  alert(result.userMessage || 'Call could not be sent.');
+}
+
 async function ffSubscribeTwilioVoiceCallLog(callLogId, statusEl, meta = {}){
-  if (!callLogId || !statusEl || !window.currentSalonId) return;
+  if (!callLogId || !window.currentSalonId) return;
   try {
     const key = String(callLogId);
     if (window.__ffTwilioVoiceLogUnsubs[key]) window.__ffTwilioVoiceLogUnsubs[key]();
@@ -7660,9 +7815,32 @@ async function ffSubscribeTwilioVoiceCallLog(callLogId, statusEl, meta = {}){
     const ref = doc(db, `salons/${window.currentSalonId}/staffCallLogs/${key}`);
     window.__ffTwilioVoiceLogUnsubs[key] = onSnapshot(ref, (snap) => {
       const data = snap.exists() ? (snap.data() || {}) : null;
+      if (!data) return;
+      const rawStatus = String(data.status || '').trim();
+
+      // Delayed screen fallback: technical phone failures only (not no-answer).
+      if ((rawStatus === 'failed' || rawStatus === 'busy') && !window.__ffTwilioVoiceFallbackDone[key]) {
+        window.__ffTwilioVoiceFallbackDone[key] = true;
+        Promise.resolve(ffFallbackStaffCallToScreen({
+          staffId: meta.staffId,
+          queueEntryId: meta.queueEntryId,
+          callType: meta.callType,
+          statusEl,
+          reason: rawStatus
+        })).catch((err) => {
+          console.warn('[StaffCall] delayed screen fallback failed', err);
+        });
+        return;
+      }
+      if (window.__ffTwilioVoiceFallbackDone[key] && (rawStatus === 'failed' || rawStatus === 'busy')) {
+        return;
+      }
+
       const status = ffTwilioVoiceStatusText(data);
-      statusEl.textContent = status;
-      statusEl.style.display = 'inline';
+      if (statusEl) {
+        statusEl.textContent = status;
+        statusEl.style.display = 'inline';
+      }
       ffTwilioVoiceRememberCall({ ...meta, callLogId: key, status });
     }, (err) => {
       console.warn('[StaffCall] call log listen failed', err);
@@ -7675,6 +7853,8 @@ async function ffSubscribeTwilioVoiceCallLog(callLogId, statusEl, meta = {}){
 async function ffSendTwilioVoiceStaffCall({ staffId, queueEntryId, callType, statusEl, buttonEl }){
   const businessId = String(window.currentSalonId || '').trim();
   const cleanStaffId = String(staffId || '').trim();
+  const normalizedType = ffNormalizeStaffCallType(callType);
+  const cleanQueueEntryId = String(queueEntryId || '').trim();
   let locationId = 'default';
   try {
     if (typeof window.ffGetActiveLocationId === 'function') {
@@ -7682,11 +7862,32 @@ async function ffSendTwilioVoiceStaffCall({ staffId, queueEntryId, callType, sta
     }
   } catch (_) {}
   if (!businessId || !cleanStaffId) return { ok: false, reason: 'missing-context' };
+  if (window.__ffStaffCallInFlight[cleanStaffId]) {
+    return { ok: false, reason: 'in-flight' };
+  }
+  window.__ffStaffCallInFlight[cleanStaffId] = true;
   if (statusEl) {
     statusEl.textContent = 'Calling';
     statusEl.style.display = 'inline';
   }
   if (buttonEl) buttonEl.disabled = true;
+
+  // No phone on the staff card → skip phone path; server still validates if called.
+  if (!ffResolveStaffPhoneForCall(cleanStaffId)) {
+    try {
+      return await ffFallbackStaffCallToScreen({
+        staffId: cleanStaffId,
+        queueEntryId: cleanQueueEntryId,
+        callType: normalizedType,
+        statusEl,
+        reason: 'no-phone'
+      });
+    } finally {
+      delete window.__ffStaffCallInFlight[cleanStaffId];
+      if (buttonEl) buttonEl.disabled = false;
+    }
+  }
+
   try {
     const { getFunctions, httpsCallable } = await import('https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js');
     const fn = httpsCallable(getFunctions(undefined, 'us-central1'), 'callStaff');
@@ -7694,33 +7895,53 @@ async function ffSendTwilioVoiceStaffCall({ staffId, queueEntryId, callType, sta
       businessId,
       locationId,
       staffId: cleanStaffId,
-      queueEntryId: String(queueEntryId || '').trim(),
-      callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting'
+      queueEntryId: cleanQueueEntryId,
+      callType: normalizedType
     });
     const data = result && result.data ? result.data : {};
     if (data.callLogId) {
       ffTwilioVoiceRememberCall({
         staffId: cleanStaffId,
-        queueEntryId: String(queueEntryId || '').trim(),
-        callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting',
+        queueEntryId: cleanQueueEntryId,
+        callType: normalizedType,
         callLogId: data.callLogId,
         status: 'Calling'
       });
       await ffSubscribeTwilioVoiceCallLog(data.callLogId, statusEl, {
         staffId: cleanStaffId,
-        queueEntryId: String(queueEntryId || '').trim(),
-        callType: callType === 'front_desk' ? 'front_desk' : 'client_waiting'
+        queueEntryId: cleanQueueEntryId,
+        callType: normalizedType
       });
     }
-    return { ok: true, ...data };
+    return { ok: true, via: 'phone', ...data };
   } catch (err) {
     console.error('[StaffCall] callStaff failed', err);
+    const code = String((err && err.code) || '').toLowerCase();
+    if (code.includes('permission-denied') || code.includes('unauthenticated')) {
+      const userMessage = ffStaffCallUserErrorText(err);
+      if (statusEl) {
+        statusEl.textContent = userMessage;
+        statusEl.style.display = 'inline';
+      }
+      return { ok: false, reason: 'permission-denied', userMessage, error: err };
+    }
+    if (ffShouldFallbackVoiceError(err)) {
+      return await ffFallbackStaffCallToScreen({
+        staffId: cleanStaffId,
+        queueEntryId: cleanQueueEntryId,
+        callType: normalizedType,
+        statusEl,
+        reason: 'phone-failed'
+      });
+    }
+    const userMessage = ffStaffCallUserErrorText(err);
     if (statusEl) {
-      statusEl.textContent = ffStaffCallUserErrorText(err);
+      statusEl.textContent = userMessage;
       statusEl.style.display = 'inline';
     }
-    return { ok: false, error: err };
+    return { ok: false, error: err, userMessage };
   } finally {
+    delete window.__ffStaffCallInFlight[cleanStaffId];
     if (buttonEl) buttonEl.disabled = false;
   }
 }
@@ -8616,13 +8837,7 @@ function renderQueue(){
             statusEl: callStatus,
             buttonEl: callBtn
           });
-          if (!result || result.ok !== true) {
-            if (result?.reason === 'missing-context') {
-              alert('Call could not be sent because the staff or business context is missing.');
-            } else {
-              alert('Call could not be sent.');
-            }
-          }
+          ffStaffCallNotifyFailure(result);
         } catch (e) {
           console.error('[Queue] Failed to start staff voice call', e);
           alert('Call could not be sent.');
@@ -8841,7 +9056,7 @@ window.ffLiveQueueCall = async function (key, opts) {
       statusEl: opts.statusEl || null,
       buttonEl: opts.buttonEl || null
     });
-    if (!result || result.ok !== true) alert('Call could not be sent.');
+    ffStaffCallNotifyFailure(result);
   } catch (e) {
     console.error('[Live] queue call failed', e);
     alert('Call could not be sent.');
@@ -8918,7 +9133,7 @@ window.ffLiveServiceCall = async function (key, opts) {
       statusEl: opts.statusEl || null,
       buttonEl: opts.buttonEl || null
     });
-    if (!result || result.ok !== true) alert('Call could not be sent.');
+    ffStaffCallNotifyFailure(result);
   } catch (e) {
     console.error('[Live] service call failed', e);
     alert('Call could not be sent.');
@@ -9141,13 +9356,7 @@ function renderService(){
             statusEl: callStatus,
             buttonEl: callBtn
           });
-          if (!result || result.ok !== true) {
-            if (result?.reason === 'missing-context') {
-              alert('Call could not be sent because the staff or business context is missing.');
-            } else {
-              alert('Call could not be sent.');
-            }
-          }
+          ffStaffCallNotifyFailure(result);
         } catch (e) {
           console.error('[Service] Failed to start staff voice call', e);
           alert('Call could not be sent.');
