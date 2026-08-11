@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#9d68b9">
+  <title>Onboarding | Fair Flow</title>
+  <link rel="icon" href="/fairflow-favicon-tab.png">
+  <style>
+    :root {
+      --brand1: #9d68b9;
+      --brand2: #ff9580;
+      --brand-grad: linear-gradient(90deg, var(--brand1), var(--brand2));
+      --bg: #f6f5f8;
+      --card: #ffffff;
+      --text: #111827;
+      --sub: #6b7280;
+      --border: #e5e7eb;
+      --muted: #f7f7f8;
+      --danger: #ef4444;
+      --danger-bg: #fef2f2;
+      --ok: #059669;
+      --ok-bg: #ecfdf5;
+      --warn: #b45309;
+      --warn-bg: #fffbeb;
+      --info: #1d4ed8;
+      --info-bg: #eff6ff;
+      --radius: 16px;
+      --shadow: 0 10px 30px rgba(17, 24, 39, 0.06);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      font-family: "Avenir Next", "Open Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 420px at 10% -10%, rgba(157, 104, 185, 0.18), transparent 55%),
+        radial-gradient(700px 360px at 100% 0%, rgba(255, 149, 128, 0.16), transparent 50%),
+        var(--bg);
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .app {
+      width: min(560px, 100%);
+      margin: 0 auto;
+      padding: 18px 16px calc(28px + var(--safe-bottom));
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .topbar img { width: 36px; height: 36px; object-fit: contain; }
+    .topbar .brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: var(--brand-grad);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .card + .card { margin-top: 12px; }
+    .hero-title {
+      font-size: 22px;
+      font-weight: 750;
+      letter-spacing: -0.03em;
+      margin: 0 0 6px;
+      line-height: 1.25;
+    }
+    .sub { color: var(--sub); font-size: 14px; line-height: 1.45; margin: 0; }
+    .meta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--muted);
+      color: var(--sub);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .progress-block { margin-top: 16px; }
+    .progress-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--sub);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #efeaf5;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      background: var(--brand-grad);
+      transition: width 0.35s ease;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--sub);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 18px 0 10px;
+    }
+    .task {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      width: 100%;
+      text-align: left;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      margin-bottom: 10px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .task:active { transform: scale(0.995); }
+    .task:not(:disabled):hover {
+      border-color: #d6c4e4;
+      box-shadow: 0 4px 14px rgba(157, 104, 185, 0.08);
+    }
+    .task-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      font-size: 16px;
+      background: var(--muted);
+    }
+    .task-body { flex: 1; min-width: 0; }
+    .task-name {
+      font-size: 15px;
+      font-weight: 700;
+      margin: 0 0 4px;
+      line-height: 1.3;
+    }
+    .task-meta {
+      font-size: 12px;
+      color: var(--sub);
+      margin: 0;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      margin-top: 2px;
+    }
+    .badge-pending { background: #f3f4f6; color: #4b5563; }
+    .badge-in_progress { background: var(--info-bg); color: var(--info); }
+    .badge-waiting_approval { background: var(--warn-bg); color: var(--warn); }
+    .badge-sealing { background: #f5f3ff; color: #6d28d9; }
+    .badge-completed { background: var(--ok-bg); color: var(--ok); }
+    .badge-rejected { background: var(--danger-bg); color: var(--danger); }
+    .badge-skipped { background: #f3f4f6; color: #6b7280; }
+    .state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: stretch;
+      gap: 12px;
+      padding: 40px 8px;
+      text-align: center;
+    }
+    .state h1 {
+      font-size: 22px;
+      margin: 0;
+      letter-spacing: -0.03em;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 3px solid #e9e0f1;
+      border-top-color: var(--brand1);
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: none;
+      font-weight: 700;
+      font-size: 15px;
+      width: 100%;
+    }
+    .btn-primary {
+      background: var(--brand-grad);
+      color: #fff;
+    }
+    .btn-secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      background: transparent;
+      color: var(--sub);
+      font-size: 14px;
+      font-weight: 600;
+      padding: 0;
+      margin-bottom: 12px;
+      min-height: 40px;
+    }
+    .policy-box {
+      max-height: min(52vh, 420px);
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      background: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+      -webkit-overflow-scrolling: touch;
+    }
+    .policy-box p { margin: 0 0 10px; }
+    .field { margin-top: 14px; }
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--sub);
+      margin-bottom: 6px;
+    }
+    .field input[type="text"],
+    .field input[type="date"],
+    .field textarea {
+      width: 100%;
+      min-height: 48px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      background: #fff;
+      color: var(--text);
+    }
+    .field input:focus,
+    .field textarea:focus {
+      outline: 2px solid rgba(157, 104, 185, 0.35);
+      border-color: var(--brand1);
+    }
+    .file-drop {
+      border: 1.5px dashed #d1d5db;
+      border-radius: 14px;
+      padding: 22px 14px;
+      text-align: center;
+      background: var(--muted);
+      position: relative;
+    }
+    .file-drop strong { display: block; margin-bottom: 4px; }
+    .file-drop input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .upload-bar {
+      margin-top: 12px;
+      height: 8px;
+      border-radius: 999px;
+      background: #efeaf5;
+      overflow: hidden;
+      display: none;
+    }
+    .upload-bar > i {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: var(--brand-grad);
+      transition: width 0.15s linear;
+    }
+    .alert {
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.45;
+      margin-top: 12px;
+    }
+    .alert-danger { background: var(--danger-bg); color: #991b1b; }
+    .alert-warn { background: var(--warn-bg); color: #92400e; }
+    .alert-ok { background: var(--ok-bg); color: #065f46; }
+    .alert-info { background: var(--info-bg); color: #1e40af; }
+    .readonly-banner {
+      background: var(--ok-bg);
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .hidden { display: none !important; }
+    .error-msg {
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 8px;
+      min-height: 1.2em;
+    }
+    @media (min-width: 640px) {
+      .app { padding-top: 28px; }
+      .hero-title { font-size: 26px; }
+      .btn-row.row-2 {
+        flex-direction: row;
+      }
+      .btn-row.row-2 .btn { width: auto; flex: 1; }
+    }
+
+    /* —— E4 e-sign —— */
+    .app.esign-mode { width: min(720px, 100%); }
+    .card-esign { padding: 14px; }
+    .esign-mount { margin-top: 10px; }
+    .esign-loading { text-align: center; padding: 28px 8px; }
+    .esign-shell { display: flex; flex-direction: column; gap: 10px; }
+    .esign-toolbar {
+      display: flex; align-items: center; gap: 6px;
+      position: sticky; top: 0; z-index: 3;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(6px);
+      padding: 6px 0;
+    }
+    .esign-icon-btn {
+      width: 40px; height: 40px; border-radius: 10px;
+      border: 1px solid var(--border); background: #fff;
+      font-size: 18px; font-weight: 700; color: var(--text);
+      flex: 0 0 auto;
+    }
+    .esign-page-ind {
+      font-size: 12px; font-weight: 700; color: var(--sub);
+      min-width: 72px; text-align: center;
+    }
+    .esign-toolbar-spacer { flex: 1; }
+    .esign-viewport {
+      overflow: auto;
+      -webkit-overflow-scrolling: touch;
+      max-height: min(62vh, 640px);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #e5e7eb;
+      touch-action: pan-x pan-y;
+    }
+    .esign-viewport.is-pinching {
+      touch-action: none;
+      overflow: hidden;
+    }
+    .esign-pages {
+      padding: 10px;
+      display: flex;
+      justify-content: flex-start;
+      min-width: min-content;
+    }
+    .esign-page {
+      position: relative;
+      background: #fff;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+      flex: 0 0 auto;
+    }
+    .esign-page-canvas {
+      display: block;
+      width: auto;
+      height: auto;
+      max-width: none;
+      image-rendering: auto;
+    }
+    .esign-icon-btn:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    .esign-field-layer { position: absolute; inset: 0; }
+    .esign-field {
+      position: absolute;
+      box-sizing: border-box;
+      border: 1.5px solid rgba(37, 99, 235, 0.55);
+      background: rgba(37, 99, 235, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: #1e3a8a;
+      padding: 2px;
+      touch-action: manipulation;
+    }
+    .esign-field.missing {
+      border-color: #dc2626;
+      background: rgba(239, 68, 68, 0.12);
+      color: #991b1b;
+      animation: esignPulse 1.2s ease 1;
+    }
+    .esign-field.pulse { outline: 2px solid #7c3aed; }
+    .esign-field.checked { background: rgba(5, 150, 105, 0.15); border-color: #059669; }
+    @keyframes esignPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+    .esign-ph { opacity: 0.75; text-align: center; line-height: 1.2; }
+    .esign-val, .esign-sig-typed {
+      font-size: 12px; font-weight: 700; color: #111827;
+      text-align: center; line-height: 1.15; padding: 0 2px;
+      word-break: break-word;
+    }
+    .esign-sig-typed {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-size: 14px; font-weight: 600;
+    }
+    .esign-sig-img { width: 100%; height: 100%; object-fit: contain; }
+    .esign-check { font-size: 16px; color: #065f46; }
+    .esign-panel {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+    .esign-method { display: flex; gap: 8px; flex-wrap: wrap; }
+    .esign-chip {
+      border: 1px solid var(--border);
+      background: #fff;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--sub);
+    }
+    .esign-chip.active {
+      border-color: #c4b5fd;
+      background: #f5f3ff;
+      color: #5b21b6;
+    }
+    .esign-pad-wrap {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+      touch-action: none;
+    }
+    #ffEsignPad { width: 100%; display: block; touch-action: none; }
+    .esign-sig-thumb {
+      margin-top: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px;
+      background: #fff;
+    }
+    .esign-sig-thumb img { width: 100%; max-height: 80px; object-fit: contain; }
+    .esign-typed-preview {
+      margin-top: 8px;
+      padding: 14px;
+      border-radius: 12px;
+      background: var(--muted);
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      font-size: 22px;
+      text-align: center;
+      color: #111827;
+    }
+    .esign-consent {
+      display: flex; gap: 10px; align-items: flex-start;
+      font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.4;
+    }
+    .esign-consent input { margin-top: 3px; width: 18px; height: 18px; flex: 0 0 auto; }
+    .esign-field-editor { margin: 10px 0; }
+    .esign-editor-card {
+      border: 1px solid #c4b5fd;
+      background: #faf5ff;
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .esign-editor-card label {
+      display: block; font-size: 13px; font-weight: 700; margin-bottom: 6px;
+    }
+    .esign-editor-card input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 12px;
+      font-size: 16px; /* iOS: avoid zoom-on-focus */
+      background: #fff;
+    }
+    @media (min-width: 640px) {
+      .esign-viewport { max-height: min(68vh, 720px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="topbar">
+      <img src="/fairflow-logo-transparent.png" alt="Fair Flow" width="36" height="36">
+      <div class="brand">Fair Flow</div>
+    </div>
+    <div id="root" aria-live="polite"></div>
+  </div>
+  <meta name="referrer" content="no-referrer">
+  <script type="module" src="/onboarding-portal/app.js?v=20260810_pdf_pinch_zoom"></script>
+</body>
+</html>

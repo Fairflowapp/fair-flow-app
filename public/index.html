@@ -8,11 +8,11 @@
 <!-- Inbox module-graph preload: parallel-fetch inbox.js + all sub-modules to collapse the
      ES-module import waterfall, so the first Inbox open is not slow/blank. Keep ?v= in sync
      with the import statements in inbox.js and the script-loader entry below. -->
-<link rel="modulepreload" href="/inbox.js?v=20260630_inbox_cleanup">
+<link rel="modulepreload" href="/inbox.js?v=20260810_owner_inbox_load_v5">
 <link rel="modulepreload" href="/inbox-state.js?v=20260629_inbox_state_split">
-<link rel="modulepreload" href="/inbox-helpers.js?v=20260626_inbox_helpers_split">
+<link rel="modulepreload" href="/inbox-helpers.js?v=20260810_owner_inbox_load_v5">
 <link rel="modulepreload" href="/inbox-utils.js?v=20260630_inbox_utils_split">
-<link rel="modulepreload" href="/inbox-data.js?v=20260630_inbox_data_split">
+<link rel="modulepreload" href="/inbox-data.js?v=20260810_owner_inbox_load_v5">
 <link rel="modulepreload" href="/inbox-types.js?v=20260630_inbox_types_split">
 <link rel="modulepreload" href="/inbox-documents.js?v=20260629_inbox_documents_split">
 <link rel="modulepreload" href="/inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split">
@@ -23,7 +23,7 @@
 <link rel="modulepreload" href="/inbox-create-form.js?v=20260630_inbox_create_form_split">
 <link rel="modulepreload" href="/inbox-submit.js?v=20260630_inbox_submit_split">
 <link rel="modulepreload" href="/inbox-actions.js?v=20260630_inbox_actions_split">
-<link rel="modulepreload" href="/inbox-listeners.js?v=20260630_inbox_listeners_split">
+<link rel="modulepreload" href="/inbox-listeners.js?v=20260810_owner_inbox_load_v5">
 
 <script>
   // Robust Inbox open: inbox.js wires #inboxBtn.onclick only inside initInbox(), which runs
@@ -36,7 +36,7 @@
       if (typeof window.goToInbox === 'function') { window.goToInbox(); return; }
       if (window.__ffInboxOpening) return;
       window.__ffInboxOpening = true;
-      import('/inbox.js?v=20260630_inbox_cleanup')
+      import('/inbox.js?v=20260810_owner_inbox_load_v5')
         .then(function (m) {
           window.__ffInboxOpening = false;
           var fn = (m && typeof m.goToInbox === 'function') ? m.goToInbox : window.goToInbox;
@@ -1527,6 +1527,7 @@
           <button class="user-profile-menu-item" data-section="time-clock-settings" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Time Clock</button>
           <button class="user-profile-menu-item" data-section="devices" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Devices</button>
           <button class="user-profile-menu-item" data-section="notifications" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Notifications</button>
+          <button class="user-profile-menu-item" data-section="onboarding" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Onboarding &amp; Documents</button>
           <button class="user-profile-menu-item" data-section="billing" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Billing</button>
           <button class="user-profile-menu-item" data-section="password" style="width:100%;padding:10px 16px;text-align:left;background:none;border:none;border-radius:8px;cursor:pointer;font-size:12px;color:#6b7280;transition:all 0.2s;">Password</button>
         </nav>
@@ -1917,6 +1918,13 @@
           </div>
         </div>
         
+        <!-- Onboarding & Documents Settings (Stage A: catalogs only) -->
+        <div id="userProfileCardOnboarding" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Onboarding &amp; Documents</h3>
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Create items employees need to complete, then group them into packages you can send — for example a “New Employee” package.</p>
+          <div id="ffOnboardingSettingsRoot"></div>
+        </div>
+
         <!-- Preferences Card (typography aligned with Staff Setup) -->
         <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
@@ -5397,6 +5405,7 @@ if (typeof document !== 'undefined') {
     if (typeof window.ffSyncUserProfileSharedSetupMenuVisibility === 'function') window.ffSyncUserProfileSharedSetupMenuVisibility();
     if (typeof window.ffSyncUserProfileScheduleMenuVisibility === 'function') window.ffSyncUserProfileScheduleMenuVisibility();
     if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') window.ffSyncUserProfilePreferencesMenuVisibility();
+    if (typeof window.ffSyncUserProfileOnboardingMenuVisibility === 'function') window.ffSyncUserProfileOnboardingMenuVisibility();
     if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
     if (typeof window.ffSyncUserProfileDevicesMenuVisibility === 'function') window.ffSyncUserProfileDevicesMenuVisibility();
     if (typeof window.ffRefreshChatManageUi === 'function') window.ffRefreshChatManageUi();
@@ -12670,6 +12679,9 @@ function goToUserProfile(section) {
   }
   if (typeof window.ffSyncUserProfilePreferencesMenuVisibility === 'function') {
     window.ffSyncUserProfilePreferencesMenuVisibility();
+  }
+  if (typeof window.ffSyncUserProfileOnboardingMenuVisibility === 'function') {
+    window.ffSyncUserProfileOnboardingMenuVisibility();
   }
   if (typeof window.ffSyncUserProfileTimeClockSettingsMenuVisibility === 'function') {
     window.ffSyncUserProfileTimeClockSettingsMenuVisibility();
@@ -26966,7 +26978,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260630_inbox_cleanup')
+              import('/inbox.js?v=20260810_owner_inbox_load_v5')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -27395,6 +27407,30 @@ function initializeAppsPanel() {
     if (employmentType === 'flexible') return 'Flexible';
     return '-';
   }
+
+  /** Tax / hire classification for onboarding packages. Separate from schedule employmentType. */
+  function normalizeWorkerClassification(value) {
+    const v = String(value == null ? '' : value).trim().toLowerCase();
+    if (v === 'w2' || v === '1099') return v;
+    return null;
+  }
+
+  function getStaffWorkerClassificationValue(staff) {
+    return normalizeWorkerClassification(
+      staff && (staff.workerClassification != null ? staff.workerClassification : staff.worker_classification)
+    );
+  }
+
+  function getStaffWorkerClassificationLabel(staff) {
+    const v = getStaffWorkerClassificationValue(staff);
+    if (v === 'w2') return 'W-2 Employee';
+    if (v === '1099') return '1099 Contractor';
+    return 'Not set';
+  }
+
+  window.ffNormalizeWorkerClassification = normalizeWorkerClassification;
+  window.ffGetStaffWorkerClassificationValue = getStaffWorkerClassificationValue;
+  window.ffGetStaffWorkerClassificationLabel = getStaffWorkerClassificationLabel;
 
   function getNormalizedStaffDefaultSchedule(staff) {
     return window.ffScheduleHelpers?.normalizeDefaultSchedule
@@ -28744,6 +28780,7 @@ function initializeAppsPanel() {
         if (typeof window.ffStaffDocumentsUnmount === 'function') {
           window.ffStaffDocumentsUnmount();
         }
+        ffClearStaffOdShellState(document.getElementById('staffDocumentsTabContent'));
         if (typeof window.ffStaffWriteupsUnmount === 'function') {
           window.ffStaffWriteupsUnmount();
         }
@@ -28762,6 +28799,7 @@ function initializeAppsPanel() {
         if (typeof window.ffStaffDocumentsUnmount === 'function') {
           window.ffStaffDocumentsUnmount();
         }
+        ffClearStaffOdShellState(document.getElementById('staffDocumentsTabContent'));
         if (typeof window.ffStaffWriteupsUnmount === 'function') {
           window.ffStaffWriteupsUnmount();
         }
@@ -28972,7 +29010,7 @@ function initializeAppsPanel() {
           baseLabels.push('Write-Ups');
         }
         baseTabs.push('documents');
-        baseLabels.push('Documents');
+        baseLabels.push('Onboarding & Documents');
         navEl.innerHTML = baseTabs.map(function(tab, idx) {
           const isActive = currentTab === tab;
           return `<button type="button" class="staff-nav-item${isActive ? ' is-active' : ''}" data-tab="${tab}" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;transition:background 0.15s ease,color 0.15s ease;">${baseLabels[idx]}</button>`;
@@ -29000,6 +29038,233 @@ function initializeAppsPanel() {
   
   // Switch between tabs
   let currentTab = 'details';
+  // Stage C: sub-tab inside Onboarding & Documents (data-tab stays "documents").
+  let staffOdSubTab = 'onboarding';
+
+  function ffClearStaffOdShellState(documentsContent) {
+    staffOdSubTab = 'onboarding';
+    try {
+      if (typeof window.ffUnmountStaffOnboardingRuns === 'function') {
+        window.ffUnmountStaffOnboardingRuns();
+      }
+    } catch (_) {}
+    try {
+      if (documentsContent && documentsContent.dataset) {
+        delete documentsContent.dataset.odShellKey;
+      }
+    } catch (_) {}
+  }
+
+  function ffSyncStaffOdSubTabUi(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-od-subtab]').forEach(function(btn) {
+      const isActive = btn.getAttribute('data-od-subtab') === staffOdSubTab;
+      btn.style.borderBottomColor = isActive ? '#7c3aed' : 'transparent';
+      btn.style.color = isActive ? '#5b21b6' : '#6b7280';
+      btn.style.fontWeight = isActive ? '700' : '600';
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    const onboardingPane = root.querySelector('#staffOdOnboardingPane');
+    const documentsPane = root.querySelector('#staffOdDocumentsPane');
+    if (onboardingPane) onboardingPane.style.display = staffOdSubTab === 'onboarding' ? 'block' : 'none';
+    if (documentsPane) documentsPane.style.display = staffOdSubTab === 'documents' ? 'block' : 'none';
+  }
+
+  function ffOdEsc(value) {
+    if (typeof escapeHtmlDraft === 'function') return escapeHtmlDraft(value);
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // Global entry used by inline HTML onclick (most reliable against overlays / wiped handlers).
+  window.__ffOdStartOnboardingClick = function(ev, packageId) {
+    try {
+      if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
+    } catch (_) {}
+    const pane = document.getElementById('staffOdOnboardingPane');
+    const staff = (pane && pane.__ffOdStaff) || window.__ffOdCurrentStaff;
+    console.log('[StaffOdShell] __ffOdStartOnboardingClick', staff && staff.id, packageId || '');
+
+    // Always-visible signal so a dead handler can never look like "nothing happened".
+    try {
+      var flash = document.getElementById('ffOdStartClickFlash');
+      if (!flash) {
+        flash = document.createElement('div');
+        flash.id = 'ffOdStartClickFlash';
+        document.body.appendChild(flash);
+      }
+      flash.textContent = 'Opening Start Onboarding…';
+      flash.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2147483646;background:#111827;color:#fff;padding:10px 16px;border-radius:10px;font:600 13px/1.2 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.25);pointer-events:none;';
+      clearTimeout(window.__ffOdStartFlashTimer);
+      window.__ffOdStartFlashTimer = setTimeout(function() {
+        try { flash.remove(); } catch (_) {}
+      }, 2500);
+    } catch (_) {}
+
+    if (!staff || !staff.id) {
+      window.alert('Staff not loaded — reopen this employee and try again.');
+      return false;
+    }
+    if (typeof window.ffOpenStartOnboardingModal === 'function') {
+      try {
+        void window.ffOpenStartOnboardingModal(staff, packageId ? { packageId: packageId } : undefined);
+      } catch (e) {
+        console.error('[StaffOdShell] open modal threw', e);
+        window.alert((e && e.message) || 'Could not open Start Onboarding.');
+      }
+    } else {
+      window.alert('Onboarding is still loading — wait one second and try again.');
+    }
+    return false;
+  };
+
+  function ffWireStaffOdStartButton(pane, staff) {
+    if (!pane || !staff) return;
+    // Staff ref for package Send (and any leftover start handlers).
+    window.__ffOdCurrentStaff = staff;
+    pane.__ffOdStaff = staff;
+    const startBtn = pane.querySelector('#staffOdStartOnboardingBtn');
+    if (!startBtn) return;
+    startBtn.disabled = false;
+    startBtn.removeAttribute('title');
+    startBtn.setAttribute('data-staff-id', String(staff.id || ''));
+    startBtn.setAttribute('onclick', "return window.__ffOdStartOnboardingClick(event)");
+    startBtn.style.pointerEvents = 'auto';
+    startBtn.style.cursor = 'pointer';
+    startBtn.onclick = function(ev) {
+      return window.__ffOdStartOnboardingClick(ev);
+    };
+  }
+
+  // Capture-phase backup for Start button + package Send buttons.
+  if (!window.__ffOdStartBtnDelegated) {
+    window.__ffOdStartBtnDelegated = true;
+    document.addEventListener('click', function(ev) {
+      const t = ev && ev.target;
+      if (!t || !t.closest) return;
+      const sendPkg = t.closest('[data-od-send-package]');
+      const startBtn = t.closest('#staffOdStartOnboardingBtn, [data-od-start-onboarding]');
+      if (!sendPkg && !startBtn) return;
+      const packageId = sendPkg ? sendPkg.getAttribute('data-od-send-package') : '';
+      window.__ffOdStartOnboardingClick(ev, packageId || undefined);
+    }, true);
+  }
+
+  async function ffRenderStaffOdOnboardingShell(pane, staff) {
+    if (!pane || !staff) return;
+    const renderToken = String(Date.now()) + '_' + String(staff.id || '');
+    pane.dataset.odRenderToken = renderToken;
+    // Idle: one "Onboarding" entry that opens a modal to pick & send a package.
+    // After a run exists, the start card hides and the run panel shows progress.
+    pane.innerHTML =
+      '<div style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px 16px;max-width:560px;box-sizing:border-box;position:relative;z-index:1;">' +
+        '<div id="staffOdStartCard" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">' +
+          '<div style="min-width:0;flex:1;">' +
+            '<div style="font-size:14px;font-weight:700;color:#111827;">Onboarding</div>' +
+            '<div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.45;">Send a package to this employee by email.</div>' +
+          '</div>' +
+          '<button type="button" id="staffOdStartOnboardingBtn" data-od-start-onboarding="1" ' +
+            'onclick="return window.__ffOdStartOnboardingClick && window.__ffOdStartOnboardingClick(event)" ' +
+            'style="padding:10px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;position:relative;z-index:50;pointer-events:auto;">' +
+            'Send package' +
+          '</button>' +
+        '</div>' +
+        '<div id="staffOdRunsHost" style="min-width:0;margin-top:12px;"></div>' +
+      '</div>';
+
+    ffWireStaffOdStartButton(pane, staff);
+
+    if (typeof window.ffMountStaffOnboardingRuns === 'function') {
+      try { window.ffMountStaffOnboardingRuns(pane, staff); } catch (e) {
+        console.warn('[StaffOdShell] mount onboarding runs', e);
+      }
+      ffWireStaffOdStartButton(pane, staff);
+    } else {
+      var mountTries = 0;
+      var mountTimer = setInterval(function() {
+        if (pane.dataset.odRenderToken !== renderToken) {
+          clearInterval(mountTimer);
+          return;
+        }
+        mountTries += 1;
+        if (typeof window.ffMountStaffOnboardingRuns === 'function') {
+          clearInterval(mountTimer);
+          try { window.ffMountStaffOnboardingRuns(pane, staff); } catch (e) {
+            console.warn('[StaffOdShell] delayed mount', e);
+          }
+          ffWireStaffOdStartButton(pane, staff);
+        } else if (mountTries >= 20) {
+          clearInterval(mountTimer);
+        }
+      }, 500);
+    }
+
+    if (pane.dataset.odRenderToken === renderToken) {
+      ffWireStaffOdStartButton(pane, staff);
+      if (pane.dataset.odHasOpenRun === '1') {
+        const startCard = pane.querySelector('#staffOdStartCard');
+        if (startCard) startCard.style.display = 'none';
+      }
+    }
+  }
+
+  function ffEnsureStaffOdShell(documentsContent, staff, salonId) {
+    if (!documentsContent || !staff) return null;
+    const shellKey = String(salonId || '') + '::' + String(staff.id || '');
+    const existingKey = documentsContent.dataset.odShellKey || '';
+    if (existingKey !== shellKey || !documentsContent.querySelector('#staffOdSubTabs')) {
+      // Destroying the host requires a clean unmount so listeners do not leak.
+      if (typeof window.ffStaffDocumentsUnmount === 'function') {
+        try { window.ffStaffDocumentsUnmount(); } catch (_) {}
+      }
+      if (typeof window.ffUnmountStaffOnboardingRuns === 'function') {
+        try { window.ffUnmountStaffOnboardingRuns(); } catch (_) {}
+      }
+      staffOdSubTab = 'onboarding';
+      documentsContent.innerHTML =
+        '<div id="staffOdShell" style="min-width:0;">' +
+          '<div id="staffOdSubTabs" role="tablist" aria-label="Onboarding and Documents" ' +
+            'style="display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid #e5e7eb;margin-bottom:12px;">' +
+            '<button type="button" data-od-subtab="onboarding" role="tab" ' +
+              'style="padding:8px 12px;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:-1px;">Onboarding</button>' +
+            '<button type="button" data-od-subtab="documents" role="tab" ' +
+              'style="padding:8px 12px;border:none;border-bottom:2px solid transparent;background:transparent;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:-1px;">Documents</button>' +
+          '</div>' +
+          '<div id="staffOdOnboardingPane" style="display:none;min-width:0;"></div>' +
+          '<div id="staffOdDocumentsPane" style="display:none;min-width:0;">' +
+            '<div id="staffOdDocumentsHost" style="min-width:0;"></div>' +
+          '</div>' +
+        '</div>';
+      documentsContent.dataset.odShellKey = shellKey;
+      documentsContent.querySelectorAll('[data-od-subtab]').forEach(function(btn) {
+        btn.onclick = function() {
+          const next = btn.getAttribute('data-od-subtab') || 'onboarding';
+          if (next === staffOdSubTab) return;
+          staffOdSubTab = next;
+          ffSyncStaffOdSubTabUi(documentsContent);
+          if (staffOdSubTab === 'onboarding') {
+            ffRenderStaffOdOnboardingShell(
+              documentsContent.querySelector('#staffOdOnboardingPane'),
+              staff
+            );
+          } else if (
+            staffOdSubTab === 'documents' &&
+            typeof window.ffMountStaffDocuments === 'function'
+          ) {
+            const host = documentsContent.querySelector('#staffOdDocumentsHost');
+            if (host) window.ffMountStaffDocuments(host, salonId, staff.id);
+          }
+        };
+      });
+    }
+    ffSyncStaffOdSubTabUi(documentsContent);
+    return documentsContent;
+  }
+
   function switchTab(tab) {
     currentTab = tab;
 
@@ -29128,12 +29393,31 @@ function initializeAppsPanel() {
     }
     if (documentsContent) {
       documentsContent.style.display = tab === 'documents' ? 'block' : 'none';
-      if (tab === 'documents' && selectedStaffId && typeof window.ffMountStaffDocuments === 'function') {
+      if (tab === 'documents' && selectedStaffId) {
         var salonIdDocs = (typeof window.currentSalonId !== 'undefined' && window.currentSalonId) ? String(window.currentSalonId).trim() : '';
-        if (salonIdDocs) {
-          window.ffMountStaffDocuments(documentsContent, salonIdDocs, selectedStaffId);
-        } else {
+        if (!salonIdDocs) {
+          ffClearStaffOdShellState(documentsContent);
           documentsContent.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Salon not loaded yet.</p></div>';
+        } else {
+          const staffDataOd = ffGetStaffStore();
+          const staffOd = staffDataOd.staff.find(function(s) { return s.id === selectedStaffId; });
+          if (!staffOd) {
+            ffClearStaffOdShellState(documentsContent);
+            documentsContent.innerHTML = '<div style="padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;"><p style="margin:0;font-size:13px;color:#b91c1c;">Staff member not found.</p></div>';
+          } else {
+            ffEnsureStaffOdShell(documentsContent, staffOd, salonIdDocs);
+            if (staffOdSubTab === 'onboarding') {
+              ffRenderStaffOdOnboardingShell(
+                documentsContent.querySelector('#staffOdOnboardingPane'),
+                staffOd
+              );
+            } else if (typeof window.ffMountStaffDocuments === 'function') {
+              const docsHost = documentsContent.querySelector('#staffOdDocumentsHost');
+              if (docsHost) {
+                window.ffMountStaffDocuments(docsHost, salonIdDocs, selectedStaffId);
+              }
+            }
+          }
         }
       }
     }
@@ -31660,6 +31944,15 @@ function initializeAppsPanel() {
               </div>
             </div>
             <div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Worker classification</label>
+              <select id="staffEditWorkerClassification" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;cursor:pointer;">
+                <option value="" ${!getStaffWorkerClassificationValue(staff) ? 'selected' : ''}>Not Set</option>
+                <option value="w2" ${getStaffWorkerClassificationValue(staff) === 'w2' ? 'selected' : ''}>W-2 Employee</option>
+                <option value="1099" ${getStaffWorkerClassificationValue(staff) === '1099' ? 'selected' : ''}>1099 Contractor</option>
+              </select>
+              <div style="font-size:10px;color:#9ca3af;margin-top:2px;line-height:1.3;">Optional payroll label (W-2 / 1099). Separate from which onboarding package you send — you choose the package per employee.</div>
+            </div>
+            <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Phone</label>
               <input type="tel" id="staffEditPhone" value="${escapeHtml(phone)}" placeholder="Phone number" style="width:100%;height:30px;padding:0 8px;border:1px solid var(--border);border-radius:4px;background:#fff;font-size:12px;font-family:inherit;outline:none;">
             </div>
@@ -31889,6 +32182,10 @@ function initializeAppsPanel() {
               <div style="font-size:12px;color:#111827;">${escapeHtml(roleLabel)}</div>
             </div>
             <div>
+              <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Worker classification</label>
+              <div style="font-size:12px;color:#111827;">${escapeHtml(getStaffWorkerClassificationLabel(staff))}</div>
+            </div>
+            <div>
               <label style="display:block;margin-bottom:1px;font-size:9px;font-weight:400;color:#9ca3af;text-transform:uppercase;letter-spacing:0.4px;">Phone</label>
               <div style="font-size:12px;color:#111827;">${phone ? escapeHtml(phone) : '<span style="color:#9ca3af;">-</span>'}</div>
             </div>
@@ -31907,7 +32204,7 @@ function initializeAppsPanel() {
           </div>
         </div>
       `;
-      
+
       // Wire up Edit button
       const editBtn = document.getElementById('staffDetailsEditBtn');
       if (editBtn) {
@@ -32424,6 +32721,15 @@ function initializeAppsPanel() {
         updatedAtMs: Date.now()
       };
       delete updatedStaff.buttonColorIndex;
+
+      // Worker classification (Details tab only) — separate from employmentType.
+      // When Not Set: store null so a previous w2/1099 is cleared on merge write.
+      if (currentTab === 'details') {
+        const wcInput = document.getElementById('staffEditWorkerClassification');
+        if (wcInput) {
+          updatedStaff.workerClassification = normalizeWorkerClassification(wcInput.value);
+        }
+      }
       
       // Update technician types
       if (newRole === 'technician') {
@@ -33569,6 +33875,7 @@ function initializeAppsPanel() {
     if (typeof window.ffStaffDocumentsUnmount === 'function') {
       window.ffStaffDocumentsUnmount();
     }
+    ffClearStaffOdShellState(document.getElementById('staffDocumentsTabContent'));
     if (typeof window.ffStaffWriteupsUnmount === 'function') {
       window.ffStaffWriteupsUnmount();
     }
@@ -38985,6 +39292,26 @@ function initializeUserProfileMenu() {
   window.ffSyncUserProfilePreferencesMenuVisibility = ffSyncUserProfilePreferencesMenuVisibility;
   ffSyncUserProfilePreferencesMenuVisibility();
 
+  // Onboarding & Documents settings — same gate as Preferences / general settings
+  // (owner, admin, or permissions.settings_manage).
+  function ffSyncUserProfileOnboardingMenuVisibility() {
+    try {
+      const btn = document.querySelector('.user-profile-menu-item[data-section="onboarding"]');
+      if (!btn) return;
+      // Prefer window export so the gate stays aligned with Preferences /
+      // Shared Setup (and can be exercised in staging e2e).
+      const can =
+        typeof window.ffCurrentUserCanManageGeneralSettings === 'function'
+          ? window.ffCurrentUserCanManageGeneralSettings()
+          : ffCurrentUserCanManageGeneralSettings();
+      btn.style.display = can ? '' : 'none';
+    } catch (e) {
+      console.warn('[User Profile] ffSyncUserProfileOnboardingMenuVisibility', e);
+    }
+  }
+  window.ffSyncUserProfileOnboardingMenuVisibility = ffSyncUserProfileOnboardingMenuVisibility;
+  ffSyncUserProfileOnboardingMenuVisibility();
+
   // Time Clock Settings - owner or Settings admin. This is an operational
   // settings section, so explicit settings_manage grants access too.
   function ffIsCurrentUserOwnerOrAdminForSettings() {
@@ -43401,6 +43728,7 @@ function initializeUserProfileMenu() {
       'password': 'userProfileCardPassword',
       'notifications': 'userProfileCardNotifications',
       'preferences': 'userProfileCardPreferences',
+      'onboarding': 'userProfileCardOnboarding',
       'schedule': 'userProfileCardSchedule',
       'billing': 'userProfileCardBilling',
       'locations': 'userProfileCardLocations',
@@ -43448,6 +43776,17 @@ function initializeUserProfileMenu() {
       // Render technician types if it's the selected section
       if (section === 'technician-types' && typeof renderUserProfileTechnicianTypes === 'function') {
         renderUserProfileTechnicianTypes();
+      }
+
+      if (section === 'onboarding') {
+        if (typeof window.initOnboardingSettingsUI === 'function') {
+          try { window.initOnboardingSettingsUI(); } catch (_) {}
+        }
+        if (typeof window.renderOnboardingSettingsUI === 'function') {
+          try { window.renderOnboardingSettingsUI(); } catch (e) {
+            console.warn('[User Profile] renderOnboardingSettingsUI failed', e);
+          }
+        }
       }
 
       // Render the Salon Location subsection (shared geofence) whenever the

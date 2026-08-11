@@ -11,14 +11,14 @@ import {
   setDoc,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import {
   inboxNormalizeLineStaffRoleLc,
   inboxCanViewInboxEval,
   inboxCanManageInboxEval,
   inboxCanSendRequestsEval,
   ffInboxRuleString,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 
 function inboxUserRoleLc() {
   return inboxNormalizeLineStaffRoleLc((inboxState.currentUserProfile && inboxState.currentUserProfile.role) || "");
@@ -172,15 +172,35 @@ async function loadCurrentUserProfile() {
       const activeSalonId = w.currentSalonId ? String(w.currentSalonId).trim() : '';
       const activeStaffId = w.__ff_authedStaffId ? String(w.__ff_authedStaffId).trim() : '';
       const activeRole = w.__ff_user_role ? String(w.__ff_user_role).trim() : '';
+      let resolvedRole = activeRole || data.role || '';
+      try {
+        if (
+          (!resolvedRole || String(resolvedRole).toLowerCase() === 'technician') &&
+          typeof w.ffIsOwner === 'function' &&
+          w.ffIsOwner() === true
+        ) {
+          resolvedRole = 'owner';
+        }
+      } catch (_) {}
       inboxState.currentUserProfile = {
         uid: user.uid,
         ...data,
         salonId: activeSalonId || data.salonId || null,
         staffId: activeStaffId || data.staffId || null,
-        role: activeRole || data.role || '',
+        role: resolvedRole,
       };
       await mergeSalonStaffIntoUserProfile(inboxState.currentUserProfile);
-      console.log('[Inbox] User profile loaded', { role: inboxState.currentUserProfile.role, permissions: inboxState.currentUserProfile.permissions });
+      // If staff permissions overwrote nothing about role, keep owner from Auth/salon.
+      try {
+        if (
+          typeof w.ffIsOwner === 'function' &&
+          w.ffIsOwner() === true &&
+          String(inboxState.currentUserProfile.role || '').toLowerCase() !== 'owner'
+        ) {
+          inboxState.currentUserProfile.role = 'owner';
+        }
+      } catch (_) {}
+      console.log('[Inbox] User profile loaded', { role: inboxState.currentUserProfile.role, permissions: inboxState.currentUserProfile.permissions, isOwner: typeof w.ffIsOwner === 'function' ? w.ffIsOwner() : null });
       // Register in members directory so others can find this user in "Send to"
       if (inboxState.currentUserProfile.salonId) {
         const memberData = {

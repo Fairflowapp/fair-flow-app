@@ -11,17 +11,17 @@
 import {
   inboxState,
   MANAGER_ONLY_INBOX_TYPES,
-} from "./inbox-state.js?v=20260629_inbox_state_split";
+} from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import {
   inboxEffectiveTypeForGrouping,
   ffInboxIsStaffCallOtherNoise,
   inboxDocAlertIsExpiredForUi,
   inboxSupplyStatusDisplayLabel,
   formatRelativeDate,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { inboxUserRoleLc, inboxCanManageInbox } from "./inbox-data.js?v=20260630_inbox_data_split";
-import { getRequestTypeInfo } from "./inbox-types.js?v=20260630_inbox_types_split";
+import { inboxUserRoleLc, inboxCanManageInbox } from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { ffRenderInventorySuggestionCard } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
 import {
   ffDocAlertIsHebrewUI,
@@ -328,7 +328,7 @@ function _renderInboxListInner() {
   const typeOrder = [
     'vacation','day_off','time_off','late_start','early_leave','schedule_change','extra_shift','swap_shift','break_change',
     'commission_review','tip_adjustment','payment_issue',
-    'supplies','maintenance','client_issue','staff_birthday_reminder',
+    'supplies','maintenance','client_issue','staff_birthday_reminder','onboarding_incomplete',
     'document_request','document_renewal_request','document_upload','document_expiring_soon','document_expired',
     'other'
   ];
@@ -454,7 +454,7 @@ function createRequestCard(request) {
           ${request.priority === 'urgent' ? '<span style="color:#ef4444;font-size:12px;">🔥 Urgent</span>' : ''}
         </div>
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
-          ${request.type === 'staff_birthday_reminder' && request.data?.subjectStaffName
+          ${(request.type === 'staff_birthday_reminder' || request.type === 'onboarding_incomplete') && request.data?.subjectStaffName
             ? escapeHtml(request.data.subjectStaffName) + ' • ' + dateStr
             : `${request.forStaffName} • ${dateStr}`}
         </div>
@@ -531,6 +531,17 @@ function getRequestSummary(request) {
       const displayIsEnglishSafe = displayRaw && !/[\u0590-\u05FF\u0600-\u06FF]/.test(displayRaw);
       const datePart = displayIsEnglishSafe ? ` ${displayRaw}` : '';
       return `${birthdayName}'s birthday is${datePart}${daysPart}.`;
+    }
+    case 'onboarding_incomplete': {
+      const who = String(data.subjectStaffName || 'Staff').trim();
+      const pkg = String(data.packageName || 'onboarding').trim();
+      const reqDone = Number(data.progressRequiredCompleted);
+      const reqTotal = Number(data.progressRequiredTotal);
+      const prog =
+        Number.isFinite(reqTotal) && reqTotal > 0
+          ? ` · ${reqDone}/${reqTotal} required`
+          : '';
+      return `${who} has not finished ${pkg}${prog}`;
     }
     case 'document_request':
       return `${data.documentType || 'Document'} – ${(data.reason || '').substring(0, 40)}`;

@@ -123,6 +123,8 @@ function inboxLegacyDeskRoleLc(roleLc) {
 }
 
 export function inboxCanViewInboxEval(profile) {
+  // Salon owner/admin session must never be blocked by a missing/partial profile merge.
+  if (inboxSessionIsSalonOwnerOrAdmin()) return true;
   if (!profile) return false;
   // Owner/admin/manager always have inbox_view access, even if the permissions map
   // is missing (e.g. a brand-new owner whose users/{uid} doc has no staff merge yet).
@@ -133,16 +135,41 @@ export function inboxCanViewInboxEval(profile) {
   return p.inbox_view === true;
 }
 
+export function inboxSessionIsSalonOwnerOrAdmin() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffIsOwner === "function" && window.ffIsOwner() === true) {
+      return true;
+    }
+    const sessionRole = String(
+      (typeof window !== "undefined" && (window.__ff_user_role || window.__ff_actorRole)) ||
+        (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("ff_actor_role") : "") ||
+        ""
+    )
+      .toLowerCase()
+      .trim();
+    if (sessionRole === "owner" || sessionRole === "admin") return true;
+  } catch (_) {}
+  return false;
+}
+
 export function inboxCanManageInboxEval(profile) {
-  if (!profile) return false;
-  const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
-  const p = profile.permissions || {};
+  if (!profile && !inboxSessionIsSalonOwnerOrAdmin()) return false;
+  const role = inboxNormalizeLineStaffRoleLc((profile && profile.role) || "");
+  // Owner/admin always get "To handle" — inbox_manage:false on staff must not hide it.
+  if (role === "owner" || role === "admin" || inboxSessionIsSalonOwnerOrAdmin()) return true;
+  // Desk managers also always see To handle (legacy + product expectation).
+  if (role === "manager" || role === "assistant_manager" || role === "front_desk") {
+    return true;
+  }
+  const p = (profile && profile.permissions) || {};
   if (p.inbox_manage === false) return false;
   if (p.inbox_manage === true) return true;
   return inboxLegacyDeskRoleLc(role);
 }
 
 export function inboxCanSendRequestsEval(profile) {
+  // Owners/admins can always create requests (same as manage / view).
+  if (inboxSessionIsSalonOwnerOrAdmin()) return true;
   if (!profile) return false;
   const role = inboxNormalizeLineStaffRoleLc(profile.role || "");
   const p = profile.permissions || {};

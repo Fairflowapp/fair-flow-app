@@ -69,6 +69,23 @@ service cloud.firestore {
         );
     }
 
+    // Mirrors client ffCurrentUserCanManageGeneralSettings: admin/owner OR
+    // staff.permissions.settings_manage (plus salon ownerUid fallback).
+    function permSettingsManageAllowed(salonId) {
+      return mySalonStaffDocData(salonId) != null
+        && mySalonStaffDocData(salonId).permissions is map
+        && mySalonStaffDocData(salonId).permissions.settings_manage == true;
+    }
+
+    function canManageOnboardingSettings(salonId) {
+      return isAdminOrOwner(salonId)
+        || isFirestoreSalonOwnerUid(salonId)
+        || (
+          belongsToSalon(salonId)
+          && permSettingsManageAllowed(salonId)
+        );
+    }
+
     // ===== EMPLOYEE WRITE-UPS HELPERS =====
     // Confidential HR data: owner / admin / explicit writeups_manage flag ONLY.
     // Deliberately NOT isManager() — managers must not see write-ups by role.
@@ -479,10 +496,9 @@ service cloud.firestore {
         && userRole() in ['owner', 'admin', 'manager']
         && request.resource.data.to is string
         && request.resource.data.message is map;
-      // Write-up emails only: the salon's owner/admin may read the delivery
-      // state (Queued / Send failed chip). The backend stamps salonId on
-      // these docs; every other mail doc stays completely unreadable.
-      allow read: if docId.matches('writeup_.*')
+      // Write-up + onboarding portal emails: the salon's owner/admin may read
+      // the delivery state. Backend stamps salonId; all other mail docs stay unread.
+      allow read: if (docId.matches('writeup_.*') || docId.matches('onboarding_.*'))
         && resource.data.salonId is string
         && (
           isAdminOrOwner(resource.data.salonId)
@@ -497,7 +513,7 @@ service cloud.firestore {
     // documents from `mail`. Backend-only writes; the salon's owner/admin
     // may read the delivery state of their own write-up emails.
     match /writeupMailStaging/{docId} {
-      allow read: if docId.matches('writeup_.*')
+      allow read: if (docId.matches('writeup_.*') || docId.matches('onboarding_.*'))
         && resource.data.salonId is string
         && (
           isAdminOrOwner(resource.data.salonId)
@@ -525,6 +541,85 @@ service cloud.firestore {
     match /salons/{salonId}/technicianTypes/{technicianTypeId} {
       allow read: if belongsToSalon(salonId);
       allow create, update, delete: if isAdminOrOwner(salonId);
+    }
+
+    // Employee Onboarding Settings (Stage A catalogs)
+    // Read: salon members/staff (needed later for package matching).
+    // Write: admin/owner OR permissions.settings_manage (same gate as general Settings UI).
+    match /salons/{salonId}/onboardingCategories/{categoryId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow create, update, delete: if canManageOnboardingSettings(salonId);
+    }
+    match /salons/{salonId}/onboardingTaskTemplates/{templateId} {
+      function onboardingV1TaskTypeOk() {
+        return request.resource.data.taskType in [
+          'document',
+          'file_upload',
+          'policy_acknowledgement',
+          'electronic_signature'
+        ];
+      }
+
+      // Generic e-sign v1: standard tier only; regulated (W-4/W-9/I-9/…) blocked.
+      function onboardingEsignTemplateConfigOk() {
+        return request.resource.data.taskType != 'electronic_signature'
+          || (
+            request.resource.data.config is map
+            && request.resource.data.config.complianceTier == 'standard'
+            && request.resource.data.config.allowInternalEsign == true
+            && request.resource.data.config.get('requiresManagerCountersign', false) != true
+            && request.resource.data.config.get('maxSizeMb', 20) is number
+            && request.resource.data.config.maxSizeMb > 0
+            && request.resource.data.config.maxSizeMb <= 20
+            && request.resource.data.config.get('maxPages', 50) is number
+            && request.resource.data.config.maxPages > 0
+            && request.resource.data.config.maxPages <= 50
+          );
+      }
+
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow create: if canManageOnboardingSettings(salonId)
+        && onboardingV1TaskTypeOk()
+        && onboardingEsignTemplateConfigOk();
+      allow update: if canManageOnboardingSettings(salonId)
+        && onboardingV1TaskTypeOk()
+        && onboardingEsignTemplateConfigOk()
+        // taskType is immutable after create
+        && request.resource.data.taskType == resource.data.taskType;
+      allow delete: if canManageOnboardingSettings(salonId);
+    }
+    match /salons/{salonId}/onboardingPackages/{packageId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow create, update, delete: if canManageOnboardingSettings(salonId);
+    }
+
+    // E-sign signature library (E0 foundations): clients read metadata; all writes via Admin SDK / CF (E1+).
+    match /salons/{salonId}/onboardingSignatureDocuments/{documentId} {
+      allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+      allow create, update, delete: if false;
+
+      // Version rows are immutable by design once written by CF.
+      match /versions/{versionId} {
+        allow read: if belongsToSalon(salonId) || isStaffInSalon(salonId);
+        allow create, update, delete: if false;
+      }
+    }
+
+    // E-sign seal jobs — Admin SDK / CF only (idempotency locks).
+    match /salons/{salonId}/onboardingSealJobs/{sealId} {
+      allow read, write: if false;
+    }
+
+    // Employee Onboarding Portal — Admin SDK / Cloud Functions only (Phase 1).
+    // Clients never read or write tokens, uploads, or rate-limit buckets.
+    match /salons/{salonId}/onboardingPortalTokens/{tokenId} {
+      allow read, write: if false;
+    }
+    match /salons/{salonId}/onboardingPortalUploads/{uploadId} {
+      allow read, write: if false;
+    }
+    match /salons/{salonId}/onboardingPortalRateLimits/{bucketId} {
+      allow read, write: if false;
     }
 
     // Inbox visibility settings (which request types are hidden from staff)
@@ -583,17 +678,38 @@ service cloud.firestore {
         );
 
       // READ: manager sees all; technician sees requests they created OR are recipient of.
+      // Also: salon ownerUid + membership-based managers (multi-salon active salon
+      // may differ from users/{uid}.salonId used by belongsToSalon).
       // Fair Flow Console (platform admin): read-only usage signal for Customer 360.
-      allow read: if (
-        belongsToSalon(salonId)
-        && (
-          isManager(salonId)
-          || (isTechnician(salonId) && (
-            resource.data.createdByUid == request.auth.uid ||
-            resource.data.forUid == request.auth.uid
-          ))
+      allow read: if isPlatformAdmin()
+        || isFirestoreSalonOwnerUid(salonId)
+        || (
+          belongsToSalon(salonId)
+          && (
+            isManager(salonId)
+            || (isTechnician(salonId) && (
+              resource.data.createdByUid == request.auth.uid ||
+              resource.data.forUid == request.auth.uid
+            ))
+          )
         )
-      ) || isPlatformAdmin();
+        || (
+          memberExists(salonId)
+          && (
+            (
+              memberDocData(salonId).role is string
+              && memberDocData(salonId).role.lower() in ['manager', 'admin', 'owner']
+            )
+            || (
+              memberDocData(salonId).role is string
+              && memberDocData(salonId).role.lower() == 'technician'
+              && (
+                resource.data.createdByUid == request.auth.uid ||
+                resource.data.forUid == request.auth.uid
+              )
+            )
+          )
+        );
 
       // UPDATE
       allow update: if belongsToSalon(salonId)
@@ -678,7 +794,19 @@ service cloud.firestore {
         && isManager(salonId);
 
       // Staff documents (Inbox approve → staff doc sync; Staff Member > Documents tab)
+      // Sealed portal e-sign rows are Admin SDK only (immutable registry).
       match /documents/{documentId} {
+        function isPortalEsignDoc() {
+          return resource != null
+            && (
+              resource.data.get('via', '') == 'portal_esign'
+              || resource.data.get('approvedBy', '') == 'portal_esign'
+            );
+        }
+        function createsPortalEsignDoc() {
+          return request.resource.data.get('via', '') == 'portal_esign'
+            || request.resource.data.get('approvedBy', '') == 'portal_esign';
+        }
         allow read: if (belongsToSalon(salonId) && isManager(salonId))
           || matchesOwnStaffId(salonId, staffId)
           || (
@@ -687,9 +815,161 @@ service cloud.firestore {
             && memberStaffId(salonId) == staffId
           )
           || staffDocUidMatches(salonId, staffId);
-        allow create, update: if belongsToSalon(salonId) && isManager(salonId);
+        allow create: if belongsToSalon(salonId) && isManager(salonId)
+          && !createsPortalEsignDoc();
+        allow update: if belongsToSalon(salonId) && isManager(salonId)
+          && !isPortalEsignDoc()
+          && !createsPortalEsignDoc();
         allow delete: if belongsToSalon(salonId) && isManager(salonId)
-          && staffDocumentLifecycleIsArchived();
+          && staffDocumentLifecycleIsArchived()
+          && !isPortalEsignDoc();
+      }
+
+      // Employee Onboarding Runs — snapshot Package → Run → Tasks
+      // Snapshot fields are immutable for all clients. Run progress/status are
+      // written by Cloud Functions (Admin SDK) after task changes. Managers may
+      // cancel / set sent / dueDate. Employees may only perform allowed task actions.
+      match /onboardingRuns/{runId} {
+        function canReadOnboardingRun() {
+          return belongsToSalon(salonId)
+            && (
+              isManager(salonId)
+              || matchesOwnStaffId(salonId, staffId)
+              || staffDocUidMatches(salonId, staffId)
+            );
+        }
+
+        function onboardingRunSnapshotsFrozen() {
+          return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'packageId',
+            'packageNameSnapshot',
+            'packageDescriptionSnapshot',
+            'audienceSnapshot',
+            'createdBy',
+            'createdAt',
+            'createdAtMs',
+            'schemaVersion',
+            'id'
+          ]);
+        }
+
+        // Managers: lifecycle fields only. progress/completedAt are CF (Admin) only.
+        function onboardingRunManagerUpdateKeysOk() {
+          return request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'status', 'updatedAt', 'sentAt', 'cancelledAt', 'dueDate', 'portal'
+            ]);
+        }
+
+        function onboardingRunManagerStatusOk() {
+          // Managers may cancel / mark sent / keep in_progress/draft.
+          // They may not forge completed (Cloud Function sets that).
+          return request.resource.data.status in ['draft', 'sent', 'in_progress', 'cancelled']
+            || (
+              resource.data.status == 'completed'
+              && request.resource.data.status == 'completed'
+            );
+        }
+
+        allow read: if canReadOnboardingRun();
+        allow create: if belongsToSalon(salonId) && isManager(salonId)
+          && request.resource.data.packageId is string
+          && request.resource.data.packageNameSnapshot is string
+          && request.resource.data.status in ['draft', 'sent', 'in_progress']
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.keys().hasAll(['audienceSnapshot', 'progress']);
+        allow update: if belongsToSalon(salonId)
+          && isManager(salonId)
+          && onboardingRunSnapshotsFrozen()
+          && onboardingRunManagerUpdateKeysOk()
+          && onboardingRunManagerStatusOk();
+        allow delete: if false;
+
+        match /tasks/{taskId} {
+          function onboardingTaskSnapshotsFrozen() {
+            return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'templateId',
+              'taskType',
+              'templateNameSnapshot',
+              'required',
+              'sortOrder',
+              'categoryId',
+              'categoryNameSnapshot',
+              'configSnapshot',
+              'id'
+            ]);
+          }
+
+          function onboardingTaskMutableKeysOnly() {
+            return request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'result', 'completedAt', 'completedBy', 'updatedAt']);
+          }
+
+          // Signed e-sign artifacts are immutable: no client mutation after complete,
+          // and clients may not mark electronic_signature completed (CF / Admin only).
+          function onboardingEsignClientMutableOk() {
+            return resource.data.taskType != 'electronic_signature'
+              || (
+                resource.data.status != 'completed'
+                && request.resource.data.status != 'completed'
+              );
+          }
+
+          function onboardingEsignCreateConfigOk() {
+            return request.resource.data.taskType != 'electronic_signature'
+              || (
+                request.resource.data.configSnapshot is map
+                && request.resource.data.configSnapshot.complianceTier == 'standard'
+                && request.resource.data.configSnapshot.allowInternalEsign == true
+                && request.resource.data.configSnapshot.get('requiresManagerCountersign', false) != true
+              );
+          }
+
+          function employeeOnboardingTaskActionOk() {
+            return resource.data.status in ['pending', 'in_progress', 'rejected', 'waiting_approval']
+              && (
+                (
+                  resource.data.taskType == 'policy_acknowledgement'
+                  && request.resource.data.status == 'completed'
+                )
+                || (
+                  resource.data.taskType in ['document', 'file_upload']
+                  && request.resource.data.status in ['waiting_approval', 'in_progress', 'pending']
+                )
+              );
+          }
+
+          allow read: if canReadOnboardingRun();
+          allow create: if belongsToSalon(salonId) && isManager(salonId)
+            && request.resource.data.templateId is string
+            && request.resource.data.taskType in [
+              'document',
+              'file_upload',
+              'policy_acknowledgement',
+              'electronic_signature'
+            ]
+            && request.resource.data.templateNameSnapshot is string
+            && request.resource.data.keys().hasAll(['configSnapshot', 'required', 'status'])
+            && onboardingEsignCreateConfigOk();
+          allow update: if belongsToSalon(salonId)
+            && onboardingTaskSnapshotsFrozen()
+            && onboardingTaskMutableKeysOnly()
+            && onboardingEsignClientMutableOk()
+            && (
+              isManager(salonId)
+              || (
+                (matchesOwnStaffId(salonId, staffId) || staffDocUidMatches(salonId, staffId))
+                && employeeOnboardingTaskActionOk()
+              )
+            );
+          allow delete: if false;
+
+          // E-sign audit trail — Admin SDK / CF only (append-only by design).
+          match /signatureAudit/{eventId} {
+            allow read: if canReadOnboardingRun() && isManager(salonId);
+            allow create, update, delete: if false;
+          }
+        }
       }
     }
 
@@ -1473,6 +1753,15 @@ service cloud.firestore {
         && request.resource.data.email.size() <= 200
         && request.resource.data.email.matches('.+@.+\\..+');
       allow read, update, delete: if false;
+    }
+
+    // Portal token hash → salon lookup (Cloud Functions / Admin SDK only)
+    match /onboardingPortalTokenLookup/{tokenHash} {
+      allow read, write: if false;
+    }
+    // Global IP rate-limit buckets for unauthenticated portal bootstrap
+    match /onboardingPortalRateLimits/{bucketId} {
+      allow read, write: if false;
     }
 
     // Default deny

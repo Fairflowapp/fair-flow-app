@@ -17,26 +17,28 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  getDocs,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState, MANAGER_ONLY_INBOX_TYPES } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState, MANAGER_ONLY_INBOX_TYPES } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import {
   ffInboxIsStaffCallOtherNoise,
   inboxItemActivityMs,
   inboxErrorNeedsIndex,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+  inboxSessionIsSalonOwnerOrAdmin,
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 import {
   inboxUserRoleLc,
   inboxCanManageInbox,
   inboxCanSendRequests,
-} from "./inbox-data.js?v=20260630_inbox_data_split";
+} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
 import {
   updateInboxStaffFilterOptions,
   updateInboxBadges,
   renderInboxList,
   inboxGetStaffLocationMap,
   inboxItemMatchesActiveLocation,
-} from "./inbox-list-render.js?v=20260630_inbox_list_render_split";
+} from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
 
 /** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
 export function inboxTechnicianNoiseFilter(rows) {
@@ -75,7 +77,7 @@ function showInboxLoadError(error, loadingEl, listEl, emptyEl) {
   }
 }
 
-function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, emptyEl }) {
+function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, emptyEl, loadGen }) {
   const field = mode === "mine" ? "createdByUid" : "forUid";
   console.warn('[Inbox] Composite index not ready; using fallback query', { mode, field });
   const fallbackQuery = query(
@@ -85,8 +87,12 @@ function subscribeInboxIndexFallback({ salonId, uid, mode, loadingEl, listEl, em
   );
   return onSnapshot(
     fallbackQuery,
-    (snapshot) => applyInboxSnapshotRows(snapshot, loadingEl),
+    (snapshot) => {
+      if (loadGen != null && !markInboxLoadSettled(loadGen)) return;
+      applyInboxSnapshotRows(snapshot, loadingEl);
+    },
     (fallbackError) => {
+      if (loadGen != null && !markInboxLoadSettled(loadGen)) return;
       console.error('[Inbox] Fallback query error', fallbackError);
       showInboxLoadError(fallbackError, loadingEl, listEl, emptyEl);
     }
@@ -109,20 +115,45 @@ function applyTechInboxMerge(loadingEl) {
 // =====================
 // Load & Render Requests
 // =====================
+function clearInboxLoadingWatchdog() {
+  if (inboxState._inboxLoadWatchdog) {
+    try { clearTimeout(inboxState._inboxLoadWatchdog); } catch (_) {}
+    inboxState._inboxLoadWatchdog = null;
+  }
+}
+
+function markInboxLoadSettled(loadGen) {
+  if (loadGen != null && inboxState._inboxLoadGen !== loadGen) return false;
+  clearInboxLoadingWatchdog();
+  return true;
+}
+
 export async function loadInboxItems() {
-  if (!inboxState.currentUserProfile) return;
+  const loadingEl = document.getElementById('inboxLoading');
+  const emptyEl = document.getElementById('inboxEmpty');
+  const listEl = document.getElementById('inboxList');
+
+  if (!inboxState.currentUserProfile) {
+    console.warn('[Inbox] loadInboxItems: no currentUserProfile yet');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) {
+      emptyEl.style.display = 'block';
+      const msgEl = emptyEl.querySelector('#emptyStateMessage');
+      if (msgEl) msgEl.textContent = 'Could not load your profile. Try refreshing.';
+    }
+    return;
+  }
   
   const salonId = inboxState.currentUserProfile.salonId;
   const role = inboxUserRoleLc();
   const uid = inboxState.currentUserProfile.uid;
+  const canManage = inboxCanManageInbox() || inboxSessionIsSalonOwnerOrAdmin();
 
-  console.log('[Inbox] loadInboxItems', { salonId, role, uid });
+  console.log('[Inbox] loadInboxItems', { salonId, role, uid, canManage, view: inboxState.inboxViewMode });
 
   // Guard: salonId must exist, otherwise rules will always deny
   if (!salonId) {
     console.error('[Inbox] salonId is missing from user profile', inboxState.currentUserProfile);
-    const emptyEl = document.getElementById('inboxEmpty');
-    const loadingEl = document.getElementById('inboxLoading');
     if (loadingEl) loadingEl.style.display = 'none';
     if (emptyEl) {
       emptyEl.style.display = 'block';
@@ -135,23 +166,56 @@ export async function loadInboxItems() {
     }
     return;
   }
+
+  if (!uid) {
+    console.error('[Inbox] uid is missing from user profile', inboxState.currentUserProfile);
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) {
+      emptyEl.style.display = 'block';
+      const msgEl = emptyEl.querySelector('#emptyStateMessage');
+      if (msgEl) msgEl.textContent = 'Not signed in. Please refresh and sign in again.';
+    }
+    return;
+  }
   
   // Unsubscribe from previous listener
   if (inboxState.inboxUnsubscribe) {
-    inboxState.inboxUnsubscribe();
+    try { inboxState.inboxUnsubscribe(); } catch (e) {
+      console.warn('[Inbox] previous unsubscribe failed', e);
+    }
     inboxState.inboxUnsubscribe = null;
   }
+  clearInboxLoadingWatchdog();
+  const loadGen = (inboxState._inboxLoadGen = (inboxState._inboxLoadGen || 0) + 1);
   
   // Show loading
-  const loadingEl = document.getElementById('inboxLoading');
-  const emptyEl = document.getElementById('inboxEmpty');
-  const listEl = document.getElementById('inboxList');
-  
   if (loadingEl) loadingEl.style.display = 'block';
   if (emptyEl) emptyEl.style.display = 'none';
   if (listEl) {
     listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach(el => el.remove());
   }
+
+  // Never leave "Loading requests..." forever (Safari / flaky snapshot / rules stall).
+  inboxState._inboxLoadWatchdog = setTimeout(() => {
+    if (inboxState._inboxLoadGen !== loadGen) return;
+    console.warn('[Inbox] load watchdog: snapshot still pending after 8s — forcing settle');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!inboxState.currentRequests || inboxState.currentRequests.length === 0) {
+      inboxState.currentRequests = inboxState.currentRequests || [];
+      try {
+        updateInboxStaffFilterOptions();
+        updateInboxBadges();
+        renderInboxList();
+      } catch (e) {
+        console.warn('[Inbox] watchdog render failed', e);
+        if (emptyEl) {
+          emptyEl.style.display = 'block';
+          const msgEl = emptyEl.querySelector('#emptyStateMessage');
+          if (msgEl) msgEl.textContent = 'Taking longer than usual. Try switching tabs or refreshing.';
+        }
+      }
+    }
+  }, 8000);
   
   try {
     // Build query based on role and tab
@@ -176,60 +240,44 @@ export async function loadInboxItems() {
       const unsubOut = onSnapshot(
         qOut,
         (snapshot) => {
+          if (!markInboxLoadSettled(loadGen)) return;
           inboxState._techInboxOutgoing = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           applyTechInboxMerge(loadingEl);
         },
         (error) => {
+          if (!markInboxLoadSettled(loadGen)) return;
           console.error('[Inbox] Technician outgoing query error', error);
-          if (loadingEl) loadingEl.style.display = 'none';
-          inboxState.currentRequests = [];
-          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
-          if (emptyEl) {
-            emptyEl.style.display = 'block';
-            emptyEl.innerHTML = `
-          <div style="color:#ef4444;">
-            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
-            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
-          </div>
-        `;
-          }
+          showInboxLoadError(error, loadingEl, listEl, emptyEl);
         }
       );
       const unsubIn = onSnapshot(
         qIn,
         (snapshot) => {
+          if (!markInboxLoadSettled(loadGen)) return;
           inboxState._techInboxIncoming = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           applyTechInboxMerge(loadingEl);
         },
         (error) => {
+          if (!markInboxLoadSettled(loadGen)) return;
           console.error('[Inbox] Technician incoming query error', error);
-          if (loadingEl) loadingEl.style.display = 'none';
-          inboxState.currentRequests = [];
-          if (listEl) listEl.querySelectorAll('.inbox-group-header, .inbox-group-body').forEach((el) => el.remove());
-          if (emptyEl) {
-            emptyEl.style.display = 'block';
-            emptyEl.innerHTML = `
-          <div style="color:#ef4444;">
-            <div style="font-size:16px;font-weight:500;margin-bottom:8px;">Error loading requests</div>
-            <div style="font-size:14px;">${error.message || 'Please try again'}</div>
-          </div>
-        `;
-          }
+          showInboxLoadError(error, loadingEl, listEl, emptyEl);
         }
       );
       inboxState.inboxUnsubscribe = () => {
+        clearInboxLoadingWatchdog();
         unsubOut();
         unsubIn();
       };
       return;
-    } else if (role !== "technician" && !inboxCanManageInbox() && !inboxCanSendRequests()) {
+    } else if (role !== "technician" && !canManage && !inboxCanSendRequests()) {
+      if (!markInboxLoadSettled(loadGen)) return;
       if (loadingEl) loadingEl.style.display = "none";
       inboxState.currentRequests = [];
       updateInboxStaffFilterOptions();
       updateInboxBadges();
       renderInboxList();
       return;
-    } else if (inboxState.inboxViewMode === "mine" || !inboxCanManageInbox()) {
+    } else if (inboxState.inboxViewMode === "mine" || !canManage) {
       // "My Requests" (created by me) — send-only staff use this path only
       q = query(
         collection(db, `salons/${salonId}/inboxItems`),
@@ -292,29 +340,49 @@ export async function loadInboxItems() {
     
     // Listen for changes
     inboxState.inboxUnsubscribe = onSnapshot(q, (snapshot) => {
+      if (!markInboxLoadSettled(loadGen)) return;
       applyInboxSnapshotRows(snapshot, loadingEl);
     }, (error) => {
+      if (inboxState._inboxLoadGen !== loadGen) return;
       console.error('[Inbox] Query error', error);
       if (inboxErrorNeedsIndex(error)) {
         try {
           if (typeof inboxState.inboxUnsubscribe === 'function') inboxState.inboxUnsubscribe();
         } catch (_) {}
+        const mode = inboxState.inboxViewMode === "mine" || !canManage ? "mine" : "to_handle";
         inboxState.inboxUnsubscribe = subscribeInboxIndexFallback({
           salonId,
           uid,
-          mode: inboxState.inboxViewMode === "mine" || !inboxCanManageInbox() ? "mine" : "to_handle",
+          mode,
           loadingEl,
           listEl,
-          emptyEl
+          emptyEl,
+          loadGen,
+        });
+        // One-shot getDocs so we don't stay on "Loading…" if the fallback listener is slow.
+        getDocs(query(
+          collection(db, `salons/${salonId}/inboxItems`),
+          where(mode === "mine" ? "createdByUid" : "forUid", "==", uid),
+          limit(100)
+        )).then((snap) => {
+          if (!markInboxLoadSettled(loadGen)) return;
+          applyInboxSnapshotRows(snap, loadingEl);
+        }).catch((e) => {
+          if (!markInboxLoadSettled(loadGen)) return;
+          console.warn('[Inbox] getDocs fallback failed', e);
+          showInboxLoadError(e, loadingEl, listEl, emptyEl);
         });
         return;
       }
+      if (!markInboxLoadSettled(loadGen)) return;
       showInboxLoadError(error, loadingEl, listEl, emptyEl);
     });
     
   } catch (error) {
     console.error('[Inbox] Load error', error);
+    markInboxLoadSettled(loadGen);
     if (loadingEl) loadingEl.style.display = 'none';
+    showInboxLoadError(error, loadingEl, listEl, emptyEl);
   }
 }
 

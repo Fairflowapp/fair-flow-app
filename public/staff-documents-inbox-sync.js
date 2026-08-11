@@ -314,6 +314,33 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
   }
   await setDoc(ref, stripUndefined(payload), { merge: true });
 
+  // Stage D: if this inbox item belongs to an onboarding task, complete it (idempotent).
+  try {
+    const d = inboxItem.data || {};
+    const onboardingRunId = trimStr(d.onboardingRunId);
+    const onboardingTaskId = trimStr(d.onboardingTaskId);
+    if (onboardingRunId && onboardingTaskId && ownerStaffId) {
+      const complete =
+        (typeof window !== "undefined" &&
+          typeof window.ffCompleteOnboardingTaskFromInboxApprove === "function" &&
+          window.ffCompleteOnboardingTaskFromInboxApprove) ||
+        null;
+      if (complete) {
+        await complete({
+          salonId: sid,
+          staffId: ownerStaffId,
+          runId: onboardingRunId,
+          taskId: onboardingTaskId,
+          inboxItemId: iid,
+          linkedDocumentId: documentId,
+          approverUid: approverUid || null,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[staff-documents] onboarding task complete after approve", e);
+  }
+
   try {
     const runExpiryInbox = () =>
       import("./staff-doc-expiry-inbox.js?v=20260409_created_by_subject")
@@ -362,7 +389,7 @@ export async function ffResyncStaffDocumentFromInbox(dbConn, salonId, inboxItemI
  * On deny: only set approvalStatus on an existing linked staff document (never create one).
  */
 export async function ffSyncStaffDocumentOnInboxReject(dbConn, params) {
-  const { salonId, inboxItem } = params || {};
+  const { salonId, inboxItem, reason } = params || {};
   const sid = trimStr(salonId);
   if (!sid || !inboxItem) return;
 
@@ -370,9 +397,37 @@ export async function ffSyncStaffDocumentOnInboxReject(dbConn, params) {
   if (t !== "document_request" && t !== "document_upload") return;
 
   const linked = ffResolveLinkedStaffDocumentId(inboxItem);
+  const ownerStaffId = await ffResolveStaffDocumentOwnerStaffIdWithFallback(dbConn, sid, inboxItem);
+
+  // Stage D: reject linked onboarding task even when no staff document exists yet.
+  try {
+    const d = (inboxItem && inboxItem.data) || {};
+    const onboardingRunId = trimStr(d.onboardingRunId);
+    const onboardingTaskId = trimStr(d.onboardingTaskId);
+    const staffForTask = ownerStaffId || trimStr(d.documentOwnerStaffId);
+    if (onboardingRunId && onboardingTaskId && staffForTask) {
+      const rejectFn =
+        typeof window !== "undefined" &&
+        typeof window.ffRejectOnboardingTaskFromInbox === "function"
+          ? window.ffRejectOnboardingTaskFromInbox
+          : null;
+      if (rejectFn) {
+        await rejectFn({
+          salonId: sid,
+          staffId: staffForTask,
+          runId: onboardingRunId,
+          taskId: onboardingTaskId,
+          inboxItemId: trimStr(inboxItem.id),
+          reason: trimStr(reason) || trimStr(inboxItem.responseNote) || null,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[staff-documents] onboarding task reject after deny", e);
+  }
+
   if (!linked) return;
 
-  const ownerStaffId = await ffResolveStaffDocumentOwnerStaffIdWithFallback(dbConn, sid, inboxItem);
   if (!ownerStaffId) {
     console.warn("[staff-documents] Reject sync skipped: missing staff id on inbox item");
     return;

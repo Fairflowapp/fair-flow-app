@@ -17,7 +17,7 @@ import {
   runTransaction,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 
 // Injected from inbox.js.
 let showToast = () => {};

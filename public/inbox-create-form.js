@@ -8,16 +8,16 @@
  */
 
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
-import { inboxNormalizeLineStaffRoleLc } from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
-import { getRequestTypeInfo } from "./inbox-types.js?v=20260630_inbox_types_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
+import { inboxNormalizeLineStaffRoleLc } from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml, showToast } from "./inbox-utils.js?v=20260630_inbox_utils_split";
 import {
   inboxCanSendRequests,
   loadSalonUsersForRecipients,
   getInboxRecipientsList,
   getCreateRequestSelectedRecipients,
-} from "./inbox-data.js?v=20260630_inbox_data_split";
+} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
 import {
   SUPPLIES_ITEM_ROW_INNER_HTML,
   wireSuppliesItemRow,

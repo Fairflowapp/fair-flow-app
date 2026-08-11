@@ -16,12 +16,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { db, storage } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import { showToast, showConfirmModal, showPromptModal } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { inboxCanManageInbox, inboxCanSendRequests } from "./inbox-data.js?v=20260630_inbox_data_split";
-import { ffInboxYmdFromRaw, inboxSupplyRequestIsPending } from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
-import { renderInboxList } from "./inbox-list-render.js?v=20260630_inbox_list_render_split";
-import { showRequestDetails } from "./inbox-details.js?v=20260630_inbox_details_split";
+import { inboxCanManageInbox, inboxCanSendRequests } from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+import { ffInboxYmdFromRaw, inboxSupplyRequestIsPending } from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+import { renderInboxList } from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
+import { showRequestDetails } from "./inbox-details.js?v=20260810_owner_inbox_load_v5";
 import {
   approveSupplyRequest,
   denySupplyRequest,
@@ -32,7 +32,7 @@ import {
   ffSyncStaffDocumentOnInboxReject,
   ffSendExpiryChatReminderForStaffDocContext,
   ffStaffDocumentTypeSelectOptionsHtml,
-} from "./staff-documents.js?v=20260701_staffdoc_render_split";
+} from "./staff-documents.js?v=20260808_onboarding_stage_d";
 
 // loadInboxItems lives in inbox.js (many callers); injected here.
 let loadInboxItems = () => {};
@@ -495,7 +495,11 @@ window.denyRequest = async function(requestId) {
     }
 
     if (item.type === 'document_upload' || item.type === 'document_request') {
-      await ffSyncStaffDocumentOnInboxReject(db, { salonId, inboxItem: item });
+      await ffSyncStaffDocumentOnInboxReject(db, {
+        salonId,
+        inboxItem: { id: requestId, ...item },
+        reason: reason || null,
+      });
     }
 
     await updateDoc(inboxRef, {

@@ -221,6 +221,27 @@ function badgeStyle(kind) {
       weight: "800",
     },
     archived: { bg: "#f3f4f6", color: "#6b7280", label: "Archived", border: "1px solid #e5e7eb", weight: "600" },
+    esigned: {
+      bg: "#ede9fe",
+      color: "#5b21b6",
+      label: "E-signed",
+      border: "1px solid #c4b5fd",
+      weight: "800",
+    },
+    esign_certificate: {
+      bg: "#f5f3ff",
+      color: "#6d28d9",
+      label: "Certificate",
+      border: "1px solid #ddd6fe",
+      weight: "700",
+    },
+    sealed: {
+      bg: "#ecfdf5",
+      color: "#065f46",
+      label: "Sealed",
+      border: "1px solid #a7f3d0",
+      weight: "700",
+    },
   };
   return map[kind] || {
     bg: "#e5e7eb",
@@ -236,6 +257,14 @@ function badgeHtml(kind) {
   const w = s.weight || "700";
   const b = s.border || "1px solid transparent";
   return `<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:${w};letter-spacing:0.02em;background:${s.bg};color:${s.color};border:${b};">${escapeHtml(s.label)}</span>`;
+}
+
+/** True for sealed onboarding e-sign registry rows (signed PDF or certificate). */
+function isPortalEsignDocument(doc) {
+  if (!doc) return false;
+  const via = String(doc.via || "").toLowerCase();
+  if (via === "portal_esign") return true;
+  return String(doc.approvedBy || "").toLowerCase() === "portal_esign";
 }
 
 function groupDocument(doc) {
@@ -405,6 +434,7 @@ export {
   expiryBadgeState,
   badgeStyle,
   badgeHtml,
+  isPortalEsignDocument,
   groupDocument,
   tierForActiveSectionDoc,
   docTimeMs,

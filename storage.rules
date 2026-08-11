@@ -44,8 +44,28 @@ service firebase.storage {
       allow read, write: if signedIn();
     }
 
-    // Staff documents: any signed-in user can read/write (tighten later: uid==staffId or same salon)
-    match /salons/{salonId}/staff/{staffId}/{allPaths=**} {
+    // Staff paths — split so sealed e-sign PDFs under documents/ are never
+    // client-overwritable (Admin SDK / signed URL only). Overlapping Storage
+    // rules OR together, so documents must NOT be covered by a broad write:true.
+    function isSealedEsignFileName(name) {
+      return name.matches('.*_signed\\.pdf')
+        || name.matches('.*_certificate\\.pdf');
+    }
+
+    match /salons/{salonId}/staff/{staffId}/documents/{allPaths=**} {
+      allow read: if signedIn();
+      // Deny client write for sealed e-sign artifacts (…/{taskId}_signed.pdf /
+      // …/{taskId}_certificate.pdf). Other staff-doc uploads remain allowed.
+      allow write: if signedIn()
+        && allPaths.size() > 0
+        && !isSealedEsignFileName(allPaths[allPaths.size() - 1]);
+    }
+
+    match /salons/{salonId}/staff/{staffId}/{firstSegment}/{allPaths=**} {
+      allow read, write: if signedIn() && firstSegment != 'documents';
+    }
+
+    match /salons/{salonId}/staff/{staffId}/{fileName} {
       allow read, write: if signedIn();
     }
 
@@ -148,6 +168,17 @@ service firebase.storage {
     match /timeClockPhotos/{salonId}/{entryId}/{fileName} {
       allow read: if canManageTimeClockStorage(salonId);
       allow write: if false;
+    }
+
+    // Onboarding Portal uploads — signed URL / Admin SDK only (no client rules access)
+    match /salons/{salonId}/onboarding-portal/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // E-sign signature library source PDFs — CF signed URL / Admin SDK only (E0+).
+    // Sealed signed PDFs live under staff documents paths and are written by CF only in later phases.
+    match /salons/{salonId}/onboarding-signature-library/{allPaths=**} {
+      allow read, write: if false;
     }
 
     // deny everything else

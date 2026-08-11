@@ -10,19 +10,19 @@
 
 import { updateDoc, doc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import {
   inboxSupplyStatusDisplayLabel,
   inboxDocAlertIsExpiredForUi,
   inboxSupplyRequestIsPending,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml } from "./inbox-utils.js?v=20260630_inbox_utils_split";
 import {
   inboxUserRoleLc,
   inboxCanManageInbox,
   inboxCanSendRequests,
-} from "./inbox-data.js?v=20260630_inbox_data_split";
-import { getRequestTypeInfo } from "./inbox-types.js?v=20260630_inbox_types_split";
+} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { ffShowInventorySuggestionModal } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
 import {
   ffDocAlertIsHebrewUI,
@@ -35,7 +35,7 @@ import {
   ffDocAlertStaffId,
   ffDocAlertModalFooterIds,
 } from "./inbox-documents.js?v=20260629_inbox_documents_split";
-import { updateInboxBadges } from "./inbox-list-render.js?v=20260630_inbox_list_render_split";
+import { updateInboxBadges } from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
 
 // =====================
 // Request Details Modal
@@ -150,6 +150,24 @@ function showRequestDetails(requestId) {
           <div><span style="color:#6b7280;">Staff member:</span> <strong>${escapeHtml(rd.subjectStaffName || '')}</strong></div>
           <div><span style="color:#6b7280;">Birthday:</span> ${(() => { const s = String(rd.birthdayDisplay || '').trim(); return s && !/[\u0590-\u05FF\u0600-\u06FF]/.test(s) ? escapeHtml(s) : '—'; })()}</div>
           <div><span style="color:#6b7280;">When:</span> ${rd.daysUntil === 0 ? 'Today' : `In ${Number(rd.daysUntil) || 0} day(s)`}</div>
+          <div><span style="color:#6b7280;">Logged:</span> ${createdDate.toLocaleString()}</div>
+        </div>
+      </div>
+    </div>`
+      : request.type === 'onboarding_incomplete'
+      ? `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin-bottom:20px;">
+      <div style="font-size:13px;color:#374151;line-height:1.55;">
+        <div style="font-weight:600;margin-bottom:6px;color:#111;">Onboarding still incomplete</div>
+        <p style="margin:0 0 12px;color:#6b7280;font-size:12px;">Automated alert after 7 days. The employee is not notified by this Inbox item — send a reminder from their Onboarding tab if needed.</p>
+        <div style="display:grid;gap:8px;font-size:13px;">
+          <div><span style="color:#6b7280;">Staff member:</span> <strong>${escapeHtml(rd.subjectStaffName || '')}</strong></div>
+          <div><span style="color:#6b7280;">Package:</span> ${escapeHtml(rd.packageName || '—')}</div>
+          <div><span style="color:#6b7280;">Progress:</span> ${
+            Number(rd.progressRequiredTotal) > 0
+              ? `${Number(rd.progressRequiredCompleted || 0)}/${Number(rd.progressRequiredTotal)} required`
+              : escapeHtml(String(rd.runStatus || '—'))
+          }</div>
           <div><span style="color:#6b7280;">Logged:</span> ${createdDate.toLocaleString()}</div>
         </div>
       </div>
@@ -279,7 +297,12 @@ function showRequestDetails(requestId) {
   
   // Manager actions — only for the RECIPIENT (who the request was sent TO), not the creator
   const isRecipient = inboxState.currentUserProfile && request.forUid === inboxState.currentUserProfile.uid;
-  if (isManager && isRecipient && request.status === 'open' && request.type === 'staff_birthday_reminder') {
+  if (
+    isManager &&
+    isRecipient &&
+    request.status === 'open' &&
+    (request.type === 'staff_birthday_reminder' || request.type === 'onboarding_incomplete')
+  ) {
     detailsHTML += `
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
@@ -816,6 +839,24 @@ function renderRequestData(request) {
       return `
         <div style="font-size:13px;line-height:1.5;color:#374151;">
           <div style="padding:10px;background:#f9fafb;border-radius:8px;">${escapeHtml(bdLine)}</div>
+        </div>
+      `;
+    }
+
+    case 'onboarding_incomplete': {
+      const who = String(data.subjectStaffName || 'Staff').trim();
+      const pkg = String(data.packageName || 'onboarding').trim();
+      const reqDone = Number(data.progressRequiredCompleted);
+      const reqTotal = Number(data.progressRequiredTotal);
+      const prog =
+        Number.isFinite(reqTotal) && reqTotal > 0
+          ? `${reqDone}/${reqTotal} required tasks done`
+          : String(data.runStatus || 'in progress');
+      const msg = String(data.message || `${who} has not finished ${pkg}.`).trim();
+      return `
+        <div style="font-size:13px;line-height:1.5;color:#374151;display:grid;gap:10px;">
+          <div style="padding:10px;background:#fffbeb;border-radius:8px;">${escapeHtml(msg)}</div>
+          <div><span style="color:#6b7280;">Progress:</span> <span style="font-weight:500;margin-left:6px;">${escapeHtml(prog)}</span></div>
         </div>
       `;
     }

@@ -20,14 +20,14 @@ import {
   REQUEST_CATEGORY_LABELS,
   BUILTIN_TYPES,
   CUSTOM_TYPE_EMOJIS,
-} from "./inbox-state.js?v=20260629_inbox_state_split";
+} from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import {
   loadCustomTypes,
   setInboxTypeVisibility,
   getRequestTypesGroupedByCategory,
-} from "./inbox-types.js?v=20260630_inbox_types_split";
+} from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml, showToast } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { inboxUserRoleLc, inboxCanSendRequests } from "./inbox-data.js?v=20260630_inbox_data_split";
+import { inboxUserRoleLc, inboxCanSendRequests } from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
 
 // =====================
 // Create Request Modal

@@ -52,6 +52,7 @@ export const BUILTIN_TYPES = [
   { id: 'maintenance', icon: '🔧', label: 'Maintenance', description: 'Report maintenance issue', category: 'operations' },
   { id: 'client_issue', icon: '👤', label: 'Client Issue', description: 'Report or discuss a client-related matter', category: 'operations' },
   { id: 'staff_birthday_reminder', icon: '🎂', label: 'Staff birthday reminder', description: 'Automated — upcoming staff birthday (management only)', category: 'operations' },
+  { id: 'onboarding_incomplete', icon: '📋', label: 'Onboarding incomplete', description: 'Automated — employee has not finished onboarding after 7 days (management only)', category: 'operations' },
   // Documents
   { id: 'document_request', icon: '📄', label: 'Request a Document', description: 'Request a document from management (1099, employment letter, contract, etc.)', category: 'documents' },
   {
@@ -76,7 +77,7 @@ export const LEGACY_INBOX_TYPE_INFO = {
 };
 
 /** Automated inbox items for management ("To handle") only — never list for technicians. */
-export const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "document_expiring_soon", "document_expired", "inventory_suggestion"]);
+export const MANAGER_ONLY_INBOX_TYPES = new Set(["staff_birthday_reminder", "onboarding_incomplete", "document_expiring_soon", "document_expired", "inventory_suggestion"]);
 
 export const INBOX_SETTINGS_DOC_ID = 'visibility';
 

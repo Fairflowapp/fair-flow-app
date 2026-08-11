@@ -5,8 +5,8 @@
  */
 import { doc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { ffSuggestionFmtDays, ffSuggestionFmtRate } from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { ffSuggestionFmtDays, ffSuggestionFmtRate } from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 
 // Injected from inbox.js (orchestrator owns these shared utilities).
 let escapeHtml = (s) => String(s == null ? '' : s);

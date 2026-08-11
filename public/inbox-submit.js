@@ -17,14 +17,14 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 import { showToast } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { getRequestTypeInfo } from "./inbox-types.js?v=20260630_inbox_types_split";
+import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import {
   enumerateInclusiveDateKeysForInbox,
   ffInboxRuleString,
   suppliesRowRequiresVariant,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 import {
   classifySuppliesRow,
   readSuppliesRowSnapshot,
@@ -37,7 +37,7 @@ import {
   getInboxRecipientsList,
   loadSalonUsersForRecipients,
   resolveCurrentInboxActorName,
-} from "./inbox-data.js?v=20260630_inbox_data_split";
+} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
 
 // loadInboxItems lives in inbox.js (many callers); injected here.
 let loadInboxItems = () => {};

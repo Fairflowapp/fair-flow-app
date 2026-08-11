@@ -16,7 +16,7 @@ import {
   BUILTIN_TYPES,
   LEGACY_INBOX_TYPE_INFO,
   INBOX_SETTINGS_DOC_ID,
-} from "./inbox-state.js?v=20260629_inbox_state_split";
+} from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 
 // Injected from inbox.js.
 let inboxUserRoleLc = () => "";
@@ -71,7 +71,7 @@ function getAllRequestTypes() {
     category: 'custom',
     fields: Array.isArray(t.fields) ? t.fields : []
   }));
-  const automatedInboxTypes = new Set(['staff_birthday_reminder', 'document_expiring_soon', 'document_expired']);
+  const automatedInboxTypes = new Set(['staff_birthday_reminder', 'onboarding_incomplete', 'document_expiring_soon', 'document_expired']);
   const managerOnlyNewRequestTypes = new Set(['document_renewal_request']);
   const hideRenewalForStaff = inboxUserRoleLc() === 'technician';
   const withoutOther = BUILTIN_TYPES.filter(

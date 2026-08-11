@@ -25,6 +25,7 @@ import {
   staffDocsShellStyle,
   expiryBadgeState,
   badgeHtml,
+  isPortalEsignDocument,
   groupDocument,
   tierForActiveSectionDoc,
   sortActiveDocuments,
@@ -35,8 +36,8 @@ import {
   docMatchesSearch,
   sortDocumentsForFilterChip,
   renderFilterChipsHtml,
-} from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
-import { refreshStaffDocViewerEditMeta } from "./staff-documents-ui.js?v=20260701_staffdoc_ui_split";
+} from "./staff-documents-format.js?v=20260809_esign_e5";
+import { refreshStaffDocViewerEditMeta } from "./staff-documents-ui.js?v=20260809_esign_e5";
 import { ffRunExpiryChatNotify } from "./staff-documents-expiry-chat.js?v=20260701_staffdoc_expiry_split";
 
 function renderActiveSectionWithSubheaders(sortedActive) {
@@ -296,6 +297,7 @@ function renderDocumentCard(doc) {
   const lifecycleRaw = doc.lifecycleStatus != null ? String(doc.lifecycleStatus) : "";
   const lifeLower = trimStr(String(doc.lifecycleStatus || "")).toLowerCase();
   const isArchived = lifeLower === "archived";
+  const isEsign = isPortalEsignDocument(doc);
   const lifecycleDisplay = isArchived
     ? formatLifecycleLabel("archived")
     : doc.expirationDate != null
@@ -304,7 +306,14 @@ function renderDocumentCard(doc) {
   const createdAt = doc.createdAt;
 
   const badges = [];
-  if (ap === "pending") badges.push(badgeHtml("pending"));
+  if (isEsign) {
+    badges.push(badgeHtml("esigned"));
+    if (String(doc.esignKind || "") === "certificate") {
+      badges.push(badgeHtml("esign_certificate"));
+    } else {
+      badges.push(badgeHtml("sealed"));
+    }
+  } else if (ap === "pending") badges.push(badgeHtml("pending"));
   else if (ap === "approved" || ap === "rejected") badges.push(badgeHtml(ap));
 
   const expState = expiryBadgeState(expirationDate);
@@ -320,14 +329,15 @@ function renderDocumentCard(doc) {
     badges.push(badgeHtml("archived"));
   }
 
-  // Pill-sized actions (same line as status badges; ~10px / 3px 9px padding)
+  // Pill-sized actions — e-sign sealed docs are read-only (no edit / delete / replace)
   const editMetaPillBtn =
-    sdState._staffDocsViewerCanEditMeta && !isArchived
+    !isEsign && sdState._staffDocsViewerCanEditMeta && !isArchived
       ? `<button type="button" data-ff-doc-action="edit_meta" data-doc-id="${escapeHtml(doc.id)}" title="Edit type, title, expiration" style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#faf5ff;color:#5b21b6;border:1px solid #c4b5fd;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">✎ Edit</button>`
       : "";
-  const deletePillBtn = isArchived
-    ? `<button type="button" data-ff-doc-action="delete_permanent" data-doc-id="${escapeHtml(doc.id)}" title="Permanently delete this document and its file. This cannot be undone." style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">Delete</button>`
-    : "";
+  const deletePillBtn =
+    !isEsign && isArchived
+      ? `<button type="button" data-ff-doc-action="delete_permanent" data-doc-id="${escapeHtml(doc.id)}" title="Permanently delete this document and its file. This cannot be undone." style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.02em;line-height:1.3;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;flex-shrink:0;">Delete</button>`
+      : "";
   const badgeActions = [editMetaPillBtn, deletePillBtn].filter(Boolean).join("");
 
   const badgeRow =
@@ -345,8 +355,8 @@ function renderDocumentCard(doc) {
     !isArchived && doc.expirationDate != null
       ? ffComputeLifecycleFromExpiration(doc.expirationDate)
       : lifeLower;
-  const showExpiredReplace = !isArchived && derivedForReplace === "expired";
-  const showExpiringSoonChat = !isArchived && derivedForReplace === "expiring_soon";
+  const showExpiredReplace = !isEsign && !isArchived && derivedForReplace === "expired";
+  const showExpiringSoonChat = !isEsign && !isArchived && derivedForReplace === "expiring_soon";
 
   const btnBase =
     "min-height:36px;padding:8px 14px;font-size:12px;font-weight:600;border-radius:999px;line-height:1.2;box-sizing:border-box;font-family:inherit;-webkit-tap-highlight-color:transparent;";
@@ -361,9 +371,11 @@ function renderDocumentCard(doc) {
     ? `<a href="${escapeAttr(fUrl)}" target="_blank" rel="noopener noreferrer" style="${btnStyle}text-decoration:none;display:inline-block;">View</a>`
     : `<button type="button" data-ff-doc-action="view" data-doc-id="${escapeHtml(doc.id)}" style="${btnStyle}">View</button>`;
 
-  const archiveOrUnarchive = isArchived
-    ? `<button type="button" data-ff-doc-action="unarchive" data-doc-id="${escapeHtml(doc.id)}" style="${btnStyle}">Unarchive</button>`
-    : `<button type="button" data-ff-doc-action="archive" data-doc-id="${escapeHtml(doc.id)}" style="${btnStyle}">Archive</button>`;
+  const archiveOrUnarchive = isEsign
+    ? ""
+    : isArchived
+      ? `<button type="button" data-ff-doc-action="unarchive" data-doc-id="${escapeHtml(doc.id)}" style="${btnStyle}">Unarchive</button>`
+      : `<button type="button" data-ff-doc-action="archive" data-doc-id="${escapeHtml(doc.id)}" style="${btnStyle}">Archive</button>`;
 
   const uploadNewVersionBtn = showExpiredReplace
     ? `<button type="button" data-ff-doc-action="replace" data-doc-id="${escapeHtml(doc.id)}" title="Replace file on this document (same record)" style="${btnBase}cursor:pointer;border:1px dashed #7c3aed;background:#faf5ff;color:#6d28d9;">Upload New Version</button>`
@@ -380,21 +392,70 @@ function renderDocumentCard(doc) {
       ${uploadNewVersionBtn}
     </div>`;
 
+  const esignMetaRows = isEsign
+    ? `${
+        doc.signerName
+          ? `<span style="color:#9ca3af;">Signer</span><span>${escapeHtml(String(doc.signerName))}</span>`
+          : ""
+      }
+      ${
+        doc.signedAt
+          ? `<span style="color:#9ca3af;">Signed</span><span>${escapeHtml(formatWhen(doc.signedAt))}</span>`
+          : ""
+      }
+      ${
+        doc.documentTitle || doc.documentVersion != null || doc.documentVersionId
+          ? `<span style="color:#9ca3af;">Version</span><span>${escapeHtml(
+              String(
+                doc.documentVersion != null
+                  ? doc.documentVersion
+                  : doc.documentVersionId || "—"
+              )
+            )}${doc.documentTitle ? " · " + escapeHtml(String(doc.documentTitle)) : ""}</span>`
+          : ""
+      }
+      ${
+        doc.onboardingRunId
+          ? `<span style="color:#9ca3af;">Onboarding</span><span>Run ${_escShort(doc.onboardingRunId)}${
+              doc.onboardingTaskId
+                ? " · Task " + _escShort(doc.onboardingTaskId)
+                : ""
+            }</span>`
+          : ""
+      }
+      <span style="color:#9ca3af;">Source</span><span>Portal e-sign · read-only</span>`
+    : "";
+
   return `
-    <div class="ff-staff-doc-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:13px 14px;background:#fff;margin-bottom:10px;">
+    <div class="ff-staff-doc-card${isEsign ? " ff-staff-doc-esign" : ""}" style="border:1px solid #e5e7eb;border-radius:10px;padding:13px 14px;background:#fff;margin-bottom:10px;">
       ${badgeRow}
       <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:8px;line-height:1.35;">${escapeHtml(title)}</div>
       <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;color:#374151;line-height:1.4;">
         <span style="color:#9ca3af;">Type</span><span>${escapeHtml(type)}</span>
         <span style="color:#9ca3af;">File</span><span style="word-break:break-word;">${escapeHtml(fileName)}</span>
-        <span style="color:#9ca3af;">Approval</span><span>${escapeHtml(approvalDisplay)}</span>
+        ${
+          isEsign
+            ? esignMetaRows
+            : `<span style="color:#9ca3af;">Approval</span><span>${escapeHtml(approvalDisplay)}</span>
         <span style="color:#9ca3af;">Expires</span><span>${escapeHtml(formatDay(expirationDate))}</span>
         <span style="color:#9ca3af;">Lifecycle</span><span>${escapeHtml(lifecycleDisplay)}</span>
-        <span style="color:#9ca3af;">Created</span><span>${escapeHtml(formatWhen(createdAt))}</span>
+        <span style="color:#9ca3af;">Created</span><span>${escapeHtml(formatWhen(createdAt))}</span>`
+        }
+        ${
+          isEsign
+            ? `<span style="color:#9ca3af;">Created</span><span>${escapeHtml(formatWhen(createdAt))}</span>`
+            : ""
+        }
       </div>
       ${actionsRow}
     </div>
   `;
+}
+
+function _escShort(id) {
+  const s = String(id || "");
+  if (s.length <= 10) return escapeHtml(s);
+  return escapeHtml(s.slice(0, 6) + "…" + s.slice(-4));
 }
 
 function renderGrouped(docs) {

@@ -17,10 +17,11 @@ import {
   inboxNormalizeLineStaffRoleLc,
   inboxCanViewInboxEval,
   inboxCanManageInboxEval,
-} from "./inbox-helpers.js?v=20260626_inbox_helpers_split";
+  inboxSessionIsSalonOwnerOrAdmin,
+} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
 
 // ── Module state + config tables — extracted to inbox-state.js
-import { inboxState } from "./inbox-state.js?v=20260629_inbox_state_split";
+import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
 
 // ── Smart Inventory Suggestion feature — extracted to inbox-inventory-suggestion.js
 import { initInboxInventorySuggestion } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
@@ -39,7 +40,7 @@ import {
   initInboxTypes,
   loadCustomTypes,
   loadInboxSettings,
-} from "./inbox-types.js?v=20260630_inbox_types_split";
+} from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 initInboxTypes({ inboxUserRoleLc });
 
 // ── Shared UI utilities — extracted to inbox-utils.js
@@ -56,7 +57,7 @@ import {
   inboxCanSendRequests,
   mergeSalonStaffIntoUserProfile,
   loadCurrentUserProfile,
-} from "./inbox-data.js?v=20260630_inbox_data_split";
+} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
 
 // ── Modals + settings UI — extracted to inbox-modals-ui.js
 import "./inbox-modals-ui.js?v=20260721_inbox_modal_stack";
@@ -66,22 +67,22 @@ import {
   renderInboxList,
   updateInboxBadges,
   initInboxListRender,
-} from "./inbox-list-render.js?v=20260630_inbox_list_render_split";
+} from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
 initInboxListRender({ showRequestDetails, inboxTechnicianNoiseFilter });
 
 // ── Request details modal — extracted to inbox-details.js
-import { showRequestDetails } from "./inbox-details.js?v=20260630_inbox_details_split";
+import { showRequestDetails } from "./inbox-details.js?v=20260810_owner_inbox_load_v5";
 
 // ── Submit request (create) — extracted to inbox-submit.js
 import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260721_inbox_tech_fix";
 initInboxSubmit({ loadInboxItems });
 
 // ── Manager action handlers — extracted to inbox-actions.js
-import { initInboxActions } from "./inbox-actions.js?v=20260630_inbox_actions_split";
+import { initInboxActions } from "./inbox-actions.js?v=20260808_onboarding_stage_d";
 initInboxActions({ loadInboxItems });
 
 // ── Listeners & data loading — extracted to inbox-listeners.js
-import { loadInboxItems, inboxTechnicianNoiseFilter, _bgBadgeRecompute, startBgBadgeListener } from "./inbox-listeners.js?v=20260630_inbox_listeners_split";
+import { loadInboxItems, inboxTechnicianNoiseFilter, _bgBadgeRecompute, startBgBadgeListener } from "./inbox-listeners.js?v=20260810_owner_inbox_load_v5";
 
 // ── Create request form — extracted to inbox-create-form.js
 import { initInboxCreateForm } from "./inbox-create-form.js?v=20260630_inbox_create_form_split";
@@ -126,7 +127,11 @@ export async function ffRefreshInboxNavVisibility() {
 export function goToInbox(onReady) {
   console.log('[Inbox] Opening inbox');
 
-  if (typeof window.ffCurrentUserHasInboxViewPermission === 'function' && !window.ffCurrentUserHasInboxViewPermission()) {
+  if (
+    !inboxSessionIsSalonOwnerOrAdmin() &&
+    typeof window.ffCurrentUserHasInboxViewPermission === 'function' &&
+    !window.ffCurrentUserHasInboxViewPermission()
+  ) {
     if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
     if (typeof showToast === 'function') {
       showToast('Inbox is turned off for this staff profile (enable View Inbox in permissions).', 'error');
@@ -159,16 +164,18 @@ export function goToInbox(onReady) {
   const joinBar = document.querySelector('.joinBar');
   const queueControls = document.getElementById('queueControls');
   const userProfileScreen = document.getElementById('userProfileScreen');
+  const myProfileScreen = document.getElementById('myProfileScreen');
   const wrap = document.querySelector('.wrap');
   const inboxScreen = document.getElementById('inboxScreen');
   const inboxContent = document.getElementById('inboxContent');
   
-  // Hide other screens first
+  // Hide other screens first (including My Profile — otherwise Inbox tab looks active while profile stays on screen)
   if (tasksScreen) tasksScreen.style.display = 'none';
   if (ownerView) ownerView.style.display = 'none';
   if (joinBar) joinBar.style.display = 'none';
   if (queueControls) queueControls.style.display = 'none';
   if (userProfileScreen) userProfileScreen.style.display = 'none';
+  if (myProfileScreen) myProfileScreen.style.display = 'none';
   if (wrap) wrap.style.display = 'none';
   const manageQueueScreen = document.getElementById('manageQueueScreen');
   if (manageQueueScreen) manageQueueScreen.style.display = 'none';
@@ -187,6 +194,22 @@ export function goToInbox(onReady) {
   if (scheduleScreenNav) scheduleScreenNav.style.display = 'none';
   const timeClockScreenInbox = document.getElementById('timeClockScreen');
   if (timeClockScreenInbox) timeClockScreenInbox.style.display = 'none';
+  [
+    'floorScreen',
+    'inventoryScreen',
+    'pointsAppScreen',
+    'dashboardScreen',
+    'queueAnalyticsScreen',
+    'ticketsAnalyticsScreen',
+    'timeAnalyticsScreen',
+    'tasksAnalyticsScreen',
+    'servicesScreen',
+    'productsScreen',
+    'historyScreen',
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
   
   // Show inbox shell but hide content until ready (avoids flash of empty "My Requests")
   if (inboxScreen) {
@@ -198,12 +221,17 @@ export function goToInbox(onReady) {
   
   document.querySelectorAll('.btn-pill').forEach(btn => btn.classList.remove('active'));
   const inboxBtn = document.getElementById('inboxBtn');
-  if (inboxBtn && typeof window.ffCurrentUserHasInboxViewPermission === 'function' && window.ffCurrentUserHasInboxViewPermission()) {
+  const mayOpenInbox =
+    inboxSessionIsSalonOwnerOrAdmin() ||
+    (typeof window.ffCurrentUserHasInboxViewPermission === 'function' &&
+      window.ffCurrentUserHasInboxViewPermission());
+  if (inboxBtn && mayOpenInbox) {
     inboxBtn.classList.add('active');
   }
 
   loadCurrentUserProfile().then(() => {
-    if (!inboxCanViewInbox()) {
+    // Owners can open Inbox even when users/{uid} / staff merge is still incomplete.
+    if (!inboxCanViewInbox() && !inboxSessionIsSalonOwnerOrAdmin()) {
       if (typeof showToast === "function") {
         showToast("You do not have permission to open Inbox.", "error");
       } else {
@@ -215,24 +243,39 @@ export function goToInbox(onReady) {
       if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
       return;
     }
+    if (inboxSessionIsSalonOwnerOrAdmin() && !inboxState.currentUserProfile) {
+      const u = auth.currentUser;
+      inboxState.currentUserProfile = {
+        uid: u && u.uid ? u.uid : '',
+        role: 'owner',
+        salonId: (typeof window !== 'undefined' && window.currentSalonId) || null,
+        permissions: { inbox_view: true, inbox_manage: true, inbox_send: true },
+      };
+    }
     if (!inboxCanManageInbox() && inboxCanSendRequests()) {
       inboxState.inboxViewMode = "mine";
     }
-    loadCustomTypes().then(() => {
-      loadInboxSettings().then(() => {
-        setupInboxUI();
-        loadInboxItems();
-        // Show content when UI is ready and loading has started
-        if (inboxContent) inboxContent.style.opacity = '1';
-        if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
-        if (typeof onReady === 'function') {
-          try {
-            onReady();
-          } catch (e) {
-            console.warn('[Inbox] goToInbox onReady', e);
-          }
+    // Don't block Inbox UI if settings/types are slow — list can load in parallel.
+    const typesP = Promise.resolve()
+      .then(() => loadCustomTypes())
+      .catch((e) => console.warn('[Inbox] loadCustomTypes', e));
+    const settingsP = Promise.resolve()
+      .then(() => loadInboxSettings())
+      .catch((e) => console.warn('[Inbox] loadInboxSettings', e));
+    const bootTimeout = new Promise((resolve) => setTimeout(resolve, 2500));
+    Promise.race([Promise.allSettled([typesP, settingsP]), bootTimeout]).then(() => {
+      setupInboxUI();
+      loadInboxItems();
+      // Show content when UI is ready and loading has started
+      if (inboxContent) inboxContent.style.opacity = '1';
+      if (typeof window.ffUpdateMainNavTabVisibility === 'function') window.ffUpdateMainNavTabVisibility();
+      if (typeof onReady === 'function') {
+        try {
+          onReady();
+        } catch (e) {
+          console.warn('[Inbox] goToInbox onReady', e);
         }
-      });
+      }
     });
   });
 }
@@ -240,11 +283,21 @@ export function goToInbox(onReady) {
 
 
 function setupInboxUI() {
-  if (!inboxState.currentUserProfile) return;
+  // Owners can still open Inbox before profile merge finishes — build a minimal profile.
+  if (!inboxState.currentUserProfile) {
+    if (!inboxSessionIsSalonOwnerOrAdmin()) return;
+    const u = auth.currentUser;
+    inboxState.currentUserProfile = {
+      uid: u && u.uid ? u.uid : '',
+      role: 'owner',
+      salonId: (typeof window !== 'undefined' && window.currentSalonId) || null,
+      permissions: { inbox_view: true, inbox_manage: true, inbox_send: true },
+    };
+  }
 
   const role = inboxUserRoleLc();
-  const canManageInbox = inboxCanManageInbox();
-  const canSend = inboxCanSendRequests();
+  const canManageInbox = inboxCanManageInbox() || inboxSessionIsSalonOwnerOrAdmin();
+  const canSend = inboxCanSendRequests() || canManageInbox;
   const sendOnlyDesk = !canManageInbox && canSend && role !== 'technician';
 
   // "New Request" — #inboxCreateRequestBtn lives in #inboxContentHeaderRow (visible for technicians; switcher is hidden for them)
@@ -253,11 +306,21 @@ function setupInboxUI() {
   const emptyStateBtn  = document.getElementById('emptyStateNewRequestBtn');
   const emptyStateMsg  = document.getElementById('emptyStateMessage');
   const inboxTabs      = document.getElementById('inboxTabs');
+  const viewSwitcher = document.getElementById('inboxViewSwitcher');
 
   const canCreateRequests = canSend;
-  const isAdminOrOwner = (role === 'admin' || role === 'owner');
+  const isAdminOrOwner =
+    role === 'admin' || role === 'owner' || inboxSessionIsSalonOwnerOrAdmin();
   const manageTypesBtn = document.getElementById('btnManageRequestTypes');
   const settingsBtn = document.getElementById('inboxSettingsBtn');
+
+  // Owners/managers default into To handle so the switcher is obvious.
+  if (canManageInbox && (!inboxState.inboxViewMode || inboxState.inboxViewMode === 'mine') && isAdminOrOwner) {
+    if (!inboxState._inboxOwnerDefaultedToHandle) {
+      inboxState.inboxViewMode = 'to_handle';
+      inboxState._inboxOwnerDefaultedToHandle = true;
+    }
+  }
 
   // New Request: show only when inbox_send (or manage) allows; hide in "To handle"
   const showNewRequest =
@@ -265,7 +328,7 @@ function setupInboxUI() {
     (role === 'technician' || sendOnlyDesk || inboxState.inboxViewMode === 'mine');
   if (headerNewBtn) headerNewBtn.style.display = showNewRequest ? '' : 'none';
   // Hide empty-state New Request — only the header button is used
-  if (emptyStateBtn) emptyStateBtn.style.display = 'none';
+  if (emptyStateBtn) emptyStateBtn.style.setProperty('display', 'none', 'important');
   if (manageTypesBtn) manageTypesBtn.style.display = 'none'; // use gear only
   // Gear settings button — ONLY for admin/owner with manage inbox, after Archived tab
   if (settingsBtn) {
@@ -275,7 +338,7 @@ function setupInboxUI() {
 
   const filterRow = document.getElementById('inboxFilterRow');
   const staffFilterSelect = document.getElementById('inboxStaffFilterSelect');
-  if (filterRow) filterRow.style.display = (role === 'technician') ? 'none' : 'flex';
+  if (filterRow) filterRow.style.display = (role === 'technician' && !canManageInbox) ? 'none' : 'flex';
   if (staffFilterSelect) {
     staffFilterSelect.onchange = () => {
       inboxState.inboxStaffFilterUid = staffFilterSelect.value || '';
@@ -283,44 +346,73 @@ function setupInboxUI() {
     };
   }
 
-  if (role === 'technician') {
+  function showViewSwitcher(on) {
+    if (!viewSwitcher) return;
+    if (on) {
+      viewSwitcher.style.setProperty('display', 'flex', 'important');
+      viewSwitcher.setAttribute('aria-hidden', 'false');
+    } else {
+      viewSwitcher.style.setProperty('display', 'none', 'important');
+      viewSwitcher.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function setHeaderRowVisible(on) {
+    if (!headerRow) return;
+    if (on) {
+      headerRow.classList.remove('is-hidden');
+      headerRow.style.setProperty('display', 'flex', 'important');
+    } else {
+      headerRow.classList.add('is-hidden');
+      headerRow.style.setProperty('display', 'none', 'important');
+    }
+  }
+
+  if (role === 'technician' && !canManageInbox) {
     // Technicians see their own requests only — hide status tabs and view switcher
-    const viewSwitcher = document.getElementById('inboxViewSwitcher');
-    if (viewSwitcher) viewSwitcher.style.display = 'none';
-    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
+    showViewSwitcher(false);
+    setHeaderRowVisible(showNewRequest);
     if (inboxTabs) inboxTabs.classList.add('hidden');
     if (emptyStateMsg) emptyStateMsg.textContent = canSend ? 'No requests yet' : 'No updates yet';
     inboxState.currentInboxTab = 'my_requests';
   } else if (sendOnlyDesk) {
     inboxState.inboxViewMode = 'mine';
-    const viewSwitcher = document.getElementById('inboxViewSwitcher');
-    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    showViewSwitcher(false);
     if (filterRow) filterRow.style.display = 'none';
-    if (headerRow) headerRow.style.display = showNewRequest ? '' : 'none';
+    setHeaderRowVisible(showNewRequest);
     if (inboxTabs) {
       inboxTabs.classList.add('hidden');
       inboxTabs.style.display = 'none';
     }
-    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
     inboxState.currentInboxTab = 'my_requests';
     if (emptyStateMsg) emptyStateMsg.textContent = 'No requests yet';
   } else if (canManageInbox) {
     // Manager / Admin / Owner — show view switcher (My Requests | To handle)
-    const viewSwitcher = document.getElementById('inboxViewSwitcher');
-    if (viewSwitcher) viewSwitcher.style.display = 'flex';
+    showViewSwitcher(true);
     document.querySelectorAll('.inbox-view-btn').forEach(btn => {
       btn.classList.toggle('active', (btn.dataset.inboxView || '') === inboxState.inboxViewMode);
+      // Keep toolbar button colors in sync with active view.
+      const active = (btn.dataset.inboxView || '') === inboxState.inboxViewMode;
+      if (active) {
+        btn.style.background = '#7c3aed';
+        btn.style.color = '#fff';
+      } else {
+        btn.style.background = '#f9fafb';
+        btn.style.color = '#6b7280';
+      }
     });
     if (filterRow) filterRow.style.display = inboxState.inboxViewMode === 'mine' ? 'none' : 'flex';
-    if (headerRow) headerRow.style.display = inboxState.inboxViewMode === 'mine' && showNewRequest ? '' : 'none';
+    setHeaderRowVisible(inboxState.inboxViewMode === 'mine' && showNewRequest);
     // In "My Requests": hide status tabs (Open/Needs Info/etc) and center New Request button
     if (inboxState.inboxViewMode === 'mine') {
       if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
     } else {
-      if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
+      if (inboxTabs) {
+        inboxTabs.classList.remove('hidden');
+        inboxTabs.style.setProperty('display', 'flex', 'important');
+      }
     }
-    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-    inboxState.currentInboxTab = inboxState.currentInboxTab || 'open';
+    inboxState.currentInboxTab = inboxState.currentInboxTab === 'my_requests' ? 'open' : (inboxState.currentInboxTab || 'open');
     if (emptyStateMsg) emptyStateMsg.textContent = 'No requests in this category';
     document.querySelectorAll('.inbox-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.inboxTab === inboxState.currentInboxTab);
@@ -328,15 +420,13 @@ function setupInboxUI() {
     syncInboxStatusFilterSelect();
   } else {
     // View inbox without send/manage — minimal UI
-    const viewSwitcher = document.getElementById('inboxViewSwitcher');
-    if (viewSwitcher) viewSwitcher.style.display = 'none';
+    showViewSwitcher(false);
     if (filterRow) filterRow.style.display = 'none';
-    if (headerRow) headerRow.style.display = 'none';
+    setHeaderRowVisible(false);
     if (inboxTabs) {
       inboxTabs.classList.add('hidden');
       inboxTabs.style.display = 'none';
     }
-    if (emptyStateBtn) emptyStateBtn.style.display = 'none';
     if (emptyStateMsg) emptyStateMsg.textContent = 'No access to requests for this account';
   }
 }
@@ -345,27 +435,14 @@ function setupInboxUI() {
 // View Mode (My Requests | To handle) — called from HTML onclick
 // =====================
 window.setInboxViewMode = function(mode) {
-  if (!inboxState.currentUserProfile || inboxUserRoleLc() === "technician") return;
-  if (mode === "to_handle" && !inboxCanManageInbox()) return;
+  const canManage = inboxCanManageInbox() || inboxSessionIsSalonOwnerOrAdmin();
+  if (!inboxState.currentUserProfile && !canManage) return;
+  if (inboxUserRoleLc() === "technician" && !canManage) return;
+  if (mode === "to_handle" && !canManage) return;
   inboxState.inboxViewMode = mode;
-  document.querySelectorAll('.inbox-view-btn').forEach(b => {
-    b.classList.toggle('active', (b.dataset.inboxView || '') === mode);
-  });
-  const filterRow = document.getElementById('inboxFilterRow');
-  const inboxTabs = document.getElementById('inboxTabs');
-  const emptyStateBtn = document.getElementById('emptyStateNewRequestBtn');
-  const headerNewBtn = document.getElementById('inboxCreateRequestBtn');
-  const headerRow = document.getElementById('inboxContentHeaderRow');
-  if (headerRow) headerRow.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
-  if (filterRow) filterRow.style.display = mode === 'mine' ? 'none' : 'flex';
-  if (mode === 'mine') {
-    if (inboxTabs) { inboxTabs.classList.add('hidden'); inboxTabs.style.display = 'none'; }
-  } else {
-    if (inboxTabs) { inboxTabs.classList.remove('hidden'); inboxTabs.style.display = ''; }
-    syncInboxStatusFilterSelect();
-  }
-  if (emptyStateBtn) emptyStateBtn.style.display = 'none';
-  if (headerNewBtn) headerNewBtn.style.display = mode === 'mine' && inboxCanSendRequests() ? '' : 'none';
+  // Re-run full toolbar setup so My Requests shows + New Request (clears
+  // display:none !important / .is-hidden left over from To handle).
+  setupInboxUI();
   loadInboxItems();
 };
 

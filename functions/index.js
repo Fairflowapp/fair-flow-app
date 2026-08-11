@@ -62,6 +62,16 @@ const _tasksAutoReset = require("./tasks-auto-reset");
 exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;
 exports.debugRunTasksAutoReset = _tasksAutoReset.debugRunTasksAutoReset;
 
+// Employee Onboarding — authoritative run progress from task writes.
+// Deploy: firebase deploy --only functions:onOnboardingTaskWrite --project fair-flow-staging
+const _onboardingProgress = require("./onboarding-progress");
+exports.onOnboardingTaskWrite = _onboardingProgress.onOnboardingTaskWrite;
+
+// Employee Onboarding Portal — Phase 1 backend (tokens + portal actions).
+// Deploy by name only — see functions/onboarding-portal.js header.
+Object.assign(exports, require("./onboarding-portal"));
+Object.assign(exports, require("./onboarding-esign-library"));
+
 
 /**
  * Simple test callable – use to verify IAM/CORS/region work.

@@ -8276,7 +8276,7 @@ dialog footer button, .code-dialog footer button {
     }
     /* My Requests / technician: only the clickable "+ New Request" top-right — no duplicate plain label */
     #inboxScreen #inboxContentHeaderRow {
-      display: flex !important;
+      display: flex;
       flex-direction: row !important;
       align-items: center !important;
       justify-content: flex-end !important;
@@ -8285,6 +8285,9 @@ dialog footer button, .code-dialog footer button {
       gap: 12px !important;
       flex-wrap: wrap !important;
       margin-bottom: 20px !important;
+    }
+    #inboxScreen #inboxContentHeaderRow.is-hidden {
+      display: none !important;
     }
     #inboxScreen #inboxContentHeaderRow .inbox-new-request-actions {
       display: flex !important;

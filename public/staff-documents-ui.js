@@ -30,7 +30,8 @@ import {
   escapeAttr,
   ffExpirationTimestampToYmdInput,
   ffStaffDocumentTypeSelectOptionsHtml,
-} from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
+  isPortalEsignDocument,
+} from "./staff-documents-format.js?v=20260809_esign_e5";
 
 // Injected from staff-documents.js (render + expiry-chat still live there until C3/C4).
 // Kept under the original names so the moved code below stays byte-verbatim.
@@ -604,6 +605,23 @@ async function ffHandleStaffDocumentActionClick(e) {
   }
 
   const ref = doc(db, "salons", salonId, "staff", staffId, "documents", docId);
+
+  // Sealed e-sign docs: view only (no edit / archive / replace / delete)
+  if (
+    action &&
+    action !== "view" &&
+    ["edit_meta", "archive", "unarchive", "delete_permanent", "replace"].includes(
+      action
+    )
+  ) {
+    try {
+      const snapGate = await getDoc(ref);
+      if (snapGate.exists() && isPortalEsignDocument(snapGate.data() || {})) {
+        ffToast("E-signed documents are sealed and can’t be changed.", "error");
+        return;
+      }
+    } catch (_) {}
+  }
 
   if (action === "view") {
     const tab = ffStaffDocsIsIosMobile() ? null : openBlankTabForLaterNavigation();

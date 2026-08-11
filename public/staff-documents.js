@@ -6,10 +6,15 @@
  */
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import { sdState } from "./staff-documents-state.js?v=20260701_staffdoc_state_split";
-import { trimStr } from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
+import { trimStr } from "./staff-documents-format.js?v=20260809_esign_e5";
 import {
+  ffResolveLinkedStaffDocumentId,
+  ffResolveStaffDocumentOwnerStaffId,
+  ffResolveStaffDocumentOwnerStaffIdWithFallback,
   ffResyncStaffDocumentFromInbox,
-} from "./staff-documents-inbox-sync.js?v=20260701_staffdoc_inbox_sync_split";
+  ffSyncStaffDocumentOnInboxApprove,
+  ffSyncStaffDocumentOnInboxReject,
+} from "./staff-documents-inbox-sync.js?v=20260808_onboarding_stage_d";
 export {
   ffResolveLinkedStaffDocumentId,
   ffResolveStaffDocumentOwnerStaffId,
@@ -17,12 +22,12 @@ export {
   ffResyncStaffDocumentFromInbox,
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
-} from "./staff-documents-inbox-sync.js?v=20260701_staffdoc_inbox_sync_split";
+};
 export {
   ffStaffDocumentTypeSelectOptionsHtml,
   ffExpirationTimestampToYmdInput,
   ffComputeLifecycleFromExpiration,
-} from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
+} from "./staff-documents-format.js?v=20260809_esign_e5";
 
 // --- Phase 2: Inbox → staff /documents sync (approve / reject) ---
 
@@ -32,11 +37,11 @@ import {
   ffToast,
   ffHandleStaffDocumentActionClick,
   initStaffDocumentsUi,
-} from "./staff-documents-ui.js?v=20260701_staffdoc_ui_split";
-export { ffUpdateStaffDocumentMetadata } from "./staff-documents-ui.js?v=20260701_staffdoc_ui_split";
+} from "./staff-documents-ui.js?v=20260809_esign_e5";
+export { ffUpdateStaffDocumentMetadata } from "./staff-documents-ui.js?v=20260809_esign_e5";
 import { ffRunExpiryChatNotify, ffSendExpiryChatReminderForStaffDocContext } from "./staff-documents-expiry-chat.js?v=20260701_staffdoc_expiry_split";
 export { ffSendExpiryChatReminderForStaffDocContext };
-import { ensureStaffDocSearchListeners, renderListIntoContainer, ensureSubscription } from "./staff-documents-render.js?v=20260701_staffdoc_render_split";
+import { ensureStaffDocSearchListeners, renderListIntoContainer, ensureSubscription } from "./staff-documents-render.js?v=20260809_esign_e5";
 
 initStaffDocumentsUi({ renderListIntoContainer, ffRunExpiryChatNotify });
 
@@ -145,6 +150,10 @@ if (typeof window !== "undefined") {
   window.ffStaffDocToast = ffToast;
   window.ffResyncStaffDocumentFromInbox = (salonId, inboxItemId) =>
     ffResyncStaffDocumentFromInbox(db, salonId, inboxItemId);
+  window.ffSyncStaffDocumentOnInboxApprove = (dbConn, params) =>
+    ffSyncStaffDocumentOnInboxApprove(dbConn || db, params);
+  window.ffSyncStaffDocumentOnInboxReject = (dbConn, params) =>
+    ffSyncStaffDocumentOnInboxReject(dbConn || db, params);
   /** For console debugging: run `ffStaffDocDebugContext()` while Staff → Documents is open. */
   window.ffStaffDocDebugContext = function () {
     return {
