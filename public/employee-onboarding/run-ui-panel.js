@@ -3,11 +3,6 @@
  */
 
 import {
-  ref as storageRef,
-  getDownloadURL,
-} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { storage } from "/app.js?v=20260610_force_lp_ios";
-import {
   odUiState,
   _esc,
   _toast,
@@ -26,8 +21,8 @@ import {
   _inviteEmployeeByEmail,
   _closeModal,
   _openModal,
-} from "./run-ui-shared.js?v=20260810_od_split_v1";
-import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260810_od_split_v1";
+} from "./run-ui-shared.js?v=20260811_od_s1_artifacts";
+import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260811_od_s1_artifacts";
 
 let _odUnsubRuns = null;
 let _odUnsubTasks = null;
@@ -300,11 +295,21 @@ async function _openEsignStoredPdf(staff, task, kind) {
   }
 
   try {
+    // S1: never use client getDownloadURL — Storage denies onboarding artifacts.
     let url = "";
-    if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+    const kindArg = kind === "cert" ? "certificate" : "signed";
+    if (typeof window.ffGetOnboardingArtifactReadUrl === "function") {
+      const meta = await window.ffGetOnboardingArtifactReadUrl({
+        storagePath: path || undefined,
+        staffId: staff && staff.id,
+        runId: task && (task.runId || odUiState.selectedRunId),
+        taskId: task && task.id,
+        kind: kindArg,
+      });
+      url = (meta && meta.readUrl) || "";
+    } else if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
+      // Legacy inbox/staff-doc public URLs only (pre-S1).
       url = fileUrl;
-    } else if (path) {
-      url = await getDownloadURL(storageRef(storage, path));
     }
     if (!url) {
       _closeBlankTab(tab);

@@ -3,18 +3,18 @@
  * Thin entry: re-exports public API + window bindings.
  */
 
-export { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260810_od_split_v1";
+export { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260811_od_s1_artifacts";
 export {
   ffMountStaffOnboardingRuns,
   ffUnmountStaffOnboardingRuns,
-} from "./run-ui-panel.js?v=20260810_od_split_v1";
+} from "./run-ui-panel.js?v=20260811_od_s1_artifacts";
 
-import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260810_od_split_v1";
+import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260811_od_s1_artifacts";
 import {
   ffMountStaffOnboardingRuns,
   ffUnmountStaffOnboardingRuns,
-} from "./run-ui-panel.js?v=20260810_od_split_v1";
-import { _syncOdShellStartUi } from "./run-ui-shared.js?v=20260810_od_split_v1";
+} from "./run-ui-panel.js?v=20260811_od_s1_artifacts";
+import { _syncOdShellStartUi } from "./run-ui-shared.js?v=20260811_od_s1_artifacts";
 
 if (typeof window !== "undefined") {
   window.ffOpenStartOnboardingModal = ffOpenStartOnboardingModal;

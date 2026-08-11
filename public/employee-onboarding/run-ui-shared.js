@@ -260,20 +260,38 @@ export function _ensureModalRoot() {
   if (root) return root;
   root = document.createElement("div");
   root.id = "ffOnboardingRunModalRoot";
+  // Idle: never intercept clicks (empty fixed overlay used to freeze the whole app).
+  root.style.cssText = "display:none;pointer-events:none;";
   document.body.appendChild(root);
   return root;
 }
 
 export function _closeModal() {
   const root = document.getElementById("ffOnboardingRunModalRoot");
-  if (root) root.innerHTML = "";
+  if (!root) return;
+  root.innerHTML = "";
+  // Critical: clearing HTML alone left a full-screen fixed layer that blocked
+  // tabs, the staff modal ×, and every other click underneath.
+  root.style.cssText = "display:none;pointer-events:none;";
+}
+
+function _bindOdModalEscapeOnce() {
+  if (typeof window === "undefined" || window.__ffOdModalEscBound) return;
+  window.__ffOdModalEscBound = true;
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const root = document.getElementById("ffOnboardingRunModalRoot");
+    if (!root || !root.innerHTML || root.style.display === "none") return;
+    _closeModal();
+  });
 }
 
 export function _openModal(html) {
   const root = _ensureModalRoot();
+  _bindOdModalEscapeOnce();
   // Sit above staffMembersModal (100001) and other app overlays.
   root.style.cssText =
-    "position:fixed;inset:0;z-index:2147483000;pointer-events:auto;";
+    "position:fixed;inset:0;z-index:2147483000;pointer-events:auto;display:block;";
   root.innerHTML =
     '<div id="ffOdModalBackdrop" style="position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;">' +
     '<div role="dialog" aria-modal="true" style="background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,0.25);position:relative;z-index:2147483001;">' +
@@ -285,6 +303,20 @@ export function _openModal(html) {
       if (e.target === backdrop) _closeModal();
     });
   }
+  // Inline onclick so ×/Cancel always close even if listeners were lost on re-render.
+  root.querySelectorAll("#ffOdModalClose, #ffOdCancelBtn").forEach((btn) => {
+    btn.addEventListener(
+      "click",
+      (e) => {
+        try {
+          e.preventDefault();
+          e.stopPropagation();
+        } catch (_) {}
+        _closeModal();
+      },
+      true
+    );
+  });
   return root;
 }
 

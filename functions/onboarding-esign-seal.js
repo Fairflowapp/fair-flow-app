@@ -166,14 +166,14 @@ async function sealEsignSubmission({
     // Re-embed certificate hash into a second pass note — compute after first save
     const certificateSha256 = sha256Buffer(certBuf);
 
-    const yyyyMm = signedAtIso.slice(0, 7);
     const docType = String(
       cfg.documentTitle || task.templateNameSnapshot || "E-Sign"
     )
       .replace(/[^a-zA-Z0-9._ -]/g, "_")
       .slice(0, 60) || "E-Sign";
-    const signedPath = `salons/${salonId}/staff/${staffId}/documents/${docType}/${yyyyMm}/${taskId}_signed.pdf`;
-    const certPath = `salons/${salonId}/staff/${staffId}/documents/${docType}/${yyyyMm}/${taskId}_certificate.pdf`;
+    const { sealedPdfPath, portalWorkBase } = require("./onboarding-storage-paths");
+    const signedPath = sealedPdfPath(salonId, staffId, runId, taskId, "signed");
+    const certPath = sealedPdfPath(salonId, staffId, runId, taskId, "certificate");
 
     const bucket = await resolveBucket();
     await bucket.file(signedPath).save(signedBuf, {
@@ -203,7 +203,7 @@ async function sealEsignSubmission({
 
     // Ephemeral portal working copies (Admin write; client denied by rules)
     try {
-      const workBase = `salons/${salonId}/onboarding-portal/${staffId}/${runId}/${taskId}`;
+      const workBase = portalWorkBase(salonId, staffId, runId, taskId);
       await bucket.file(`${workBase}/fields.json`).save(
         JSON.stringify({
           fieldValues: validated.fieldValues,

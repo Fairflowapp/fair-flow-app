@@ -53,7 +53,11 @@ service firebase.storage {
     }
 
     match /salons/{salonId}/staff/{staffId}/documents/{allPaths=**} {
-      allow read: if signedIn();
+      // S1: sealed e-sign PDFs are read via getOnboardingArtifactReadUrl only
+      // (even legacy paths under staff/documents). Other staff docs stay readable.
+      allow read: if signedIn()
+        && (allPaths.size() == 0
+            || !isSealedEsignFileName(allPaths[allPaths.size() - 1]));
       // Deny client write for sealed e-sign artifacts (…/{taskId}_signed.pdf /
       // …/{taskId}_certificate.pdf). Other staff-doc uploads remain allowed.
       allow write: if signedIn()
@@ -171,13 +175,22 @@ service firebase.storage {
     }
 
     // Onboarding Portal uploads — signed URL / Admin SDK only (no client rules access)
+    // Legacy path (pre-S1); new writes use onboardingArtifacts/ below.
     match /salons/{salonId}/onboarding-portal/{allPaths=**} {
       allow read, write: if false;
     }
 
-    // E-sign signature library source PDFs — CF signed URL / Admin SDK only (E0+).
-    // Sealed signed PDFs live under staff documents paths and are written by CF only in later phases.
+    // E-sign signature library source PDFs — CF signed URL / Admin SDK only.
+    // Legacy path (pre-S1); new writes use onboardingArtifacts/library/…
     match /salons/{salonId}/onboarding-signature-library/{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // ===== ONBOARDING ARTIFACTS (S1 security) =====
+    // Outside salons/… (same idea as timeClockPhotos). Client: deny read+write.
+    // Access only via Admin SDK or short-lived V4 signed URLs from callables
+    // (getOnboardingSignatureDocumentVersionReadUrl / getOnboardingArtifactReadUrl).
+    match /onboardingArtifacts/{salonId}/{allPaths=**} {
       allow read, write: if false;
     }
 

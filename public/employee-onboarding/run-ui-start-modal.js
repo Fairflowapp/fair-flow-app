@@ -14,7 +14,7 @@ import {
   _openModal,
   _loadActivePackages,
   _previewTasksForPackage,
-} from "./run-ui-shared.js?v=20260810_od_split_v1";
+} from "./run-ui-shared.js?v=20260811_od_s1_artifacts";
 
 let _odCreateBusy = false;
 

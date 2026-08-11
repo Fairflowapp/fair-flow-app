@@ -240,7 +240,15 @@ async function handleCreateUpload(request) {
     .collection(`salons/${ctx.salonId}/onboardingPortalUploads`)
     .doc().id;
   const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_").slice(0, 80);
-  const storagePath = `salons/${ctx.salonId}/onboarding-portal/${ctx.staffId}/${ctx.runId}/${taskId}/${uploadId}_${safeName}`;
+  const { portalUploadPath } = require("./onboarding-storage-paths");
+  const storagePath = portalUploadPath(
+    ctx.salonId,
+    ctx.staffId,
+    ctx.runId,
+    taskId,
+    uploadId,
+    safeName
+  );
   const expiresAt = admin.firestore.Timestamp.fromMillis(
     Date.now() + UPLOAD_URL_TTL_MS
   );
@@ -353,17 +361,22 @@ async function handleFinalizeUpload(request) {
   const documentType = String(
     task.templateNameSnapshot || task.templateId || "Other"
   ).replace(/[^a-zA-Z0-9._ -]/g, "_");
-  const yyyyMm = new Date().toISOString().slice(0, 7);
   const safeName = String(up.fileName || "file")
     .replace(/[^a-zA-Z0-9.-]/g, "_")
     .slice(0, 80);
-  const destPath = `salons/${ctx.salonId}/staff/${ctx.staffId}/documents/${documentType}/${yyyyMm}/${uploadId}_${safeName}`;
+  // S1: finalized copy stays under onboardingArtifacts (client Storage deny).
+  // Inbox must open via getOnboardingArtifactReadUrl — no long-lived fileUrl.
+  const { portalUploadPath } = require("./onboarding-storage-paths");
+  const destPath = portalUploadPath(
+    ctx.salonId,
+    ctx.staffId,
+    ctx.runId,
+    taskId,
+    `${uploadId}_final`,
+    safeName
+  );
   const destFile = bucket.file(destPath);
   await portalFile.copy(destFile);
-  const [fileUrl] = await destFile.getSignedUrl({
-    action: "read",
-    expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
-  });
 
   const inboxRef = db().collection(`salons/${ctx.salonId}/inboxItems`).doc();
   await inboxRef.set({
@@ -379,7 +392,9 @@ async function handleFinalizeUpload(request) {
       documentType,
       expirationDate,
       filePath: destPath,
-      fileUrl,
+      fileUrl: null,
+      storagePath: destPath,
+      viaOnboardingArtifacts: true,
       fileName: up.fileName || safeName,
       notes,
       documentOwnerStaffId: ctx.staffId,

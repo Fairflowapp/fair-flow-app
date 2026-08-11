@@ -265,6 +265,67 @@ export async function ffGetOnboardingSignatureDocumentVersionReadUrl({
   });
 }
 
+/**
+ * S1: short-lived signed URL for sealed PDFs / portal uploads under
+ * onboardingArtifacts (client Storage read is denied).
+ */
+export async function ffGetOnboardingArtifactReadUrl({
+  storagePath,
+  staffId,
+  runId,
+  taskId,
+  kind,
+} = {}) {
+  const salonId = (await getSalonId()) || _salonId;
+  if (!salonId) throw new Error("Salon not loaded");
+  const payload = { salonId };
+  const path = String(storagePath || "").trim();
+  if (path) payload.storagePath = path;
+  if (staffId) payload.staffId = String(staffId).trim();
+  if (runId) payload.runId = String(runId).trim();
+  if (taskId) payload.taskId = String(taskId).trim();
+  if (kind) payload.kind = String(kind).trim();
+  return _call("getOnboardingArtifactReadUrl", payload);
+}
+
+/** Open inbox / run-panel artifact via signed URL (never getDownloadURL). */
+export async function ffOpenOnboardingArtifact(opts = {}) {
+  const meta = await ffGetOnboardingArtifactReadUrl(opts);
+  const url = meta && meta.readUrl;
+  if (!url) throw new Error("Could not get download link");
+  const tab = window.open(url, "_blank", "noopener,noreferrer");
+  if (!tab) {
+    window.location.assign(url);
+  }
+  return meta;
+}
+
+/** Inbox click handler — wired from inbox-details document_upload links. */
+export function ffInboxOpenOnboardingArtifact(ev) {
+  try {
+    if (ev && typeof ev.preventDefault === "function") ev.preventDefault();
+  } catch (_) {}
+  const a = ev && ev.currentTarget;
+  if (!a) return false;
+  const storagePath = a.getAttribute("data-od-artifact-path") || "";
+  const staffId = a.getAttribute("data-od-artifact-staff") || "";
+  const runId = a.getAttribute("data-od-artifact-run") || "";
+  const taskId = a.getAttribute("data-od-artifact-task") || "";
+  void ffOpenOnboardingArtifact({
+    storagePath,
+    staffId,
+    runId,
+    taskId,
+    kind: "upload",
+  }).catch((e) => {
+    console.warn("[Onboarding] inbox artifact open", e);
+    try {
+      window.alert((e && e.message) || "Could not open file");
+    } catch (_) {}
+  });
+  return false;
+}
+
 export async function ffSetOnboardingSignatureDocumentVersionFieldSchema({
   documentId,
   versionId,
@@ -353,6 +414,9 @@ if (typeof window !== "undefined") {
     ffUploadOnboardingSignatureDocumentVersion;
   window.ffGetOnboardingSignatureDocumentVersionReadUrl =
     ffGetOnboardingSignatureDocumentVersionReadUrl;
+  window.ffGetOnboardingArtifactReadUrl = ffGetOnboardingArtifactReadUrl;
+  window.ffOpenOnboardingArtifact = ffOpenOnboardingArtifact;
+  window.ffInboxOpenOnboardingArtifact = ffInboxOpenOnboardingArtifact;
   window.ffSetOnboardingSignatureDocumentVersionFieldSchema =
     ffSetOnboardingSignatureDocumentVersionFieldSchema;
   window.ffBindOnboardingSignatureDocumentVersions =

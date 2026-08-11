@@ -166,7 +166,8 @@ exports.createOnboardingSignatureDocumentVersionUpload = onCall(
     const versionRef = versionsCol(salonId, documentId).doc();
     const versionId = versionRef.id;
     const safeName = safeFileName(fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`);
-    const storagePath = `salons/${salonId}/onboarding-signature-library/${documentId}/${versionId}/source.pdf`;
+    const { librarySourcePath } = require("./onboarding-storage-paths");
+    const storagePath = librarySourcePath(salonId, documentId, versionId);
     const expiresAt = admin.firestore.Timestamp.fromMillis(
       Date.now() + UPLOAD_URL_TTL_MS
     );

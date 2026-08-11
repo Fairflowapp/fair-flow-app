@@ -13,11 +13,11 @@
         { src: "/employee-onboarding/task-registry.js?v=20260809_esign_e2", type: "module", delay: 760 },
         { src: "/employee-onboarding/audience.js?v=20260808_onboarding_hardening", type: "module", delay: 770 },
         { src: "/employee-onboarding/settings-cloud.js?v=20260810_item_delete_fix", type: "module", delay: 780 },
-        { src: "/employee-onboarding/esign-library-cloud.js?v=20260809_esign_e2", type: "module", delay: 785 },
+        { src: "/employee-onboarding/esign-library-cloud.js?v=20260811_od_s1_artifacts", type: "module", delay: 785 },
         { src: "/employee-onboarding/esign-field-editor.js?v=20260810_sign_finish_draft", type: "module", delay: 788 },
         { src: "/employee-onboarding/settings-ui.js?v=20260810_od_split_v1", type: "module", delay: 790 },
-        { src: "/employee-onboarding/run-cloud.js?v=20260810_od_split_v1", type: "module", delay: 795 },
-        { src: "/employee-onboarding/run-ui.js?v=20260810_od_split_v1", type: "module", delay: 798 },
+        { src: "/employee-onboarding/run-cloud.js?v=20260811_od_modal_fix_v1", type: "module", delay: 795 },
+        { src: "/employee-onboarding/run-ui.js?v=20260811_od_s1_artifacts", type: "module", delay: 798 },
         { src: "/employee-onboarding/portal-manager.js?v=20260809_onboarding_reminders", type: "module", delay: 799 },
         { src: "/time-clock-entries.js?v=20260805_tc_schedule_s4", type: "module", delay: 800 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
@@ -37,7 +37,7 @@
         // dropped back, adding dead wait to every later module. 2500 = load
         // immediately after dashboard, same effective order as before.
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 2500 },
-        { src: "/inbox.js?v=20260810_owner_inbox_load_v5", type: "module", delay: 2700 },
+        { src: "/inbox.js?v=20260811_od_s1_artifacts", type: "module", delay: 2700 },
         { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 2780 },
         { src: "/chat.js?v=20260806_sched_12h_picker", type: "module", delay: 2900 },
         { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },

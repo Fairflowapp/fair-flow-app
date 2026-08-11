@@ -17,7 +17,8 @@ const REGULATED = new Set([
   "regulated_i9",
   "regulated_other",
 ]);
-const PACKET_URL_TTL_MS = 15 * 60 * 1000;
+/** Portal signature packet PDF preview — align with 5-minute read URL contract. */
+const PACKET_URL_TTL_MS = 5 * 60 * 1000;
 
 function db() {
   return admin.firestore();

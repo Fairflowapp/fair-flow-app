@@ -27,7 +27,8 @@ const UPLOAD_URL_TTL_MS = 30 * 60 * 1000;
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const MAX_PAGES = 50;
 const PDF_MIME = "application/pdf";
-const READ_URL_TTL_MS = 30 * 60 * 1000;
+/** Short-lived signed read URLs — security contract: 5 minutes. */
+const READ_URL_TTL_MS = 5 * 60 * 1000;
 const MAX_FIELDS = 100;
 const FIELD_TYPES = new Set([
   "signature",

@@ -24,16 +24,31 @@ async function downloadSourcePdf(salonId, cfg) {
     );
   }
 
-  // Prefer snapshot storage path if present; else library convention
+  // Prefer snapshot storage path; else try S1 artifacts path then legacy.
   let storagePath = trimStr(cfg.storagePath);
-  if (!storagePath) {
-    storagePath = `salons/${salonId}/onboarding-signature-library/${documentId}/${documentVersionId}/source.pdf`;
-  }
+  const {
+    librarySourcePath,
+    legacyLibrarySourcePath,
+  } = require("./onboarding-storage-paths");
+  const candidates = [];
+  if (storagePath) candidates.push(storagePath);
+  candidates.push(librarySourcePath(salonId, documentId, documentVersionId));
+  candidates.push(legacyLibrarySourcePath(salonId, documentId, documentVersionId));
 
   const bucket = await resolveBucket();
-  const file = bucket.file(storagePath);
-  const [exists] = await file.exists();
-  if (!exists) {
+  let file = null;
+  let exists = false;
+  for (const p of candidates) {
+    const f = bucket.file(p);
+    const [ex] = await f.exists();
+    if (ex) {
+      file = f;
+      storagePath = p;
+      exists = true;
+      break;
+    }
+  }
+  if (!exists || !file) {
     throw new HttpsError("failed-precondition", "Source PDF is missing.");
   }
   const [buf] = await file.download();

@@ -801,9 +801,14 @@ function renderRequestData(request) {
     }
 
     case 'document_upload': {
+      const artifactPath = String(data.storagePath || data.filePath || "").trim();
+      const isOdArtifact =
+        data.viaOnboardingArtifacts === true ||
+        artifactPath.startsWith("onboardingArtifacts/") ||
+        artifactPath.includes("/onboarding-portal/");
       const uploadThumb = (() => {
         const u = data.fileUrl;
-        if (!u || !inboxUploadedFileLooksLikeImage(data)) return "";
+        if (!u || isOdArtifact || !inboxUploadedFileLooksLikeImage(data)) return "";
         const esc = escapeHtml(u);
         const jsEsc = JSON.stringify(u);
         return `
@@ -814,12 +819,17 @@ function renderRequestData(request) {
           </button>
         </div>`;
       })();
+      const fileLink = isOdArtifact && artifactPath
+        ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="#" data-od-artifact-path="${escapeHtml(artifactPath)}" data-od-artifact-staff="${escapeHtml(String(data.documentOwnerStaffId || data.onboardingStaffId || "").trim())}" data-od-artifact-run="${escapeHtml(String(data.onboardingRunId || "").trim())}" data-od-artifact-task="${escapeHtml(String(data.onboardingTaskId || "").trim())}" onclick="return window.ffInboxOpenOnboardingArtifact && window.ffInboxOpenOnboardingArtifact(event)" title="${escapeHtml(String(data.fileName || artifactPath).trim() || "Open")}" style="color:#2563eb;">${escapeHtml(inboxDisplayUploadedFileLinkLabel(data))}</a></div>`
+        : data.fileUrl
+          ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" title="${escapeHtml(String(data.fileName || data.filePath || '').trim() || 'Open in new tab')}" style="color:#2563eb;">${escapeHtml(inboxDisplayUploadedFileLinkLabel(data))}</a></div>${uploadThumb}`
+          : "";
       return `
         <div style="display:grid;gap:12px;font-size:13px;">
           <div><span style="color:#6b7280;">Document type:</span><span style="font-weight:500;margin-left:8px;">${escapeHtml(data.documentType || 'N/A')}</span></div>
           ${data.expirationDate ? `<div><span style="color:#6b7280;">Expiration date:</span><span style="font-weight:500;margin-left:8px;">${data.expirationDate}</span></div>` : ''}
           ${data.notes ? `<div><span style="color:#6b7280;">Notes:</span><div style="margin-top:4px;padding:8px;background:#f9fafb;border-radius:6px;">${escapeHtml(data.notes)}</div></div>` : ''}
-          ${data.fileUrl ? `<div><span style="color:#6b7280;">Uploaded file:</span> <a href="${escapeHtml(data.fileUrl)}" target="_blank" rel="noopener" title="${escapeHtml(String(data.fileName || data.filePath || '').trim() || 'Open in new tab')}" style="color:#2563eb;">${escapeHtml(inboxDisplayUploadedFileLinkLabel(data))}</a></div>${uploadThumb}` : ''}
+          ${fileLink}
         </div>
       `;
     }

@@ -71,7 +71,7 @@ import {
 initInboxListRender({ showRequestDetails, inboxTechnicianNoiseFilter });
 
 // ── Request details modal — extracted to inbox-details.js
-import { showRequestDetails } from "./inbox-details.js?v=20260810_owner_inbox_load_v5";
+import { showRequestDetails } from "./inbox-details.js?v=20260811_od_s1_artifacts";
 
 // ── Submit request (create) — extracted to inbox-submit.js
 import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260721_inbox_tech_fix";
