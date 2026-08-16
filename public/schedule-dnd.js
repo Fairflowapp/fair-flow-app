@@ -24,12 +24,12 @@ import {
   persistScheduleDraftOverrideFromState,
   removeManualOffForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260816_cell_notes6";
+} from "./schedule-draft.js?v=20260816_cell_notes7";
 import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 
 // -- injected via initScheduleDnd() (wired in schedule-ui.js) --
 let renderScheduleBoard;

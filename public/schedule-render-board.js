@@ -13,7 +13,7 @@ import {
   getAssignmentId,
   getCellNoteForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260816_cell_notes6";
+} from "./schedule-draft.js?v=20260816_cell_notes7";
 import { _ffActiveLocationNameForIcs } from "./schedule-ics.js?v=20260702_schedule_ics";
 import {
   cellShowsScheduleWarningDot,
@@ -39,7 +39,7 @@ import {
   formatLunchBreakCellSubtitle,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 import {
   bindScheduleCoverageDayClick,
   bindScheduleStandByPen,
@@ -60,7 +60,7 @@ function renderManagerCellNoteHtml(day, staffKey, staffName) {
     ? getCellNoteForStaffDay(day, staffKey)
     : String(day?.cellNotesByStaffId?.[staffKey] || "").trim();
   if (!note) return "";
-  return `<button type="button" data-schedule-cell-note="true" data-staff-id="${escapeScheduleAttr(staffKey || "")}" data-date="${escapeScheduleAttr(day?.date || "")}" data-staff-name="${escapeScheduleAttr(staffName || "")}" data-note="${escapeScheduleAttr(note)}" title="${escapeScheduleAttr(note)}" aria-label="Show reminder" onclick="if(window.__ffOpenScheduleCellNote){return window.__ffOpenScheduleCellNote(this,event);}return false;" style="position:absolute;top:0;right:0;width:18px;height:18px;padding:0;border:none;background:transparent;z-index:6;cursor:pointer;"><span style="display:block;width:8px;height:8px;margin:3px 3px 0 auto;border-radius:50%;background:#2563eb;box-shadow:0 0 0 1.5px #fff;"></span></button>`;
+  return `<button type="button" data-schedule-cell-note="true" data-staff-id="${escapeScheduleAttr(staffKey || "")}" data-date="${escapeScheduleAttr(day?.date || "")}" data-staff-name="${escapeScheduleAttr(staffName || "")}" data-note="${escapeScheduleAttr(note)}" title="${escapeScheduleAttr(note)}" aria-label="Show reminder" onclick="if(window.__ffOpenScheduleCellNote){return window.__ffOpenScheduleCellNote(this,event);}return false;" style="position:absolute;top:0;right:0;width:18px;height:18px;padding:0;border:none;background:transparent;z-index:6;cursor:pointer;"><span style="display:block;width:8px;height:8px;margin:3px 3px 0 auto;border-radius:50%;background:#dc2626;box-shadow:0 0 0 1.5px #fff;"></span></button>`;
 }
 
 export function initScheduleRenderBoard(deps) {

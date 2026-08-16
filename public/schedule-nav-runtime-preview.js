@@ -55,7 +55,7 @@ import {
   setSchedulePreviewMode,
   setSchedulePreviewView,
   shortenCoverageWarningForModal,
-} from "./schedule-render.js?v=20260816_cell_notes6";
+} from "./schedule-render.js?v=20260816_cell_notes7";
 import {
   _ffActiveLocationNameForIcs,
   _ffAdaptAssignmentToShift,
@@ -140,7 +140,7 @@ import {
   simpleHashString,
   staffDayBlockedByApprovedInbox,
   syncPublishedWeekStandByToCloud,
-} from "./schedule-draft.js?v=20260816_cell_notes6";
+} from "./schedule-draft.js?v=20260816_cell_notes7";
 import {
   initScheduleCloud,
   canViewScheduleBoardForCurrentWeek,
@@ -235,7 +235,7 @@ import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 import {
   STAND_BY_SLOTS,
   SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY,

@@ -27,12 +27,12 @@ import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 import { initScheduleRenderModals } from "./schedule-render-modals.js?v=20260703_schedule_render_split";
 import {
   initScheduleRenderBoard,
   renderScheduleBoard,
-} from "./schedule-render-board.js?v=20260816_cell_notes6";
+} from "./schedule-render-board.js?v=20260816_cell_notes7";
 
 // -- injected via initScheduleRender() (wired in schedule-nav-runtime.js) --
 let renderScheduleViewTabs;
@@ -156,7 +156,7 @@ export {
 export {
   bindScheduleStaffProfileLinks,
   setScheduleLoadingState,
-} from "./schedule-render-board.js?v=20260816_cell_notes6";
+} from "./schedule-render-board.js?v=20260816_cell_notes7";
 export { renderScheduleBoard };
 export {
   renderScheduleSummary,

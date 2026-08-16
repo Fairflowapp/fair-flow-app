@@ -25,7 +25,7 @@ import {
 import {
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 
 // -- injected via initScheduleNavCore() (wired in schedule-nav-runtime.js) --
 let renderScheduleBoard;

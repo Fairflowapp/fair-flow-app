@@ -34,7 +34,7 @@ import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
 
 // -- injected via initScheduleCloud() (wired in schedule-ui.js after storage constants initialize) --
 let SCHEDULE_DRAFT_OVERRIDE_KEY_VER;

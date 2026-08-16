@@ -19,7 +19,7 @@
         { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 800 },
         { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 850 },
         { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 900 },
-        { src: "/schedule-ui.js?v=20260816_cell_notes6", type: "module", delay: 1000 },
+        { src: "/schedule-ui.js?v=20260816_cell_notes7", type: "module", delay: 1000 },
         { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 1100 },
         { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1100 },
         { src: "/inbox.js?v=20260816_od_link", type: "module", delay: 1200 },
