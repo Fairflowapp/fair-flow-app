@@ -24,12 +24,12 @@ import {
   persistScheduleDraftOverrideFromState,
   removeManualOffForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260702_schedule_draft";
+} from "./schedule-draft.js?v=20260816_cell_notes6";
 import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 
 // -- injected via initScheduleDnd() (wired in schedule-ui.js) --
 let renderScheduleBoard;
@@ -309,6 +309,7 @@ function handleShiftDragEnd(event) {
 }
 
 function handleScheduleShiftClick(event) {
+  if (event.target && event.target.closest && event.target.closest("[data-schedule-cell-note]")) return;
   if (!scheduleUserCanManualEdit() || scheduleState.schedulePreviewMode !== "build") return;
   const shiftEl = event.currentTarget;
   const staffKey = String(shiftEl?.getAttribute("data-staff-id") || "").trim();

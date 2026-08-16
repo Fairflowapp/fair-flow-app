@@ -3,7 +3,7 @@
 // legacy window.ffScheduleHelpers object. Core logic lives in
 // schedule-helpers-core.js; staff/coverage logic in schedule-helpers-staff.js.
 
-import * as core from "./schedule-helpers-core.js?v=20260704_schedule_helpers_split";
+import * as core from "./schedule-helpers-core.js?v=20260816_sat_open";
 import * as staff from "./schedule-helpers-staff.js?v=20260704_schedule_helpers_split";
 
 const scheduleHelpers = { ...core, ...staff };
@@ -52,7 +52,7 @@ export {
   normalizeBusinessHours,
   normalizeDayShiftSegments,
   getEffectiveShiftSegmentsForDay,
-} from "./schedule-helpers-core.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers-core.js?v=20260816_sat_open";
 export {
   getEffectiveWeeklyHoursCap,
   resolvedSegmentCoverage,

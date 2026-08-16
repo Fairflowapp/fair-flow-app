@@ -11,8 +11,9 @@ import {
   buildAssignmentLookup,
   dayHasManualOff,
   getAssignmentId,
+  getCellNoteForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260702_schedule_draft";
+} from "./schedule-draft.js?v=20260816_cell_notes6";
 import { _ffActiveLocationNameForIcs } from "./schedule-ics.js?v=20260702_schedule_ics";
 import {
   cellShowsScheduleWarningDot,
@@ -30,13 +31,15 @@ import {
 } from "./schedule-format.js?v=20260806_sched_12h_picker";
 import {
   bindScheduleBoardManualAdd,
+  bindScheduleCellNoteButtons,
   bindScheduleShiftEditButtons,
+  hideStuckScheduleOverlays,
   escapeScheduleAttr,
   escapeScheduleHtml,
   formatLunchBreakCellSubtitle,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 import {
   bindScheduleCoverageDayClick,
   bindScheduleStandByPen,
@@ -51,6 +54,15 @@ let getBusinessStatusForDate;
 let getScheduleRoleLabel;
 let parseStandByDayEntry;
 
+function renderManagerCellNoteHtml(day, staffKey, staffName) {
+  if (!scheduleUserCanManualEdit()) return "";
+  const note = typeof getCellNoteForStaffDay === "function"
+    ? getCellNoteForStaffDay(day, staffKey)
+    : String(day?.cellNotesByStaffId?.[staffKey] || "").trim();
+  if (!note) return "";
+  return `<button type="button" data-schedule-cell-note="true" data-staff-id="${escapeScheduleAttr(staffKey || "")}" data-date="${escapeScheduleAttr(day?.date || "")}" data-staff-name="${escapeScheduleAttr(staffName || "")}" data-note="${escapeScheduleAttr(note)}" title="${escapeScheduleAttr(note)}" aria-label="Show reminder" onclick="if(window.__ffOpenScheduleCellNote){return window.__ffOpenScheduleCellNote(this,event);}return false;" style="position:absolute;top:0;right:0;width:18px;height:18px;padding:0;border:none;background:transparent;z-index:6;cursor:pointer;"><span style="display:block;width:8px;height:8px;margin:3px 3px 0 auto;border-radius:50%;background:#2563eb;box-shadow:0 0 0 1.5px #fff;"></span></button>`;
+}
+
 export function initScheduleRenderBoard(deps) {
   ({
     computeStaffWeeklyScheduledMinutes,
@@ -62,6 +74,7 @@ export function initScheduleRenderBoard(deps) {
 }
 
 function renderScheduleBoard(draft, validation, staffList) {
+  hideStuckScheduleOverlays();
   const board = document.getElementById("scheduleBoard");
   const empty = document.getElementById("schedulePreviewEmpty");
   if (!board || !empty) return;
@@ -259,6 +272,7 @@ function renderScheduleBoard(draft, validation, staffList) {
         assignment && assignment.lunchBreakEnabled
           ? `<div style="font-size:9px;font-weight:600;color:#92400e;margin-top:4px;line-height:1.3;max-width:100%;">${escapeScheduleHtml(formatLunchBreakCellSubtitle(assignment))}</div>`
           : "";
+      const managerNoteHtml = renderManagerCellNoteHtml(day, staffKey, staff.name);
       const emptyCellWrap = !assignment
         ? `style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:100%;"`
         : "";
@@ -289,6 +303,7 @@ function renderScheduleBoard(draft, validation, staffList) {
           return `
             <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.25;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
               ${editBtn}
+              ${managerNoteHtml}
               ${locLine(activeName, "#7c3aed")}
               <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
                 <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</div>
@@ -311,6 +326,7 @@ function renderScheduleBoard(draft, validation, staffList) {
               ${locLine(labelName, "#2563eb")}
               <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(s.startTime, s.endTime, { fallback: "--:-- - --:--" }))}</div>
               ${lunchOtherHtml(s)}
+              ${managerNoteHtml}
             </div>
           `;
         }
@@ -320,6 +336,7 @@ function renderScheduleBoard(draft, validation, staffList) {
           ? `
             <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:5px 6px;border-radius:8px;min-height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:700;line-height:1.2;background:#f5f3ff;border:1px solid #d8b4fe;color:#5b21b6;">
               ${editBtn}
+              ${managerNoteHtml}
               ${locLine(activeName, "#7c3aed")}
               <div ${allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>
                 <div>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</div>
@@ -352,6 +369,7 @@ function renderScheduleBoard(draft, validation, staffList) {
       return `
         <div data-drop-zone="true" data-staff-id="${staffKey}" data-date="${day.date}" style="position:relative;padding:6px;border-radius:8px;min-height:50px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:11px;font-weight:${assignment ? "700" : "500"};line-height:1.25;transition:outline-color 0.12s ease;${cellStyle}">
           ${editBtn}
+          ${managerNoteHtml}
           <div ${assignment && allowCellEdit ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : assignment ? `style="user-select:none;"` : emptyCellWrap}>
             <div>${
               assignment
@@ -466,6 +484,7 @@ function renderScheduleBoard(draft, validation, staffList) {
       const noteHtml = noteParts.length
         ? `<div style="margin-top:5px;font-size:11px;font-weight:700;color:#64748b;line-height:1.35;">${noteParts.map(escapeScheduleHtml).join("<br/>")}</div>`
         : "";
+      const managerNoteHtml = renderManagerCellNoteHtml(day, staffKey, staff.name);
       const statusHtml = dayIsClosed
         ? `<span style="color:#9ca3af;font-size:13px;font-weight:700;">Closed</span>`
         : assignment
@@ -489,7 +508,7 @@ function renderScheduleBoard(draft, validation, staffList) {
             </div>`).join("")}</div>`
         : "";
       return `
-        <div style="border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:7px 9px;">
+        <div style="position:relative;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:7px 9px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <div style="min-width:0;">
               <div style="font-size:12px;font-weight:900;color:#111827;line-height:1.15;">${dayLabel.title}</div>
@@ -502,6 +521,7 @@ function renderScheduleBoard(draft, validation, staffList) {
           </div>
           ${activeBranchTagMobile}
           ${noteHtml}
+          ${managerNoteHtml}
           ${otherShiftsMobileHtml}
         </div>
       `;
@@ -590,6 +610,7 @@ function renderScheduleBoard(draft, validation, staffList) {
   bindScheduleBoardDnD();
   bindScheduleShiftEditButtons();
   bindScheduleBoardManualAdd();
+  bindScheduleCellNoteButtons();
   bindScheduleStaffProfileLinks();
   bindScheduleStandByPen();
   bindScheduleCoverageDayClick();

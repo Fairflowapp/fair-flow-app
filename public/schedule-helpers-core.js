@@ -161,6 +161,13 @@ function normalizeBusinessDayEntry(value, fallback = DEFAULT_DAY_BUSINESS_HOURS)
   let openTime = normalizeTimeString(source.openTime, fallback.openTime);
   let closeTime = normalizeTimeString(source.closeTime, fallback.closeTime);
 
+  // Checking Open for Sat/Sun used to save with empty times. On reload those
+  // days fell back to the closed default. Keep the day open and fill hours.
+  if (isOpen) {
+    if (!openTime) openTime = "09:00";
+    if (!closeTime) closeTime = "18:00";
+  }
+
   const o = parseScheduleTimeToMinutes(openTime);
   let c = parseScheduleTimeToMinutes(closeTime);
 
@@ -178,7 +185,8 @@ function normalizeBusinessDayEntry(value, fallback = DEFAULT_DAY_BUSINESS_HOURS)
         openTime = openSwapped;
         closeTime = closeSwapped;
       } else {
-        isOpen = false;
+        openTime = "09:00";
+        closeTime = "18:00";
       }
     }
   }

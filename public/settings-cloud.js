@@ -26,7 +26,7 @@ import {
   normalizeSpecialBusinessDays,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
-} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers.js?v=20260816_sat_open";
 
 let _salonId = null;
 let _unsubUi = null;
@@ -450,7 +450,9 @@ function _applyMainSnapshot(data) {
     };
     const srcRolesHierarchy = _pickField('rolesHierarchy');
     const srcScheduleRules = _pickField('scheduleRules');
-    const srcBusinessHours = _pickField('businessHours');
+    const srcBusinessHours = (!_activeLoc && window.settings.businessHours && typeof window.settings.businessHours === 'object')
+      ? window.settings.businessHours
+      : _pickField('businessHours');
     const srcCoverageRules = _pickField('coverageRules');
     const srcSpecialBusinessDays = _pickField('specialBusinessDays');
     const srcDayShiftSegments = _pickField('dayShiftSegments');
@@ -1208,7 +1210,13 @@ function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, co
   const payload = { updatedAt: serverTimestamp() };
   if (rolesHierarchy && typeof rolesHierarchy === "object") payload[joinPath('rolesHierarchy')] = normalizeRolesHierarchy(rolesHierarchy);
   if (scheduleRules && typeof scheduleRules === "object") payload[joinPath('scheduleRules')] = normalizeScheduleRules(scheduleRules);
-  if (businessHours && typeof businessHours === "object") payload[joinPath('businessHours')] = normalizeBusinessHours(businessHours);
+  if (businessHours && typeof businessHours === "object") {
+    const normalizedHours = normalizeBusinessHours(businessHours);
+    payload[joinPath('businessHours')] = normalizedHours;
+    // Also write salon-wide hours so a refresh before the active location
+    // is ready does not fall back to Mon–Fri defaults (Sat/Sun closed).
+    if (basePath) payload.businessHours = normalizedHours;
+  }
   if (coverageRules && typeof coverageRules === "object") payload[joinPath('coverageRules')] = normalizeCoverageRules(coverageRules);
   if (specialBusinessDays && typeof specialBusinessDays === "object") payload[joinPath('specialBusinessDays')] = normalizeSpecialBusinessDays(specialBusinessDays);
   if (dayShiftSegments && typeof dayShiftSegments === "object") payload[joinPath('dayShiftSegments')] = normalizeDayShiftSegments(dayShiftSegments);

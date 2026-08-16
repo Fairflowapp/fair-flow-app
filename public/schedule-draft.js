@@ -36,7 +36,7 @@ import {
   ensureScheduleRebuildConfirmModal,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 
 // -- injected via initScheduleDraft() (wired in schedule-ui.js) --
 let _ffActiveLocationNameForIcs;
@@ -86,12 +86,50 @@ function getAssignmentId(assignment, dateKey) {
   return `${staffId}::${dateKey}`;
 }
 
+const CELL_NOTE_MAX_LEN = 200;
+
+function normalizeCellNote(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > CELL_NOTE_MAX_LEN ? text.slice(0, CELL_NOTE_MAX_LEN) : text;
+}
+
+function cloneCellNotesByStaffId(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out = {};
+  Object.keys(value).forEach((rawKey) => {
+    const key = String(rawKey || "").trim();
+    const note = normalizeCellNote(value[rawKey]);
+    if (key && note) out[key] = note;
+  });
+  return out;
+}
+
+function getCellNoteForStaffDay(day, staffKey) {
+  const key = String(staffKey || "").trim();
+  if (!key || !day || !day.cellNotesByStaffId || typeof day.cellNotesByStaffId !== "object") return "";
+  return normalizeCellNote(day.cellNotesByStaffId[key]);
+}
+
+function setCellNoteForStaffDay(draft, dateKey, staffKey, note) {
+  const day = findDraftDay(draft, dateKey);
+  const key = String(staffKey || "").trim();
+  if (!day || !key) return;
+  const next = cloneCellNotesByStaffId(day.cellNotesByStaffId);
+  const normalized = normalizeCellNote(note);
+  if (normalized) next[key] = normalized;
+  else delete next[key];
+  if (Object.keys(next).length) day.cellNotesByStaffId = next;
+  else delete day.cellNotesByStaffId;
+}
+
 function cloneScheduleDraft(draft) {
   return {
     ...draft,
     days: (Array.isArray(draft?.days) ? draft.days : []).map((day) => ({
       ...day,
       manualOffStaffIds: Array.isArray(day.manualOffStaffIds) ? [...day.manualOffStaffIds] : [],
+      cellNotesByStaffId: cloneCellNotesByStaffId(day.cellNotesByStaffId),
       assignments: (Array.isArray(day.assignments) ? day.assignments : []).map((assignment) => ({ ...assignment })),
     })),
     context: draft?.context ? { ...draft.context } : draft?.context,
@@ -629,6 +667,7 @@ function serializeDraftDaysForStorage(draft) {
     date: day.date,
     assignments: (Array.isArray(day.assignments) ? day.assignments : []).map((a) => ({ ...a })),
     manualOffStaffIds: Array.isArray(day.manualOffStaffIds) ? [...day.manualOffStaffIds] : [],
+    cellNotesByStaffId: cloneCellNotesByStaffId(day.cellNotesByStaffId),
   }));
 }
 
@@ -647,7 +686,14 @@ function applyDraftDaysOverride(draft, savedDays, staffList) {
       const manualOffStaffIds = (Array.isArray(o.manualOffStaffIds) ? o.manualOffStaffIds : []).filter((id) =>
         validKeys.has(id),
       );
-      return { ...day, assignments, manualOffStaffIds };
+      const cellNotesByStaffId = {};
+      const rawNotes = o.cellNotesByStaffId && typeof o.cellNotesByStaffId === "object" ? o.cellNotesByStaffId : {};
+      Object.keys(rawNotes).forEach((id) => {
+        if (!validKeys.has(id)) return;
+        const note = normalizeCellNote(rawNotes[id]);
+        if (note) cellNotesByStaffId[id] = note;
+      });
+      return { ...day, assignments, manualOffStaffIds, cellNotesByStaffId };
     }),
   };
 }
@@ -705,6 +751,8 @@ function markScheduleDayAsOffFromModal() {
     return;
   }
   addManualOffForStaffDay(draft, dateKey, staffKey);
+  const noteEl = typeof document !== "undefined" ? document.getElementById("scheduleShiftEditNote") : null;
+  if (noteEl) setCellNoteForStaffDay(draft, dateKey, staffKey, noteEl.value);
   draft = applyBusinessSettingsToDraft(draft);
   revalidateLocalDraft(draft);
   renderScheduleSummary(scheduleState.schedulePreviewState.validation, scheduleState.schedulePreviewState.validation?.days || []);
@@ -736,6 +784,7 @@ export {
   buildAssignmentLookup,
   clearScheduleLocalDirtyForCurrentUser,
   clearSharedScheduleDraftOverrideForWeek,
+  cloneCellNotesByStaffId,
   cloneScheduleDraft,
   computeFingerprintMapForDraft,
   computeStaffShiftFingerprintForWeek,
@@ -743,6 +792,7 @@ export {
   discardSavedScheduleWeekDraftAndReload,
   findDraftDay,
   getAssignmentId,
+  getCellNoteForStaffDay,
   getScheduleDraftOverrideStorageKey,
   getScheduleLocalDirtyStorageKey,
   getScheduleManualOffStorageKey,
@@ -760,6 +810,7 @@ export {
   runDiscardSavedScheduleWeekDraftAndReload,
   saveScheduleWeekDraftToCloud,
   serializeDraftDaysForStorage,
+  setCellNoteForStaffDay,
   simpleHashString,
   staffDayBlockedByApprovedInbox,
   syncPublishedWeekStandByToCloud,

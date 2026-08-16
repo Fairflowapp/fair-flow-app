@@ -1,59 +1,52 @@
     (function () {
-      // Sequential load (stage-2 batching reverted — parallel peers raced
-      // window globals / staff+settings UI updates). Keeps stage-1 ordering:
-      // fixed delay monotonicity + settings-cloud / time-clock-entries early.
+      // Sequential load (stage-2 full parallel batching reverted — raced
+      // window globals / staff+settings UI). Order is still monotonic, but
+      // delays are compressed and employee-onboarding is deferred until after
+      // Queue/Schedule so first interactive screens arrive sooner.
       var scripts = [
-        { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 600 }, // global account-state enforcement (banner / lock overlay)
-        { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 700 },
-        // settings-cloud + time-clock-entries moved up from the tail of the
-        // chain (they used to arrive 8-13s after boot): both are light, only
-        // depend on app.js / firebase CDN / schedule-helpers (static import),
-        // and the Settings + Time Clock screens block on them.
-        { src: "/settings-cloud.js?v=20260806_ticket_name_toggle", type: "module", delay: 750 },
-        { src: "/employee-onboarding/task-registry.js?v=20260809_esign_e2", type: "module", delay: 760 },
-        { src: "/employee-onboarding/audience.js?v=20260808_onboarding_hardening", type: "module", delay: 770 },
-        { src: "/employee-onboarding/settings-cloud.js?v=20260810_item_delete_fix", type: "module", delay: 780 },
-        { src: "/employee-onboarding/esign-library-cloud.js?v=20260811_od_s1_artifacts", type: "module", delay: 785 },
-        { src: "/employee-onboarding/esign-field-editor.js?v=20260810_sign_finish_draft", type: "module", delay: 788 },
-        { src: "/employee-onboarding/settings-ui.js?v=20260810_od_split_v1", type: "module", delay: 790 },
-        { src: "/employee-onboarding/run-cloud.js?v=20260811_od_modal_fix_v1", type: "module", delay: 795 },
-        { src: "/employee-onboarding/run-ui.js?v=20260811_od_s1_artifacts", type: "module", delay: 798 },
-        { src: "/employee-onboarding/portal-manager.js?v=20260809_onboarding_reminders", type: "module", delay: 799 },
-        { src: "/time-clock-entries.js?v=20260805_tc_schedule_s4", type: "module", delay: 800 },
-        { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 900 },
-        { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 1050 },
-        { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 1200 },
-        { src: "/queue-cloud.js?v=20260728_cloud_wins_guard", type: "module", delay: 1350 },
-        { src: "/tickets.js?v=20260806_sched_12h_picker", type: "module", delay: 1400 },
-        { src: "/tasks-cloud.js?v=20260727_tasks_done_60d", type: "module", delay: 1500 },
-        { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 1650 },
-        { src: "/schedule-helpers.js?v=20260625_loc_fallback", type: "module", delay: 1800 },
-        { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 1900 },
-        { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 2000 },
-        { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 2100 },
-        { src: "/schedule-ui.js?v=20260806_sched_12h_picker", type: "module", delay: 2300 },
-        { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 2500 },
-        // delay was 1800 (< dashboard's 2500): the loader's lastDelay tracker
-        // dropped back, adding dead wait to every later module. 2500 = load
-        // immediately after dashboard, same effective order as before.
-        { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 2500 },
-        { src: "/inbox.js?v=20260811_od_s1_artifacts", type: "module", delay: 2700 },
-        { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 2780 },
-        { src: "/chat.js?v=20260806_sched_12h_picker", type: "module", delay: 2900 },
-        { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 3050 },
-        { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 3120 },
-        { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module", delay: 3150 },
-        { src: "/staff-documents.js?v=20260809_esign_e5", type: "module", delay: 3200 },
-        { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 3300 },
-        { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 3400 },
-        { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 3400 },
-        { src: "/push-notifications.js?v=20260805_tc_schedule_push", type: "module", delay: 3500 },
-        { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 3650 }, // bumped: native (mobile) read-only billing — payment-method last-4 + blocked payment actions
-        { src: "/time-clock-engine.js?v=20260501_points", delay: 3800 },
-        // was 4900 with a 3000 entry before it → 1.9s dead wait. 3900 keeps
-        // inventory last-but-one with a short gap after time-clock-engine.
-        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 3900 },
-        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 4000 }
+        { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 200 },
+        { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 250 },
+        { src: "/settings-cloud.js?v=20260816_sat_open2", type: "module", delay: 300 },
+        { src: "/time-clock-entries.js?v=20260805_tc_schedule_s4", type: "module", delay: 350 },
+        { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 400 },
+        { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 450 },
+        { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 500 },
+        { src: "/queue-cloud.js?v=20260813_sync_intent", type: "module", delay: 550 },
+        { src: "/tickets.js?v=20260806_sched_12h_picker", type: "module", delay: 600 },
+        { src: "/tasks-cloud.js?v=20260727_tasks_done_60d", type: "module", delay: 650 },
+        { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 700 },
+        { src: "/schedule-helpers.js?v=20260816_sat_open", type: "module", delay: 750 },
+        { src: "/schedule-availability.js?v=20260501_points", type: "module", delay: 800 },
+        { src: "/schedule-generator.js?v=20260501_points", type: "module", delay: 850 },
+        { src: "/schedule-validator.js?v=20260501_points", type: "module", delay: 900 },
+        { src: "/schedule-ui.js?v=20260816_cell_notes6", type: "module", delay: 1000 },
+        { src: "/dashboard.js?v=20260626_dashboard_split", type: "module", delay: 1100 },
+        { src: "/onboarding-wizard.js?v=20260625_onboarding_split", type: "module", delay: 1100 },
+        { src: "/inbox.js?v=20260816_od_link", type: "module", delay: 1200 },
+        { src: "/media-upload.js?v=20260719_media_lightbox", type: "module", delay: 1250 },
+        { src: "/chat.js?v=20260806_sched_12h_picker", type: "module", delay: 1300 },
+        { src: "/floor-flows.js?v=20260616_floor_flow_save_state_fix", type: "module", delay: 1400 },
+        { src: "/floor-cloud.js?v=20260618_live_floor_realtime_refresh", type: "module", delay: 1450 },
+        { src: "/sticky-notes-cloud.js?v=20260727_note_colors", type: "module", delay: 1500 },
+        { src: "/staff-documents.js?v=20260816_od_link", type: "module", delay: 1550 },
+        // Employee onboarding (settings + staff runs) — after core staff/docs UI
+        { src: "/employee-onboarding/task-registry.js?v=20260816_od_link", type: "module", delay: 1600 },
+        { src: "/employee-onboarding/audience.js?v=20260808_onboarding_hardening", type: "module", delay: 1620 },
+        { src: "/employee-onboarding/settings-cloud.js?v=20260816_od_del2", type: "module", delay: 1640 },
+        { src: "/employee-onboarding/esign-library-cloud.js?v=20260816_od_bin", type: "module", delay: 1660 },
+        { src: "/employee-onboarding/esign-field-editor.js?v=20260816_od_bin", type: "module", delay: 1680 },
+        { src: "/employee-onboarding/settings-ui.js?v=20260816_od_open", type: "module", delay: 1700 },
+        { src: "/employee-onboarding/run-cloud.js?v=20260815_od_s7", type: "module", delay: 1720 },
+        { src: "/employee-onboarding/run-ui.js?v=20260815_od_s7b", type: "module", delay: 1740 },
+        { src: "/employee-onboarding/portal-manager.js?v=20260815_od_s6", type: "module", delay: 1760 },
+        { src: "/staff-writeups.js?v=20260802_writeups_phase2d", type: "module", delay: 1850 },
+        { src: "/my-writeups.js?v=20260803_writeups_push", type: "module", delay: 1900 },
+        { src: "/staff-call-cloud.js?v=20260505_member_presence", type: "module", delay: 1900 },
+        { src: "/push-notifications.js?v=20260805_tc_schedule_push", type: "module", delay: 2000 },
+        { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 2100 },
+        { src: "/time-clock-engine.js?v=20260501_points", delay: 2200 },
+        { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 2300 },
+        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 2400 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });
@@ -72,12 +65,9 @@
         });
       }
       // Wait until the user is authenticated AND a salon is selected before
-      // loading the heavy module scripts. Loading 29 modules during the login
-      // flow attached 29 onAuthStateChanged listeners that all fired in parallel
-      // when the user signed in, blocking Chrome's main thread long enough to
-      // trigger the "This page isn't responding" dialog. By gating the loader
-      // on currentSalonId we guarantee subscriptions only run for the chosen
-      // salon and never race the auth resolution.
+      // loading the heavy module scripts. Loading many modules during the login
+      // flow attached many onAuthStateChanged listeners that all fired in
+      // parallel when the user signed in, blocking Chrome's main thread.
       function waitForSalonReady() {
         return new Promise(function (resolve) {
           function ready() {
@@ -102,9 +92,6 @@
       }
       (async function loadSafely() {
         try { await waitForSalonReady(); } catch (_) {}
-        // Once salon is ready, load all modules sequentially with monotonic
-        // delays so we don't overload the browser with simultaneous module
-        // evaluations (batching was tried in stage 2 and reverted).
         var lastDelay = 0;
         for (var i = 0; i < scripts.length; i += 1) {
           var item = scripts[i];

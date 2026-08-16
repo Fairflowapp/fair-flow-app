@@ -55,7 +55,7 @@ import {
   setSchedulePreviewMode,
   setSchedulePreviewView,
   shortenCoverageWarningForModal,
-} from "./schedule-render.js?v=20260703_schedule_render_split";
+} from "./schedule-render.js?v=20260816_cell_notes6";
 import {
   _ffActiveLocationNameForIcs,
   _ffAdaptAssignmentToShift,
@@ -118,6 +118,7 @@ import {
   discardSavedScheduleWeekDraftAndReload,
   findDraftDay,
   getAssignmentId,
+  getCellNoteForStaffDay,
   getScheduleDraftOverrideStorageKey,
   getScheduleLocalDirtyStorageKey,
   getScheduleManualOffStorageKey,
@@ -135,10 +136,11 @@ import {
   runDiscardSavedScheduleWeekDraftAndReload,
   saveScheduleWeekDraftToCloud,
   serializeDraftDaysForStorage,
+  setCellNoteForStaffDay,
   simpleHashString,
   staffDayBlockedByApprovedInbox,
   syncPublishedWeekStandByToCloud,
-} from "./schedule-draft.js?v=20260702_schedule_draft";
+} from "./schedule-draft.js?v=20260816_cell_notes6";
 import {
   initScheduleCloud,
   canViewScheduleBoardForCurrentWeek,
@@ -233,7 +235,7 @@ import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 import {
   STAND_BY_SLOTS,
   SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY,
@@ -341,6 +343,8 @@ initScheduleShiftEdit({
   getBusinessStatusForDate,
   getDefaultShiftTimesForDate,
   applyBusinessSettingsToDraft,
+  getCellNoteForStaffDay,
+  setCellNoteForStaffDay,
   hhmmFromTimeInput,
   setScheduleTimeFieldValue,
   setScheduleTimeCompositeDisabled,

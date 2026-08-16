@@ -2,19 +2,19 @@
 // Schedule UI runtime — week filter, navigation, event binding, window hooks.
 // Extracted verbatim from schedule-nav-runtime.js (nav-runtime split T2).
 
-import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260806_sched_12h_picker";
+import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260816_cell_notes6";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
   renderScheduleSummary,
   setSchedulePreviewMode,
   setSchedulePreviewView,
-} from "./schedule-render.js?v=20260703_schedule_render_split";
+} from "./schedule-render.js?v=20260816_cell_notes6";
 import {
   discardSavedScheduleWeekDraftAndReload,
   notifyStaffScheduleChanges,
   saveScheduleWeekDraftToCloud,
-} from "./schedule-draft.js?v=20260702_schedule_draft";
+} from "./schedule-draft.js?v=20260816_cell_notes6";
 import {
   canViewScheduleBoardForCurrentWeek,
   ensureSchedulePublishListener,
@@ -35,7 +35,7 @@ import {
   teardownScheduleAckListener,
   teardownScheduleChangePingListener,
 } from "./schedule-ack.js?v=20260702_schedule_ack";
-import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 import {
   renderScheduleCrossLocationConflictBanner,
   renderScheduleViewTabs,

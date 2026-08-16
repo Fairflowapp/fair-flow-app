@@ -30,7 +30,7 @@ import {
   normalizeSpecialBusinessDayEntry,
   normalizeWeeklyHoursTarget,
   parseScheduleTimeToMinutes,
-} from "./schedule-helpers-core.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers-core.js?v=20260816_sat_open";
 
 /** Per-segment minimums merged with weekday defaults (same as schedule-generator). */
 function resolvedSegmentCoverage(seg, dayCov) {

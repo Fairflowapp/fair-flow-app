@@ -1922,7 +1922,7 @@
         <div id="userProfileCardOnboarding" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Onboarding &amp; Documents</h3>
           <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Create items employees need to complete, then group them into packages you can send — for example a “New Employee” package.</p>
-          <div id="ffOnboardingSettingsRoot"></div>
+          <div id="ffOnboardingSettingsRoot"><div style="padding:16px;color:#6b7280;font-size:13px;">Loading…</div></div>
         </div>
 
         <!-- Preferences Card (typography aligned with Staff Setup) -->
@@ -2543,17 +2543,31 @@
     </div>
   </div>
 
-  <!-- Delete Staff Confirmation Modal (permanent) -->
+  <!-- Delete Staff Confirmation Modal (permanent) — two-step: records warning, then are-you-sure -->
   <div id="staffDeleteConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100003;align-items:center;justify-content:center;pointer-events:auto;">
     <div class="history-modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.25);z-index:0;"></div>
-    <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.15);padding:24px;max-width:520px;width:90%;z-index:1;pointer-events:auto;">
-      <h3 style="margin:0 0 12px 0;font-size:18px;font-weight:700;color:#111827;">Delete Staff Member Permanently?</h3>
-      <p id="staffDeleteConfirmBody" style="margin:0 0 14px 0;font-size:14px;color:#6b7280;line-height:1.5;">
-        This will permanently delete this staff entry from the system and cloud. This cannot be undone.
-      </p>
-      <div style="display:flex;gap:12px;justify-content:flex-end;">
-        <button id="staffDeleteConfirmCancel" style="padding:10px 20px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;transition:background 0.2s;">Cancel</button>
-        <button id="staffDeleteConfirmDelete" style="padding:10px 20px;border:none;background:#b91c1c;border-radius:8px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:background 0.2s;">Delete</button>
+    <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.15);padding:24px;max-width:560px;width:90%;z-index:1;pointer-events:auto;">
+      <h3 id="staffDeleteConfirmTitle" style="margin:0 0 14px 0;font-size:20px;font-weight:800;color:#111827;line-height:1.3;">Download records before deleting</h3>
+      <div id="staffDeleteStep1">
+        <div style="margin:0 0 14px 0;padding:14px 16px;border:2px solid #b91c1c;border-radius:10px;background:#fef2f2;">
+          <p id="staffDeleteConfirmBody" style="margin:0;font-size:15px;font-weight:600;color:#7f1d1d;line-height:1.55;">
+            If you delete this employee, you will lose easy access to their file. Download every document first and keep your own copy. You are responsible for keeping records as required.
+          </p>
+        </div>
+        <p style="margin:0 0 16px 0;font-size:13px;color:#4b5563;line-height:1.5;">
+          Open Documents, download everything you need, then come back. If you still want to delete, continue — we will ask you one more time.
+        </p>
+      </div>
+      <div id="staffDeleteStep2" style="display:none;">
+        <p id="staffDeleteConfirmBody2" style="margin:0 0 16px 0;font-size:16px;font-weight:700;color:#111827;line-height:1.5;">
+          Are you sure? This cannot be undone.
+        </p>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;">
+        <button type="button" id="staffDeleteConfirmCancel" style="padding:10px 18px;border:1px solid var(--border);background:#fff;border-radius:8px;font-size:14px;font-weight:600;color:#374151;cursor:pointer;">Cancel</button>
+        <button type="button" id="staffDeleteOpenDocs" style="padding:10px 18px;border:1px solid #9a3412;background:#fff7ed;border-radius:8px;font-size:14px;font-weight:700;color:#9a3412;cursor:pointer;">Open documents</button>
+        <button type="button" id="staffDeleteConfirmContinue" style="padding:10px 18px;border:none;background:#b91c1c;border-radius:8px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;">Continue</button>
+        <button type="button" id="staffDeleteConfirmDelete" style="display:none;padding:10px 18px;border:none;background:#7f1d1d;border-radius:8px;font-size:14px;font-weight:800;color:#fff;cursor:pointer;">Yes, delete permanently</button>
       </div>
     </div>
   </div>
@@ -3716,7 +3730,9 @@ settings.scheduleRules = {
 
 settings.businessHours = window.ffScheduleHelpers?.normalizeBusinessHours
   ? window.ffScheduleHelpers.normalizeBusinessHours(settings.businessHours)
-  : { ...DEFAULTS.businessHours };
+  : (settings.businessHours && typeof settings.businessHours === 'object'
+    ? settings.businessHours
+    : { ...DEFAULTS.businessHours });
 
 settings.coverageRules = window.ffScheduleHelpers?.normalizeCoverageRules
   ? window.ffScheduleHelpers.normalizeCoverageRules(settings.coverageRules)
@@ -14308,12 +14324,26 @@ function ffScheduleSettingsTimeControlHtml(value, attrs) {
   return `<span data-ff-schedule-time-picker="12h" style="display:inline-flex;align-items:center;gap:4px;max-width:100%;box-sizing:border-box;flex-wrap:nowrap;">${hidden}<select data-ff-role="hour" aria-label="Hour" style="${selBase}width:46px;">${hourOpts}</select><span style="color:#9ca3af;font-weight:700;flex:0 0 auto;">:</span><select data-ff-role="min" aria-label="Minute" style="${selBase}width:52px;">${minOpts}</select><select data-ff-role="ampm" aria-label="AM or PM" style="${selBase}width:58px;font-weight:600;">${ampmOpts}</select></span>`;
 }
 
+function ffScheduleSettingsReadTimeFrom12hPicker(store) {
+  const pick = store && store.closest && store.closest('[data-ff-schedule-time-picker="12h"]');
+  if (!pick) return '';
+  const hourSel = pick.querySelector('[data-ff-role="hour"]');
+  const minSel = pick.querySelector('[data-ff-role="min"]');
+  const ampmSel = pick.querySelector('[data-ff-role="ampm"]');
+  const min = parseInt(minSel && minSel.value, 10);
+  let h12 = parseInt(hourSel && hourSel.value, 10);
+  if (!Number.isFinite(h12) || !Number.isFinite(min)) return '';
+  const h = (ampmSel && ampmSel.value === 'PM') ? (h12 % 12) + 12 : (h12 % 12);
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
 function ffScheduleSettingsReadTimeInputValue(input) {
   if (!input) return null;
   const store = input.matches && input.matches('[data-ff-schedule-time-store="1"]')
     ? input
     : (input.querySelector && input.querySelector('[data-ff-schedule-time-store="1"]')) || input;
-  const raw = String(store.value || '').trim();
+  let raw = String(store.value || '').trim();
+  if (!raw) raw = ffScheduleSettingsReadTimeFrom12hPicker(store);
   if (!raw) return null;
   const normalized = ffScheduleSettingsNormalizeHHMM(raw);
   if (normalized) {
@@ -14366,11 +14396,7 @@ function ffBindScheduleSettingsTimePickers(scope) {
         hidden.dispatchEvent(new Event('change', { bubbles: true }));
       } catch (_) {}
     };
-    // Keep hidden in sync with visible selects when a value already exists,
-    // and seed empty stores from the default select state only after user edits.
-    if (hidden && ffScheduleSettingsNormalizeHHMM(hidden.value)) {
-      recompute();
-    }
+    if (hidden) recompute();
     pick.querySelectorAll('select').forEach((sel) => {
       sel.addEventListener('change', recompute);
     });
@@ -14526,16 +14552,31 @@ function renderCombinedScheduleRowsInto(containerId, businessHoursValue, coverag
   box.innerHTML = header + rows;
   ffBindScheduleSettingsTimePickers(box);
   ffInitDayShiftSegmentPanelsInBox(box, dayShiftSeg, attrPrefix, coverageRules);
+  box.querySelectorAll(`input[data-${attrPrefix}-business-open]`).forEach((cb) => {
+    if (cb.__ffOpenAutoSave) return;
+    cb.__ffOpenAutoSave = true;
+    cb.addEventListener('change', () => {
+      if (attrPrefix !== 'profile') return;
+      window.__ffScheduleSettingsDirty = true;
+      if (typeof window.ffSaveScheduleSettingsProfile === 'function') {
+        window.ffSaveScheduleSettingsProfile();
+      }
+    });
+  });
 }
 
 function collectBusinessHoursFromUiPrefix(attrPrefix) {
+  const root = document.getElementById('userProfileScheduleCombinedBox') || document;
   const result = {};
   SCHEDULE_SETTINGS_DAY_OPTIONS.forEach((day) => {
-    result[day.value] = {
-      isOpen: document.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true,
-      openTime: ffScheduleSettingsReadTimeInputValue(document.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`)),
-      closeTime: ffScheduleSettingsReadTimeInputValue(document.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`))
-    };
+    const isOpen = root.querySelector(`[data-${attrPrefix}-business-open="${day.value}"]`)?.checked === true;
+    let openTime = ffScheduleSettingsReadTimeInputValue(root.querySelector(`[data-${attrPrefix}-business-open-time="${day.value}"]`));
+    let closeTime = ffScheduleSettingsReadTimeInputValue(root.querySelector(`[data-${attrPrefix}-business-close-time="${day.value}"]`));
+    if (isOpen) {
+      if (!openTime) openTime = '09:00';
+      if (!closeTime) closeTime = '18:00';
+    }
+    result[day.value] = { isOpen, openTime, closeTime };
   });
   return window.ffScheduleHelpers?.normalizeBusinessHours
     ? window.ffScheduleHelpers.normalizeBusinessHours(result)
@@ -14805,6 +14846,7 @@ if (typeof document !== 'undefined' && !document.__ffScheduleSettingsRefreshBoun
       // Time-format changes rebuild even if the card is hidden so the next open
       // already matches Preferences. Other events only repaint when visible.
       if (!isTimeFormatEvent && (!card || card.style.display === 'none')) return;
+      if (!isTimeFormatEvent && window.__ffScheduleSettingsDirty) return;
       if (typeof renderUserProfileScheduleSettings === 'function') {
         renderUserProfileScheduleSettings();
       }
@@ -14851,7 +14893,8 @@ window.ffSaveScheduleSettingsProfile = async function() {
     if (typeof window.ffSaveScheduleSettings === 'function') {
       const cloudResult = await window.ffSaveScheduleSettings(settings.rolesHierarchy, settings.scheduleRules, settings.businessHours, settings.coverageRules, settings.specialBusinessDays, previousSpecialBusinessDays, settings.dayShiftSegments);
       if (typeof window.showToast === 'function') {
-        if (cloudResult === false) {
+        window.__ffScheduleSettingsDirty = false;
+      if (cloudResult === false) {
           window.showToast('Saved on this device. Cloud sync needs an active salon session - open the app while logged into the salon.', 5000);
         } else {
           window.showToast('Schedule settings saved', 3000);
@@ -27042,7 +27085,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260806_sched_12h_picker')
+              import('/schedule-ui.js?v=20260816_cell_notes6')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -28194,6 +28237,7 @@ function initializeAppsPanel() {
 
       const modal = document.getElementById('staffDeleteConfirmModal');
       const bodyText = document.getElementById('staffDeleteConfirmBody');
+      const body2 = document.getElementById('staffDeleteConfirmBody2');
       const staffName = staff.name || 'this staff member';
 
       if (!modal) {
@@ -28202,10 +28246,18 @@ function initializeAppsPanel() {
       }
 
       if (bodyText) {
-        bodyText.textContent = `${staffName} will be permanently deleted from the system and cloud. This cannot be undone.`;
+        bodyText.textContent =
+          'If you delete ' + staffName +
+          ', you will lose easy access to their file. Download every document first and keep your own copy. You are responsible for keeping records as required.';
+      }
+      if (body2) {
+        body2.textContent =
+          'Are you sure you want to permanently delete ' + staffName +
+          '? This cannot be undone.';
       }
 
       modal.dataset.pendingStaffId = staffId;
+      ffStaffDeleteModalSetStep(1);
       modal.style.display = 'flex';
     } catch (e) {
       console.error('[ffStaffDelete] Error:', e);
@@ -28255,12 +28307,41 @@ function initializeAppsPanel() {
     }
   }
 
+  function ffStaffDeleteModalSetStep(step) {
+    const modal = document.getElementById('staffDeleteConfirmModal');
+    const title = document.getElementById('staffDeleteConfirmTitle');
+    const s1 = document.getElementById('staffDeleteStep1');
+    const s2 = document.getElementById('staffDeleteStep2');
+    const openDocs = document.getElementById('staffDeleteOpenDocs');
+    const cont = document.getElementById('staffDeleteConfirmContinue');
+    const del = document.getElementById('staffDeleteConfirmDelete');
+    const n = step === 2 ? 2 : 1;
+    if (modal) modal.dataset.step = String(n);
+    if (n === 2) {
+      if (title) title.textContent = 'Are you sure?';
+      if (s1) s1.style.display = 'none';
+      if (s2) s2.style.display = 'block';
+      if (openDocs) openDocs.style.display = 'none';
+      if (cont) cont.style.display = 'none';
+      if (del) del.style.display = '';
+    } else {
+      if (title) title.textContent = 'Download records before deleting';
+      if (s1) s1.style.display = 'block';
+      if (s2) s2.style.display = 'none';
+      if (openDocs) openDocs.style.display = '';
+      if (cont) cont.style.display = '';
+      if (del) del.style.display = 'none';
+    }
+  }
+
   function ffStaffDeleteModalClose() {
     const modal = document.getElementById('staffDeleteConfirmModal');
     if (modal) {
       modal.style.display = 'none';
       modal.dataset.pendingStaffId = '';
+      modal.dataset.step = '1';
     }
+    ffStaffDeleteModalSetStep(1);
   }
   
   // Re-activate staff member
@@ -29079,6 +29160,39 @@ function initializeAppsPanel() {
       .replace(/"/g, '&quot;');
   }
 
+  window.__ffOdEnsureRunUi = function() {
+    return new Promise(function(resolve) {
+      if (typeof window.ffOpenStartOnboardingModal === 'function') {
+        resolve(true);
+        return;
+      }
+      var v = '20260815_od_s7b';
+      function inject(src, key) {
+        if (document.querySelector('script[data-ff-od-run="' + key + '"]')) return;
+        var s = document.createElement('script');
+        s.type = 'module';
+        s.src = src;
+        s.setAttribute('data-ff-od-run', key);
+        document.body.appendChild(s);
+      }
+      inject('/employee-onboarding/esign-library-cloud.js?v=' + v, 'artifact');
+      inject('/employee-onboarding/run-cloud.js?v=' + v, 'cloud');
+      inject('/employee-onboarding/run-ui.js?v=' + v, 'ui');
+      inject('/employee-onboarding/portal-manager.js?v=' + v, 'portal');
+      var tries = 0;
+      var t = setInterval(function() {
+        tries += 1;
+        if (typeof window.ffOpenStartOnboardingModal === 'function') {
+          clearInterval(t);
+          resolve(true);
+        } else if (tries >= 40) {
+          clearInterval(t);
+          resolve(false);
+        }
+      }, 200);
+    });
+  };
+
   // Global entry used by inline HTML onclick (most reliable against overlays / wiped handlers).
   window.__ffOdStartOnboardingClick = function(ev, packageId) {
     try {
@@ -29109,16 +29223,25 @@ function initializeAppsPanel() {
       window.alert('Staff not loaded — reopen this employee and try again.');
       return false;
     }
-    if (typeof window.ffOpenStartOnboardingModal === 'function') {
+    function openModal() {
       try {
         void window.ffOpenStartOnboardingModal(staff, packageId ? { packageId: packageId } : undefined);
       } catch (e) {
         console.error('[StaffOdShell] open modal threw', e);
         window.alert((e && e.message) || 'Could not open Start Onboarding.');
       }
-    } else {
-      window.alert('Onboarding is still loading — wait one second and try again.');
     }
+    if (typeof window.ffOpenStartOnboardingModal === 'function') {
+      openModal();
+      return false;
+    }
+    void window.__ffOdEnsureRunUi().then(function(ok) {
+      if (ok && typeof window.ffOpenStartOnboardingModal === 'function') {
+        openModal();
+      } else {
+        window.alert('Could not load Start Onboarding. Refresh this page and try again.');
+      }
+    });
     return false;
   };
 
@@ -29177,6 +29300,7 @@ function initializeAppsPanel() {
       '</div>';
 
     ffWireStaffOdStartButton(pane, staff);
+    try { void window.__ffOdEnsureRunUi(); } catch (_) {}
 
     if (typeof window.ffMountStaffOnboardingRuns === 'function') {
       try { window.ffMountStaffOnboardingRuns(pane, staff); } catch (e) {
@@ -33761,9 +33885,34 @@ function initializeAppsPanel() {
           };
         }
 
+        const deleteConfirmContinue = document.getElementById('staffDeleteConfirmContinue');
+        const deleteOpenDocs = document.getElementById('staffDeleteOpenDocs');
+
+        if (deleteConfirmContinue) {
+          deleteConfirmContinue.onclick = function(e) {
+            e.stopPropagation();
+            if (!deleteConfirmModal.dataset.pendingStaffId) return;
+            ffStaffDeleteModalSetStep(2);
+          };
+        }
+
+        if (deleteOpenDocs) {
+          deleteOpenDocs.onclick = function(e) {
+            e.stopPropagation();
+            ffStaffDeleteModalClose();
+            if (typeof window.ffSwitchStaffDetailsTab === 'function') {
+              window.ffSwitchStaffDetailsTab('documents');
+            }
+            if (typeof showToast === 'function') {
+              showToast('Download every document, then Delete again if you still want to remove this person.');
+            }
+          };
+        }
+
         if (deleteConfirmDelete) {
           deleteConfirmDelete.onclick = function(e) {
             e.stopPropagation();
+            if (deleteConfirmModal.dataset.step !== '2') return;
             const pendingStaffId = deleteConfirmModal.dataset.pendingStaffId;
             if (!pendingStaffId) return;
             ffStaffDeleteConfirm(pendingStaffId);
@@ -43779,14 +43928,57 @@ function initializeUserProfileMenu() {
       }
 
       if (section === 'onboarding') {
-        if (typeof window.initOnboardingSettingsUI === 'function') {
-          try { window.initOnboardingSettingsUI(); } catch (_) {}
-        }
-        if (typeof window.renderOnboardingSettingsUI === 'function') {
-          try { window.renderOnboardingSettingsUI(); } catch (e) {
-            console.warn('[User Profile] renderOnboardingSettingsUI failed', e);
+        (function ffLoadOnboardingSettings() {
+          var root = document.getElementById('ffOnboardingSettingsRoot');
+          var tries = 0;
+          function showErr(msg) {
+            if (!root) return;
+            var text = String(msg || 'Could not load this screen. Refresh and try again.');
+            if (/parser error/i.test(text)) {
+              text = 'Could not load this screen. Refresh and try again.';
+            }
+            root.innerHTML = '<div style="padding:16px;border:1px dashed #fecaca;border-radius:10px;background:#fef2f2;color:#991b1b;font-size:13px;">'
+              + text + '</div>';
           }
-        }
+          function paint() {
+            if (typeof window.initOnboardingSettingsUI === 'function') {
+              try { window.initOnboardingSettingsUI(); } catch (_) {}
+            }
+            if (typeof window.renderOnboardingSettingsUI !== 'function') return false;
+            Promise.resolve(window.renderOnboardingSettingsUI()).catch(function (e) {
+              console.warn('[User Profile] renderOnboardingSettingsUI failed', e);
+              showErr((e && e.message) || 'Could not load this screen.');
+            });
+            return true;
+          }
+          if (paint()) return;
+          var v = '20260816_od_open';
+          // Load cloud via <script type=module> (same as safe-loader). Do NOT
+          // import() settings-cloud — Safari re-parses app.js ("Parser error").
+          if (typeof window.ffEnsureOnboardingSettingsSubscribed !== 'function'
+              && !document.querySelector('script[data-ff-od-cloud]')) {
+            var cloud = document.createElement('script');
+            cloud.type = 'module';
+            cloud.src = '/employee-onboarding/settings-cloud.js?v=' + v;
+            cloud.setAttribute('data-ff-od-cloud', '1');
+            document.body.appendChild(cloud);
+          }
+          import('/employee-onboarding/settings-ui.js?v=' + v).then(function () {
+            paint();
+          }).catch(function (e) {
+            console.warn('[User Profile] settings-ui import failed', e);
+            showErr((e && e.message) || 'Could not load this screen. Refresh and try again.');
+          });
+          var poll = setInterval(function () {
+            tries += 1;
+            if (paint() || tries > 60) {
+              clearInterval(poll);
+              if (tries > 60 && typeof window.renderOnboardingSettingsUI !== 'function') {
+                showErr('Could not load this screen. Refresh and try again.');
+              }
+            }
+          }, 250);
+        })();
       }
 
       // Render the Salon Location subsection (shared geofence) whenever the
@@ -53722,7 +53914,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260804_tc_load_cache"></script>
+  <script src="/safe-loader.js?v=20260816_od_open"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

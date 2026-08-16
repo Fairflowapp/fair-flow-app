@@ -7,7 +7,7 @@ import {
   findDraftDay,
   persistScheduleDraftOverrideFromState,
   syncPublishedWeekStandByToCloud,
-} from "./schedule-draft.js?v=20260702_schedule_draft";
+} from "./schedule-draft.js?v=20260816_cell_notes6";
 import {
   filterCoverageWarnings,
   formatBoardDayLabel,
@@ -22,7 +22,7 @@ import {
   escapeScheduleAttr,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260806_sched_12h_picker";
+} from "./schedule-shift-edit.js?v=20260816_cell_notes6";
 
 // -- injected via initScheduleRenderModals() (wired in schedule-render.js) --
 let STAND_BY_SLOTS;
