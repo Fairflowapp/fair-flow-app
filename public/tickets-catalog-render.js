@@ -14,11 +14,11 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
+import { ffCanManageServices, resolveServiceDurationMinutes, parseServiceDurationMinutesInput, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260818_service_duration";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260630_catalog_ui_split3";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260630_catalog_ui_split3";
+import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260818_service_duration";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260818_service_duration";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -589,10 +589,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
   }
 
   const selected = selectedService;
-  const rawDuration = selected.durationMinutes ?? selected.duration ?? selected.defaultDuration ?? selected.minutes;
-  const durationText = rawDuration == null || rawDuration === ''
-    ? ''
-    : (Number.isFinite(Number(rawDuration)) ? `${Number(rawDuration)} min` : String(rawDuration));
+  const durationMinutes = resolveServiceDurationMinutes(selected);
+  const durationText = `${durationMinutes} min`;
   const isInlineEditingService = String(ticketsState._ffServicesInlineEditServiceId || '') === String(selected.id || '');
   const activeServiceTab = ticketsState._ffServicesDetailTab || 'details';
   const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
@@ -647,6 +645,13 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
         </label>
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;">Duration</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <input id="servicesInlineEditDuration" type="number" min="1" max="1440" step="1" value="${escapeHtml(String(durationMinutes))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            <span style="font-size:11px;color:#9ca3af;">min</span>
+          </span>
+        </label>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Charge Tax</span>
           <span style="display:flex;align-items:center;gap:8px;">
             <span class="ff-toggle-switch"><input id="servicesInlineEditTaxable" type="checkbox" ${selected.taxable === true ? 'checked' : ''}><span class="ff-toggle-slider"></span></span>
@@ -671,14 +676,13 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           <div style="font-size:13px;color:#111827;font-weight:600;">${ffTicketMoney(basePrice)}</div>
         </div>
         <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Duration</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Charge Tax</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${selected.taxable === true ? 'On' : 'Off'}</div>
         </div>
-        ${durationText ? `
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
-          <div style="font-size:12px;color:#6b7280;">Duration</div>
-          <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
-        </div>` : ''}
       </div>
     </div>
   `;
@@ -737,10 +741,22 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       const nameInput = root.querySelector('#servicesInlineEditName');
       const categoryInput = root.querySelector('#servicesInlineEditCategory');
       const priceInput = root.querySelector('#servicesInlineEditPrice');
+      const durationInput = root.querySelector('#servicesInlineEditDuration');
       const name = String(nameInput?.value || '').trim();
       if (!name) {
         if (nameInput) nameInput.focus();
         showToast('Service name is required', 'error');
+        return;
+      }
+      const durationMinutes = parseServiceDurationMinutesInput(durationInput?.value);
+      if (durationMinutes == null) {
+        if (durationInput) {
+          const prev = durationInput.style.borderColor;
+          durationInput.style.borderColor = '#ef4444';
+          durationInput.focus();
+          setTimeout(() => { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
+        }
+        showToast('Duration must be a whole number of minutes (1–1440).', 'error');
         return;
       }
       const categoryId = categoryInput?.value || null;
@@ -759,6 +775,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             active: selected.active !== false,
           sortOrder: selected.sortOrder,
             taxable,
+            durationMinutes,
           });
           await loadSharedCatalogForManager();
         } else {
@@ -769,6 +786,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             defaultPrice,
           sortOrder: Number.isFinite(Number(selected.sortOrder)) ? Number(selected.sortOrder) : 0,
             taxable,
+            durationMinutes,
           });
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
@@ -776,6 +794,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         selected.categoryId = categoryId;
         selected.defaultPrice = defaultPrice;
         selected.taxable = taxable;
+        selected.durationMinutes = durationMinutes;
         ticketsState._ffServicesInlineEditServiceId = null;
         if (categoryId) ticketsState._ffOpenCats.add(categoryId);
         renderServicesCatalogV2();

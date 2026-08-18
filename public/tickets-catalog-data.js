@@ -89,6 +89,42 @@ function serviceCategoryDisplayId(categoryName) {
   return sharedCategoryId(normalizeSharedCategoryName(categoryName));
 }
 
+const DEFAULT_SERVICE_DURATION_MINUTES = 30;
+const MAX_SERVICE_DURATION_MINUTES = 1440;
+
+function isValidServiceDurationMinutes(value) {
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) && Number.isInteger(n) && n >= 1 && n <= MAX_SERVICE_DURATION_MINUTES;
+}
+
+function resolveServiceDurationMinutes(service) {
+  const raw = service?.durationMinutes ?? service?.duration ?? service?.defaultDuration ?? service?.minutes;
+  if (raw == null || raw === '') return DEFAULT_SERVICE_DURATION_MINUTES;
+  const n = Number(raw);
+  return isValidServiceDurationMinutes(n) ? n : DEFAULT_SERVICE_DURATION_MINUTES;
+}
+
+/** Empty input → 30. Invalid → null so the caller can flash the field. */
+function parseServiceDurationMinutesInput(raw) {
+  const trimmed = String(raw ?? '').trim();
+  if (trimmed === '') return DEFAULT_SERVICE_DURATION_MINUTES;
+  const n = Number(trimmed);
+  return isValidServiceDurationMinutes(n) ? n : null;
+}
+
+function applyDurationMinutesToServicePayload(payload, service, isCreate) {
+  if (isCreate) {
+    payload.durationMinutes = isValidServiceDurationMinutes(Number(service?.durationMinutes))
+      ? Number(service.durationMinutes)
+      : DEFAULT_SERVICE_DURATION_MINUTES;
+    return;
+  }
+  if (!service || !Object.prototype.hasOwnProperty.call(service, 'durationMinutes')) return;
+  payload.durationMinutes = isValidServiceDurationMinutes(Number(service.durationMinutes))
+    ? Number(service.durationMinutes)
+    : DEFAULT_SERVICE_DURATION_MINUTES;
+}
+
 function sharedServiceCatalogDocRef(accountId) {
   return doc(db, `accounts/${accountId}/shared/serviceCatalog`);
 }
@@ -173,6 +209,10 @@ function applySharedServiceCatalog() {
         active: s.active !== false,
         sortOrder: Number.isFinite(Number(s.sortOrder)) ? Number(s.sortOrder) : idx,
         isSharedService: true,
+        durationMinutes: s.durationMinutes,
+        duration: s.duration,
+        defaultDuration: s.defaultDuration,
+        minutes: s.minutes,
         staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
       };
     })
@@ -271,6 +311,10 @@ function getSharedServicesForCatalogManager() {
         isSharedService: true,
         hasOverride,
         overridePrice: hasOverride ? Number(override.price) : null,
+        durationMinutes: s.durationMinutes,
+        duration: s.duration,
+        defaultDuration: s.defaultDuration,
+        minutes: s.minutes,
         staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
       };
     })
@@ -373,6 +417,7 @@ async function saveSharedService(service) {
   if (Number.isFinite(Number(service.sortOrder))) payload.sortOrder = Number(service.sortOrder);
   // "Charge Tax" — only write when explicitly provided (merge-safe).
   if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
+  applyDurationMinutesToServicePayload(payload, service, !service.id);
   if (service.id) {
     await ensureSharedServiceCatalogDoc(accountId);
     await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
@@ -550,6 +595,7 @@ async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
           defaultPrice: Number(svc.defaultPrice) || 0,
           active: svc.active !== false,
           sortOrder: Number.isFinite(Number(svc.sortOrder)) ? Number(svc.sortOrder) : groups.size,
+          durationMinutes: resolveServiceDurationMinutes(svc),
           localByLocation: new Map()
         });
       }
@@ -807,6 +853,7 @@ async function saveService(service) {
   // "Charge Tax" — only write when explicitly provided so reorder/other saves
   // (which omit it) preserve the existing value.
   if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
+  applyDurationMinutesToServicePayload(payload, service, !service.id);
   if (service.id) {
     await updateDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
@@ -892,6 +939,8 @@ export {
   getTicketsAccountId,
   normalizeSharedCategoryName,
   sharedCategoryId,
+  resolveServiceDurationMinutes,
+  parseServiceDurationMinutesInput,
   serviceCatalogStableKey,
   serviceCategoryDisplayId,
   sharedServiceCatalogDocRef,

@@ -9,7 +9,7 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, parseServiceDurationMinutesInput, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260818_service_duration";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 
@@ -400,10 +400,12 @@ function _ffCatalogEditorOpen(opts) {
   const title = document.getElementById('servicesCatalogEditorTitle');
   const wrapCat = document.getElementById('servicesCatalogEditorCatWrap');
   const wrapPrice = document.getElementById('servicesCatalogEditorPriceWrap');
+  const wrapDuration = document.getElementById('servicesCatalogEditorDurationWrap');
   const nameInp = document.getElementById('servicesCatalogEditorName');
   const catSel = document.getElementById('servicesCatalogEditorCategory');
   const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const durationInp = document.getElementById('servicesCatalogEditorDuration');
   const activeWrap = document.getElementById('servicesCatalogEditorActiveWrap');
   const activeInp = document.getElementById('servicesCatalogEditorActive');
   const overrideWrap = document.getElementById('servicesCatalogOverrideWrap');
@@ -416,9 +418,11 @@ function _ffCatalogEditorOpen(opts) {
   // Reset visibility + fields
   wrapCat.style.display = 'none';
   wrapPrice.style.display = 'none';
+  if (wrapDuration) wrapDuration.style.display = 'none';
   nameInp.value = '';
   nameInp.placeholder = '';
   priceInp.value = '';
+  if (durationInp) durationInp.value = '';
   catSel.innerHTML = '';
   if (catSel) catSel.style.display = 'block';
   if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
@@ -451,7 +455,12 @@ function _ffCatalogEditorOpen(opts) {
     nameInp.placeholder = 'Service name (e.g. Gel Full Set)';
     wrapCat.style.display = 'block';
     wrapPrice.style.display = 'block';
+    if (wrapDuration) wrapDuration.style.display = 'block';
     priceInp.placeholder = isSharedServiceMode ? `Default price (${ffTicketCurSym()})` : `Default price (${ffTicketCurSym()})`;
+    if (durationInp) {
+      durationInp.placeholder = 'Duration (minutes)';
+      durationInp.value = '30';
+    }
     if (isSharedServiceMode) {
       if (catSel) catSel.style.display = 'none';
       if (catTextInp) {
@@ -483,6 +492,7 @@ function _ffCatalogEditorOpen(opts) {
       priceInp.value = isSharedServiceMode
         ? (s.sharedDefaultPrice != null ? String(s.sharedDefaultPrice) : '')
         : (s.defaultPrice != null ? String(s.defaultPrice) : '');
+      if (durationInp) durationInp.value = String(resolveServiceDurationMinutes(s));
       if (isSharedServiceMode) {
         if (catTextInp) catTextInp.value = s.category || '';
         if (activeInp) activeInp.checked = s.active !== false;
@@ -521,6 +531,7 @@ async function _ffCatalogEditorSubmit(ctx) {
   const catSel = document.getElementById('servicesCatalogEditorCategory');
   const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const durationInp = document.getElementById('servicesCatalogEditorDuration');
   const activeInp = document.getElementById('servicesCatalogEditorActive');
   const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
   const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
@@ -535,6 +546,10 @@ async function _ffCatalogEditorSubmit(ctx) {
     } catch (_) {}
   };
   if (!name) { flashErr(nameInp); return; }
+  const isServiceMode = ctx.mode === 'service-add' || ctx.mode === 'service-edit'
+    || ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit';
+  const durationMinutes = isServiceMode ? parseServiceDurationMinutesInput(durationInp?.value) : null;
+  if (isServiceMode && durationMinutes == null) { flashErr(durationInp); return; }
 
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   try {
@@ -575,7 +590,7 @@ async function _ffCatalogEditorSubmit(ctx) {
     } else if (ctx.mode === 'service-add') {
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
-      await saveService({ name, categoryId, defaultPrice });
+      await saveService({ name, categoryId, defaultPrice, durationMinutes });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Service added', 'success');
@@ -583,7 +598,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       const s = ctx.existing;
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
-      await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder });
+      await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder, durationMinutes });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Updated', 'success');
@@ -602,7 +617,8 @@ async function _ffCatalogEditorSubmit(ctx) {
         category,
         defaultPrice,
         active: activeInp ? activeInp.checked : true,
-        sortOrder: s.sortOrder
+        sortOrder: s.sortOrder,
+        durationMinutes
       });
       if (ctx.mode === 'shared-service-edit') {
         if (overrideCustom?.checked) {

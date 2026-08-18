@@ -15,7 +15,7 @@ import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_tick
 import { ffTicketMoney, ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { computeTicketTotalsFromLines } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
 import { canSeeTicket, canCurrentUserCloseTickets, getTicketVisibility, getAutoFrontDeskRecipients } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
-import { loadServiceCategories, loadServices } from "./tickets-catalog-data.js?v=20260704_tickets_catalog_data_unsplit";
+import { loadServiceCategories, loadServices } from "./tickets-catalog-data.js?v=20260818_service_duration";
 
 let showToast, ticketConfirm, ffTicketLinesChanged, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, setupTicketsUI, getTicketPriceForServiceAndCurrentStaff, getTicketPriceForProductAndActiveLocation, closeTicketModal, openTicketDetailsModal, ffTicketRequiresCustomerName, ffApplyTicketCustomerRequiredUI;
 /** Guards concurrent Send-to-Front-Desk submissions (new + finalize flows). */
