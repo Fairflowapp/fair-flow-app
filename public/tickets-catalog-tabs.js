@@ -10,7 +10,7 @@
  * controlledStaffCanProvideService are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter } from "./tickets-catalog-data.js?v=20260818_service_duration";
+import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter, resolveServiceDurationMinutes, parseStaffDurationOverrideInput } from "./tickets-catalog-data.js?v=20260818_staff_duration";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { db } from "/app.js?v=20260610_force_lp_ios";
@@ -289,12 +289,17 @@ function renderServicesStaffTabHtml(service) {
   }
   const overrides = getServiceStaffOverrides(service);
   const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const serviceDefaultDuration = resolveServiceDurationMinutes(service);
   const cards = staffRows.map((staff) => {
     const staffId = getServiceStaffId(staff);
     if (!staffId) return '';
     const override = overrides[staffId] && typeof overrides[staffId] === 'object' ? overrides[staffId] : {};
     const enabled = override.enabled !== false;
     const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
+    const storedDuration = Number(override.durationMinutes);
+    const hasDurationOverride = Number.isInteger(storedDuration) && storedDuration >= 1 && storedDuration <= 1440
+      && storedDuration !== serviceDefaultDuration;
+    const durationValue = hasDurationOverride ? String(storedDuration) : '';
     const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
     const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
     const hasCommissionOverride = Number.isFinite(Number(commission.value));
@@ -333,6 +338,11 @@ function renderServicesStaffTabHtml(service) {
           <div style="font-size:12px;color:#6b7280;">Price</div>
           <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
           <span style="font-size:11px;color:#9ca3af;">Default ${ffTicketMoney(basePrice)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;margin-bottom:8px;">
+          <div style="font-size:12px;color:#6b7280;">Duration</div>
+          <input type="number" min="1" max="1440" step="1" class="ff-services-staff-duration" value="${escapeHtml(durationValue)}" placeholder="${escapeHtml(String(serviceDefaultDuration))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+          <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};">${hasDurationOverride ? 'Override' : `Default ${serviceDefaultDuration} min`}</span>
         </div>
         <div style="margin-bottom:8px;padding:8px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
@@ -374,7 +384,7 @@ function renderServicesStaffTabHtml(service) {
     <div style="display:flex;flex-direction:column;gap:8px;">
       <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
         <div style="font-size:14px;font-weight:700;color:#111827;margin-bottom:3px;">Staff</div>
-        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage staff availability, staff-specific price, and commission for this service.</p>
+        <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.4;">Manage staff availability, staff-specific price, duration, and commission for this service.</p>
       </div>
       ${cards}
     </div>
@@ -387,8 +397,21 @@ async function saveServiceStaffOverride(service, staffId, patch) {
   const existing = current[staffId] && typeof current[staffId] === 'object' ? current[staffId] : {};
   const next = { ...existing, ...(patch || {}) };
   const basePrice = Number(service.sharedDefaultPrice ?? service.defaultPrice) || 0;
+  const serviceDefaultDuration = resolveServiceDurationMinutes(service);
   if (next.enabled === true) delete next.enabled;
   if (next.price == null || next.price === '' || Number(next.price) === basePrice) delete next.price;
+  if (
+    next.durationMinutes == null ||
+    next.durationMinutes === '' ||
+    !Number.isInteger(Number(next.durationMinutes)) ||
+    Number(next.durationMinutes) < 1 ||
+    Number(next.durationMinutes) > 1440 ||
+    Number(next.durationMinutes) === serviceDefaultDuration
+  ) {
+    delete next.durationMinutes;
+  } else {
+    next.durationMinutes = Number(next.durationMinutes);
+  }
   if (!next.commission || !Number.isFinite(Number(next.commission.value))) delete next.commission;
   if (
     !next.supplyDeduction ||
@@ -488,6 +511,7 @@ function wireServicesStaffTab(root, service) {
     const staffId = card.getAttribute('data-staff-id');
     const enabledInput = card.querySelector('.ff-services-staff-enabled');
     const priceInput = card.querySelector('.ff-services-staff-price');
+    const durationInput = card.querySelector('.ff-services-staff-duration');
     const commissionValueInput = card.querySelector('.ff-services-staff-commission-value');
     const commissionTypeInput = card.querySelector('.ff-services-staff-commission-type');
     const supplyEnabledInput = card.querySelector('.ff-services-staff-supply-enabled');
@@ -502,12 +526,24 @@ function wireServicesStaffTab(root, service) {
       if (!staffId) return;
       const enabled = enabledInput ? enabledInput.checked : true;
       const rawPrice = parseFloat(priceInput?.value);
+      const parsedDuration = parseStaffDurationOverrideInput(durationInput?.value);
+      if (!parsedDuration.ok) {
+        if (durationInput) {
+          const prev = durationInput.style.borderColor;
+          durationInput.style.borderColor = '#ef4444';
+          durationInput.focus();
+          setTimeout(() => { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
+        }
+        showToast('Duration must be a whole number of minutes (1–1440), or empty for the service default.', 'error');
+        return;
+      }
       const commissionValue = parseFloat(commissionValueInput?.value);
       const supplyEnabled = supplyEnabledInput ? supplyEnabledInput.checked : false;
       const supplyValue = parseFloat(supplyValueInput?.value);
       const patch = {
         enabled,
-        price: Number.isFinite(rawPrice) ? rawPrice : basePrice
+        price: Number.isFinite(rawPrice) ? rawPrice : basePrice,
+        durationMinutes: parsedDuration.value
       };
       if (Number.isFinite(commissionValue)) {
         const commissionType = commissionTypeInput?.value === 'fixed' ? 'fixed' : 'percentage';

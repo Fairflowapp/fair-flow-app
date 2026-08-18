@@ -112,6 +112,26 @@ function parseServiceDurationMinutesInput(raw) {
   return isValidServiceDurationMinutes(n) ? n : null;
 }
 
+/** Staff override input: empty → no override. Invalid → ok:false. */
+function parseStaffDurationOverrideInput(raw) {
+  const trimmed = String(raw ?? '').trim();
+  if (trimmed === '') return { ok: true, value: null };
+  const n = Number(trimmed);
+  if (!isValidServiceDurationMinutes(n)) return { ok: false, value: null };
+  return { ok: true, value: n };
+}
+
+function resolveServiceDurationForStaff(service, staffId) {
+  const id = String(staffId || '').trim();
+  const overrides = service && service.staffOverrides && typeof service.staffOverrides === 'object'
+    ? service.staffOverrides
+    : {};
+  const override = id && overrides[id] && typeof overrides[id] === 'object' ? overrides[id] : null;
+  const n = Number(override?.durationMinutes);
+  if (isValidServiceDurationMinutes(n)) return n;
+  return resolveServiceDurationMinutes(service);
+}
+
 function applyDurationMinutesToServicePayload(payload, service, isCreate) {
   if (isCreate) {
     payload.durationMinutes = isValidServiceDurationMinutes(Number(service?.durationMinutes))
@@ -941,6 +961,8 @@ export {
   sharedCategoryId,
   resolveServiceDurationMinutes,
   parseServiceDurationMinutesInput,
+  parseStaffDurationOverrideInput,
+  resolveServiceDurationForStaff,
   serviceCatalogStableKey,
   serviceCategoryDisplayId,
   sharedServiceCatalogDocRef,
