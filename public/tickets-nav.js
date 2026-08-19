@@ -16,8 +16,8 @@
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
 import { renderTicketsList } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260818_staff_duration";
-import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260818_staff_duration";
+import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260818_staff_dur_ui";
 
 let showToast, loadCurrentUserProfile, enrichTicketsProfileFromMemberDoc, loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility;
 export function initTicketsNav(deps) {

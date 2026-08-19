@@ -10,7 +10,7 @@
  * controlledStaffCanProvideService are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter, resolveServiceDurationMinutes, parseStaffDurationOverrideInput } from "./tickets-catalog-data.js?v=20260818_staff_duration";
+import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter, resolveServiceDurationMinutes, parseStaffDurationOverrideInput } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { db } from "/app.js?v=20260610_force_lp_ios";
@@ -490,6 +490,7 @@ function ffStaffServicesGetOverrideForStaffMember(service, staffId) {
 function ffStaffServicesDefaultsForStaffMember(staff, service) {
   return {
     price: Number(service?.sharedDefaultPrice ?? service?.defaultPrice) || 0,
+    durationMinutes: resolveServiceDurationMinutes(service),
     commission: getStaffDefaultServiceCommission(staff, getServiceStaffId(staff)),
     supplyDeduction: getStaffDefaultSupplyDeduction(staff)
   };
@@ -500,6 +501,8 @@ if (typeof window !== 'undefined') {
   window.ffStaffServicesSaveOverrideForStaffMember = ffStaffServicesSaveOverrideForStaffMember;
   window.ffStaffServicesGetOverrideForStaffMember = ffStaffServicesGetOverrideForStaffMember;
   window.ffStaffServicesDefaultsForStaffMember = ffStaffServicesDefaultsForStaffMember;
+  window.ffResolveServiceDurationMinutes = resolveServiceDurationMinutes;
+  window.ffParseStaffDurationOverrideInput = parseStaffDurationOverrideInput;
   window.ffStaffServicesMoney = ffTicketMoney;
   window.ffStaffServicesEscapeHtml = escapeHtml;
 }

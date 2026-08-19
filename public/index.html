@@ -29733,6 +29733,15 @@ function initializeAppsPanel() {
           ? window.ffStaffServicesDefaultsForStaffMember(staff, service)
           : { price: Number(service.defaultPrice) || 0, commission: null, supplyDeduction: null };
         const basePrice = Number(defaults.price) || 0;
+        const serviceDefaultDuration = Number.isFinite(Number(defaults.durationMinutes))
+          ? Number(defaults.durationMinutes)
+          : (typeof window.ffResolveServiceDurationMinutes === 'function'
+            ? window.ffResolveServiceDurationMinutes(service)
+            : 30);
+        const storedDuration = Number(override.durationMinutes);
+        const hasDurationOverride = Number.isInteger(storedDuration) && storedDuration >= 1 && storedDuration <= 1440
+          && storedDuration !== serviceDefaultDuration;
+        const durationValue = hasDurationOverride ? String(storedDuration) : '';
         const enabled = override.enabled !== false;
         const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
         const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
@@ -29767,6 +29776,11 @@ function initializeAppsPanel() {
               <div style="font-size:12px;color:#6b7280;">Price</div>
               <input type="number" min="0" step="0.01" class="ff-staff-services-price" value="${ffStaffServicesHtmlEscape(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
               <span style="font-size:11px;color:#9ca3af;">Default ${ffStaffServicesMoney(basePrice)}</span>
+            </div>
+            <div class="ff-staff-svc-row ff-staff-svc-duration-row" style="display:grid;grid-template-columns:110px minmax(120px,180px) auto;gap:8px;align-items:center;margin-bottom:9px;">
+              <div style="font-size:12px;color:#6b7280;">Duration</div>
+              <input type="number" min="1" max="1440" step="1" class="ff-staff-services-duration" value="${ffStaffServicesHtmlEscape(durationValue)}" placeholder="${ffStaffServicesHtmlEscape(String(serviceDefaultDuration))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+              <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};">${hasDurationOverride ? 'Override' : ('Default ' + serviceDefaultDuration + ' min')}</span>
             </div>
             <div style="margin-bottom:9px;padding:9px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
@@ -29823,7 +29837,7 @@ function initializeAppsPanel() {
         <div style="display:flex;flex-direction:column;gap:10px;">
           <div style="padding:12px;background:#fff;border:1px solid var(--border);border-radius:12px;">
             <div style="font-size:14px;font-weight:800;color:#111827;margin-bottom:3px;">Services</div>
-            <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;">Manage availability, staff-specific price, supply deduct, and commission for ${ffStaffServicesHtmlEscape(staff.name || 'this staff member')}.</p>
+            <p style="margin:0;color:#6b7280;font-size:12px;line-height:1.45;">Manage availability, staff-specific price, duration, supply deduct, and commission for ${ffStaffServicesHtmlEscape(staff.name || 'this staff member')}.</p>
           </div>
           ${groupedSections}
         </div>
@@ -29841,6 +29855,7 @@ function initializeAppsPanel() {
       const serviceId = card.getAttribute('data-service-id');
       const enabledInput = card.querySelector('.ff-staff-services-enabled');
       const priceInput = card.querySelector('.ff-staff-services-price');
+      const durationInput = card.querySelector('.ff-staff-services-duration');
       const supplyEnabledInput = card.querySelector('.ff-staff-services-supply-enabled');
       const supplyFields = card.querySelector('.ff-staff-services-supply-fields');
       const supplyTypeInput = card.querySelector('.ff-staff-services-supply-type');
@@ -29852,12 +29867,26 @@ function initializeAppsPanel() {
       const save = async function() {
         if (!serviceId || !staffId || typeof window.ffStaffServicesSaveOverrideForStaffMember !== 'function') return;
         const rawPrice = parseFloat(priceInput?.value);
+        const parsedDuration = typeof window.ffParseStaffDurationOverrideInput === 'function'
+          ? window.ffParseStaffDurationOverrideInput(durationInput?.value)
+          : { ok: true, value: (String(durationInput?.value || '').trim() === '' ? null : Number(durationInput?.value)) };
+        if (!parsedDuration || parsedDuration.ok === false) {
+          if (durationInput) {
+            const prev = durationInput.style.borderColor;
+            durationInput.style.borderColor = '#ef4444';
+            durationInput.focus();
+            setTimeout(function() { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
+          }
+          if (status) { status.textContent = 'Duration must be 1–1440 min, or empty'; status.style.color = '#dc2626'; }
+          return;
+        }
         const commissionValue = parseFloat(commissionValueInput?.value);
         const supplyEnabled = !!(supplyEnabledInput && supplyEnabledInput.checked);
         const supplyValue = parseFloat(supplyValueInput?.value);
         const patch = {
           enabled: enabledInput ? !!enabledInput.checked : true,
-          price: Number.isFinite(rawPrice) ? rawPrice : ''
+          price: Number.isFinite(rawPrice) ? rawPrice : '',
+          durationMinutes: parsedDuration.value
         };
         if (Number.isFinite(commissionValue)) {
           patch.commission = {
@@ -53914,7 +53943,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
   <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260818_staff_duration"></script>
+  <script src="/safe-loader.js?v=20260818_staff_dur_ui"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">

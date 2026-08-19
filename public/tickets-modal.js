@@ -11,7 +11,7 @@
  * function references between the two modules (breaking the import cycle).
  */
 import { initModalView, openTicketModal, ffFormatReviewedAt, toggleTicketReviewed, openAdminTicketView, closeTicketModal, openTicketDetailsModal, closeTicketDetailsModal, ffTicketRequiresCustomerName, ffApplyTicketCustomerRequiredUI, resetTicketForm } from "./tickets-modal-view.js?v=20260708_ticket_list_fix";
-import { initModalEdit, populateTicketForm, syncTicketFormLinesFromDom, renderPerformedLines, renderDiff, addServiceToTicket, addProductToTicket, setupTicketFormToggles, updateTicketDiff, updateTicketTotal, paintTicketServiceUpgradeButton, setupTicketServiceUpgradeControl, saveTicket, doSendNewTicket, doFinalizeTicket, doCloseTicket } from "./tickets-modal-edit.js?v=20260818_staff_duration";
+import { initModalEdit, populateTicketForm, syncTicketFormLinesFromDom, renderPerformedLines, renderDiff, addServiceToTicket, addProductToTicket, setupTicketFormToggles, updateTicketDiff, updateTicketTotal, paintTicketServiceUpgradeButton, setupTicketServiceUpgradeControl, saveTicket, doSendNewTicket, doFinalizeTicket, doCloseTicket } from "./tickets-modal-edit.js?v=20260818_staff_dur_ui";
 
 export function initTicketsModal(deps) {
   initModalView({
