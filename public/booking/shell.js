@@ -69,6 +69,13 @@
   }
 
   function pageHtml(id) {
+    if (id === "calendar") {
+      return (
+        '<section class="ff-booking-page ff-booking-page-calendar" data-ff-booking-page="calendar">' +
+          '<div id="ffBookingCalendarRoot"></div>' +
+        "</section>"
+      );
+    }
     var copy = COPY[id] || COPY.calendar;
     return (
       '<section class="ff-booking-page" data-ff-booking-page="' + id + '">' +
@@ -112,6 +119,9 @@
     root.querySelectorAll("[data-ff-booking-page]").forEach(function (page) {
       page.classList.toggle("is-active", page.getAttribute("data-ff-booking-page") === section);
     });
+    if (section === "calendar" && typeof window.ffRefreshBookingCalendar === "function") {
+      window.ffRefreshBookingCalendar();
+    }
   }
 
   function applyArea(area) {

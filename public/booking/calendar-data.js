@@ -1,0 +1,191 @@
+/**
+ * Booking Calendar data adapters.
+ * Reuses Fair Flow staff, locations, and schedule helpers. No new collections.
+ *
+ * Bookable provider assumption (single filter — do not copy this elsewhere):
+ * A Calendar column is a non-archived staff member who can perform services
+ * (has technicianTypes, or manager/admin queueJoinAsTechnicianTypes).
+ * Owners/admins with no service types are excluded.
+ * If the active location is set and allowedLocationIds is a non-empty list,
+ * the staff member must include that location.
+ *
+ * Working hours: staff.defaultSchedule / locationScheduleAvailability via
+ * ffScheduleHelpers.getStaffDefaultScheduleForLocation. This is the weekly
+ * template already stored on the employee. Published week shifts are not
+ * loaded unless the user opened Schedule, so they are not the foundation
+ * source. Appointment-level availability is out of scope for Step 2.
+ */
+(function () {
+  var DEFAULT_OPEN = 9 * 60;
+  var DEFAULT_CLOSE = 18 * 60;
+
+  function helpers() {
+    return window.ffScheduleHelpers || null;
+  }
+
+  function readStaffList() {
+    try {
+      if (typeof window.ffGetStaffStore === "function") {
+        var store = window.ffGetStaffStore();
+        if (store && Array.isArray(store.staff)) return store.staff;
+      }
+    } catch (_) {}
+    try {
+      var raw = JSON.parse(localStorage.getItem("ff_staff_v1") || "{}");
+      if (Array.isArray(raw.staff)) return raw.staff;
+    } catch (_) {}
+    return [];
+  }
+
+  function currentLocationId() {
+    try {
+      if (typeof window.ffGetActiveLocationId === "function") {
+        return String(window.ffGetActiveLocationId() || "").trim();
+      }
+    } catch (_) {}
+    try {
+      return String(window.__ff_active_location_id || "").trim();
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function firstNameOf(staff) {
+    var raw = String((staff && (staff.name || staff.firstName)) || "").trim();
+    if (!raw) return "Staff";
+    return raw.split(/\s+/)[0];
+  }
+
+  function serviceTypeIds(staff) {
+    if (!staff || typeof staff !== "object") return [];
+    var role = String(staff.role || "").toLowerCase().trim();
+    var isLead = staff.isManager === true || staff.isAdmin === true
+      || role === "manager" || role === "admin" || role === "owner";
+    var source = isLead && Array.isArray(staff.queueJoinAsTechnicianTypes)
+      && staff.queueJoinAsTechnicianTypes.length
+      ? staff.queueJoinAsTechnicianTypes
+      : staff.technicianTypes;
+    return (Array.isArray(source) ? source : [])
+      .map(function (id) { return String(id || "").trim(); })
+      .filter(Boolean);
+  }
+
+  function isBookableProvider(staff, locationId) {
+    if (!staff || typeof staff !== "object") return false;
+    if (staff.isArchived === true || staff.archived === true) return false;
+    if (staff.active === false || staff.isActive === false) return false;
+    if (!String(staff.name || staff.firstName || "").trim()) return false;
+    if (!serviceTypeIds(staff).length) return false;
+    var loc = String(locationId || "").trim();
+    if (!loc) return true;
+    var allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+    if (!allowed.length) return true;
+    return allowed.indexOf(loc) !== -1;
+  }
+
+  function parseMinutes(value, helpersApi) {
+    if (helpersApi && typeof helpersApi.parseScheduleTimeToMinutes === "function") {
+      return helpersApi.parseScheduleTimeToMinutes(value);
+    }
+    var m = /^(\d{2}):(\d{2})$/.exec(String(value || "").trim());
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  }
+
+  function workingWindowsFor(staff, dateKey, locationId) {
+    var api = helpers();
+    var time = window.ffBookingTime;
+    var dayKey = time ? time.weekdayKey(dateKey) : "";
+    if (!dayKey) return [];
+    var sched = null;
+    if (api && typeof api.getStaffDefaultScheduleForLocation === "function") {
+      sched = api.getStaffDefaultScheduleForLocation(staff, locationId);
+    } else if (staff && staff.defaultSchedule) {
+      sched = staff.defaultSchedule;
+    }
+    var day = sched && sched[dayKey] ? sched[dayKey] : null;
+    if (!day || day.enabled !== true) return [];
+    var start = parseMinutes(day.startTime, api);
+    var end = parseMinutes(day.endTime, api);
+    if (start == null || end == null || end <= start) return [];
+    return [{ startMin: start, endMin: end }];
+  }
+
+  function unavailableWindows(working, axisStartMin, axisEndMin) {
+    var start = Number(axisStartMin);
+    var end = Number(axisEndMin);
+    var windows = (working || [])
+      .map(function (w) {
+        return {
+          startMin: Math.max(w.startMin, start),
+          endMin: Math.min(w.endMin, end)
+        };
+      })
+      .filter(function (w) { return w.endMin > w.startMin; })
+      .sort(function (a, b) { return a.startMin - b.startMin; });
+    if (!windows.length) return [{ startMin: start, endMin: end }];
+    var out = [];
+    var cursor = start;
+    windows.forEach(function (w) {
+      if (w.startMin > cursor) out.push({ startMin: cursor, endMin: w.startMin });
+      cursor = Math.max(cursor, w.endMin);
+    });
+    if (cursor < end) out.push({ startMin: cursor, endMin: end });
+    return out;
+  }
+
+  function readBusinessHoursMap() {
+    var api = helpers();
+    var raw = (window.settings && window.settings.businessHours) || null;
+    if (api && typeof api.normalizeBusinessHours === "function") {
+      return api.normalizeBusinessHours(raw);
+    }
+    return raw && typeof raw === "object" ? raw : null;
+  }
+
+  function businessDayFor(dateKey) {
+    var time = window.ffBookingTime;
+    var dayKey = time ? time.weekdayKey(dateKey) : "";
+    var map = readBusinessHoursMap();
+    var entry = map && dayKey ? map[dayKey] : null;
+    var api = helpers();
+    var start = entry ? parseMinutes(entry.openTime, api) : null;
+    var end = entry ? parseMinutes(entry.closeTime, api) : null;
+    var isOpen = !!(entry && entry.isOpen && start != null && end != null && end > start);
+    return {
+      dayKey: dayKey,
+      isOpen: isOpen,
+      startMin: isOpen ? start : DEFAULT_OPEN,
+      endMin: isOpen ? end : DEFAULT_CLOSE,
+      usedDefault: !isOpen
+    };
+  }
+
+  function loadCalendarEmployees(dateKey, locationId) {
+    var loc = String(locationId || currentLocationId() || "").trim();
+    var list = readStaffList().filter(function (staff) {
+      return isBookableProvider(staff, loc);
+    }).map(function (staff) {
+      var working = workingWindowsFor(staff, dateKey, loc);
+      return {
+        id: String(staff.id || staff.staffId || staff.name || ""),
+        firstName: firstNameOf(staff),
+        working: working
+      };
+    }).filter(function (row) {
+      return !!row.id;
+    }).sort(function (a, b) {
+      return a.firstName.localeCompare(b.firstName);
+    });
+    return list;
+  }
+
+  window.ffBookingCalData = {
+    currentLocationId: currentLocationId,
+    isBookableProvider: isBookableProvider,
+    firstNameOf: firstNameOf,
+    workingWindowsFor: workingWindowsFor,
+    unavailableWindows: unavailableWindows,
+    businessDayFor: businessDayFor,
+    loadCalendarEmployees: loadCalendarEmployees
+  };
+})();
