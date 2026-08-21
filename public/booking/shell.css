@@ -1,0 +1,131 @@
+/* Booking product switch + workspace shell (Step 1). */
+
+.ff-product-switch {
+  display: none;
+  align-items: center;
+  flex-shrink: 0;
+  margin-right: 12px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  gap: 2px;
+}
+.ff-product-switch.is-ready {
+  display: inline-flex;
+}
+.ff-product-switch-btn {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 6px 11px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ff-product-switch-btn:hover {
+  color: #fff;
+}
+.ff-product-switch-btn.is-active {
+  background: #fff;
+  color: #5b21b6;
+}
+
+.ff-booking-section-nav {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+body.ff-booking-area .toolbar-nav-main {
+  display: none !important;
+}
+body.ff-booking-area .ff-booking-section-nav {
+  display: flex;
+}
+.ff-booking-section-btn {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 24px;
+  height: 24px;
+  padding: 0 12px;
+  border-radius: 999px;
+  opacity: 0.78;
+}
+.ff-booking-section-btn:hover {
+  opacity: 1;
+}
+.ff-booking-section-btn.is-active {
+  opacity: 1;
+  font-weight: 800;
+  color: #7c3aed;
+  border-color: #a78bfa;
+  background: #ede9fe;
+}
+
+.ff-booking-workspace {
+  display: none;
+  position: fixed;
+  top: var(--header-h, 60px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9865;
+  background: #f5f7fb;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.ff-booking-workspace:not([hidden]) {
+  display: block;
+}
+.ff-booking-page {
+  display: none;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 28px;
+}
+.ff-booking-page.is-active {
+  display: block;
+}
+.ff-booking-page-title {
+  margin: 0 0 10px;
+  font-size: 28px;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: -0.02em;
+}
+.ff-booking-page-body {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+
+body.ff-kiosk-mode .ff-product-switch,
+body.ff-kiosk-pairing-active .ff-product-switch,
+body.ff-logged-out .ff-product-switch {
+  display: none !important;
+}
+
+@media (max-width: 720px) {
+  .ff-product-switch-btn {
+    padding: 6px 8px;
+    font-size: 10px;
+  }
+  .ff-booking-page {
+    padding: 28px 18px;
+  }
+  .ff-booking-page-title {
+    font-size: 22px;
+  }
+}
