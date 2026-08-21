@@ -152,7 +152,7 @@
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260805_queue_boot_dismiss2">
+<link rel="stylesheet" href="/main.css?v=20260821_lfd_proto">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -53081,7 +53081,26 @@ function hookSettingsGuard_DISABLED(){
         if (h < 24) return h + "h";
         return Math.floor(h / 24) + "d";
       }
-      function setCount(id, n) { var el = document.getElementById(id); if (el) el.textContent = String(n); }
+      function setCount(id, n) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = String(n);
+        var drawer = document.getElementById("ffLiveFloorDrawer");
+        if (!drawer) return;
+        var mirrored = drawer.querySelector('[data-ff-live-count="' + id + '"]');
+        if (mirrored) mirrored.textContent = String(n);
+      }
+      function mirrorLiveList(id) {
+        var src = document.getElementById(id);
+        var drawer = document.getElementById("ffLiveFloorDrawer");
+        if (!src || !drawer) return;
+        var dest = drawer.querySelector('[data-ff-live-list="' + id + '"]');
+        if (dest) dest.innerHTML = src.innerHTML;
+      }
+      function isLivePresentationActive() {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") return true;
+        return !!(typeof window.ffIsLiveFloorDrawerOpen === "function" && window.ffIsLiveFloorDrawerOpen());
+      }
       function emptyHtml(msg) { return '<div class="live-empty">' + liveEsc(msg) + "</div>"; }
 
       var ffLiveQueueMode = "available"; // "available" | "service"
@@ -53150,20 +53169,23 @@ function hookSettingsGuard_DISABLED(){
         if (!list) return;
         var title = document.getElementById("liveQueueTitle");
         if (title) title.textContent = "Queue";
-        var seg = document.getElementById("liveQueueModeToggle");
-        if (seg) {
-          seg.querySelectorAll(".live-q-seg-opt").forEach(function (b) {
-            var on = b.getAttribute("data-live-q-mode") === ffLiveQueueMode;
-            b.classList.toggle("is-active", on);
-            b.setAttribute("aria-selected", on ? "true" : "false");
-          });
-        }
+        document.querySelectorAll("[data-live-q-mode]").forEach(function (b) {
+          var on = b.getAttribute("data-live-q-mode") === ffLiveQueueMode;
+          b.classList.toggle("is-active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+        });
         if (ffLiveQueueMode === "service") renderQueueService(list);
         else renderQueueAvailable(list);
+        mirrorLiveList("liveQueueList");
       }
+      window.ffSetLiveQueueMode = function (mode) {
+        if (mode !== "available" && mode !== "service") return;
+        if (mode === ffLiveQueueMode) return;
+        ffLiveQueueMode = mode;
+        renderQueue();
+      };
       window.ffLiveRefreshQueueCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderQueue();
+        if (isLivePresentationActive()) renderQueue();
       };
 
       function ticketEmployee(t) {
@@ -53201,25 +53223,27 @@ function hookSettingsGuard_DISABLED(){
           return s === "open" || s === "ready_for_checkout";
         });
         setCount("liveTicketsCount", tickets.length);
-        if (!tickets.length) { list.innerHTML = emptyHtml("No active tickets."); return; }
-        if (typeof window.ffRenderTicketCardHTML === "function") {
+        if (!tickets.length) {
+          list.innerHTML = emptyHtml("No active tickets.");
+        } else if (typeof window.ffRenderTicketCardHTML === "function") {
           // Use the exact same ticket card as the Tickets list so the look matches 1:1.
           list.innerHTML = tickets.map(function (t) {
             return '<div class="live-tk-wrap" data-live-ticket="' + liveEsc(t.id || "") + '">' +
               window.ffRenderTicketCardHTML(t) + '</div>';
           }).join("");
-          return;
+        } else {
+          // Fallback: compact rows if the shared renderer isn't ready yet.
+          list.innerHTML = tickets.map(function (t) {
+            var emp = ticketEmployee(t) || "Unassigned";
+            var client = ticketClient(t) || "No client name";
+            var total = liveMoney(ticketTotalAmount(t));
+            return '<div class="live-item is-clickable" data-live-ticket="' + liveEsc(t.id || "") + '">' +
+              '<div class="live-item-main"><div class="live-item-title">' + liveEsc(emp) + '</div>' +
+              '<div class="live-item-sub">\uD83D\uDC64 ' + liveEsc(client) + '</div></div>' +
+              '<div class="live-item-right"><span class="live-pill live-pill--num">' + total + '</span></div></div>';
+          }).join("");
         }
-        // Fallback: compact rows if the shared renderer isn't ready yet.
-        list.innerHTML = tickets.map(function (t) {
-          var emp = ticketEmployee(t) || "Unassigned";
-          var client = ticketClient(t) || "No client name";
-          var total = liveMoney(ticketTotalAmount(t));
-          return '<div class="live-item is-clickable" data-live-ticket="' + liveEsc(t.id || "") + '">' +
-            '<div class="live-item-main"><div class="live-item-title">' + liveEsc(emp) + '</div>' +
-            '<div class="live-item-sub">\uD83D\uDC64 ' + liveEsc(client) + '</div></div>' +
-            '<div class="live-item-right"><span class="live-pill live-pill--num">' + total + '</span></div></div>';
-        }).join("");
+        mirrorLiveList("liveTicketsList");
       }
 
       function renderFloor() {
@@ -53231,32 +53255,32 @@ function hookSettingsGuard_DISABLED(){
           return String((o && o.status) || "open").toLowerCase() !== "closed";
         });
         setCount("liveFloorCount", orders.length);
-        if (!orders.length) { list.innerHTML = emptyHtml("No open floor requests."); return; }
-        if (typeof window.ffRenderFloorOrderCardHTML === "function") {
+        if (!orders.length) {
+          list.innerHTML = emptyHtml("No open floor requests.");
+        } else if (typeof window.ffRenderFloorOrderCardHTML === "function") {
           // Use the exact same floor card as the Floor module so the look matches 1:1.
           list.innerHTML = orders.map(function (o) {
             return '<div class="live-floor-wrap" data-live-floor="' + liveEsc(o.id || "") + '">' +
               window.ffRenderFloorOrderCardHTML(o) + '</div>';
           }).join("");
-          return;
+        } else {
+          // Fallback: compact rows if the shared renderer isn't ready yet.
+          list.innerHTML = orders.map(function (o) {
+            var who = liveEsc((o && o.createdByName) || "Someone");
+            var req = liveEsc((o && o.requestName) || "Floor request");
+            var client = String((o && o.clientName) || "").trim();
+            var sub = req + (client ? (" \u00B7 \uD83D\uDC64 " + liveEsc(client)) : "");
+            return '<div class="live-item"><div class="live-item-main"><div class="live-item-title">' + who +
+              '</div><div class="live-item-sub">' + sub + '</div></div></div>';
+          }).join("");
         }
-        // Fallback: compact rows if the shared renderer isn't ready yet.
-        list.innerHTML = orders.map(function (o) {
-          var who = liveEsc((o && o.createdByName) || "Someone");
-          var req = liveEsc((o && o.requestName) || "Floor request");
-          var client = String((o && o.clientName) || "").trim();
-          var sub = req + (client ? (" \u00B7 \uD83D\uDC64 " + liveEsc(client)) : "");
-          return '<div class="live-item"><div class="live-item-main"><div class="live-item-title">' + who +
-            '</div><div class="live-item-sub">' + sub + '</div></div></div>';
-        }).join("");
+        mirrorLiveList("liveFloorList");
       }
       window.ffLiveRefreshFloorCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderFloor();
+        if (isLivePresentationActive()) renderFloor();
       };
       window.ffLiveRefreshTicketsCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderTickets();
+        if (isLivePresentationActive()) renderTickets();
       };
 
       function renderChat() {
@@ -53397,6 +53421,9 @@ function hookSettingsGuard_DISABLED(){
       function openLiveScreen() {
         var screen = document.getElementById("liveScreen");
         if (!screen) return;
+        if (typeof window.ffCloseLiveFloorDrawer === "function") {
+          try { window.ffCloseLiveFloorDrawer(); } catch (_) {}
+        }
         // Live covers Queue; never leave the queue boot skeleton taking layout
         // space underneath (and later pushing Chat when leaving Live).
         try {
@@ -53598,15 +53625,14 @@ function hookSettingsGuard_DISABLED(){
         }, true);
       });
       document.addEventListener("ff-tickets-data-changed", function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display !== "none") renderTickets();
+        if (isLivePresentationActive()) renderTickets();
       });
       document.addEventListener("ff-staff-cloud-updated", function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display !== "none") renderLiveScreen();
+        if (isLivePresentationActive()) renderLiveScreen();
       });
     })();
   </script>
+  <script src="/live-floor-drawer.js?v=20260821_lfd_proto"></script>
   <script>
     (function () {
       var STORAGE_KEY = "ff_live_desk_fab_pos_v1";
