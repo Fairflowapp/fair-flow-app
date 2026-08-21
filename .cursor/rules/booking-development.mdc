@@ -1,0 +1,39 @@
+---
+description: Fair Flow Booking branch, deploy, merge, and modularity rules
+alwaysApply: true
+---
+
+# Booking development
+
+## Branch
+
+- Booking development happens on `feature/booking` (clean worktree). Check `git branch` first; do not create another Booking branch if this one exists.
+- Stay on `feature/booking` unless the user explicitly says otherwise.
+- Do not merge Booking into `main`, `sync/production`, or any production-connected branch without explicit approval.
+
+Flow: **`feature/booking` → test → staging → review → explicit approval → only then merge/production.**
+
+## Deploy
+
+- Production is `fairflowapp-db841`. Never deploy Booking there unless the current message explicitly says deploy to production.
+- "Deploy" / "refresh" without naming production = **staging only**: `firebase deploy … --project fair-flow-staging`.
+- Never rely on the Firebase default alias (it may be production). Never change the default alias.
+- If the target is ambiguous, **stop and ask**.
+
+Before every Booking deploy, report:
+
+- Current Git branch
+- Working tree status
+- Target Firebase project
+- Environment: staging or production
+
+If the target is production and the current message did not explicitly approve it: **STOP. DO NOT DEPLOY.**
+
+## Architecture
+
+- Booking lives in small purpose-specific modules (guideline: ~500–800 lines). Split by responsibility when a file grows or mixes concerns. Create modules only when needed.
+- Do not put substantial Booking business logic in `index.html`. Wiring/loaders only; keep any forced integration minimal.
+- One source of truth: reuse existing Fair Flow employees, salon/workspace, locations, services, permissions, Live Floor, and auth. Do not duplicate logic that can drift.
+- Before a major Booking feature: inspect architecture, identify reuse, choose the owning module, check file size, prefer a clean extension over a shortcut. No large unrelated refactors.
+
+Do not start a major Booking feature until the user has approved the current branch state.
