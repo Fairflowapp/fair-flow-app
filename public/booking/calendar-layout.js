@@ -1,27 +1,44 @@
 /**
- * Booking Calendar geometry tokens and positioning.
- * Appointments later should use minutesToTop / windowToRect — not new pixel math.
+ * Booking Calendar sizing + coordinates.
+ * ONE token set — CSS and render both read these values.
+ * 15-minute positioning: top = axisPadTop + (minutes - axisStart) * (hourH / 60).
  */
 (function () {
-  var COL_W = 176;
-  var TIME_W = 72;
-  var HOUR_H = 64;
-  var HEADER_H = 48;
-  var SNAP_MIN = 15;
+  var TOKENS = Object.freeze({
+    minColW: 216,
+    timeW: 88,
+    hourH: 92,
+    headerH: 52,
+    axisPadTop: 14,
+    snapMin: 15
+  });
 
   function tokens() {
     return {
-      colW: COL_W,
-      timeW: TIME_W,
-      hourH: HOUR_H,
-      headerH: HEADER_H,
-      snapMin: SNAP_MIN,
-      pxPerMinute: HOUR_H / 60
+      minColW: TOKENS.minColW,
+      timeW: TOKENS.timeW,
+      hourH: TOKENS.hourH,
+      headerH: TOKENS.headerH,
+      axisPadTop: TOKENS.axisPadTop,
+      snapMin: TOKENS.snapMin,
+      qtrH: TOKENS.hourH / 4,
+      pxPerMinute: TOKENS.hourH / 60
     };
   }
 
+  function columnWidth(employeeCount, availablePx) {
+    var n = Math.max(1, Number(employeeCount) || 0);
+    var available = Math.max(0, Number(availablePx) || 0);
+    return Math.max(TOKENS.minColW, available / n);
+  }
+
+  function columnsWidth(employeeCount, availablePx) {
+    return columnWidth(employeeCount, availablePx) * Math.max(1, Number(employeeCount) || 0);
+  }
+
   function minutesToTop(absMinutes, axisStartMin) {
-    return (Number(absMinutes) - Number(axisStartMin)) * tokens().pxPerMinute;
+    var t = tokens();
+    return t.axisPadTop + (Number(absMinutes) - Number(axisStartMin)) * t.pxPerMinute;
   }
 
   function windowToRect(startMin, endMin, axisStartMin, axisEndMin) {
@@ -35,7 +52,8 @@
   }
 
   function axisHeight(axisStartMin, axisEndMin) {
-    return Math.max(0, (Number(axisEndMin) - Number(axisStartMin)) * tokens().pxPerMinute);
+    var t = tokens();
+    return t.axisPadTop + Math.max(0, (Number(axisEndMin) - Number(axisStartMin)) * t.pxPerMinute);
   }
 
   function hourMarks(axisStartMin, axisEndMin) {
@@ -45,11 +63,25 @@
     return marks;
   }
 
+  function applyTokensToElement(el) {
+    if (!el || !el.style) return;
+    var t = tokens();
+    el.style.setProperty("--ff-cal-min-col-w", t.minColW + "px");
+    el.style.setProperty("--ff-cal-time-w", t.timeW + "px");
+    el.style.setProperty("--ff-cal-hour-h", t.hourH + "px");
+    el.style.setProperty("--ff-cal-qtr-h", t.qtrH + "px");
+    el.style.setProperty("--ff-cal-header-h", t.headerH + "px");
+    el.style.setProperty("--ff-cal-axis-pad", t.axisPadTop + "px");
+  }
+
   window.ffBookingCalLayout = {
     tokens: tokens,
+    columnWidth: columnWidth,
+    columnsWidth: columnsWidth,
     minutesToTop: minutesToTop,
     windowToRect: windowToRect,
     axisHeight: axisHeight,
-    hourMarks: hourMarks
+    hourMarks: hourMarks,
+    applyTokensToElement: applyTokensToElement
   };
 })();

@@ -1,12 +1,13 @@
 /**
  * Booking Calendar day-view renderer.
- * State lives in ffBookingCalState; data in ffBookingCalData; dates in ffBookingTime.
- * Delegated toolbar clicks only — no per-cell listeners.
+ * State / data / time / layout stay in their modules. One delegated click
+ * listener and one resize listener — no per-cell handlers.
  */
 (function () {
   var ROOT_ID = "ffBookingCalendarRoot";
   var nowTimer = null;
   var bound = false;
+  var resizeBound = false;
   var lastPaintKey = "";
 
   function state() { return window.ffBookingCalState || null; }
@@ -52,6 +53,34 @@
     }).join("");
   }
 
+  function hourLineHtml(marks, axis) {
+    var lay = layout();
+    if (!lay) return "";
+    return marks.map(function (min) {
+      var top = lay.minutesToTop(min, axis.startMin);
+      return '<div class="ff-cal-hour-line" style="top:' + top + 'px"></div>';
+    }).join("");
+  }
+
+  function applyColumnLayout(root) {
+    var lay = layout();
+    var st = state();
+    if (!lay || !st || !root) return;
+    var shell = root.querySelector(".ff-cal");
+    var vp = root.querySelector("[data-ff-cal-viewport]");
+    var board = root.querySelector("[data-ff-cal-board]");
+    if (!shell || !vp || !board) return;
+    lay.applyTokensToElement(shell);
+    var n = (st.getEmployees() || []).length;
+    if (!n) return;
+    var t = lay.tokens();
+    var available = Math.max(0, vp.clientWidth - t.timeW);
+    var colW = lay.columnWidth(n, available);
+    var colsW = colW * n;
+    board.style.setProperty("--ff-cal-col-w", colW + "px");
+    board.style.setProperty("--ff-cal-cols-w", colsW + "px");
+  }
+
   function paint(root) {
     var st = syncContext();
     var tm = time();
@@ -59,7 +88,6 @@
     if (!st || !tm || !lay || !root) return;
     var axis = st.getAxis();
     var employees = st.getEmployees();
-    var tokens = lay.tokens();
     var height = lay.axisHeight(axis.startMin, axis.endMin);
     var marks = lay.hourMarks(axis.startMin, axis.endMin);
     var dateLabel = tm.formatDisplayDate(st.getSelectedDateKey());
@@ -113,16 +141,21 @@
         "</div>" +
         (emptyHtml ||
         '<div class="ff-cal-viewport" data-ff-cal-viewport>' +
-          '<div class="ff-cal-board" style="--ff-cal-col-w:' + tokens.colW + "px;--ff-cal-time-w:" +
-            tokens.timeW + "px;--ff-cal-hour-h:" + tokens.hourH + "px;--ff-cal-header-h:" + tokens.headerH + 'px">' +
+          '<div class="ff-cal-board" data-ff-cal-board>' +
             '<div class="ff-cal-corner"></div>' +
             '<div class="ff-cal-emp-head">' + namesHtml + "</div>" +
-            '<div class="ff-cal-times" style="height:' + height + 'px">' + timesHtml + "</div>" +
-            '<div class="ff-cal-cols" style="height:' + height + 'px">' + colsHtml + nowHtml + "</div>" +
+            '<div class="ff-cal-times" style="height:' + height + 'px">' + hourLineHtml(marks, axis) + timesHtml + "</div>" +
+            '<div class="ff-cal-cols" style="height:' + height + 'px">' +
+              '<div class="ff-cal-gridlines" aria-hidden="true">' + hourLineHtml(marks, axis) + "</div>" +
+              colsHtml + nowHtml +
+            "</div>" +
           "</div>" +
         "</div>") +
       "</div>";
 
+    var shell = root.querySelector(".ff-cal");
+    if (shell) lay.applyTokensToElement(shell);
+    applyColumnLayout(root);
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length;
   }
 
@@ -209,6 +242,13 @@
     document.addEventListener("ff-locations-updated", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
     });
+    if (!resizeBound) {
+      resizeBound = true;
+      window.addEventListener("resize", function () {
+        var root = document.getElementById(ROOT_ID);
+        if (root && isCalendarVisible()) applyColumnLayout(root);
+      });
+    }
   }
 
   function refresh() {

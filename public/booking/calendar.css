@@ -1,4 +1,5 @@
-/* Booking Calendar day view — Fair Flow visual system. */
+/* Booking Calendar day view — Fair Flow visual system.
+   Sizing tokens are applied from calendar-layout.js as CSS variables. */
 
 .ff-booking-workspace {
   overflow: hidden;
@@ -25,18 +26,23 @@
 }
 
 .ff-cal {
-  --ff-cal-col-w: 176px;
-  --ff-cal-time-w: 72px;
-  --ff-cal-hour-h: 64px;
-  --ff-cal-header-h: 48px;
-  --ff-cal-line: #ece7f5;
+  --ff-cal-min-col-w: 216px;
+  --ff-cal-col-w: 216px;
+  --ff-cal-cols-w: 216px;
+  --ff-cal-time-w: 88px;
+  --ff-cal-hour-h: 92px;
+  --ff-cal-qtr-h: 23px;
+  --ff-cal-header-h: 52px;
+  --ff-cal-axis-pad: 14px;
+  --ff-cal-major: #d9d3e8;
+  --ff-cal-minor: #efeaf6;
   --ff-cal-ink: #1f1633;
-  --ff-cal-muted: #6b6280;
+  --ff-cal-muted: #6d657c;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: #f4f1fa;
+  background: #f3f0f7;
   color: var(--ff-cal-ink);
 }
 
@@ -132,33 +138,36 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  background: #fff;
+  background: #f7f5fb;
 }
 .ff-cal-board {
   display: grid;
-  grid-template-columns: var(--ff-cal-time-w) max-content;
+  grid-template-columns: var(--ff-cal-time-w) var(--ff-cal-cols-w);
   grid-template-rows: var(--ff-cal-header-h) auto;
   min-width: 100%;
+  background: #fff;
 }
 .ff-cal-corner {
   position: sticky;
   top: 0;
   left: 0;
-  z-index: 5;
-  background: #fff;
-  border-bottom: 1px solid var(--ff-cal-line);
-  border-right: 1px solid var(--ff-cal-line);
+  z-index: 6;
+  background: #faf8fd;
+  border-bottom: 1px solid var(--ff-cal-major);
+  border-right: 1px solid #e8e3f0;
   box-shadow: 1px 1px 0 #fff;
 }
 .ff-cal-emp-head {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 4;
   display: flex;
+  width: var(--ff-cal-cols-w);
   background: #fff;
-  border-bottom: 1px solid var(--ff-cal-line);
+  border-bottom: 1px solid var(--ff-cal-major);
 }
 .ff-cal-emp-name {
+  box-sizing: border-box;
   flex: 0 0 var(--ff-cal-col-w);
   width: var(--ff-cal-col-w);
   display: flex;
@@ -167,58 +176,85 @@
   font-size: 13px;
   font-weight: 700;
   color: #2a2140;
-  border-right: 1px solid var(--ff-cal-line);
+  border-right: 1px solid #eee9f5;
   background: #fff;
 }
 .ff-cal-times {
   position: sticky;
   left: 0;
-  z-index: 4;
-  background: #fff;
-  border-right: 1px solid var(--ff-cal-line);
+  z-index: 5;
+  box-sizing: border-box;
+  width: var(--ff-cal-time-w);
+  background: #faf8fd;
+  border-right: 1px solid #e8e3f0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--ff-cal-qtr-h) - 1px),
+    var(--ff-cal-minor) calc(var(--ff-cal-qtr-h) - 1px),
+    var(--ff-cal-minor) var(--ff-cal-qtr-h)
+  );
+  background-position: 0 var(--ff-cal-axis-pad);
+  background-repeat: repeat-y;
 }
 .ff-cal-hour {
   position: absolute;
-  left: 0;
-  right: 8px;
+  left: 10px;
+  right: 10px;
   transform: translateY(-50%);
   text-align: right;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   color: var(--ff-cal-muted);
+  line-height: 1;
+  white-space: nowrap;
+  z-index: 2;
 }
 .ff-cal-cols {
   position: relative;
   display: flex;
+  width: var(--ff-cal-cols-w);
+  background: #fff;
   background-image: repeating-linear-gradient(
     to bottom,
-    transparent,
-    transparent calc(var(--ff-cal-hour-h) - 1px),
-    var(--ff-cal-line) calc(var(--ff-cal-hour-h) - 1px),
-    var(--ff-cal-line) var(--ff-cal-hour-h)
+    transparent 0,
+    transparent calc(var(--ff-cal-qtr-h) - 1px),
+    var(--ff-cal-minor) calc(var(--ff-cal-qtr-h) - 1px),
+    var(--ff-cal-minor) var(--ff-cal-qtr-h)
   );
+  background-position: 0 var(--ff-cal-axis-pad);
+  background-repeat: repeat-y;
+}
+.ff-cal-gridlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.ff-cal-hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--ff-cal-major);
 }
 .ff-cal-col {
   position: relative;
+  box-sizing: border-box;
   flex: 0 0 var(--ff-cal-col-w);
   width: var(--ff-cal-col-w);
-  border-right: 1px solid var(--ff-cal-line);
-  background: #fff;
+  border-right: 1px solid #eee9f5;
+  background: transparent;
+  z-index: 0;
 }
 .ff-cal-off {
   position: absolute;
   left: 0;
   right: 0;
-  background:
-    repeating-linear-gradient(
-      -18deg,
-      rgba(99, 91, 122, 0.035),
-      rgba(99, 91, 122, 0.035) 6px,
-      rgba(99, 91, 122, 0.07) 6px,
-      rgba(99, 91, 122, 0.07) 12px
-    ),
-    #f4f2f7;
+  background: #f4f3f7;
   pointer-events: none;
+  z-index: 0;
 }
 .ff-cal-now {
   position: absolute;
@@ -226,9 +262,9 @@
   right: 0;
   height: 2px;
   background: #7c3aed;
-  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.12);
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.1);
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
 }
 .ff-cal-now::before {
   content: "";

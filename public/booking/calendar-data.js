@@ -85,10 +85,36 @@
 
   function parseMinutes(value, helpersApi) {
     if (helpersApi && typeof helpersApi.parseScheduleTimeToMinutes === "function") {
-      return helpersApi.parseScheduleTimeToMinutes(value);
+      var parsed = helpersApi.parseScheduleTimeToMinutes(value);
+      if (parsed != null) return parsed;
     }
-    var m = /^(\d{2}):(\d{2})$/.exec(String(value || "").trim());
-    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    var raw = String(value || "").trim();
+    var m24 = /^(\d{1,2}):(\d{2})$/.exec(raw);
+    if (m24) return Number(m24[1]) * 60 + Number(m24[2]);
+    var m12 = /^(\d{1,2}):(\d{2})\s*([ap]m)$/i.exec(raw);
+    if (m12) {
+      var hour = Number(m12[1]) % 12;
+      if (/pm/i.test(m12[3])) hour += 12;
+      return hour * 60 + Number(m12[2]);
+    }
+    return null;
+  }
+
+  function dayIsEnabled(day) {
+    if (!day || typeof day !== "object") return false;
+    return day.enabled === true || day.enabled === 1 || String(day.enabled).toLowerCase() === "true";
+  }
+
+  function businessWindowForDay(dayKey) {
+    var map = readBusinessHoursMap();
+    var entry = map && dayKey ? map[dayKey] : null;
+    var api = helpers();
+    var start = entry ? parseMinutes(entry.openTime, api) : null;
+    var end = entry ? parseMinutes(entry.closeTime, api) : null;
+    if (entry && entry.isOpen && start != null && end != null && end > start) {
+      return { startMin: start, endMin: end };
+    }
+    return { startMin: DEFAULT_OPEN, endMin: DEFAULT_CLOSE };
   }
 
   function workingWindowsFor(staff, dateKey, locationId) {
@@ -102,10 +128,18 @@
     } else if (staff && staff.defaultSchedule) {
       sched = staff.defaultSchedule;
     }
+    if (api && sched && typeof api.normalizeDefaultSchedule === "function") {
+      sched = api.normalizeDefaultSchedule(sched);
+    }
     var day = sched && sched[dayKey] ? sched[dayKey] : null;
-    if (!day || day.enabled !== true) return [];
+    if (!dayIsEnabled(day)) return [];
     var start = parseMinutes(day.startTime, api);
     var end = parseMinutes(day.endTime, api);
+    if (start == null || end == null || end <= start) {
+      var fallback = businessWindowForDay(dayKey);
+      start = start == null ? fallback.startMin : start;
+      end = end == null || end <= start ? fallback.endMin : end;
+    }
     if (start == null || end == null || end <= start) return [];
     return [{ startMin: start, endMin: end }];
   }
