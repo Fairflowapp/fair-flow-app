@@ -93,9 +93,11 @@
     var firstName = String(emp.firstName || "").trim() || "Staff";
     return '<button type="button" class="ff-cal-emp-btn" data-ff-cal-provider="' +
       escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false">' +
-      providerAvatarHtml(emp) +
-      '<span class="ff-cal-emp-label">' + escapeHtml(firstName) + "</span>" +
-      '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
+      '<span class="ff-cal-emp-ctrl">' +
+        providerAvatarHtml(emp) +
+        '<span class="ff-cal-emp-label">' + escapeHtml(firstName) + "</span>" +
+        '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
+      "</span>" +
       "</button>";
   }
 

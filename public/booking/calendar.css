@@ -215,6 +215,13 @@
 .ff-cal-emp-btn:hover {
   background: #fafafa;
 }
+.ff-cal-emp-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+}
 .ff-cal-emp-avatar {
   width: 26px;
   height: 26px;

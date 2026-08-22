@@ -117,16 +117,29 @@
     });
   }
 
+  function anchorNode(anchor) {
+    if (!anchor || !anchor.querySelector) return anchor;
+    return anchor.querySelector(".ff-cal-emp-ctrl") || anchor;
+  }
+
   function place(el, anchor) {
-    var rect = anchor.getBoundingClientRect();
+    if (!el || !anchor) return;
+    var rect = anchorNode(anchor).getBoundingClientRect();
     var menuW = el.offsetWidth || 220;
-    var left = Math.min(Math.max(8, rect.left), window.innerWidth - menuW - 8);
-    var top = rect.bottom + 4;
-    if (top + el.offsetHeight > window.innerHeight - 8) {
-      top = Math.max(8, rect.top - el.offsetHeight - 4);
-    }
-    el.style.left = left + "px";
-    el.style.top = top + "px";
+    var menuH = el.offsetHeight || 0;
+    var gap = 6;
+    var pad = 8;
+    var left = rect.left;
+    var top = rect.bottom + gap;
+    if (left + menuW > window.innerWidth - pad) left = window.innerWidth - menuW - pad;
+    if (left < pad) left = pad;
+    if (top + menuH > window.innerHeight - pad) top = rect.top - menuH - gap;
+    if (top < pad) top = pad;
+    el.style.position = "fixed";
+    el.style.right = "auto";
+    el.style.bottom = "auto";
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
   }
 
   function open(anchor, ctx) {
@@ -138,6 +151,7 @@
     close();
     var el = ensureMenu();
     openCtx = ctx;
+    openCtx.anchor = anchor;
     el.innerHTML = actionDefs(ctx).map(function (act) {
       var disabled = act.enabled === false;
       return '<button type="button" class="ff-cal-menu-item" role="menuitem" data-ff-cal-menu="' + act.id + '"' +
@@ -148,6 +162,9 @@
     el.removeAttribute("hidden");
     anchor.setAttribute("aria-expanded", "true");
     place(el, anchor);
+    requestAnimationFrame(function () {
+      if (openCtx && openCtx.anchor === anchor) place(el, anchor);
+    });
   }
 
   function bind() {
