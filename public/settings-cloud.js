@@ -441,6 +441,9 @@ function _applyMainSnapshot(data) {
     // branch, ffSaveScheduleSettings writes to locationSchedules.{id}.
     const _activeLoc = _ffActiveLocationIdForSettings();
     const _locBucket = _pickLocationScheduleBucket(data, _activeLoc) || {};
+    if (data.locationSchedules && typeof data.locationSchedules === "object") {
+      window.settings.locationSchedules = data.locationSchedules;
+    }
     const _pickField = (key) => {
       if (Object.prototype.hasOwnProperty.call(_locBucket, key) &&
           _locBucket[key] && typeof _locBucket[key] === 'object') {

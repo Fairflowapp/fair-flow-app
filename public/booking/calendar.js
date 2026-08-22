@@ -317,13 +317,23 @@
     return vp ? { left: vp.scrollLeft, top: vp.scrollTop } : { left: 0, top: 0 };
   }
 
+  function initialScrollTop(axis) {
+    var lay = layout();
+    if (!lay || !axis) return 0;
+    var target = Math.max(Number(axis.startMin) || 0, Number(axis.salonStartMin || axis.startMin) - 60);
+    var top = lay.timeToY(target, axis.startMin) - (lay.tokens().axisPadTop || 0);
+    return top > 0 ? top : 0;
+  }
+
   function render(opts) {
     var root = document.getElementById(ROOT_ID);
     if (!root) return;
     var keepScroll = opts && opts.keepScroll;
     var scroll = keepScroll ? readScroll(root) : { left: 0, top: 0 };
     paint(root);
+    var st = state();
     if (keepScroll) restoreScroll(root, scroll.left, scroll.top);
+    else restoreScroll(root, 0, initialScrollTop(st && st.getAxis ? st.getAxis() : null));
     startNowTimer();
   }
 
@@ -370,6 +380,9 @@
       rememberSlot(ev, t.closest("[data-ff-cal-surface]"));
     });
     document.addEventListener("ff-staff-cloud-updated", function () {
+      if (isCalendarVisible()) render({ keepScroll: true });
+    });
+    document.addEventListener("ff-schedule-settings-changed", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-active-location-changed", function () {

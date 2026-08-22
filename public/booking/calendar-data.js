@@ -119,6 +119,22 @@
     return { startMin: DEFAULT_OPEN, endMin: DEFAULT_CLOSE };
   }
 
+  function scheduleHasEnabledDay(sched) {
+    if (!sched || typeof sched !== "object") return false;
+    return Object.keys(sched).some(function (key) {
+      return dayIsEnabled(sched[key]);
+    });
+  }
+
+  function inheritSalonWindow(dayKey) {
+    var map = readBusinessHoursMap();
+    var entry = map && dayKey ? map[dayKey] : null;
+    if (!entry || !entry.isOpen) return [];
+    var win = businessWindowForDay(dayKey);
+    if (win.startMin == null || win.endMin == null || win.endMin <= win.startMin) return [];
+    return [{ startMin: win.startMin, endMin: win.endMin }];
+  }
+
   function workingWindowsFor(staff, dateKey, locationId) {
     var api = helpers();
     var time = window.ffBookingTime;
@@ -134,7 +150,9 @@
       sched = api.normalizeDefaultSchedule(sched);
     }
     var day = sched && sched[dayKey] ? sched[dayKey] : null;
-    if (!dayIsEnabled(day)) return [];
+    if (!dayIsEnabled(day)) {
+      return scheduleHasEnabledDay(sched) ? [] : inheritSalonWindow(dayKey);
+    }
     var start = parseMinutes(day.startTime, api);
     var end = parseMinutes(day.endTime, api);
     if (start == null || end == null || end <= start) {
@@ -142,7 +160,7 @@
       start = start == null ? fallback.startMin : start;
       end = end == null || end <= start ? fallback.endMin : end;
     }
-    if (start == null || end == null || end <= start) return [];
+    if (start == null || end == null || end <= start) return inheritSalonWindow(dayKey);
     return [{ startMin: start, endMin: end }];
   }
 
@@ -188,8 +206,17 @@
 
   function readBusinessHoursMap() {
     var api = helpers();
-    var raw = (window.settings && window.settings.businessHours) || null;
-    if (api && typeof api.normalizeBusinessHours === "function") {
+    var locId = currentLocationId();
+    var settings = (window.settings && typeof window.settings === "object") ? window.settings : {};
+    var locBucket = locId && settings.locationSchedules && settings.locationSchedules[locId];
+    var raw = (locBucket && locBucket.businessHours) || settings.businessHours || null;
+    if (!raw) {
+      try {
+        var stored = JSON.parse(localStorage.getItem("ffv24_settings") || "{}");
+        raw = stored && stored.businessHours ? stored.businessHours : null;
+      } catch (_) {}
+    }
+    if (api && typeof api.normalizeBusinessHours === "function" && raw) {
       return api.normalizeBusinessHours(raw);
     }
     return raw && typeof raw === "object" ? raw : null;
