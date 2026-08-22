@@ -5,16 +5,44 @@
  */
 (function () {
   var ROOT_ID = "ffBookingClientHarness";
+  var STORAGE_KEY = "ff_client_foundation_harness_v1";
 
   function isAllowedHost() {
     if (typeof window.FF_ENV === "string" && window.FF_ENV === "staging") return true;
     var host = (window.location && window.location.hostname) || "";
-    return host === "localhost" || host === "127.0.0.1";
+    return host === "localhost" || host === "127.0.0.1" || host.indexOf("fair-flow-staging") !== -1;
+  }
+
+  function flagFromLocation() {
+    try {
+      var search = new URLSearchParams(window.location.search || "");
+      var v = String(search.get("ffClientTest") || "").trim();
+      if (v === "1") return "1";
+      if (v === "0") return "0";
+    } catch (_) {}
+    try {
+      var hash = String(window.location.hash || "");
+      if (/(?:^|[?#&])ffClientTest=1(?:&|$)/.test(hash)) return "1";
+      if (/(?:^|[?#&])ffClientTest=0(?:&|$)/.test(hash)) return "0";
+    } catch (_) {}
+    return "";
+  }
+
+  function persistFlag(value) {
+    try {
+      if (value === "1") sessionStorage.setItem(STORAGE_KEY, "1");
+      else if (value === "0") sessionStorage.removeItem(STORAGE_KEY);
+    } catch (_) {}
   }
 
   function isRequested() {
+    var fromUrl = flagFromLocation();
+    if (fromUrl) {
+      persistFlag(fromUrl);
+      return fromUrl === "1";
+    }
     try {
-      return new URLSearchParams(window.location.search || "").get("ffClientTest") === "1";
+      return sessionStorage.getItem(STORAGE_KEY) === "1";
     } catch (_) {
       return false;
     }
@@ -152,7 +180,7 @@
     var root = document.createElement("aside");
     root.id = ROOT_ID;
     root.innerHTML =
-      '<div style="position:fixed;right:16px;bottom:16px;z-index:99999;width:320px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #d8d2e4;border-radius:12px;box-shadow:0 10px 30px rgba(40,20,70,.16);padding:12px;font:13px/1.4 system-ui;">' +
+      '<div style="position:fixed;right:16px;bottom:16px;z-index:200050;width:320px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #d8d2e4;border-radius:12px;box-shadow:0 10px 30px rgba(40,20,70,.16);padding:12px;font:13px/1.4 system-ui;">' +
         "<strong>Client foundation harness</strong>" +
         '<p style="margin:6px 0 10px;color:#6d657c;">Staging test only. Not the Clients product UI.</p>' +
         '<input id="ffClientHarnessId" placeholder="clientId" style="width:100%;margin:0 0 6px;padding:6px;">' +
@@ -187,13 +215,21 @@
     document.body.appendChild(root);
   }
 
-  function start() {
+  function tryMount() {
     if (!isAllowedHost() || !isRequested()) return;
+    if (!document.body) return;
+    mount();
+  }
+
+  function start() {
+    tryMount();
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", mount);
-    } else {
-      mount();
+      document.addEventListener("DOMContentLoaded", tryMount);
     }
+    window.addEventListener("popstate", tryMount);
+    setTimeout(tryMount, 0);
+    setTimeout(tryMount, 800);
+    setTimeout(tryMount, 2500);
   }
 
   window.ffBookingClientHarness = {
