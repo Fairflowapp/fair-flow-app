@@ -3,7 +3,7 @@
 
 .ff-booking-workspace {
   overflow: hidden;
-  background: #fff;
+  background: #FFFFFF;
 }
 .ff-booking-page.is-active:not(.ff-booking-page-calendar) {
   height: 100%;
@@ -40,10 +40,10 @@
   --ff-cal-quarter-h: 18px;
   --ff-cal-header-h: 48px;
   --ff-cal-axis-pad: 8px;
-  --ff-cal-major: #eeeeef;
-  --ff-cal-half: #f4f4f5;
-  --ff-cal-quarter: #f8f8f9;
-  --ff-cal-divider: #e2e2e4;
+  --ff-cal-major: #ececee;
+  --ff-cal-half: #f3f3f4;
+  --ff-cal-quarter: #f7f7f8;
+  --ff-cal-divider: #dedee0;
   --ff-cal-ink: #1f1633;
   --ff-cal-muted: #6d657c;
   display: flex;
@@ -51,7 +51,7 @@
   height: 100%;
   min-height: 0;
   min-width: 0;
-  background: #fff;
+  background: #FFFFFF;
   color: var(--ff-cal-ink);
 }
 
@@ -62,7 +62,7 @@
   gap: 16px;
   flex-shrink: 0;
   padding: 14px 20px 12px;
-  background: #fff;
+  background: #FFFFFF;
   border-bottom: 1px solid #ece8f4;
 }
 .ff-cal-toolbar-left,
@@ -161,7 +161,7 @@
   min-height: 0;
   min-width: 0;
   overflow: auto;
-  background: #fff;
+  background: #FFFFFF;
 }
 .ff-cal-board {
   display: grid;
@@ -169,14 +169,14 @@
   grid-template-rows: var(--ff-cal-header-h) auto;
   width: calc(var(--ff-cal-time-w) + var(--ff-cal-canvas-w));
   min-width: 100%;
-  background: #fff;
+  background: #FFFFFF;
 }
 .ff-cal-corner {
   position: sticky;
   top: 0;
   left: 0;
   z-index: 6;
-  background: #fff;
+  background: #FFFFFF;
   border-bottom: 1px solid var(--ff-cal-major);
   border-right: 1px solid var(--ff-cal-divider);
   box-shadow: 1px 1px 0 #fff;
@@ -187,7 +187,7 @@
   z-index: 4;
   width: var(--ff-cal-canvas-w);
   min-width: var(--ff-cal-cols-w);
-  background: #fff;
+  background: #FFFFFF;
   border-bottom: 1px solid var(--ff-cal-major);
 }
 .ff-cal-emp-head {
@@ -206,7 +206,7 @@
   padding: 8px 10px;
   border: 0;
   border-right: 1px solid var(--ff-cal-divider);
-  background: #fff;
+  background: #FFFFFF;
   color: #2a2140;
   cursor: pointer;
   font: inherit;
@@ -269,8 +269,9 @@
   z-index: 5;
   box-sizing: border-box;
   width: var(--ff-cal-time-w);
-  background: #fff;
+  background: #FFFFFF;
   border-right: 1px solid var(--ff-cal-divider);
+  overflow: hidden;
 }
 .ff-cal-hour,
 .ff-cal-quarter {
@@ -297,7 +298,7 @@
   position: relative;
   width: var(--ff-cal-canvas-w);
   min-width: var(--ff-cal-cols-w);
-  background: #fff;
+  background: #FFFFFF;
 }
 .ff-cal-cols {
   position: relative;
@@ -336,17 +337,19 @@
   flex: 0 0 var(--ff-cal-col-w);
   width: var(--ff-cal-col-w);
   border-right: 1px solid var(--ff-cal-divider);
-  background: #fff;
+  background: #FFFFFF;
   z-index: 0;
+}
+.ff-cal-times .ff-cal-hour-line,
+.ff-cal-times .ff-cal-half-line,
+.ff-cal-times .ff-cal-quarter-line {
+  display: none;
 }
 .ff-cal-off,
 .ff-cal-closed {
-  position: absolute;
-  left: 0;
-  right: 0;
-  pointer-events: none;
-  z-index: 0;
-  background: transparent;
+  display: none;
+  background: none;
+  background-image: none;
 }
 .ff-cal-now {
   position: absolute;
