@@ -8,6 +8,7 @@
   var nowTimer = null;
   var bound = false;
   var resizeBound = false;
+  var canvasObserver = null;
   var lastPaintKey = "";
 
   function state() { return window.ffBookingCalState || null; }
@@ -62,19 +63,35 @@
     }).join("");
   }
 
-  function applyColumnLayout(root) {
+  function applyCanvasLayout(root) {
     var lay = layout();
     var st = state();
     if (!lay || !st || !root) return;
     var shell = root.querySelector(".ff-cal");
     var board = root.querySelector("[data-ff-cal-board]");
+    var vp = root.querySelector("[data-ff-cal-viewport]");
     if (!shell || !board) return;
     lay.applyTokensToElement(shell);
     var n = (st.getEmployees() || []).length;
-    if (!n) return;
     var colW = lay.columnWidth();
+    var colsW = lay.providerContentWidth(n);
+    var timeW = lay.tokens().timeW;
+    var host = vp || root;
+    var available = host.clientWidth > 0 ? Math.max(0, host.clientWidth - timeW) : colsW;
+    var canvasW = lay.canvasWidth(available, n);
     board.style.setProperty("--ff-cal-col-w", colW + "px");
-    board.style.setProperty("--ff-cal-cols-w", (colW * n) + "px");
+    board.style.setProperty("--ff-cal-cols-w", colsW + "px");
+    board.style.setProperty("--ff-cal-canvas-w", canvasW + "px");
+  }
+
+  function watchCanvas(root) {
+    var vp = root && root.querySelector("[data-ff-cal-viewport]");
+    if (!vp || typeof ResizeObserver === "undefined") return;
+    if (canvasObserver) canvasObserver.disconnect();
+    canvasObserver = new ResizeObserver(function () {
+      applyCanvasLayout(root);
+    });
+    canvasObserver.observe(vp);
   }
 
   function paint(root) {
@@ -141,11 +158,14 @@
         '<div class="ff-cal-viewport" data-ff-cal-viewport>' +
           '<div class="ff-cal-board" data-ff-cal-board>' +
             '<div class="ff-cal-corner"></div>' +
-            '<div class="ff-cal-emp-head">' + namesHtml + "</div>" +
+            '<div class="ff-cal-head">' +
+              '<div class="ff-cal-emp-head">' + namesHtml + "</div>" +
+            "</div>" +
             '<div class="ff-cal-times" style="height:' + height + 'px">' + linesHtml + timesHtml + "</div>" +
-            '<div class="ff-cal-cols" style="height:' + height + 'px">' +
+            '<div class="ff-cal-surface" data-ff-cal-surface style="height:' + height + 'px">' +
               '<div class="ff-cal-gridlines" aria-hidden="true">' + linesHtml + "</div>" +
-              colsHtml + nowHtml +
+              '<div class="ff-cal-cols">' + colsHtml + "</div>" +
+              nowHtml +
             "</div>" +
           "</div>" +
         "</div>") +
@@ -153,7 +173,8 @@
 
     var shell = root.querySelector(".ff-cal");
     if (shell) lay.applyTokensToElement(shell);
-    applyColumnLayout(root);
+    applyCanvasLayout(root);
+    watchCanvas(root);
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length;
   }
 
@@ -173,12 +194,12 @@
     }
     var top = lay.minutesToTop(nowMin, axis.startMin);
     if (!el) {
-      var cols = root.querySelector(".ff-cal-cols");
-      if (!cols) return;
+      var surface = root.querySelector("[data-ff-cal-surface]");
+      if (!surface) return;
       el = document.createElement("div");
       el.className = "ff-cal-now";
       el.setAttribute("data-ff-cal-now", "");
-      cols.appendChild(el);
+      surface.appendChild(el);
     }
     el.style.top = top + "px";
   }
@@ -244,7 +265,7 @@
       resizeBound = true;
       window.addEventListener("resize", function () {
         var root = document.getElementById(ROOT_ID);
-        if (root && isCalendarVisible()) applyColumnLayout(root);
+        if (root && isCalendarVisible()) applyCanvasLayout(root);
       });
     }
   }

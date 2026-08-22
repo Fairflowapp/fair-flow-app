@@ -5,9 +5,11 @@
  * Y = axisPadTop + (minutesFromMidnight - axisStart) * (pixelsPerHour / 60)
  * height = durationMinutes * (pixelsPerHour / 60)
  *
- * Column width is preferred (not stretched to fill leftover workspace),
- * so a future right-side details panel can shrink the Calendar pane
- * without changing provider-column proportions.
+ * Two widths, kept separate:
+ *   provider content = preferredColW * employeeCount (never stretched)
+ *   canvas = max(available workspace surface, provider content)
+ * The canvas owns the scheduling coordinate system. Provider columns
+ * sit inside it. Leftover canvas is unused workspace, not fake columns.
  */
 (function () {
   var TOKENS = Object.freeze({
@@ -43,6 +45,16 @@
 
   function columnsWidth(employeeCount) {
     return columnWidth() * Math.max(0, Number(employeeCount) || 0);
+  }
+
+  function providerContentWidth(employeeCount) {
+    return columnsWidth(employeeCount);
+  }
+
+  function canvasWidth(availableSurfaceWidth, employeeCount) {
+    var content = providerContentWidth(employeeCount);
+    var available = Math.max(0, Number(availableSurfaceWidth) || 0);
+    return Math.max(content, available);
   }
 
   function minutesToTop(absMinutes, axisStartMin) {
@@ -102,6 +114,8 @@
     tokens: tokens,
     columnWidth: columnWidth,
     columnsWidth: columnsWidth,
+    providerContentWidth: providerContentWidth,
+    canvasWidth: canvasWidth,
     minutesToTop: minutesToTop,
     durationToHeight: durationToHeight,
     windowToRect: windowToRect,
