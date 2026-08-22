@@ -101,6 +101,12 @@
     return hour12 + " " + suffix;
   }
 
+  function formatQuarterLabel(totalMinutes) {
+    var q = ((Number(totalMinutes) % 60) + 60) % 60;
+    if (!q) return "";
+    return ":" + String(q).padStart(2, "0");
+  }
+
   window.ffBookingTime = {
     getTimeZone: getTimeZone,
     todayDateKey: todayDateKey,
@@ -109,6 +115,7 @@
     formatDisplayDate: formatDisplayDate,
     nowMinutes: nowMinutes,
     formatHourLabel: formatHourLabel,
+    formatQuarterLabel: formatQuarterLabel,
     parseDateKey: parseDateKey
   };
 })();

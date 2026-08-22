@@ -10,6 +10,7 @@
   var resizeBound = false;
   var canvasObserver = null;
   var lastPaintKey = "";
+  var lastColW = 0;
 
   function state() { return window.ffBookingCalState || null; }
   function data() { return window.ffBookingCalData || null; }
@@ -58,7 +59,7 @@
     var lay = layout();
     if (!lay) return "";
     return marks.map(function (min) {
-      var top = lay.minutesToTop(min, axis.startMin);
+      var top = lay.timeToY(min, axis.startMin);
       return '<div class="' + className + '" style="top:' + top + 'px"></div>';
     }).join("");
   }
@@ -73,15 +74,32 @@
     if (!shell || !board) return;
     lay.applyTokensToElement(shell);
     var n = (st.getEmployees() || []).length;
-    var colW = lay.columnWidth();
-    var colsW = lay.providerContentWidth(n);
     var timeW = lay.tokens().timeW;
     var host = vp || root;
-    var available = host.clientWidth > 0 ? Math.max(0, host.clientWidth - timeW) : colsW;
+    var available = host.clientWidth > 0 ? Math.max(0, host.clientWidth - timeW) : 0;
+    var colW = lay.columnWidthFor(available, n);
     var canvasW = lay.canvasWidth(available, n);
+    lastColW = colW;
     board.style.setProperty("--ff-cal-col-w", colW + "px");
-    board.style.setProperty("--ff-cal-cols-w", colsW + "px");
+    board.style.setProperty("--ff-cal-cols-w", canvasW + "px");
     board.style.setProperty("--ff-cal-canvas-w", canvasW + "px");
+  }
+
+  function rememberSlot(ev, surface) {
+    var lay = layout();
+    var st = state();
+    if (!lay || !st || !surface || !ev) return;
+    var rect = surface.getBoundingClientRect();
+    window.ffBookingCalLastSlot = lay.hitTest(
+      ev.clientX - rect.left,
+      ev.clientY - rect.top,
+      {
+        employees: st.getEmployees(),
+        axis: st.getAxis(),
+        dateKey: st.getSelectedDateKey(),
+        columnWidth: lastColW
+      }
+    );
   }
 
   function watchCanvas(root) {
@@ -102,15 +120,23 @@
     var axis = st.getAxis();
     var employees = st.getEmployees();
     var height = lay.axisHeight(axis.startMin, axis.endMin);
-    var marks = lay.hourMarks(axis.startMin, axis.endMin);
+    var hours = lay.hourMarks(axis.startMin, axis.endMin);
     var halves = lay.halfHourMarks(axis.startMin, axis.endMin);
-    var linesHtml = gridLineHtml(halves, axis, "ff-cal-half-line") + gridLineHtml(marks, axis, "ff-cal-hour-line");
+    var quarters = lay.quarterMarks(axis.startMin, axis.endMin);
+    var linesHtml = gridLineHtml(quarters, axis, "ff-cal-quarter-line")
+      + gridLineHtml(halves, axis, "ff-cal-half-line")
+      + gridLineHtml(hours, axis, "ff-cal-hour-line");
     var dateLabel = tm.formatDisplayDate(st.getSelectedDateKey());
     var closed = !axis.salonOpen;
 
-    var timesHtml = marks.map(function (min) {
-      var top = lay.minutesToTop(min, axis.startMin);
+    var timesHtml = hours.map(function (min) {
+      var top = lay.timeToY(min, axis.startMin);
       return '<div class="ff-cal-hour" style="top:' + top + 'px">' + escapeHtml(tm.formatHourLabel(min)) + "</div>";
+    }).join("") + halves.concat(quarters).map(function (min) {
+      var top = lay.timeToY(min, axis.startMin);
+      var label = tm.formatQuarterLabel(min);
+      if (!label) return "";
+      return '<div class="ff-cal-quarter" style="top:' + top + 'px">' + escapeHtml(label) + "</div>";
     }).join("");
 
     var namesHtml = employees.map(function (emp) {
@@ -128,7 +154,7 @@
       var nowMin = tm.nowMinutes();
       if (nowMin >= axis.startMin && nowMin <= axis.endMin) {
         nowHtml = '<div class="ff-cal-now" data-ff-cal-now style="top:' +
-          lay.minutesToTop(nowMin, axis.startMin) + 'px"></div>';
+          lay.timeToY(nowMin, axis.startMin) + 'px"></div>';
       }
     }
 
@@ -137,7 +163,7 @@
       : "";
 
     root.innerHTML =
-      '<div class="ff-cal">' +
+      '<div class="ff-cal' + (closed ? " is-closed" : "") + '">' +
         '<div class="ff-cal-toolbar">' +
           '<div class="ff-cal-toolbar-left">' +
             '<button type="button" class="ff-cal-today" data-ff-cal-act="today">Today</button>' +
@@ -192,7 +218,7 @@
       if (el) el.remove();
       return;
     }
-    var top = lay.minutesToTop(nowMin, axis.startMin);
+    var top = lay.timeToY(nowMin, axis.startMin);
     if (!el) {
       var surface = root.querySelector("[data-ff-cal-surface]");
       if (!surface) return;
@@ -247,10 +273,15 @@
     document.addEventListener("click", function (ev) {
       var t = ev.target;
       if (!t || typeof t.closest !== "function") return;
+      var root = document.getElementById(ROOT_ID);
+      if (!root || !root.contains(t)) return;
       var btn = t.closest("[data-ff-cal-act]");
-      if (!btn || !document.getElementById(ROOT_ID) || !document.getElementById(ROOT_ID).contains(btn)) return;
-      ev.preventDefault();
-      onAction(btn.getAttribute("data-ff-cal-act"));
+      if (btn) {
+        ev.preventDefault();
+        onAction(btn.getAttribute("data-ff-cal-act"));
+        return;
+      }
+      rememberSlot(ev, t.closest("[data-ff-cal-surface]"));
     });
     document.addEventListener("ff-staff-cloud-updated", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
