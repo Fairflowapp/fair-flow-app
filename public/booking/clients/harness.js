@@ -30,8 +30,13 @@
 
   function persistFlag(value) {
     try {
-      if (value === "1") sessionStorage.setItem(STORAGE_KEY, "1");
-      else if (value === "0") sessionStorage.removeItem(STORAGE_KEY);
+      if (value === "1") {
+        sessionStorage.setItem(STORAGE_KEY, "1");
+        localStorage.setItem(STORAGE_KEY, "1");
+      } else if (value === "0") {
+        sessionStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } catch (_) {}
   }
 
@@ -42,7 +47,10 @@
       return fromUrl === "1";
     }
     try {
-      return sessionStorage.getItem(STORAGE_KEY) === "1";
+      if (sessionStorage.getItem(STORAGE_KEY) === "1") return true;
+    } catch (_) {}
+    try {
+      return localStorage.getItem(STORAGE_KEY) === "1";
     } catch (_) {
       return false;
     }
@@ -179,25 +187,25 @@
     if (document.getElementById(ROOT_ID)) return;
     var root = document.createElement("aside");
     root.id = ROOT_ID;
+    root.setAttribute("data-ff-client-harness", "1");
+    root.style.cssText = "position:fixed;top:8px;right:8px;z-index:2147483646;width:min(360px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;background:#7c3aed;color:#fff;border:3px solid #fbbf24;border-radius:14px;box-shadow:0 16px 40px rgba(0,0,0,.35);padding:14px;font:13px/1.4 system-ui;display:block;visibility:visible;opacity:1;pointer-events:auto;";
     root.innerHTML =
-      '<div style="position:fixed;right:16px;bottom:16px;z-index:200050;width:320px;max-height:80vh;overflow:auto;background:#fff;border:1px solid #d8d2e4;border-radius:12px;box-shadow:0 10px 30px rgba(40,20,70,.16);padding:12px;font:13px/1.4 system-ui;">' +
-        "<strong>Client foundation harness</strong>" +
-        '<p style="margin:6px 0 10px;color:#6d657c;">Staging test only. Not the Clients product UI.</p>' +
-        '<input id="ffClientHarnessId" placeholder="clientId" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessFirst" placeholder="First name" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessLast" placeholder="Last name" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessPhone" placeholder="Phone" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessEmail" placeholder="Email" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessNotes" placeholder="Notes" style="width:100%;margin:0 0 6px;padding:6px;">' +
-        '<input id="ffClientHarnessQuery" placeholder="Search name / phone / email" style="width:100%;margin:0 0 8px;padding:6px;">' +
-        '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
-          '<button type="button" data-act="create">Create</button>' +
-          '<button type="button" data-act="search">Search</button>' +
-          '<button type="button" data-act="update">Update</button>' +
-          '<button type="button" data-act="tests">Run A–J</button>' +
-        "</div>" +
-        '<pre id="ffClientHarnessLog" style="white-space:pre-wrap;margin:10px 0 0;font-size:11px;max-height:220px;overflow:auto;"></pre>' +
-      "</div>";
+      "<strong style=\"display:block;font-size:16px;color:#fff;\">CLIENT FOUNDATION HARNESS</strong>" +
+      '<p style="margin:6px 0 10px;color:#fde68a;">Staging test only. Not the Clients product UI. Look here — not in the Clients placeholder.</p>' +
+      '<input id="ffClientHarnessId" placeholder="clientId" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessFirst" placeholder="First name" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessLast" placeholder="Last name" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessPhone" placeholder="Phone" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessEmail" placeholder="Email" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessNotes" placeholder="Notes" style="width:100%;margin:0 0 6px;padding:6px;box-sizing:border-box;">' +
+      '<input id="ffClientHarnessQuery" placeholder="Search name / phone / email" style="width:100%;margin:0 0 8px;padding:6px;box-sizing:border-box;">' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
+        '<button type="button" data-act="create">Create</button>' +
+        '<button type="button" data-act="search">Search</button>' +
+        '<button type="button" data-act="update">Update</button>' +
+        '<button type="button" data-act="tests">Run A–J</button>' +
+      "</div>" +
+      '<pre id="ffClientHarnessLog" style="white-space:pre-wrap;margin:10px 0 0;font-size:11px;max-height:220px;overflow:auto;background:#fff;color:#111;padding:8px;border-radius:8px;"></pre>';
     root.addEventListener("click", function (ev) {
       var btn = ev.target && ev.target.closest ? ev.target.closest("[data-act]") : null;
       if (!btn) return;
@@ -213,6 +221,12 @@
       });
     });
     document.body.appendChild(root);
+    console.log("[FF CLIENT HARNESS] mounted", {
+      search: window.location.search,
+      host: window.location.hostname,
+      env: window.FF_ENV || "",
+      id: ROOT_ID
+    });
   }
 
   function tryMount() {
@@ -222,6 +236,14 @@
   }
 
   function start() {
+    console.log("[FF CLIENT HARNESS] loaded", {
+      search: window.location.search,
+      hash: window.location.hash,
+      host: window.location.hostname,
+      env: window.FF_ENV || "",
+      allowed: isAllowedHost(),
+      requested: isRequested()
+    });
     tryMount();
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", tryMount);
@@ -230,6 +252,13 @@
     setTimeout(tryMount, 0);
     setTimeout(tryMount, 800);
     setTimeout(tryMount, 2500);
+    setTimeout(tryMount, 6000);
+    if (document.documentElement && window.MutationObserver) {
+      var observer = new MutationObserver(function () {
+        if (isAllowedHost() && isRequested() && !document.getElementById(ROOT_ID)) tryMount();
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
   }
 
   window.ffBookingClientHarness = {

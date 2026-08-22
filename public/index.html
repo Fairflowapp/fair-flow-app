@@ -5586,8 +5586,10 @@ function ffCaptureClientFoundationHarness() {
     var inHash = /(?:^|[?#&])ffClientTest=1(?:&|$)/.test(hash);
     if (v === '1' || inHash) {
       sessionStorage.setItem('ff_client_foundation_harness_v1', '1');
+      localStorage.setItem('ff_client_foundation_harness_v1', '1');
     } else if (v === '0') {
       sessionStorage.removeItem('ff_client_foundation_harness_v1');
+      localStorage.removeItem('ff_client_foundation_harness_v1');
     }
   } catch (eClientHarness) {}
 }
@@ -53707,7 +53709,7 @@ function hookSettingsGuard_DISABLED(){
   <script type="module" src="/booking/availability-store.js?v=20260822_avail"></script>
   <script src="/booking/clients/model.js?v=20260822_clients"></script>
   <script type="module" src="/booking/clients/data.js?v=20260822_clients"></script>
-  <script src="/booking/clients/harness.js?v=20260822_clients2"></script>
+  <script src="/booking/clients/harness.js?v=20260822_clients3"></script>
   <script src="/booking/shell.js?v=20260821_cal_foundation"></script>
   <script>
     (function () {
