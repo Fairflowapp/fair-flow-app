@@ -40,10 +40,10 @@
   --ff-cal-quarter-h: 18px;
   --ff-cal-header-h: 48px;
   --ff-cal-axis-pad: 8px;
-  --ff-cal-major: #e4e4e6;
-  --ff-cal-half: #eeeeef;
-  --ff-cal-quarter: #f5f5f6;
-  --ff-cal-divider: #d0d0d2;
+  --ff-cal-major: #eeeeef;
+  --ff-cal-half: #f4f4f5;
+  --ff-cal-quarter: #f8f8f9;
+  --ff-cal-divider: #e2e2e4;
   --ff-cal-ink: #1f1633;
   --ff-cal-muted: #6d657c;
   display: flex;
@@ -346,28 +346,7 @@
   right: 0;
   pointer-events: none;
   z-index: 0;
-}
-.ff-cal-off,
-.ff-cal-closed {
-  background-color: #fff;
-}
-.ff-cal-off {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    #fff 0,
-    #fff 9px,
-    #f3f3f4 9px,
-    #f3f3f4 10px
-  );
-}
-.ff-cal-closed {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    #fff 0,
-    #fff 7px,
-    #efeff0 7px,
-    #efeff0 8px
-  );
+  background: transparent;
 }
 .ff-cal-now {
   position: absolute;
