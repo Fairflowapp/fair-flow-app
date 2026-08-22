@@ -347,8 +347,12 @@
 }
 .ff-cal-off,
 .ff-cal-closed {
-  display: none;
-  background: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: #F5F5F7;
   background-image: none;
 }
 .ff-cal-now {

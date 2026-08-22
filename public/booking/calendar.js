@@ -14,6 +14,7 @@
 
   function state() { return window.ffBookingCalState || null; }
   function data() { return window.ffBookingCalData || null; }
+  function availability() { return window.ffBookingCalAvailability || null; }
   function time() { return window.ffBookingTime || null; }
   function layout() { return window.ffBookingCalLayout || null; }
 
@@ -55,13 +56,21 @@
   }
 
   function columnOverlayHtml(emp, axis) {
-    var dt = data();
-    if (!dt) return "";
-    var closed = dt.salonClosedWindows(
-      axis.startMin, axis.endMin, axis.salonStartMin, axis.salonEndMin, axis.salonOpen
-    );
-    var off = dt.employeeOffWindows(emp.working, axis.salonStartMin, axis.salonEndMin, axis.salonOpen);
-    return rangeHtml(off, axis, "ff-cal-off") + rangeHtml(closed, axis, "ff-cal-closed");
+    var av = availability();
+    var regions = av && typeof av.unavailableForProvider === "function"
+      ? av.unavailableForProvider(emp, axis)
+      : null;
+    if (!regions) {
+      var dt = data();
+      if (!dt) return "";
+      regions = {
+        closed: dt.salonClosedWindows(
+          axis.startMin, axis.endMin, axis.salonStartMin, axis.salonEndMin, axis.salonOpen
+        ),
+        off: dt.employeeOffWindows(emp.working, axis.salonStartMin, axis.salonEndMin, axis.salonOpen)
+      };
+    }
+    return rangeHtml(regions.off, axis, "ff-cal-off") + rangeHtml(regions.closed, axis, "ff-cal-closed");
   }
 
   function providerAvatarHtml(emp) {
