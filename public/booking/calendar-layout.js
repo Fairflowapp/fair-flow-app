@@ -16,7 +16,7 @@
     pixelsPerHour: 72,
     minColW: 144,
     timeW: 56,
-    headerH: 44,
+    headerH: 48,
     axisPadTop: 8,
     snapMin: 15
   });

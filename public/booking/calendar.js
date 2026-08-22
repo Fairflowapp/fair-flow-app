@@ -64,26 +64,37 @@
     return rangeHtml(off, axis, "ff-cal-off") + rangeHtml(closed, axis, "ff-cal-closed");
   }
 
-  function providerHeaderHtml(emp) {
-    var avatar = "";
-    if (typeof window.ffRenderUserAvatar === "function") {
-      avatar = window.ffRenderUserAvatar({
-        staffId: emp.id,
-        name: emp.name || emp.firstName,
-        photoURL: emp.photoURL,
-        avatarUrl: emp.photoURL,
-        size: 22,
-        className: "ff-cal-emp-avatar",
-        initialsMode: "single"
-      });
-    } else {
-      var initial = String(emp.firstName || "?").charAt(0).toUpperCase();
-      avatar = '<span class="ff-cal-emp-avatar ff-cal-emp-avatar-fallback">' + escapeHtml(initial) + "</span>";
+  function providerAvatarHtml(emp) {
+    var firstName = String(emp.firstName || "").trim() || "Staff";
+    var initial = firstName.charAt(0).toUpperCase();
+    var src = "";
+    if (typeof window.ffGetAvatarUrlForUser === "function") {
+      try {
+        src = String(window.ffGetAvatarUrlForUser({
+          staffId: emp.id,
+          name: emp.name || firstName,
+          photoURL: emp.photoURL,
+          avatarUrl: emp.photoURL
+        }) || "").trim();
+      } catch (_) {
+        src = "";
+      }
     }
+    if (!src) src = String(emp.photoURL || "").trim();
+    var fallback = '<span class="ff-cal-emp-avatar-fallback">' + escapeHtml(initial) + "</span>";
+    if (!src) return '<span class="ff-cal-emp-avatar">' + fallback + "</span>";
+    return '<span class="ff-cal-emp-avatar">' +
+      '<img src="' + escapeHtml(src) + '" alt="" onerror="this.style.display=\'none\';var n=this.nextElementSibling;if(n)n.removeAttribute(\'hidden\');">' +
+      '<span class="ff-cal-emp-avatar-fallback" hidden>' + escapeHtml(initial) + "</span>" +
+      "</span>";
+  }
+
+  function providerHeaderHtml(emp) {
+    var firstName = String(emp.firstName || "").trim() || "Staff";
     return '<button type="button" class="ff-cal-emp-btn" data-ff-cal-provider="' +
       escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false">' +
-      avatar +
-      '<span class="ff-cal-emp-label">' + escapeHtml(emp.firstName) + "</span>" +
+      providerAvatarHtml(emp) +
+      '<span class="ff-cal-emp-label">' + escapeHtml(firstName) + "</span>" +
       '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
       "</button>";
   }
