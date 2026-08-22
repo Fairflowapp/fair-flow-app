@@ -6354,6 +6354,29 @@ function ffCurrentUserHasStaffViewPermission() {
   return ffStaffHasStaffViewPermission(ffResolveCurrentStaffRowFromFfStaffV1());
 }
 
+/** Staff Members: Add/Edit/Archive — or owner/admin/manager role (same people who persist staff writes). */
+function ffStaffHasStaffManagePermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const roleLc = String(staff.role || '').toLowerCase().trim();
+  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager' || roleLc === 'assistant_manager'
+      || staff.isOwner === true || staff.isAdmin === true || staff.isManager === true) {
+    return true;
+  }
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.staff_manage));
+}
+
+function ffCurrentUserHasStaffManagePermission() {
+  if (ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasStaffManagePermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+
+function ffCurrentUserCanManageStaffPhoto() {
+  return ffCurrentUserHasStaffManagePermission();
+}
+window.ffCurrentUserHasStaffManagePermission = ffCurrentUserHasStaffManagePermission;
+window.ffCurrentUserCanManageStaffPhoto = ffCurrentUserCanManageStaffPhoto;
+
 /** Reorder control: staff.permissions.queue_reorder === true (Permissions tab: Show Reorder). */
 function ffStaffHasQueueReorderPermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -28915,6 +28938,20 @@ function initializeAppsPanel() {
         const avatarHtml = avatarUrl
           ? `<div style="width:40px;height:40px;border-radius:50%;overflow:hidden;flex-shrink:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);"><img src="${escapeHtml(avatarUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.outerHTML='<div style=&quot;width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;&quot;>${escapeHtml(initials)}</div>';"></div>`
           : `<div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;font-weight:600;flex-shrink:0;">${escapeHtml(initials)}</div>`;
+        const canManagePhoto = typeof window.ffCurrentUserCanManageStaffPhoto === 'function'
+          && window.ffCurrentUserCanManageStaffPhoto();
+        const avatarControlHtml = canManagePhoto
+          ? `<div class="ff-staff-details-avatar-wrap" style="position:relative;width:40px;height:40px;flex-shrink:0;">
+              ${avatarHtml}
+              <button type="button" id="staffDetailsAvatarEditBtn" style="position:absolute;bottom:-2px;right:-2px;width:20px;height:20px;border-radius:50%;background:#fff;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,0.12);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;z-index:2;" title="Change profile photo" aria-label="Change profile photo">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+              </button>
+              <input type="file" id="staffDetailsAvatarInput" accept="image/*" style="display:none;">
+            </div>`
+          : avatarHtml;
         const roleLabel = getStaffRoleLabel(staff);
         const invited = staff.invited === true;
         const isArchived = staff.isArchived === true;
@@ -28957,7 +28994,7 @@ function initializeAppsPanel() {
         headerEl.innerHTML = `
           <div class="ff-staff-details-header-row" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);position:relative;">
             <div class="ff-staff-details-main" style="display:flex;align-items:flex-start;gap:12px;flex:1;">
-              ${avatarHtml}
+              ${avatarControlHtml}
               <div class="ff-staff-details-text" style="flex:1;">
                 <h2 class="ff-staff-details-name" style="margin:0 0 4px 0;font-size:16px;font-weight:600;color:#111827;">${escapeHtml(staff.name)}</h2>
                 <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">${escapeHtml(roleLabel)}</p>
@@ -29032,6 +29069,10 @@ function initializeAppsPanel() {
           };
         }
         
+        if (typeof window.ffBindStaffDetailsAvatarUpload === 'function') {
+          window.ffBindStaffDetailsAvatarUpload(staff);
+        }
+
         // Wire up Send invite button (delegated on details container)
         if (detailsContainer && !detailsContainer.__ffInviteHandlerBound) {
           detailsContainer.__ffInviteHandlerBound = true;
@@ -29118,6 +29159,7 @@ function initializeAppsPanel() {
       console.error('[renderStaffDetails] Error rendering staff details:', error);
     }
   }
+  window.renderStaffDetails = renderStaffDetails;
   
   // Switch between tabs
   let currentTab = 'details';
@@ -53978,6 +54020,7 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
+  <script type="module" src="/staff-avatar-admin.js?v=20260822_staff_photo"></script>
   <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
   <script src="/safe-loader.js?v=20260818_staff_dur_ui"></script>
