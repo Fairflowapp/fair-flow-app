@@ -44,15 +44,48 @@
     return st;
   }
 
-  function offHtml(windows, axis) {
+  function rangeHtml(windows, axis, className) {
     var lay = layout();
-    var dt = data();
-    if (!lay || !dt) return "";
-    return dt.unavailableWindows(windows, axis.startMin, axis.endMin).map(function (win) {
+    if (!lay) return "";
+    return (windows || []).map(function (win) {
       var rect = lay.windowToRect(win.startMin, win.endMin, axis.startMin, axis.endMin);
       if (!rect) return "";
-      return '<div class="ff-cal-off" style="top:' + rect.top + "px;height:" + rect.height + 'px"></div>';
+      return '<div class="' + className + '" style="top:' + rect.top + "px;height:" + rect.height + 'px"></div>';
     }).join("");
+  }
+
+  function columnOverlayHtml(emp, axis) {
+    var dt = data();
+    if (!dt) return "";
+    var closed = dt.salonClosedWindows(
+      axis.startMin, axis.endMin, axis.salonStartMin, axis.salonEndMin, axis.salonOpen
+    );
+    var off = dt.employeeOffWindows(emp.working, axis.salonStartMin, axis.salonEndMin, axis.salonOpen);
+    return rangeHtml(off, axis, "ff-cal-off") + rangeHtml(closed, axis, "ff-cal-closed");
+  }
+
+  function providerHeaderHtml(emp) {
+    var avatar = "";
+    if (typeof window.ffRenderUserAvatar === "function") {
+      avatar = window.ffRenderUserAvatar({
+        staffId: emp.id,
+        name: emp.name || emp.firstName,
+        photoURL: emp.photoURL,
+        avatarUrl: emp.photoURL,
+        size: 22,
+        className: "ff-cal-emp-avatar",
+        initialsMode: "single"
+      });
+    } else {
+      var initial = String(emp.firstName || "?").charAt(0).toUpperCase();
+      avatar = '<span class="ff-cal-emp-avatar ff-cal-emp-avatar-fallback">' + escapeHtml(initial) + "</span>";
+    }
+    return '<button type="button" class="ff-cal-emp-btn" data-ff-cal-provider="' +
+      escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false">' +
+      avatar +
+      '<span class="ff-cal-emp-label">' + escapeHtml(emp.firstName) + "</span>" +
+      '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
+      "</button>";
   }
 
   function gridLineHtml(marks, axis, className) {
@@ -73,7 +106,7 @@
     var vp = root.querySelector("[data-ff-cal-viewport]");
     if (!shell || !board) return;
     lay.applyTokensToElement(shell);
-    var n = (st.getEmployees() || []).length;
+    var n = ((st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees() || []).length;
     var timeW = lay.tokens().timeW;
     var host = vp || root;
     var available = host.clientWidth > 0 ? Math.max(0, host.clientWidth - timeW) : 0;
@@ -94,12 +127,21 @@
       ev.clientX - rect.left,
       ev.clientY - rect.top,
       {
-        employees: st.getEmployees(),
+        employees: (st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees(),
         axis: st.getAxis(),
         dateKey: st.getSelectedDateKey(),
         columnWidth: lastColW
       }
     );
+  }
+
+  function bindViewportScroll(root) {
+    var vp = root && root.querySelector("[data-ff-cal-viewport]");
+    if (!vp || vp.getAttribute("data-ff-cal-scroll-bound")) return;
+    vp.setAttribute("data-ff-cal-scroll-bound", "1");
+    vp.addEventListener("scroll", function () {
+      if (window.ffBookingCalMenu) window.ffBookingCalMenu.close();
+    }, { passive: true });
   }
 
   function watchCanvas(root) {
@@ -118,7 +160,8 @@
     var lay = layout();
     if (!st || !tm || !lay || !root) return;
     var axis = st.getAxis();
-    var employees = st.getEmployees();
+    var employees = (st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees();
+    var focusedId = st.getFocusProviderId ? st.getFocusProviderId() : "";
     var height = lay.axisHeight(axis.startMin, axis.endMin);
     var hours = lay.hourMarks(axis.startMin, axis.endMin);
     var halves = lay.halfHourMarks(axis.startMin, axis.endMin);
@@ -140,12 +183,12 @@
     }).join("");
 
     var namesHtml = employees.map(function (emp) {
-      return '<div class="ff-cal-emp-name">' + escapeHtml(emp.firstName) + "</div>";
+      return providerHeaderHtml(emp);
     }).join("");
 
     var colsHtml = employees.map(function (emp) {
       return '<div class="ff-cal-col" data-ff-cal-emp="' + escapeHtml(emp.id) + '">' +
-        offHtml(emp.working, axis) +
+        columnOverlayHtml(emp, axis) +
       "</div>";
     }).join("");
 
@@ -171,6 +214,7 @@
             '<div class="ff-cal-date">' + escapeHtml(dateLabel) + "</div>" +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="next" aria-label="Next day">›</button>' +
             (closed ? '<span class="ff-cal-closed-note">Salon closed</span>' : "") +
+            (focusedId ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
           "</div>" +
           '<div class="ff-cal-toolbar-right">' +
             '<button type="button" class="ff-cal-filters" disabled title="Coming later">Filters</button>' +
@@ -201,7 +245,11 @@
     if (shell) lay.applyTokensToElement(shell);
     applyCanvasLayout(root);
     watchCanvas(root);
-    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length;
+    bindViewportScroll(root);
+    if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
+      window.ffBookingCalMenu.close();
+    }
+    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
   }
 
   function updateNowLine() {
@@ -263,6 +311,7 @@
     if (act === "today") st.goToday();
     else if (act === "prev") st.shiftDay(-1);
     else if (act === "next") st.shiftDay(1);
+    else if (act === "clear-focus") st.clearFocusProvider();
     else return;
     render({ keepScroll: false });
   }
@@ -275,10 +324,25 @@
       if (!t || typeof t.closest !== "function") return;
       var root = document.getElementById(ROOT_ID);
       if (!root || !root.contains(t)) return;
+      var st = state();
       var btn = t.closest("[data-ff-cal-act]");
       if (btn) {
         ev.preventDefault();
         onAction(btn.getAttribute("data-ff-cal-act"));
+        return;
+      }
+      var providerBtn = t.closest("[data-ff-cal-provider]");
+      if (providerBtn && window.ffBookingCalMenu) {
+        ev.preventDefault();
+        window.ffBookingCalMenu.open(providerBtn, {
+          providerId: providerBtn.getAttribute("data-ff-cal-provider"),
+          firstName: (st && st.getVisibleEmployees ? st.getVisibleEmployees() : []).reduce(function (name, emp) {
+            return emp.id === providerBtn.getAttribute("data-ff-cal-provider") ? emp.firstName : name;
+          }, ""),
+          dateKey: st ? st.getSelectedDateKey() : "",
+          locationId: st ? st.getLocationId() : "",
+          focusProviderId: st && st.getFocusProviderId ? st.getFocusProviderId() : ""
+        });
         return;
       }
       rememberSlot(ev, t.closest("[data-ff-cal-surface]"));

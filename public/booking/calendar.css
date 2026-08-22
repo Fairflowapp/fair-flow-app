@@ -37,11 +37,12 @@
   --ff-cal-hour-h: 72px;
   --ff-cal-half-h: 36px;
   --ff-cal-quarter-h: 18px;
-  --ff-cal-header-h: 36px;
+  --ff-cal-header-h: 44px;
   --ff-cal-axis-pad: 8px;
-  --ff-cal-major: #d4cce6;
-  --ff-cal-half: #e6e0f0;
-  --ff-cal-quarter: #f1ecf6;
+  --ff-cal-major: #d8d6dc;
+  --ff-cal-half: #ecebee;
+  --ff-cal-quarter: #f5f4f6;
+  --ff-cal-divider: #c4c1c8;
   --ff-cal-ink: #1f1633;
   --ff-cal-muted: #6d657c;
   display: flex;
@@ -108,13 +109,26 @@
   letter-spacing: -0.02em;
   color: #1f1633;
 }
-.ff-cal-closed-note {
+.ff-cal-closed-note,
+.ff-cal-clear-focus {
   font-size: 12px;
   font-weight: 600;
-  color: #7c3aed;
-  background: #f3e8ff;
   border-radius: 999px;
   padding: 5px 10px;
+}
+.ff-cal-closed-note {
+  color: #6b6574;
+  background: #eeeef1;
+}
+.ff-cal-clear-focus {
+  border: 1px solid #ddd6ee;
+  background: #fff;
+  color: #3b3354;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
 }
 .ff-cal-filters,
 .ff-cal-view-btn:disabled {
@@ -161,9 +175,9 @@
   top: 0;
   left: 0;
   z-index: 6;
-  background: #faf8fd;
+  background: #fafafa;
   border-bottom: 1px solid var(--ff-cal-major);
-  border-right: 1px solid #e8e3f0;
+  border-right: 1px solid var(--ff-cal-divider);
   box-shadow: 1px 1px 0 #fff;
 }
 .ff-cal-head {
@@ -179,18 +193,54 @@
   display: flex;
   width: var(--ff-cal-cols-w);
 }
-.ff-cal-emp-name {
+.ff-cal-emp-btn {
   box-sizing: border-box;
   flex: 0 0 var(--ff-cal-col-w);
   width: var(--ff-cal-col-w);
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--ff-cal-divider);
+  background: #fff;
+  color: #2a2140;
+  cursor: pointer;
+  font: inherit;
   font-size: 12px;
   font-weight: 650;
-  color: #2a2140;
-  border-right: 1px solid #eee9f5;
-  background: #fff;
+}
+.ff-cal-emp-btn:hover {
+  background: #fafafa;
+}
+.ff-cal-emp-avatar,
+.ff-cal-emp-avatar-fallback {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #f1f1f3;
+  color: #5b5566;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+}
+.ff-cal-emp-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-cal-emp-caret {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: #8b8594;
+  line-height: 1;
 }
 .ff-cal-times {
   position: sticky;
@@ -198,8 +248,8 @@
   z-index: 5;
   box-sizing: border-box;
   width: var(--ff-cal-time-w);
-  background: #faf8fd;
-  border-right: 1px solid #e8e3f0;
+  background: #fafafa;
+  border-right: 1px solid var(--ff-cal-divider);
 }
 .ff-cal-hour,
 .ff-cal-quarter {
@@ -227,9 +277,6 @@
   width: var(--ff-cal-canvas-w);
   min-width: var(--ff-cal-cols-w);
   background: #fff;
-}
-.ff-cal.is-closed .ff-cal-surface {
-  background: #faf8fc;
 }
 .ff-cal-cols {
   position: relative;
@@ -267,17 +314,23 @@
   box-sizing: border-box;
   flex: 0 0 var(--ff-cal-col-w);
   width: var(--ff-cal-col-w);
-  border-right: 1px solid #eee9f5;
-  background: transparent;
+  border-right: 1px solid var(--ff-cal-divider);
+  background: #fff;
   z-index: 0;
 }
-.ff-cal-off {
+.ff-cal-off,
+.ff-cal-closed {
   position: absolute;
   left: 0;
   right: 0;
-  background: #f8f7fa;
   pointer-events: none;
   z-index: 0;
+}
+.ff-cal-off {
+  background: #f2f2f4;
+}
+.ff-cal-closed {
+  background: #e8e8eb;
 }
 .ff-cal-now {
   position: absolute;
@@ -306,6 +359,42 @@
   color: var(--ff-cal-muted);
   font-size: 14px;
   line-height: 1.5;
+}
+
+.ff-cal-menu {
+  position: fixed;
+  z-index: 9900;
+  min-width: 212px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e6e4ea;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(31, 22, 51, 0.12);
+}
+.ff-cal-menu[hidden] {
+  display: none;
+}
+.ff-cal-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #2a2140;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.25;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ff-cal-menu-item:hover:not(:disabled) {
+  background: #f5f4f7;
+}
+.ff-cal-menu-item:disabled {
+  color: #9a94a3;
+  cursor: default;
 }
 
 @media (max-width: 720px) {

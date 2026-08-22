@@ -18,6 +18,8 @@
 (function () {
   var DEFAULT_OPEN = 9 * 60;
   var DEFAULT_CLOSE = 18 * 60;
+  var AXIS_PAD_MINUTES = 60;
+  var DAY_END = 24 * 60;
 
   function helpers() {
     return window.ffScheduleHelpers || null;
@@ -144,6 +146,23 @@
     return [{ startMin: start, endMin: end }];
   }
 
+  function salonClosedWindows(axisStartMin, axisEndMin, salonStartMin, salonEndMin, isOpen) {
+    var axisStart = Number(axisStartMin);
+    var axisEnd = Number(axisEndMin);
+    if (!isOpen) return [{ startMin: axisStart, endMin: axisEnd }];
+    var salonStart = Number(salonStartMin);
+    var salonEnd = Number(salonEndMin);
+    var out = [];
+    if (salonStart > axisStart) out.push({ startMin: axisStart, endMin: salonStart });
+    if (salonEnd < axisEnd) out.push({ startMin: salonEnd, endMin: axisEnd });
+    return out;
+  }
+
+  function employeeOffWindows(working, salonStartMin, salonEndMin, isOpen) {
+    if (!isOpen) return [];
+    return unavailableWindows(working, salonStartMin, salonEndMin);
+  }
+
   function unavailableWindows(working, axisStartMin, axisEndMin) {
     var start = Number(axisStartMin);
     var end = Number(axisEndMin);
@@ -185,12 +204,26 @@
     var start = entry ? parseMinutes(entry.openTime, api) : null;
     var end = entry ? parseMinutes(entry.closeTime, api) : null;
     var isOpen = !!(entry && entry.isOpen && start != null && end != null && end > start);
+    var salonStart = start != null ? start : DEFAULT_OPEN;
+    var salonEnd = end != null && end > salonStart ? end : DEFAULT_CLOSE;
+    if (salonEnd <= salonStart) {
+      salonStart = DEFAULT_OPEN;
+      salonEnd = DEFAULT_CLOSE;
+    }
+    var axisStart = Math.max(0, salonStart - AXIS_PAD_MINUTES);
+    var axisEnd = Math.min(DAY_END, salonEnd + AXIS_PAD_MINUTES);
+    if (axisEnd <= axisStart) {
+      axisStart = Math.max(0, salonStart - AXIS_PAD_MINUTES);
+      axisEnd = Math.min(DAY_END, salonEnd + AXIS_PAD_MINUTES);
+    }
     return {
       dayKey: dayKey,
       isOpen: isOpen,
-      startMin: isOpen ? start : DEFAULT_OPEN,
-      endMin: isOpen ? end : DEFAULT_CLOSE,
-      usedDefault: !isOpen
+      salonStartMin: salonStart,
+      salonEndMin: salonEnd,
+      startMin: axisStart,
+      endMin: axisEnd,
+      usedDefault: start == null || end == null
     };
   }
 
@@ -203,6 +236,8 @@
       return {
         id: String(staff.id || staff.staffId || staff.name || ""),
         firstName: firstNameOf(staff),
+        name: String(staff.name || staff.firstName || "").trim(),
+        photoURL: String(staff.avatarUrl || staff.photoURL || staff.photoUrl || staff.imageUrl || "").trim(),
         working: working
       };
     }).filter(function (row) {
@@ -219,7 +254,10 @@
     firstNameOf: firstNameOf,
     workingWindowsFor: workingWindowsFor,
     unavailableWindows: unavailableWindows,
+    salonClosedWindows: salonClosedWindows,
+    employeeOffWindows: employeeOffWindows,
     businessDayFor: businessDayFor,
-    loadCalendarEmployees: loadCalendarEmployees
+    loadCalendarEmployees: loadCalendarEmployees,
+    AXIS_PAD_MINUTES: AXIS_PAD_MINUTES
   };
 })();

@@ -11,9 +11,12 @@
   var view = VIEW_DAY;
   var locationId = "";
   var employees = [];
+  var focusProviderId = "";
   var businessHours = null;
-  var axisStartMin = 9 * 60;
-  var axisEndMin = 18 * 60;
+  var axisStartMin = 8 * 60;
+  var axisEndMin = 19 * 60;
+  var salonStartMin = 9 * 60;
+  var salonEndMin = 18 * 60;
   var salonOpen = true;
 
   function time() {
@@ -70,7 +73,31 @@
 
   function setEmployees(list) {
     employees = Array.isArray(list) ? list : [];
+    if (focusProviderId && !employees.some(function (emp) { return emp.id === focusProviderId; })) {
+      focusProviderId = "";
+    }
     return employees;
+  }
+
+  function getFocusProviderId() {
+    return focusProviderId || "";
+  }
+
+  function setFocusProviderId(next) {
+    var id = String(next || "").trim();
+    focusProviderId = id;
+    return focusProviderId;
+  }
+
+  function clearFocusProvider() {
+    focusProviderId = "";
+    return focusProviderId;
+  }
+
+  function getVisibleEmployees() {
+    if (!focusProviderId) return employees;
+    var focused = employees.filter(function (emp) { return emp.id === focusProviderId; });
+    return focused.length ? focused : employees;
   }
 
   function getBusinessHours() {
@@ -80,16 +107,24 @@
   function setBusinessDay(next) {
     businessHours = next && typeof next === "object" ? next : null;
     salonOpen = !!(businessHours && businessHours.isOpen);
-    axisStartMin = Number.isFinite(next && next.startMin) ? next.startMin : 9 * 60;
-    axisEndMin = Number.isFinite(next && next.endMin) ? next.endMin : 18 * 60;
+    salonStartMin = Number.isFinite(next && next.salonStartMin) ? next.salonStartMin : 9 * 60;
+    salonEndMin = Number.isFinite(next && next.salonEndMin) ? next.salonEndMin : 18 * 60;
+    axisStartMin = Number.isFinite(next && next.startMin) ? next.startMin : Math.max(0, salonStartMin - 60);
+    axisEndMin = Number.isFinite(next && next.endMin) ? next.endMin : salonEndMin + 60;
     if (axisEndMin <= axisStartMin) {
-      axisStartMin = 9 * 60;
-      axisEndMin = 18 * 60;
+      axisStartMin = Math.max(0, salonStartMin - 60);
+      axisEndMin = salonEndMin + 60;
     }
   }
 
   function getAxis() {
-    return { startMin: axisStartMin, endMin: axisEndMin, salonOpen: salonOpen };
+    return {
+      startMin: axisStartMin,
+      endMin: axisEndMin,
+      salonOpen: salonOpen,
+      salonStartMin: salonStartMin,
+      salonEndMin: salonEndMin
+    };
   }
 
   window.ffBookingCalState = {
@@ -104,6 +139,10 @@
     setLocationId: setLocationId,
     getEmployees: getEmployees,
     setEmployees: setEmployees,
+    getVisibleEmployees: getVisibleEmployees,
+    getFocusProviderId: getFocusProviderId,
+    setFocusProviderId: setFocusProviderId,
+    clearFocusProvider: clearFocusProvider,
     getBusinessHours: getBusinessHours,
     setBusinessDay: setBusinessDay,
     getAxis: getAxis
