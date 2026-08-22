@@ -9,11 +9,10 @@
  * If the active location is set and allowedLocationIds is a non-empty list,
  * the staff member must include that location.
  *
- * Working hours: staff.defaultSchedule / locationScheduleAvailability via
- * ffScheduleHelpers.getStaffDefaultScheduleForLocation. This is the weekly
- * template already stored on the employee. Published week shifts are not
- * loaded unless the user opened Schedule, so they are not the foundation
- * source. Appointment-level availability is out of scope for Step 2.
+ * Working hours come from the canonical Booking availability engine
+ * (ffBookingAvailability). That engine composes Operations business hours,
+ * specialBusinessDays, location-aware defaultSchedule, and approved Inbox
+ * schedule exceptions. Appointment conflicts are out of scope for V1.
  */
 (function () {
   var DEFAULT_OPEN = 9 * 60;
@@ -135,7 +134,25 @@
     return [{ startMin: win.startMin, endMin: win.endMin }];
   }
 
+  function intervalsToWindows(intervals) {
+    return (intervals || []).map(function (win) {
+      return { startMin: win.startMin, endMin: win.endMin };
+    }).filter(function (win) {
+      return Number.isFinite(win.startMin) && Number.isFinite(win.endMin) && win.endMin > win.startMin;
+    });
+  }
+
   function workingWindowsFor(staff, dateKey, locationId) {
+    var engine = window.ffBookingAvailability;
+    if (engine && typeof engine.resolveEffectiveProviderAvailability === "function") {
+      var resolved = engine.resolveEffectiveProviderAvailability(
+        staff && (staff.id || staff.staffId),
+        dateKey,
+        locationId,
+        { staff: staff }
+      );
+      return intervalsToWindows(resolved && resolved.intervals);
+    }
     var api = helpers();
     var time = window.ffBookingTime;
     var dayKey = time ? time.weekdayKey(dateKey) : "";
@@ -164,10 +181,13 @@
     return [{ startMin: start, endMin: end }];
   }
 
-  function salonClosedWindows(axisStartMin, axisEndMin, salonStartMin, salonEndMin, isOpen) {
+  function salonClosedWindows(axisStartMin, axisEndMin, salonStartMin, salonEndMin, isOpen, intervals) {
     var axisStart = Number(axisStartMin);
     var axisEnd = Number(axisEndMin);
     if (!isOpen) return [{ startMin: axisStart, endMin: axisEnd }];
+    if (Array.isArray(intervals) && intervals.length) {
+      return unavailableWindows(intervals, axisStart, axisEnd);
+    }
     var salonStart = Number(salonStartMin);
     var salonEnd = Number(salonEndMin);
     var out = [];
@@ -222,9 +242,26 @@
     return raw && typeof raw === "object" ? raw : null;
   }
 
-  function businessDayFor(dateKey) {
-    var time = window.ffBookingTime;
-    var dayKey = time ? time.weekdayKey(dateKey) : "";
+  function businessDayFor(dateKey, locationId) {
+    var engine = window.ffBookingAvailability;
+    var loc = String(locationId || currentLocationId() || "").trim();
+    if (engine && typeof engine.businessAxis === "function") {
+      var axis = engine.businessAxis(dateKey, loc);
+      var time = window.ffBookingTime;
+      return {
+        dayKey: time ? time.weekdayKey(dateKey) : "",
+        isOpen: !!axis.isOpen,
+        salonStartMin: axis.salonStartMin,
+        salonEndMin: axis.salonEndMin,
+        startMin: axis.startMin,
+        endMin: axis.endMin,
+        intervals: axis.intervals || [],
+        source: axis.source,
+        usedDefault: false
+      };
+    }
+    var timeLegacy = window.ffBookingTime;
+    var dayKey = timeLegacy ? timeLegacy.weekdayKey(dateKey) : "";
     var map = readBusinessHoursMap();
     var entry = map && dayKey ? map[dayKey] : null;
     var api = helpers();
@@ -250,6 +287,7 @@
       salonEndMin: salonEnd,
       startMin: axisStart,
       endMin: axisEnd,
+      intervals: isOpen ? [{ startMin: salonStart, endMin: salonEnd }] : [],
       usedDefault: start == null || end == null
     };
   }

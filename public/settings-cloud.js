@@ -444,6 +444,9 @@ function _applyMainSnapshot(data) {
     if (data.locationSchedules && typeof data.locationSchedules === "object") {
       window.settings.locationSchedules = data.locationSchedules;
     }
+    if (data.locationPreferences && typeof data.locationPreferences === "object") {
+      window.settings.locationPreferences = data.locationPreferences;
+    }
     const _pickField = (key) => {
       if (Object.prototype.hasOwnProperty.call(_locBucket, key) &&
           _locBucket[key] && typeof _locBucket[key] === 'object') {

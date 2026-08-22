@@ -1,11 +1,14 @@
 /**
- * Booking Calendar availability — one query surface for shading and later booking.
- * Hours come from calendar-data (salon businessHours + staff defaultSchedule).
- * Do not parse schedules here.
+ * Booking Calendar availability — thin visual adapter over the canonical engine.
+ * Do not parse Operations schedules here.
  */
 (function () {
   function data() {
     return window.ffBookingCalData || null;
+  }
+
+  function engine() {
+    return window.ffBookingAvailability || null;
   }
 
   function axisOf(axis) {
@@ -21,7 +24,8 @@
       ax.endMin,
       ax.salonStartMin,
       ax.salonEndMin,
-      ax.salonOpen
+      ax.salonOpen,
+      ax.intervals
     ) || [];
   }
 
@@ -59,6 +63,14 @@
   }
 
   function isBookableAt(emp, axis, minutes) {
+    var api = engine();
+    var st = window.ffBookingCalState;
+    if (api && st && emp && emp.id) {
+      return api.isProviderAvailableAt(emp.id, {
+        dateKey: st.getSelectedDateKey(),
+        minutes: minutes
+      }, st.getLocationId());
+    }
     return reasonAt(emp, axis, minutes) === "available";
   }
 

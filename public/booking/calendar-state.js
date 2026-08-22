@@ -18,6 +18,7 @@
   var salonStartMin = 9 * 60;
   var salonEndMin = 18 * 60;
   var salonOpen = true;
+  var salonIntervals = [];
 
   function time() {
     return window.ffBookingTime || null;
@@ -109,6 +110,7 @@
     salonOpen = !!(businessHours && businessHours.isOpen);
     salonStartMin = Number.isFinite(next && next.salonStartMin) ? next.salonStartMin : 9 * 60;
     salonEndMin = Number.isFinite(next && next.salonEndMin) ? next.salonEndMin : 18 * 60;
+    salonIntervals = Array.isArray(next && next.intervals) ? next.intervals : [];
     axisStartMin = Number.isFinite(next && next.startMin) ? next.startMin : Math.max(0, salonStartMin - 60);
     axisEndMin = Number.isFinite(next && next.endMin) ? next.endMin : salonEndMin + 60;
     if (axisEndMin <= axisStartMin) {
@@ -123,7 +125,8 @@
       endMin: axisEndMin,
       salonOpen: salonOpen,
       salonStartMin: salonStartMin,
-      salonEndMin: salonEndMin
+      salonEndMin: salonEndMin,
+      intervals: salonIntervals
     };
   }
 

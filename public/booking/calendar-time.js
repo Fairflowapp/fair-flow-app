@@ -3,9 +3,11 @@
  * All Calendar date/time reads go through here — do not scatter new Date()
  * assumptions in render code.
  *
- * Timezone source: settings.preferences.salonTimeZone when valid IANA,
- * otherwise the browser zone. Isolated so a later location-level zone
- * can replace this without touching the grid.
+ * Timezone source (existing Fair Flow chain, not a Booking setting):
+ * locationPreferences.{locationId}.salonTimeZone
+ * → preferences.salonTimeZone
+ * → browser zone
+ * → America/New_York
  */
 (function () {
   var FALLBACK_ZONE = "America/New_York";
@@ -23,7 +25,30 @@
     }
   }
 
-  function getTimeZone() {
+  function resolveLocationId(locationId) {
+    var loc = String(locationId || "").trim();
+    if (loc) return loc;
+    try {
+      if (typeof window.ffGetActiveLocationId === "function") {
+        loc = String(window.ffGetActiveLocationId() || "").trim();
+      }
+    } catch (_) {}
+    if (loc) return loc;
+    try {
+      return String(window.__ff_active_location_id || "").trim();
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function getTimeZone(locationId) {
+    var loc = resolveLocationId(locationId);
+    try {
+      var prefsMap = window.settings && window.settings.locationPreferences;
+      var locPrefs = loc && prefsMap && typeof prefsMap === "object" ? prefsMap[loc] : null;
+      var locZone = locPrefs && locPrefs.salonTimeZone ? String(locPrefs.salonTimeZone).trim() : "";
+      if (isValidTimeZone(locZone)) return locZone;
+    } catch (_) {}
     try {
       var raw = window.settings && window.settings.preferences && window.settings.preferences.salonTimeZone;
       var zone = String(raw || "").trim();
@@ -88,8 +113,18 @@
     return WEEKDAYS_LONG[utc.getUTCDay()] + ", " + MONTHS[utc.getUTCMonth()] + " " + p.d + ", " + p.y;
   }
 
-  function nowMinutes() {
-    var p = zonedParts(new Date(), getTimeZone());
+  function nowMinutes(locationId) {
+    var p = zonedParts(new Date(), getTimeZone(locationId));
+    return Number(p.hour) * 60 + Number(p.minute);
+  }
+
+  function zonedDateKey(date, locationId) {
+    var p = zonedParts(date instanceof Date ? date : new Date(date), getTimeZone(locationId));
+    return p.year + "-" + p.month + "-" + p.day;
+  }
+
+  function zonedMinutes(date, locationId) {
+    var p = zonedParts(date instanceof Date ? date : new Date(date), getTimeZone(locationId));
     return Number(p.hour) * 60 + Number(p.minute);
   }
 
@@ -116,6 +151,8 @@
     nowMinutes: nowMinutes,
     formatHourLabel: formatHourLabel,
     formatQuarterLabel: formatQuarterLabel,
-    parseDateKey: parseDateKey
+    parseDateKey: parseDateKey,
+    zonedDateKey: zonedDateKey,
+    zonedMinutes: zonedMinutes
   };
 })();

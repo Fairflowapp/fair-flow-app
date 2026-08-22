@@ -40,8 +40,11 @@
     if (!st.getSelectedDateKey()) st.goToday();
     st.setLocationId(dt.currentLocationId());
     var dateKey = st.getSelectedDateKey();
-    st.setBusinessDay(dt.businessDayFor(dateKey));
+    st.setBusinessDay(dt.businessDayFor(dateKey, st.getLocationId()));
     st.setEmployees(dt.loadCalendarEmployees(dateKey, st.getLocationId()));
+    if (window.ffBookingAvailabilityStore && typeof window.ffBookingAvailabilityStore.ensureLoaded === "function") {
+      window.ffBookingAvailabilityStore.ensureLoaded();
+    }
     return st;
   }
 
@@ -65,7 +68,7 @@
       if (!dt) return "";
       regions = {
         closed: dt.salonClosedWindows(
-          axis.startMin, axis.endMin, axis.salonStartMin, axis.salonEndMin, axis.salonOpen
+          axis.startMin, axis.endMin, axis.salonStartMin, axis.salonEndMin, axis.salonOpen, axis.intervals
         ),
         off: dt.employeeOffWindows(emp.working, axis.salonStartMin, axis.salonEndMin, axis.salonOpen)
       };
@@ -383,6 +386,9 @@
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-schedule-settings-changed", function () {
+      if (isCalendarVisible()) render({ keepScroll: true });
+    });
+    document.addEventListener("ff-booking-availability-changed", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-active-location-changed", function () {
