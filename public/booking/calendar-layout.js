@@ -1,44 +1,57 @@
 /**
  * Booking Calendar sizing + coordinates.
- * ONE token set — CSS and render both read these values.
- * 15-minute positioning: top = axisPadTop + (minutes - axisStart) * (hourH / 60).
+ * ONE token set for density, columns, and time→Y / duration→height.
+ *
+ * Y = axisPadTop + (minutesFromMidnight - axisStart) * (pixelsPerHour / 60)
+ * height = durationMinutes * (pixelsPerHour / 60)
+ *
+ * Column width is preferred (not stretched to fill leftover workspace),
+ * so a future right-side details panel can shrink the Calendar pane
+ * without changing provider-column proportions.
  */
 (function () {
   var TOKENS = Object.freeze({
-    minColW: 216,
-    timeW: 88,
-    hourH: 92,
-    headerH: 52,
-    axisPadTop: 14,
+    pixelsPerHour: 48,
+    preferredColW: 152,
+    minColW: 128,
+    maxColW: 168,
+    timeW: 52,
+    headerH: 36,
+    axisPadTop: 8,
     snapMin: 15
   });
 
   function tokens() {
     return {
+      pixelsPerHour: TOKENS.pixelsPerHour,
+      hourH: TOKENS.pixelsPerHour,
+      preferredColW: TOKENS.preferredColW,
       minColW: TOKENS.minColW,
+      maxColW: TOKENS.maxColW,
       timeW: TOKENS.timeW,
-      hourH: TOKENS.hourH,
       headerH: TOKENS.headerH,
       axisPadTop: TOKENS.axisPadTop,
       snapMin: TOKENS.snapMin,
-      qtrH: TOKENS.hourH / 4,
-      pxPerMinute: TOKENS.hourH / 60
+      halfH: TOKENS.pixelsPerHour / 2,
+      pxPerMinute: TOKENS.pixelsPerHour / 60
     };
   }
 
-  function columnWidth(employeeCount, availablePx) {
-    var n = Math.max(1, Number(employeeCount) || 0);
-    var available = Math.max(0, Number(availablePx) || 0);
-    return Math.max(TOKENS.minColW, available / n);
+  function columnWidth() {
+    return TOKENS.preferredColW;
   }
 
-  function columnsWidth(employeeCount, availablePx) {
-    return columnWidth(employeeCount, availablePx) * Math.max(1, Number(employeeCount) || 0);
+  function columnsWidth(employeeCount) {
+    return columnWidth() * Math.max(0, Number(employeeCount) || 0);
   }
 
   function minutesToTop(absMinutes, axisStartMin) {
     var t = tokens();
     return t.axisPadTop + (Number(absMinutes) - Number(axisStartMin)) * t.pxPerMinute;
+  }
+
+  function durationToHeight(durationMinutes) {
+    return Number(durationMinutes) * tokens().pxPerMinute;
   }
 
   function windowToRect(startMin, endMin, axisStartMin, axisEndMin) {
@@ -47,13 +60,13 @@
     if (!(end > start)) return null;
     return {
       top: minutesToTop(start, axisStartMin),
-      height: (end - start) * tokens().pxPerMinute
+      height: durationToHeight(end - start)
     };
   }
 
   function axisHeight(axisStartMin, axisEndMin) {
     var t = tokens();
-    return t.axisPadTop + Math.max(0, (Number(axisEndMin) - Number(axisStartMin)) * t.pxPerMinute);
+    return t.axisPadTop + durationToHeight(Number(axisEndMin) - Number(axisStartMin));
   }
 
   function hourMarks(axisStartMin, axisEndMin) {
@@ -63,13 +76,24 @@
     return marks;
   }
 
+  function halfHourMarks(axisStartMin, axisEndMin) {
+    var start = Math.ceil(Number(axisStartMin) / 30) * 30;
+    var marks = [];
+    for (var m = start; m < Number(axisEndMin); m += 30) {
+      if (m % 60 !== 0) marks.push(m);
+    }
+    return marks;
+  }
+
   function applyTokensToElement(el) {
     if (!el || !el.style) return;
     var t = tokens();
+    el.style.setProperty("--ff-cal-col-w", t.preferredColW + "px");
     el.style.setProperty("--ff-cal-min-col-w", t.minColW + "px");
+    el.style.setProperty("--ff-cal-max-col-w", t.maxColW + "px");
     el.style.setProperty("--ff-cal-time-w", t.timeW + "px");
     el.style.setProperty("--ff-cal-hour-h", t.hourH + "px");
-    el.style.setProperty("--ff-cal-qtr-h", t.qtrH + "px");
+    el.style.setProperty("--ff-cal-half-h", t.halfH + "px");
     el.style.setProperty("--ff-cal-header-h", t.headerH + "px");
     el.style.setProperty("--ff-cal-axis-pad", t.axisPadTop + "px");
   }
@@ -79,9 +103,11 @@
     columnWidth: columnWidth,
     columnsWidth: columnsWidth,
     minutesToTop: minutesToTop,
+    durationToHeight: durationToHeight,
     windowToRect: windowToRect,
     axisHeight: axisHeight,
     hourMarks: hourMarks,
+    halfHourMarks: halfHourMarks,
     applyTokensToElement: applyTokensToElement
   };
 })();

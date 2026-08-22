@@ -16,24 +16,28 @@
 }
 .ff-booking-page-calendar.is-active {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   overflow: hidden;
+  min-width: 0;
 }
 #ffBookingCalendarRoot {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   height: 100%;
 }
 
 .ff-cal {
-  --ff-cal-min-col-w: 216px;
-  --ff-cal-col-w: 216px;
-  --ff-cal-cols-w: 216px;
-  --ff-cal-time-w: 88px;
-  --ff-cal-hour-h: 92px;
-  --ff-cal-qtr-h: 23px;
-  --ff-cal-header-h: 52px;
-  --ff-cal-axis-pad: 14px;
+  --ff-cal-min-col-w: 128px;
+  --ff-cal-col-w: 152px;
+  --ff-cal-max-col-w: 168px;
+  --ff-cal-cols-w: 152px;
+  --ff-cal-time-w: 52px;
+  --ff-cal-hour-h: 48px;
+  --ff-cal-half-h: 24px;
+  --ff-cal-header-h: 36px;
+  --ff-cal-axis-pad: 8px;
   --ff-cal-major: #d9d3e8;
   --ff-cal-minor: #efeaf6;
   --ff-cal-ink: #1f1633;
@@ -42,6 +46,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   background: #f3f0f7;
   color: var(--ff-cal-ink);
 }
@@ -137,6 +142,7 @@
 .ff-cal-viewport {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   background: #f7f5fb;
 }
@@ -144,7 +150,8 @@
   display: grid;
   grid-template-columns: var(--ff-cal-time-w) var(--ff-cal-cols-w);
   grid-template-rows: var(--ff-cal-header-h) auto;
-  min-width: 100%;
+  width: calc(var(--ff-cal-time-w) + var(--ff-cal-cols-w));
+  min-width: calc(var(--ff-cal-time-w) + var(--ff-cal-cols-w));
   background: #fff;
 }
 .ff-cal-corner {
@@ -173,8 +180,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 650;
   color: #2a2140;
   border-right: 1px solid #eee9f5;
   background: #fff;
@@ -187,25 +194,15 @@
   width: var(--ff-cal-time-w);
   background: #faf8fd;
   border-right: 1px solid #e8e3f0;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--ff-cal-qtr-h) - 1px),
-    var(--ff-cal-minor) calc(var(--ff-cal-qtr-h) - 1px),
-    var(--ff-cal-minor) var(--ff-cal-qtr-h)
-  );
-  background-position: 0 var(--ff-cal-axis-pad);
-  background-repeat: repeat-y;
 }
 .ff-cal-hour {
   position: absolute;
-  left: 10px;
-  right: 10px;
+  left: 6px;
+  right: 8px;
   transform: translateY(-50%);
   text-align: right;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.01em;
+  font-size: 10px;
+  font-weight: 600;
   color: var(--ff-cal-muted);
   line-height: 1;
   white-space: nowrap;
@@ -216,15 +213,6 @@
   display: flex;
   width: var(--ff-cal-cols-w);
   background: #fff;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--ff-cal-qtr-h) - 1px),
-    var(--ff-cal-minor) calc(var(--ff-cal-qtr-h) - 1px),
-    var(--ff-cal-minor) var(--ff-cal-qtr-h)
-  );
-  background-position: 0 var(--ff-cal-axis-pad);
-  background-repeat: repeat-y;
 }
 .ff-cal-gridlines {
   position: absolute;
@@ -239,6 +227,13 @@
   height: 1px;
   background: var(--ff-cal-major);
 }
+.ff-cal-half-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--ff-cal-minor);
+}
 .ff-cal-col {
   position: relative;
   box-sizing: border-box;
@@ -252,7 +247,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  background: #f4f3f7;
+  background: #f8f7fa;
   pointer-events: none;
   z-index: 0;
 }

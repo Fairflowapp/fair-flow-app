@@ -98,7 +98,7 @@
     var suffix = h >= 12 ? "PM" : "AM";
     var hour12 = h % 12;
     if (hour12 === 0) hour12 = 12;
-    return hour12 + ":00 " + suffix;
+    return hour12 + " " + suffix;
   }
 
   window.ffBookingTime = {

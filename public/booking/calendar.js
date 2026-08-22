@@ -53,12 +53,12 @@
     }).join("");
   }
 
-  function hourLineHtml(marks, axis) {
+  function gridLineHtml(marks, axis, className) {
     var lay = layout();
     if (!lay) return "";
     return marks.map(function (min) {
       var top = lay.minutesToTop(min, axis.startMin);
-      return '<div class="ff-cal-hour-line" style="top:' + top + 'px"></div>';
+      return '<div class="' + className + '" style="top:' + top + 'px"></div>';
     }).join("");
   }
 
@@ -67,18 +67,14 @@
     var st = state();
     if (!lay || !st || !root) return;
     var shell = root.querySelector(".ff-cal");
-    var vp = root.querySelector("[data-ff-cal-viewport]");
     var board = root.querySelector("[data-ff-cal-board]");
-    if (!shell || !vp || !board) return;
+    if (!shell || !board) return;
     lay.applyTokensToElement(shell);
     var n = (st.getEmployees() || []).length;
     if (!n) return;
-    var t = lay.tokens();
-    var available = Math.max(0, vp.clientWidth - t.timeW);
-    var colW = lay.columnWidth(n, available);
-    var colsW = colW * n;
+    var colW = lay.columnWidth();
     board.style.setProperty("--ff-cal-col-w", colW + "px");
-    board.style.setProperty("--ff-cal-cols-w", colsW + "px");
+    board.style.setProperty("--ff-cal-cols-w", (colW * n) + "px");
   }
 
   function paint(root) {
@@ -90,6 +86,8 @@
     var employees = st.getEmployees();
     var height = lay.axisHeight(axis.startMin, axis.endMin);
     var marks = lay.hourMarks(axis.startMin, axis.endMin);
+    var halves = lay.halfHourMarks(axis.startMin, axis.endMin);
+    var linesHtml = gridLineHtml(halves, axis, "ff-cal-half-line") + gridLineHtml(marks, axis, "ff-cal-hour-line");
     var dateLabel = tm.formatDisplayDate(st.getSelectedDateKey());
     var closed = !axis.salonOpen;
 
@@ -144,9 +142,9 @@
           '<div class="ff-cal-board" data-ff-cal-board>' +
             '<div class="ff-cal-corner"></div>' +
             '<div class="ff-cal-emp-head">' + namesHtml + "</div>" +
-            '<div class="ff-cal-times" style="height:' + height + 'px">' + hourLineHtml(marks, axis) + timesHtml + "</div>" +
+            '<div class="ff-cal-times" style="height:' + height + 'px">' + linesHtml + timesHtml + "</div>" +
             '<div class="ff-cal-cols" style="height:' + height + 'px">' +
-              '<div class="ff-cal-gridlines" aria-hidden="true">' + hourLineHtml(marks, axis) + "</div>" +
+              '<div class="ff-cal-gridlines" aria-hidden="true">' + linesHtml + "</div>" +
               colsHtml + nowHtml +
             "</div>" +
           "</div>" +
