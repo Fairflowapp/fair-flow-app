@@ -93,18 +93,19 @@
 }
 .ff-cli-table th {
   text-align: left;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--sub, #6b7280);
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-bottom: 1px solid #eceef2;
 }
 .ff-cli-table td {
-  height: 50px;
-  padding: 0 10px;
+  height: 42px;
+  padding: 0 8px;
   border-bottom: 1px solid #f3f4f6;
+  font-size: 12px;
   color: var(--text, #111827);
   vertical-align: middle;
   overflow: hidden;
@@ -137,31 +138,27 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text, #111827);
 }
 .ff-cli-initials {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   border-radius: 50%;
   background: #f5f3ff;
   color: #1f1633;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 .ff-cli-phone,
-.ff-cli-email {
-  font-size: 12px;
-  color: var(--sub, #6b7280);
-  font-weight: 500;
-}
+.ff-cli-email,
 .ff-cli-updated {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--sub, #6b7280);
   font-weight: 500;
 }
