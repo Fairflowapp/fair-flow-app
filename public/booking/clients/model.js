@@ -32,7 +32,14 @@
 
   function isEmailLike(value) {
     var email = normalizeEmail(value);
-    return email.indexOf("@") > 0 && email.indexOf(".") > email.indexOf("@") + 1;
+    if (!email || /\s/.test(email)) return false;
+    var at = email.indexOf("@");
+    if (at <= 0 || at !== email.lastIndexOf("@")) return false;
+    var local = email.slice(0, at);
+    var domain = email.slice(at + 1);
+    if (!/^[a-z0-9._+-]+$/.test(local)) return false;
+    if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(domain)) return false;
+    return true;
   }
 
   function phoneDigits(value) {
