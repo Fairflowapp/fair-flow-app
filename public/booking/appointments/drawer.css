@@ -179,6 +179,16 @@ body:not(.ff-booking-area) .ff-appt {
   flex-direction: column;
   gap: 10px;
 }
+.ff-appt-new[hidden],
+.ff-appt-summary[hidden],
+.ff-appt-suggest[hidden],
+.ff-appt-chosen[hidden],
+.ff-appt-note[hidden],
+.ff-appt-cap[hidden],
+.ff-appt-error[hidden],
+.ff-appt-avatar[hidden] {
+  display: none !important;
+}
 .ff-appt-secondary {
   align-self: flex-start;
   background: #FFFFFF;
