@@ -69,15 +69,16 @@
     if (!rows.length) return '<div class="ff-cli-empty">No clients yet.</div>';
     return (
       '<table class="ff-cli-table">' +
-        "<thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Last updated</th></tr></thead>" +
+        "<thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Last updated</th><th></th></tr></thead>" +
         "<tbody>" +
         rows.map(function (row) {
           return '<tr class="ff-cli-row" data-ff-cli-id="' + escapeHtml(row.clientId) + '">' +
             '<td><span class="ff-cli-who"><span class="ff-cli-initials">' + escapeHtml(initials(row)) +
-            "</span>" + escapeHtml(row.displayName || "Client") + "</span></td>" +
-            '<td class="ff-cli-muted">' + escapeHtml(dash(row.phone)) + "</td>" +
-            '<td class="ff-cli-muted">' + escapeHtml(dash(row.email)) + "</td>" +
-            '<td class="ff-cli-muted">' + escapeHtml(formatUpdated(row.updatedAt || row.createdAt)) + "</td>" +
+            "</span><span class="ff-cli-name">' + escapeHtml(row.displayName || "Client") + "</span></span></td>" +
+            '<td class="ff-cli-phone">' + escapeHtml(dash(row.phone)) + "</td>" +
+            '<td class="ff-cli-email">' + escapeHtml(dash(row.email)) + "</td>" +
+            '<td class="ff-cli-updated">' + escapeHtml(formatUpdated(row.updatedAt || row.createdAt)) + "</td>" +
+            '<td class="ff-cli-more"><span class="ff-cli-dots" aria-hidden="true">⋮</span></td>' +
           "</tr>";
         }).join("") +
         "</tbody></table>"

@@ -32,8 +32,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 20px 24px 12px;
+  gap: 12px;
+  padding: 18px 22px 10px;
   flex: 0 0 auto;
 }
 .ff-cli-toolbar h1 {
@@ -47,23 +47,25 @@
   border: 0;
   background: var(--ff-brand-purple, #9d68b9);
   color: var(--ff-brand-text-on-brand, #fff);
-  border-radius: 10px;
-  padding: 10px 14px;
+  border-radius: 8px;
+  height: 36px;
+  padding: 0 12px;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
 }
 .ff-cli-search {
-  padding: 0 24px 16px;
+  padding: 0 22px 10px;
   flex: 0 0 auto;
 }
 .ff-cli-search input {
   width: 100%;
   box-sizing: border-box;
+  height: 38px;
   border: 1px solid var(--border, #e5e7eb);
-  border-radius: 10px;
-  padding: 12px 14px;
-  font-size: 15px;
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 13px;
   color: var(--text, #111827);
   background: #FFFFFF;
 }
@@ -76,63 +78,102 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 0 24px 24px;
+  padding: 0 22px 20px;
 }
 .ff-cli-empty {
-  padding: 48px 16px;
+  padding: 28px 12px;
   text-align: center;
   color: var(--sub, #6b7280);
-  font-size: 14px;
+  font-size: 13px;
 }
 .ff-cli-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 .ff-cli-table th {
   text-align: left;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--sub, #6b7280);
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
+  padding: 6px 10px;
+  border-bottom: 1px solid #eceef2;
 }
 .ff-cli-table td {
-  padding: 12px;
-  border-bottom: 1px solid var(--border, #e5e7eb);
-  font-size: 14px;
+  height: 50px;
+  padding: 0 10px;
+  border-bottom: 1px solid #f3f4f6;
   color: var(--text, #111827);
   vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.ff-cli-table th:nth-child(1),
+.ff-cli-table td:nth-child(1) { width: 38%; }
+.ff-cli-table th:nth-child(2),
+.ff-cli-table td:nth-child(2) { width: 20%; }
+.ff-cli-table th:nth-child(3),
+.ff-cli-table td:nth-child(3) { width: 26%; }
+.ff-cli-table th:nth-child(4),
+.ff-cli-table td:nth-child(4) { width: 14%; }
+.ff-cli-table th:nth-child(5),
+.ff-cli-table td:nth-child(5) { width: 36px; }
 .ff-cli-row {
   cursor: pointer;
 }
 .ff-cli-row:hover td {
-  background: #f5f3ff;
+  background: #f8f7fc;
 }
 .ff-cli-who {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 650;
+  gap: 8px;
+  min-width: 0;
+}
+.ff-cli-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #111827);
 }
 .ff-cli-initials {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   border-radius: 50%;
   background: #f5f3ff;
   color: #1f1633;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 600;
 }
-.ff-cli-muted {
+.ff-cli-phone,
+.ff-cli-email {
+  font-size: 12px;
   color: var(--sub, #6b7280);
   font-weight: 500;
+}
+.ff-cli-updated {
+  font-size: 12px;
+  color: var(--sub, #6b7280);
+  font-weight: 500;
+}
+.ff-cli-more {
+  text-align: center;
+}
+.ff-cli-dots {
+  display: inline-block;
+  color: #9ca3af;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: 0;
 }
 
 .ff-cli-drawer {
