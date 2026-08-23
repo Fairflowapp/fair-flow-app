@@ -1,5 +1,5 @@
 /**
- * Booking Clients V1 screen. Search-only list on top of ffBookingClients.
+ * Booking Clients V1 screen. Recent 50 + targeted search via ffBookingClients.
  * Does not load the clients collection.
  */
 (function () {
@@ -63,11 +63,10 @@
   }
 
   function bodyHtml() {
+    if (status === "loading") return '<div class="ff-cli-empty">Loading...</div>';
     if (status === "searching") return '<div class="ff-cli-empty">Searching...</div>';
     if (status === "empty") return '<div class="ff-cli-empty">No clients found.</div>';
-    if (status !== "results" || !rows.length) {
-      return '<div class="ff-cli-empty">Search clients by name, phone or email</div>';
-    }
+    if (!rows.length) return '<div class="ff-cli-empty">No clients yet.</div>';
     return (
       '<table class="ff-cli-table">' +
         "<thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Last updated</th></tr></thead>" +
@@ -107,14 +106,29 @@
     }
   }
 
+  async function loadRecent() {
+    var api = repo();
+    var gen = ++searchGen;
+    status = "loading";
+    paint();
+    var found = [];
+    try {
+      found = api && typeof api.getRecentClients === "function" ? await api.getRecentClients(50) : [];
+    } catch (_) {
+      found = [];
+    }
+    if (gen !== searchGen) return;
+    rows = found || [];
+    status = "recent";
+    paint();
+  }
+
   async function runSearch(raw) {
     var api = repo();
     var q = String(raw || "").trim();
     queryText = q;
     if (!q) {
-      rows = [];
-      status = "idle";
-      paint();
+      await loadRecent();
       return;
     }
     if (!api) {
@@ -184,14 +198,18 @@
       queryText = ev.target.value;
       scheduleSearch(ev.target.value);
     });
+    document.addEventListener("ff-booking-client-created", function () {
+      if (!isVisible()) return;
+      if (String(queryText || "").trim()) return;
+      loadRecent();
+    });
   }
 
   function refresh() {
     bind();
     if (!isVisible()) return;
-    paint();
-    var input = document.getElementById("ffCliSearch");
-    if (input && queryText) input.focus();
+    if (String(queryText || "").trim()) runSearch(queryText);
+    else loadRecent();
   }
 
   window.ffRefreshBookingClients = refresh;

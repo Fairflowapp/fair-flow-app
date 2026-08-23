@@ -10,6 +10,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -69,6 +70,12 @@ function requireModel() {
   const api = model();
   if (!api) throw new Error("Client model is not loaded.");
   return api;
+}
+
+function emitClientCreated(client) {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-booking-client-created", { detail: { client: client || null } }));
+  } catch (_) {}
 }
 
 async function getClientById(clientId, salonId) {
@@ -202,7 +209,19 @@ async function createClient(input) {
   };
   const ref = await addDoc(clientsRef(salonId), payload);
   const client = await getClientById(ref.id, salonId);
+  emitClientCreated(client);
   return { ok: true, created: true, duplicate: false, client };
+}
+
+async function getRecentClients(max) {
+  const salonId = requireSalon();
+  const cap = Math.min(50, Math.max(1, Number(max) || 50));
+  const snap = await getDocs(query(
+    clientsRef(salonId),
+    orderBy("updatedAt", "desc"),
+    limit(cap)
+  ));
+  return snap.docs.map(toClient);
 }
 
 async function updateClient(clientId, patch) {
@@ -256,6 +275,7 @@ async function updateClient(clientId, patch) {
 const api = {
   createClient,
   getClientById,
+  getRecentClients,
   searchClients,
   findClientByPhone,
   findClientByEmail,
@@ -268,6 +288,7 @@ window.ffBookingClients = api;
 export {
   createClient,
   getClientById,
+  getRecentClients,
   searchClients,
   findClientByPhone,
   findClientByEmail,

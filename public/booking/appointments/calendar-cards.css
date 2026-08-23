@@ -1,0 +1,37 @@
+.ff-cal-card {
+  position: absolute;
+  right: 4px;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  overflow: hidden;
+  border: 1px solid #c4b5fd;
+  border-left: 3px solid var(--ff-brand-purple, #9d68b9);
+  border-radius: 8px;
+  background: #f5f3ff;
+  color: #1f1633;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.25;
+  cursor: default;
+  z-index: 4;
+}
+.ff-cal-card-name,
+.ff-cal-card-svc,
+.ff-cal-card-time {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ff-cal-card-name {
+  font-weight: 700;
+}
+.ff-cal-card-svc {
+  color: #6d657c;
+  font-weight: 500;
+}
+.ff-cal-card-time {
+  color: #5b5566;
+  font-weight: 650;
+}

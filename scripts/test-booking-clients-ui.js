@@ -38,9 +38,12 @@ const dataSrc = fs.readFileSync(path.join(root, "public/booking/clients/data.js"
 check("repository still owns searchClients", dataSrc.includes("async function searchClients"));
 check("repository still owns createClient", dataSrc.includes("async function createClient"));
 check("repository still owns updateClient", dataSrc.includes("async function updateClient"));
+check("repository owns getRecentClients", dataSrc.includes("async function getRecentClients"));
+check("recent list is bounded to 50", dataSrc.includes("Math.min(50") && dataSrc.includes('orderBy("updatedAt", "desc")'));
 
 const uiSrc = fs.readFileSync(path.join(root, "public/booking/clients/ui.js"), "utf8");
 check("UI search goes through searchClients", uiSrc.includes("api.searchClients(q)"));
+check("UI recent list uses getRecentClients", uiSrc.includes("getRecentClients(50)"));
 check("UI never queries collection group", !uiSrc.includes("getDocs") && !uiSrc.includes("collection("));
 
 const drawerSrc = fs.readFileSync(path.join(root, "public/booking/clients/drawer.js"), "utf8");

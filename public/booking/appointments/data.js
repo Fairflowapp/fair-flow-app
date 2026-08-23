@@ -65,6 +65,14 @@ function toAppointment(docSnap) {
   return requireModel().fromDoc(docSnap.id, docSnap.data());
 }
 
+function emitAppointmentCreated(appointment) {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-booking-appointment-created", {
+      detail: { appointment: appointment || null },
+    }));
+  } catch (_) {}
+}
+
 function asTimestamp(value) {
   const date = requireModel().toDate(value);
   return date ? Timestamp.fromDate(date) : null;
@@ -385,6 +393,7 @@ async function createAppointment(data) {
   };
   const ref = await addDoc(appointmentsRef(salonId), payload);
   const appointment = await getAppointmentById(ref.id, salonId);
+  emitAppointmentCreated(appointment);
   return { ok: true, created: true, appointment };
 }
 

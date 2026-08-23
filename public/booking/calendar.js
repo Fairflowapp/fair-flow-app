@@ -316,6 +316,16 @@
       window.ffBookingCalMenu.close();
     }
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
+    if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
+    if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
+  }
+
+  async function syncAppointmentCards() {
+    var root = document.getElementById(ROOT_ID);
+    var st = state();
+    if (!root || !st || !window.ffBookingCalAppointments) return;
+    await window.ffBookingCalAppointments.loadForView(st.getSelectedDateKey(), st.getLocationId());
+    if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
     if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
   }
 
@@ -380,6 +390,7 @@
     if (keepScroll) restoreScroll(root, scroll.left, scroll.top);
     else restoreScroll(root, 0, initialScrollTop(st && st.getAxis ? st.getAxis() : null));
     startNowTimer();
+    syncAppointmentCards();
   }
 
   function onAction(act) {
@@ -401,6 +412,10 @@
       if (!t || typeof t.closest !== "function") return;
       var root = document.getElementById(ROOT_ID);
       if (!root || !root.contains(t)) return;
+      if (t.closest("[data-ff-cal-card]")) {
+        ev.preventDefault();
+        return;
+      }
       var st = state();
       var btn = t.closest("[data-ff-cal-act]");
       if (btn) {
@@ -438,6 +453,9 @@
     });
     document.addEventListener("ff-locations-updated", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
+    });
+    document.addEventListener("ff-booking-appointment-created", function () {
+      if (isCalendarVisible()) syncAppointmentCards();
     });
     if (!resizeBound) {
       resizeBound = true;
