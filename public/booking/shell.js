@@ -76,6 +76,13 @@
         "</section>"
       );
     }
+    if (id === "clients") {
+      return (
+        '<section class="ff-booking-page ff-booking-page-clients" data-ff-booking-page="clients">' +
+          '<div id="ffBookingClientsRoot"></div>' +
+        "</section>"
+      );
+    }
     var copy = COPY[id] || COPY.calendar;
     return (
       '<section class="ff-booking-page" data-ff-booking-page="' + id + '">' +
@@ -122,6 +129,9 @@
     if (section === "calendar" && typeof window.ffRefreshBookingCalendar === "function") {
       window.ffRefreshBookingCalendar();
     }
+    if (section === "clients" && typeof window.ffRefreshBookingClients === "function") {
+      window.ffRefreshBookingClients();
+    }
   }
 
   function closeAppointmentDrawer() {
@@ -132,9 +142,20 @@
     } catch (_) {}
   }
 
+  function closeClientsDrawer() {
+    try {
+      if (window.ffBookingClientsDrawer && typeof window.ffBookingClientsDrawer.forceClose === "function") {
+        window.ffBookingClientsDrawer.forceClose();
+      }
+    } catch (_) {}
+  }
+
   function applyArea(area) {
     var inBooking = area === "booking";
-    if (!inBooking) closeAppointmentDrawer();
+    if (!inBooking) {
+      closeAppointmentDrawer();
+      closeClientsDrawer();
+    }
     if (document.body) document.body.classList.toggle("ff-booking-area", inBooking);
     var workspace = document.getElementById(WORKSPACE_ID);
     if (workspace) {
@@ -162,6 +183,7 @@
     var st = state();
     if (!st || !st.isBooking()) return;
     if (next !== "calendar") closeAppointmentDrawer();
+    if (next !== "clients") closeClientsDrawer();
     paintSection(st.setSection(next));
   }
 
