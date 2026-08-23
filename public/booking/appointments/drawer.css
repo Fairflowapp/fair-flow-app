@@ -6,6 +6,10 @@
   z-index: 9858;
 }
 .ff-appt-backdrop.is-open { display: block; }
+body:not(.ff-booking-area) .ff-appt,
+body:not(.ff-booking-area) .ff-appt-backdrop {
+  display: none !important;
+}
 
 .ff-appt {
   position: fixed;

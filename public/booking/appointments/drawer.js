@@ -11,6 +11,13 @@
   function form() { return window.ffBookingAppointmentForm || null; }
   function clients() { return window.ffBookingClients || null; }
 
+  function isBookingCalendarVisible() {
+    var shell = window.ffBookingState;
+    if (!shell || !shell.isBooking() || shell.getSection() !== "calendar") return false;
+    if (!document.body || !document.body.classList.contains("ff-booking-area")) return false;
+    return !!document.getElementById("ffBookingCalendarRoot");
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value)
       .replace(/&/g, "&amp;")
@@ -297,9 +304,13 @@
     return !!(root && !root.hidden && root.classList.contains("is-open"));
   }
 
+  function forceClose() {
+    close(false);
+  }
+
   async function open(seed) {
     var api = form();
-    if (!api) return;
+    if (!api || !isBookingCalendarVisible()) return;
     ensureDom();
     captureScroll();
     state = api.emptyState({
@@ -386,6 +397,7 @@
   window.ffBookingAppointmentDrawer = {
     open: open,
     close: requestClose,
+    forceClose: forceClose,
     isOpen: isOpen,
     getState: function () { return state; }
   };

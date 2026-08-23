@@ -124,8 +124,17 @@
     }
   }
 
+  function closeAppointmentDrawer() {
+    try {
+      if (window.ffBookingAppointmentDrawer && typeof window.ffBookingAppointmentDrawer.forceClose === "function") {
+        window.ffBookingAppointmentDrawer.forceClose();
+      }
+    } catch (_) {}
+  }
+
   function applyArea(area) {
     var inBooking = area === "booking";
+    if (!inBooking) closeAppointmentDrawer();
     if (document.body) document.body.classList.toggle("ff-booking-area", inBooking);
     var workspace = document.getElementById(WORKSPACE_ID);
     if (workspace) {
@@ -152,6 +161,7 @@
   function setSection(next) {
     var st = state();
     if (!st || !st.isBooking()) return;
+    if (next !== "calendar") closeAppointmentDrawer();
     paintSection(st.setSection(next));
   }
 

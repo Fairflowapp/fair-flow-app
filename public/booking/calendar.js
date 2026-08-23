@@ -164,6 +164,7 @@
   }
 
   function openAppointmentFromHit(hit) {
+    if (!isCalendarVisible()) return;
     if (!hit || !hit.slot || !window.ffBookingAppointmentDrawer) return;
     var emp = (hit.employees || []).find(function (row) {
       return row && row.id === hit.slot.providerId;
