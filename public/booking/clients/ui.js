@@ -74,7 +74,7 @@
         rows.map(function (row) {
           return '<tr class="ff-cli-row" data-ff-cli-id="' + escapeHtml(row.clientId) + '">' +
             '<td><span class="ff-cli-who"><span class="ff-cli-initials">' + escapeHtml(initials(row)) +
-            "</span><span class="ff-cli-name">' + escapeHtml(row.displayName || "Client") + "</span></span></td>" +
+            '</span><span class="ff-cli-name">' + escapeHtml(row.displayName || "Client") + "</span></span></td>" +
             '<td class="ff-cli-phone">' + escapeHtml(dash(row.phone)) + "</td>" +
             '<td class="ff-cli-email">' + escapeHtml(dash(row.email)) + "</td>" +
             '<td class="ff-cli-updated">' + escapeHtml(formatUpdated(row.updatedAt || row.createdAt)) + "</td>" +
