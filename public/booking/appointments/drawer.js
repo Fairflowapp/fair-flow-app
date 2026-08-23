@@ -1,5 +1,5 @@
 /**
- * Schedule-a-visit panel. Lives inside the Booking workspace so the calendar
+ * New Appointment panel. Lives inside the Booking workspace so the calendar
  * stays visible and Operations never shows it. LIVE can stack above.
  */
 (function () {
@@ -7,9 +7,6 @@
   var searchTimer = null;
   var state = null;
   var lastScroll = null;
-  var CHIP_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  var CHIP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
   function form() { return window.ffBookingAppointmentForm || null; }
   function clients() { return window.ffBookingClients || null; }
 
@@ -34,14 +31,6 @@
       if (row && (row.name || row.label || row.title)) return row.name || row.label || row.title;
     } catch (_) {}
     return "This location";
-  }
-
-  function chipDate(dateKey) {
-    var tm = window.ffBookingTime;
-    var p = tm && tm.parseDateKey ? tm.parseDateKey(dateKey) : null;
-    if (!p) return dateKey || "";
-    var utc = new Date(Date.UTC(p.y, p.m - 1, p.d, 12, 0, 0));
-    return CHIP_DAYS[utc.getUTCDay()] + ", " + CHIP_MONTHS[p.m - 1] + " " + p.d;
   }
 
   function syncHold() {
@@ -109,23 +98,23 @@
     aside.hidden = true;
     aside.innerHTML =
       '<header class="ff-appt-head">' +
-        '<div>' +
-          '<h2 id="ffApptTitle">Schedule a visit</h2>' +
-          '<p class="ff-appt-place" id="ffApptPlace"></p>' +
-        "</div>" +
-        '<button type="button" class="ff-appt-close" data-ff-appt-act="close">Close</button>' +
+        '<h2 id="ffApptTitle">New Appointment</h2>' +
+        '<button type="button" class="ff-appt-x" data-ff-appt-act="close" aria-label="Close">×</button>' +
       "</header>" +
       '<form class="ff-appt-body" id="ffApptForm" novalidate>' +
-        '<div class="ff-appt-when">' +
-          '<label class="ff-appt-chip"><span class="ff-appt-chip-k">When</span><input id="ffApptDate" type="date"></label>' +
-          '<label class="ff-appt-chip"><span class="ff-appt-chip-k">Starts</span><select id="ffApptStart"></select></label>' +
-        "</div>" +
-        '<p class="ff-appt-with" id="ffApptWhenHint"></p>' +
         '<label class="ff-appt-field">' +
-          '<span>Guest</span>' +
-          '<input id="ffApptClientQ" type="search" autocomplete="off" placeholder="Find a guest by name or phone">' +
+          '<span>Location</span>' +
+          '<input id="ffApptLocation" type="text" readonly>' +
+        "</label>" +
+        '<div class="ff-appt-row">' +
+          '<label class="ff-appt-field"><span>Date</span><input id="ffApptDate" type="date"></label>' +
+          '<label class="ff-appt-field"><span>Start time</span><select id="ffApptStart"></select></label>' +
+        "</div>" +
+        '<label class="ff-appt-field">' +
+          '<span>Client</span>' +
+          '<input id="ffApptClientQ" type="search" autocomplete="off" placeholder="Search by name, phone or email">' +
           '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
-          '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ New guest</button>' +
+          '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ Add new client</button>' +
           '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
         "</label>" +
         '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
@@ -135,26 +124,35 @@
           "</div>" +
           '<label><span>Phone</span><input id="ffApptPhone" type="tel"></label>' +
           '<label><span>Email</span><input id="ffApptEmail" type="email"></label>' +
-          '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save guest</button>' +
+          '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save client</button>' +
           '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
         "</div>" +
         '<label class="ff-appt-field">' +
           '<span>Service</span>' +
           '<select id="ffApptService"></select>' +
         "</label>" +
+        '<div id="ffApptSummary" class="ff-appt-summary" hidden>' +
+          '<div><span>Duration</span><strong id="ffApptDur"></strong></div>' +
+          '<div><span>End time</span><strong id="ffApptEnd"></strong></div>' +
+          '<div><span>Price</span><strong id="ffApptPrice"></strong></div>' +
+        "</div>" +
+        '<div id="ffApptCap" class="ff-appt-cap" hidden></div>' +
         '<label class="ff-appt-field">' +
-          '<span>With</span>' +
-          '<select id="ffApptProvider"></select>' +
+          '<span>Provider</span>' +
+          '<div class="ff-appt-provider-row">' +
+            '<span id="ffApptProviderAvatar" class="ff-appt-avatar" hidden></span>' +
+            '<select id="ffApptProvider"></select>' +
+          "</div>" +
         "</label>" +
-        '<div class="ff-appt-meta" id="ffApptMeta"></div>' +
         '<label class="ff-appt-field">' +
-          '<span>Visit note</span>' +
-          '<textarea id="ffApptNotes" rows="2" maxlength="2000" placeholder="Optional"></textarea>' +
+          '<span>Notes (optional)</span>' +
+          '<textarea id="ffApptNotes" rows="2" maxlength="2000" placeholder="Add a note..."></textarea>' +
         "</label>" +
         '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
       "</form>" +
       '<footer class="ff-appt-foot">' +
-        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Save visit</button>' +
+        '<button type="button" class="ff-appt-ghost" data-ff-appt-act="close">Cancel</button>' +
+        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Create Appointment</button>' +
       "</footer>";
     host().appendChild(aside);
     bindDrawer(aside);
@@ -163,8 +161,7 @@
   function els() {
     return {
       root: document.getElementById(ROOT_ID),
-      place: document.getElementById("ffApptPlace"),
-      whenHint: document.getElementById("ffApptWhenHint"),
+      location: document.getElementById("ffApptLocation"),
       clientQ: document.getElementById("ffApptClientQ"),
       results: document.getElementById("ffApptClientResults"),
       chosen: document.getElementById("ffApptClientChosen"),
@@ -172,9 +169,14 @@
       clientMsg: document.getElementById("ffApptClientMsg"),
       service: document.getElementById("ffApptService"),
       provider: document.getElementById("ffApptProvider"),
+      avatar: document.getElementById("ffApptProviderAvatar"),
       date: document.getElementById("ffApptDate"),
       start: document.getElementById("ffApptStart"),
-      meta: document.getElementById("ffApptMeta"),
+      summary: document.getElementById("ffApptSummary"),
+      dur: document.getElementById("ffApptDur"),
+      end: document.getElementById("ffApptEnd"),
+      price: document.getElementById("ffApptPrice"),
+      cap: document.getElementById("ffApptCap"),
       notes: document.getElementById("ffApptNotes"),
       error: document.getElementById("ffApptError"),
       create: document.getElementById("ffApptCreate")
@@ -201,10 +203,17 @@
     ui.date.value = state.dateKey || "";
     ui.start.innerHTML = timeOptions(state.startMin);
     ui.notes.value = state.notes || "";
-    if (ui.place) ui.place.textContent = "At " + locationLabel(state.locationId);
-    if (ui.whenHint) {
-      ui.whenHint.textContent = chipDate(state.dateKey) +
-        (Number.isFinite(state.startMin) && form() ? " · " + form().formatMinutes(state.startMin) : "");
+    if (ui.location) ui.location.value = locationLabel(state.locationId);
+    var selected = providers.find(function (emp) { return emp.id === state.providerId; }) || null;
+    if (ui.avatar) {
+      var src = selected && selected.photoURL ? String(selected.photoURL).trim() : "";
+      if (src) {
+        ui.avatar.hidden = false;
+        ui.avatar.innerHTML = '<img src="' + escapeHtml(src) + '" alt="">';
+      } else {
+        ui.avatar.hidden = true;
+        ui.avatar.innerHTML = "";
+      }
     }
     if (state.client) {
       ui.chosen.hidden = false;
@@ -214,16 +223,20 @@
       ui.chosen.hidden = true;
       ui.chosen.textContent = "";
     }
-    var bits = [];
-    if (state.durationMinutes) bits.push(state.durationMinutes + " min");
-    if (state.endMin) bits.push("Ends " + api.formatMinutes(state.endMin));
-    if (state.service) bits.push(money(state.price));
-    ui.meta.textContent = bits.join(" · ");
-    if (state.capabilityMessage) ui.meta.textContent = state.capabilityMessage + (bits.length ? " · " + bits.join(" · ") : "");
+    if (ui.summary) ui.summary.hidden = !state.service;
+    if (state.service) {
+      if (ui.dur) ui.dur.textContent = state.durationMinutes ? state.durationMinutes + " min" : "—";
+      if (ui.end) ui.end.textContent = state.endMin ? api.formatMinutes(state.endMin) : "—";
+      if (ui.price) ui.price.textContent = money(state.price);
+    }
+    if (ui.cap) {
+      ui.cap.hidden = !state.capabilityMessage;
+      ui.cap.textContent = state.capabilityMessage || "";
+    }
     ui.error.hidden = !state.error;
     ui.error.textContent = state.error || "";
     ui.create.disabled = !api.canCreate(state) || state.creating;
-    ui.create.textContent = state.creating ? "Saving…" : "Save visit";
+    ui.create.textContent = state.creating ? "Creating…" : "Create Appointment";
     syncHold();
   }
 
@@ -318,7 +331,7 @@
     if (result && result.ok) {
       close(true);
       restoreScroll();
-      toast("Visit saved");
+      toast("Appointment created");
     }
   }
 

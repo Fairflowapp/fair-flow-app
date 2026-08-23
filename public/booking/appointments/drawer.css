@@ -5,12 +5,13 @@
   right: 0;
   bottom: 0;
   z-index: 30;
-  width: min(380px, 100%);
-  background: #fffaf6;
-  border-left: 1px solid #eadfd4;
-  box-shadow: -12px 0 28px rgba(61, 36, 16, 0.08);
+  width: min(420px, 100%);
+  background: #FFFFFF;
+  border-left: 1px solid var(--border, #e5e7eb);
+  box-shadow: -8px 0 20px rgba(17, 24, 39, 0.06);
   display: none;
   flex-direction: column;
+  color: var(--text, #111827);
 }
 .ff-appt.is-open { display: flex; }
 body:not(.ff-booking-area) .ff-appt {
@@ -20,82 +21,44 @@ body:not(.ff-booking-area) .ff-appt {
 .ff-appt-head,
 .ff-appt-foot {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  padding: 18px 20px 12px;
+  gap: 12px;
+  padding: 16px 20px;
   flex: 0 0 auto;
+}
+.ff-appt-head {
+  border-bottom: 1px solid var(--border, #e5e7eb);
 }
 .ff-appt-head h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: -0.03em;
-  color: #3b2414;
+  letter-spacing: -0.02em;
+  color: var(--text, #111827);
 }
-.ff-appt-place {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #8a6a4f;
-}
-.ff-appt-close {
+.ff-appt-x {
+  width: 32px;
+  height: 32px;
   border: 0;
   background: transparent;
-  color: #9a6b4a;
+  color: var(--sub, #6b7280);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 4px 0;
+  font-size: 22px;
+  line-height: 1;
+  border-radius: 8px;
+}
+.ff-appt-x:hover {
+  background: var(--muted, #f7f7f8);
+  color: var(--text, #111827);
 }
 .ff-appt-body {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 4px 20px 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-.ff-appt-when {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.ff-appt-chip {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #eadfd4;
-}
-.ff-appt-chip-k {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #b08968;
-}
-.ff-appt-chip input,
-.ff-appt-chip select {
-  border: 0;
-  background: transparent;
-  font-size: 14px;
-  font-weight: 650;
-  color: #3b2414;
-  padding: 0;
-}
-.ff-appt-chip input:focus,
-.ff-appt-chip select:focus {
-  outline: none;
-}
-.ff-appt-with {
-  margin: -4px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: #6b5340;
 }
 .ff-appt-field,
 .ff-appt-new label {
@@ -104,35 +67,63 @@ body:not(.ff-booking-area) .ff-appt {
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #8a6a4f;
+  color: var(--sub, #6b7280);
 }
 .ff-appt-field input,
 .ff-appt-field select,
 .ff-appt-field textarea,
 .ff-appt-new input {
-  border: 0;
-  border-bottom: 1px solid #eadfd4;
-  border-radius: 0;
-  padding: 8px 0;
-  font-size: 15px;
-  color: #3b2414;
-  background: transparent;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 9px 10px;
+  font-size: 14px;
+  color: var(--text, #111827);
+  background: #FFFFFF;
   font-weight: 500;
+}
+.ff-appt-field input[readonly] {
+  background: var(--muted, #f7f7f8);
+  color: var(--text, #111827);
 }
 .ff-appt-field input:focus,
 .ff-appt-field select:focus,
 .ff-appt-field textarea:focus,
 .ff-appt-new input:focus {
   outline: none;
-  border-bottom-color: #c2410c;
+  border-color: var(--ff-brand-purple, #9d68b9);
+  box-shadow: 0 0 0 3px rgba(157, 104, 185, 0.18);
 }
 .ff-appt-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.ff-appt-provider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ff-appt-provider-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ff-appt-avatar {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--muted, #f7f7f8);
+}
+.ff-appt-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
 .ff-appt-link,
 .ff-appt-secondary,
+.ff-appt-ghost,
 .ff-appt-primary {
   border: 0;
   background: transparent;
@@ -141,7 +132,7 @@ body:not(.ff-booking-area) .ff-appt {
 }
 .ff-appt-link {
   align-self: flex-start;
-  color: #c2410c;
+  color: var(--ff-brand-purple, #9d68b9);
   font-weight: 650;
   padding: 0;
 }
@@ -153,30 +144,33 @@ body:not(.ff-booking-area) .ff-appt {
 }
 .ff-appt-hit {
   border: 0;
-  background: #fff4e8;
+  background: var(--muted, #f7f7f8);
   text-align: left;
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
 }
+.ff-appt-hit:hover {
+  background: #f5f3ff;
+}
 .ff-appt-hit strong {
   display: block;
   font-size: 14px;
-  color: #3b2414;
+  color: var(--text, #111827);
 }
 .ff-appt-hit span {
   font-size: 12px;
-  color: #8a6a4f;
+  color: var(--sub, #6b7280);
 }
 .ff-appt-chosen,
-.ff-appt-meta,
-.ff-appt-note {
+.ff-appt-note,
+.ff-appt-cap {
   font-size: 13px;
-  color: #6b5340;
+  color: var(--text, #111827);
   font-weight: 500;
 }
 .ff-appt-error {
-  color: #b42318;
+  color: #b91c1c;
   font-size: 13px;
   font-weight: 600;
 }
@@ -187,25 +181,60 @@ body:not(.ff-booking-area) .ff-appt {
 }
 .ff-appt-secondary {
   align-self: flex-start;
-  background: #fff4e8;
+  background: #FFFFFF;
+  border: 1px solid var(--border, #e5e7eb);
+  color: var(--text, #111827);
   border-radius: 8px;
   padding: 8px 12px;
   font-weight: 650;
-  color: #9a3412;
+}
+.ff-appt-secondary:hover {
+  border-color: var(--ff-brand-purple, #9d68b9);
+}
+.ff-appt-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+.ff-appt-summary div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ff-appt-summary span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sub, #6b7280);
+}
+.ff-appt-summary strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text, #111827);
 }
 .ff-appt-foot {
-  align-items: stretch;
-  padding: 12px 20px 20px;
+  border-top: 1px solid var(--border, #e5e7eb);
+  padding: 12px 20px 16px;
+}
+.ff-appt-ghost {
+  background: #FFFFFF;
+  border: 1px solid var(--border, #e5e7eb);
+  color: var(--text, #111827);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 650;
+}
+.ff-appt-ghost:hover {
+  border-color: var(--ff-brand-purple, #9d68b9);
 }
 .ff-appt-primary {
-  width: 100%;
-  background: #c2410c;
-  color: #fff;
-  border-radius: 12px;
-  padding: 12px 16px;
-  font-weight: 700;
+  background: var(--ff-brand-purple, #9d68b9);
+  color: var(--ff-brand-text-on-brand, #fff);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 650;
 }
 .ff-appt-primary:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
