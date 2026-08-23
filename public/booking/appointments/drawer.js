@@ -1,21 +1,64 @@
 /**
- * New Appointment drawer. Calendar stays visible. LIVE can stack above.
+ * Schedule-a-visit panel. Lives inside the Booking workspace so the calendar
+ * stays visible and Operations never shows it. LIVE can stack above.
  */
 (function () {
   var ROOT_ID = "ffBookingApptDrawer";
-  var BACKDROP_ID = "ffBookingApptBackdrop";
   var searchTimer = null;
   var state = null;
   var lastScroll = null;
+  var CHIP_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var CHIP_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   function form() { return window.ffBookingAppointmentForm || null; }
   function clients() { return window.ffBookingClients || null; }
 
-  function isBookingCalendarVisible() {
+  function canOpenOnCalendar() {
+    var workspace = document.getElementById("ffBookingWorkspace");
+    if (workspace && workspace.hasAttribute("hidden")) return false;
     var shell = window.ffBookingState;
-    if (!shell || !shell.isBooking() || shell.getSection() !== "calendar") return false;
-    if (!document.body || !document.body.classList.contains("ff-booking-area")) return false;
+    if (shell && !shell.isBooking()) return false;
     return !!document.getElementById("ffBookingCalendarRoot");
+  }
+
+  function host() {
+    return document.getElementById("ffBookingWorkspace") || document.body;
+  }
+
+  function locationLabel(id) {
+    try {
+      var list = typeof window.ffGetLocations === "function" ? window.ffGetLocations() : [];
+      var row = (list || []).find(function (loc) {
+        return loc && (String(loc.id || "") === String(id) || String(loc.locationId || "") === String(id));
+      });
+      if (row && (row.name || row.label || row.title)) return row.name || row.label || row.title;
+    } catch (_) {}
+    return "This location";
+  }
+
+  function chipDate(dateKey) {
+    var tm = window.ffBookingTime;
+    var p = tm && tm.parseDateKey ? tm.parseDateKey(dateKey) : null;
+    if (!p) return dateKey || "";
+    var utc = new Date(Date.UTC(p.y, p.m - 1, p.d, 12, 0, 0));
+    return CHIP_DAYS[utc.getUTCDay()] + ", " + CHIP_MONTHS[p.m - 1] + " " + p.d;
+  }
+
+  function syncHold() {
+    if (!window.ffBookingCalDraft) return;
+    if (!state) {
+      window.ffBookingCalDraft.clear();
+      return;
+    }
+    window.ffBookingCalDraft.set({
+      providerId: state.providerId,
+      dateKey: state.dateKey,
+      startMin: state.startMin,
+      durationMinutes: state.durationMinutes || 30,
+      title: state.service && state.service.name
+        ? state.service.name
+        : ""
+    });
   }
 
   function escapeHtml(value) {
@@ -54,77 +97,74 @@
   }
 
   function ensureDom() {
-    if (!document.getElementById(BACKDROP_ID)) {
-      var backdrop = document.createElement("div");
-      backdrop.id = BACKDROP_ID;
-      backdrop.className = "ff-appt-backdrop";
-      backdrop.hidden = true;
-      backdrop.addEventListener("click", function () { requestClose(); });
-      document.body.appendChild(backdrop);
-    }
-    if (!document.getElementById(ROOT_ID)) {
-      var aside = document.createElement("aside");
-      aside.id = ROOT_ID;
-      aside.className = "ff-appt";
-      aside.setAttribute("role", "dialog");
-      aside.setAttribute("aria-labelledby", "ffApptTitle");
-      aside.setAttribute("aria-hidden", "true");
-      aside.hidden = true;
-      aside.innerHTML =
-        '<header class="ff-appt-head">' +
-          '<h2 id="ffApptTitle">New Appointment</h2>' +
-          '<button type="button" class="ff-appt-x" data-ff-appt-act="close" aria-label="Close">×</button>' +
-        "</header>" +
-        '<form class="ff-appt-body" id="ffApptForm" novalidate>' +
-          '<label class="ff-appt-field">' +
-            '<span>Client</span>' +
-            '<input id="ffApptClientQ" type="search" autocomplete="off" placeholder="Search name, phone, or email">' +
-            '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
-            '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ Add new client</button>' +
-            '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
-          "</label>" +
-          '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
-            '<div class="ff-appt-row">' +
-              '<label><span>First name</span><input id="ffApptFirst" type="text"></label>' +
-              '<label><span>Last name</span><input id="ffApptLast" type="text"></label>' +
-            "</div>" +
-            '<label><span>Phone</span><input id="ffApptPhone" type="tel"></label>' +
-            '<label><span>Email</span><input id="ffApptEmail" type="email"></label>' +
-            '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save client</button>' +
-            '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
-          "</div>" +
-          '<label class="ff-appt-field">' +
-            '<span>Service</span>' +
-            '<select id="ffApptService"></select>' +
-          "</label>" +
-          '<label class="ff-appt-field">' +
-            '<span>Provider</span>' +
-            '<select id="ffApptProvider"></select>' +
-          "</label>" +
+    var existing = document.getElementById(ROOT_ID);
+    if (existing && existing.parentNode !== host()) host().appendChild(existing);
+    if (existing) return;
+    var aside = document.createElement("aside");
+    aside.id = ROOT_ID;
+    aside.className = "ff-appt";
+    aside.setAttribute("role", "dialog");
+    aside.setAttribute("aria-labelledby", "ffApptTitle");
+    aside.setAttribute("aria-hidden", "true");
+    aside.hidden = true;
+    aside.innerHTML =
+      '<header class="ff-appt-head">' +
+        '<div>' +
+          '<h2 id="ffApptTitle">Schedule a visit</h2>' +
+          '<p class="ff-appt-place" id="ffApptPlace"></p>' +
+        "</div>" +
+        '<button type="button" class="ff-appt-close" data-ff-appt-act="close">Close</button>' +
+      "</header>" +
+      '<form class="ff-appt-body" id="ffApptForm" novalidate>' +
+        '<div class="ff-appt-when">' +
+          '<label class="ff-appt-chip"><span class="ff-appt-chip-k">When</span><input id="ffApptDate" type="date"></label>' +
+          '<label class="ff-appt-chip"><span class="ff-appt-chip-k">Starts</span><select id="ffApptStart"></select></label>' +
+        "</div>" +
+        '<p class="ff-appt-with" id="ffApptWhenHint"></p>' +
+        '<label class="ff-appt-field">' +
+          '<span>Guest</span>' +
+          '<input id="ffApptClientQ" type="search" autocomplete="off" placeholder="Find a guest by name or phone">' +
+          '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
+          '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ New guest</button>' +
+          '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
+        "</label>" +
+        '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
           '<div class="ff-appt-row">' +
-            '<label class="ff-appt-field"><span>Date</span><input id="ffApptDate" type="date"></label>' +
-            '<label class="ff-appt-field"><span>Start time</span><select id="ffApptStart"></select></label>' +
+            '<label><span>First name</span><input id="ffApptFirst" type="text"></label>' +
+            '<label><span>Last name</span><input id="ffApptLast" type="text"></label>' +
           "</div>" +
-          '<div class="ff-appt-meta" id="ffApptMeta"></div>' +
-          '<label class="ff-appt-field">' +
-            '<span>Notes</span>' +
-            '<textarea id="ffApptNotes" rows="2" maxlength="2000"></textarea>' +
-          "</label>" +
-          '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
-        "</form>" +
-        '<footer class="ff-appt-foot">' +
-          '<button type="button" class="ff-appt-ghost" data-ff-appt-act="close">Cancel</button>' +
-          '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Create Appointment</button>' +
-        "</footer>";
-      document.body.appendChild(aside);
-      bindDrawer(aside);
-    }
+          '<label><span>Phone</span><input id="ffApptPhone" type="tel"></label>' +
+          '<label><span>Email</span><input id="ffApptEmail" type="email"></label>' +
+          '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save guest</button>' +
+          '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
+        "</div>" +
+        '<label class="ff-appt-field">' +
+          '<span>Service</span>' +
+          '<select id="ffApptService"></select>' +
+        "</label>" +
+        '<label class="ff-appt-field">' +
+          '<span>With</span>' +
+          '<select id="ffApptProvider"></select>' +
+        "</label>" +
+        '<div class="ff-appt-meta" id="ffApptMeta"></div>' +
+        '<label class="ff-appt-field">' +
+          '<span>Visit note</span>' +
+          '<textarea id="ffApptNotes" rows="2" maxlength="2000" placeholder="Optional"></textarea>' +
+        "</label>" +
+        '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
+      "</form>" +
+      '<footer class="ff-appt-foot">' +
+        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Save visit</button>' +
+      "</footer>";
+    host().appendChild(aside);
+    bindDrawer(aside);
   }
 
   function els() {
     return {
       root: document.getElementById(ROOT_ID),
-      backdrop: document.getElementById(BACKDROP_ID),
+      place: document.getElementById("ffApptPlace"),
+      whenHint: document.getElementById("ffApptWhenHint"),
       clientQ: document.getElementById("ffApptClientQ"),
       results: document.getElementById("ffApptClientResults"),
       chosen: document.getElementById("ffApptClientChosen"),
@@ -161,6 +201,11 @@
     ui.date.value = state.dateKey || "";
     ui.start.innerHTML = timeOptions(state.startMin);
     ui.notes.value = state.notes || "";
+    if (ui.place) ui.place.textContent = "At " + locationLabel(state.locationId);
+    if (ui.whenHint) {
+      ui.whenHint.textContent = chipDate(state.dateKey) +
+        (Number.isFinite(state.startMin) && form() ? " · " + form().formatMinutes(state.startMin) : "");
+    }
     if (state.client) {
       ui.chosen.hidden = false;
       ui.chosen.textContent = (state.client.displayName || "Client") +
@@ -178,7 +223,8 @@
     ui.error.hidden = !state.error;
     ui.error.textContent = state.error || "";
     ui.create.disabled = !api.canCreate(state) || state.creating;
-    ui.create.textContent = state.creating ? "Creating…" : "Create Appointment";
+    ui.create.textContent = state.creating ? "Saving…" : "Save visit";
+    syncHold();
   }
 
   function showClientResults(rows) {
@@ -272,7 +318,7 @@
     if (result && result.ok) {
       close(true);
       restoreScroll();
-      toast("Appointment created");
+      toast("Visit saved");
     }
   }
 
@@ -290,13 +336,9 @@
     ui.root.hidden = true;
     ui.root.setAttribute("aria-hidden", "true");
     ui.root.classList.remove("is-open");
-    if (ui.backdrop) {
-      ui.backdrop.hidden = true;
-      ui.backdrop.classList.remove("is-open");
-    }
-    if (!success) state = null;
-    else state = null;
+    state = null;
     showClientResults([]);
+    if (window.ffBookingCalDraft) window.ffBookingCalDraft.clear();
   }
 
   function isOpen() {
@@ -310,7 +352,7 @@
 
   async function open(seed) {
     var api = form();
-    if (!api || !isBookingCalendarVisible()) return;
+    if (!api || !canOpenOnCalendar()) return;
     ensureDom();
     captureScroll();
     state = api.emptyState({
@@ -323,11 +365,10 @@
     ui.root.hidden = false;
     ui.root.classList.add("is-open");
     ui.root.setAttribute("aria-hidden", "false");
-    ui.backdrop.hidden = false;
-    ui.backdrop.classList.add("is-open");
     ui.clientQ.value = "";
     ui.newBox.hidden = true;
     showClientResults([]);
+    syncHold();
     await api.refreshServices(state);
     paint();
     setTimeout(function () { ui.clientQ.focus(); }, 20);

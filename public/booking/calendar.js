@@ -143,6 +143,14 @@
     board.style.setProperty("--ff-cal-canvas-w", canvasW + "px");
   }
 
+  function columnWidth(surface) {
+    if (lastColW > 0) return lastColW;
+    var board = surface && surface.closest ? surface.closest("[data-ff-cal-board]") : null;
+    var raw = board ? getComputedStyle(board).getPropertyValue("--ff-cal-col-w") : "";
+    var n = parseFloat(raw);
+    return n > 0 ? n : lastColW;
+  }
+
   function rememberSlot(ev, surface) {
     var lay = layout();
     var st = state();
@@ -156,11 +164,18 @@
         employees: employees,
         axis: st.getAxis(),
         dateKey: st.getSelectedDateKey(),
-        columnWidth: lastColW
+        columnWidth: columnWidth(surface)
       }
     );
     window.ffBookingCalLastSlot = slot;
     return slot ? { slot: slot, employees: employees, axis: st.getAxis(), locationId: st.getLocationId() } : null;
+  }
+
+  function slotIsOpen(emp, axis, minutes) {
+    var av = availability();
+    if (!av) return false;
+    if (typeof av.reasonAt === "function") return av.reasonAt(emp, axis, minutes) === "available";
+    return typeof av.isBookableAt === "function" && av.isBookableAt(emp, axis, minutes);
   }
 
   function openAppointmentFromHit(hit) {
@@ -169,11 +184,15 @@
     var emp = (hit.employees || []).find(function (row) {
       return row && row.id === hit.slot.providerId;
     });
-    var av = availability();
-    var bookable = av && typeof av.isBookableAt === "function"
-      ? av.isBookableAt(emp, hit.axis, hit.slot.startMin)
-      : false;
-    if (!bookable) return;
+    if (!slotIsOpen(emp, hit.axis, hit.slot.startMin)) return;
+    if (window.ffBookingCalDraft) {
+      window.ffBookingCalDraft.set({
+        providerId: hit.slot.providerId,
+        dateKey: hit.slot.dateKey,
+        startMin: hit.slot.startMin,
+        durationMinutes: 30
+      });
+    }
     window.ffBookingAppointmentDrawer.open({
       providerId: hit.slot.providerId,
       dateKey: hit.slot.dateKey,
@@ -297,6 +316,7 @@
       window.ffBookingCalMenu.close();
     }
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
+    if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
   }
 
   function updateNowLine() {
