@@ -195,3 +195,69 @@ body:not(.ff-booking-area) .ff-apd { display: none !important; }
 .ff-apd #ffApdEdit .ff-appt-field {
   width: 100%;
 }
+.ff-apd-danger-text {
+  border: 0;
+  background: transparent;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 8px 0;
+  cursor: pointer;
+}
+.ff-apd-danger-text:hover {
+  color: #912018;
+}
+.ff-apd-danger-text[hidden],
+.ff-apd-primary[hidden],
+.ff-apd-ghost[hidden] {
+  display: none !important;
+}
+.ff-apd-confirm {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 16px 20px 18px;
+  background: #FFFFFF;
+  border-top: 1px solid var(--border, #e5e7eb);
+  box-shadow: 0 -8px 20px rgba(17, 24, 39, 0.06);
+}
+.ff-apd-confirm[hidden] {
+  display: none !important;
+}
+.ff-apd-confirm h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text, #111827);
+}
+.ff-apd-confirm p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--sub, #6b7280);
+  line-height: 1.45;
+}
+.ff-apd-confirm-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+.ff-apd-danger {
+  background: #FFFFFF;
+  border: 1px solid #fecaca;
+  color: #b42318;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ff-apd-danger:hover {
+  border-color: #f97066;
+}
+.ff-apd-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

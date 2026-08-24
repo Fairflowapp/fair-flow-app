@@ -115,6 +115,24 @@ const emailOnly = details.viewFrom({
 check("email fallback", emailOnly.clientSecondary === "shiri@example.com");
 check("empty notes", emailOnly.notesEmpty === true);
 
+const cancelled = details.viewFrom({
+  appointmentId: "appt_3",
+  status: "cancelled",
+  locationId: "locA",
+  dateKey: "2026-08-24",
+  notes: "",
+  cancellationReason: "  Client asked  ",
+  clientSnapshot: { displayName: "Shiri A", phone: "9546306513" },
+  serviceLines: appointment.serviceLines
+}, "line_1");
+check("cancelled status label", cancelled.statusLabel === "Cancelled" && cancelled.isCancelled === true);
+check("cancellation reason shown", cancelled.cancellationReason === "Client asked");
+
+const repoSrc = fs.readFileSync(path.join(root, "public/booking/appointments/data.js"), "utf8");
+check("cancel does not delete the appointment", repoSrc.indexOf("deleteDoc") === -1);
+check("cancel writes status cancelled", /status:\s*"cancelled"/.test(repoSrc));
+check("cancel is idempotent for already-cancelled", repoSrc.indexOf("alreadyCancelled") !== -1);
+
 const holdSrc = fs.readFileSync(path.join(root, "public/booking/calendar-draft.js"), "utf8");
 check("hold is not a calendar card", holdSrc.indexOf("data-ff-cal-card") === -1);
 check("hold keeps its own marker", holdSrc.indexOf("data-ff-cal-hold") !== -1);

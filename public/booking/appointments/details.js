@@ -16,6 +16,7 @@
   var current = null;
   var mode = "view";
   var edit = null;
+  var cancelling = false;
 
   function live() { return window.ffBookingDrawerLive || null; }
   function calAppts() { return window.ffBookingCalAppointments || null; }
@@ -188,7 +189,10 @@
       locationLabel: locationLabel(locationId) || "—",
       notes: notes,
       notesEmpty: !notes,
-      statusLabel: statusLabel(appointment && appointment.status)
+      status: trim(appointment && appointment.status) || "scheduled",
+      statusLabel: statusLabel(appointment && appointment.status),
+      isCancelled: trim(appointment && appointment.status) === "cancelled",
+      cancellationReason: trim(appointment && appointment.cancellationReason)
     };
   }
 
@@ -265,7 +269,17 @@
       avatar: document.getElementById("ffApdProviderAvatar"),
       notesIn: document.getElementById("ffApdNotesIn"),
       error: document.getElementById("ffApdError"),
-      save: document.getElementById("ffApdSave")
+      save: document.getElementById("ffApdSave"),
+      reasonRow: document.getElementById("ffApdReasonRow"),
+      reason: document.getElementById("ffApdReason"),
+      confirm: document.getElementById("ffApdCancel"),
+      confirmReason: document.getElementById("ffApdCancelReason"),
+      confirmError: document.getElementById("ffApdCancelError"),
+      confirmKeep: document.getElementById("ffApdKeep"),
+      confirmGo: document.getElementById("ffApdConfirmCancel"),
+      cancelBtn: document.getElementById("ffApdCancelBtn"),
+      editBtn: document.getElementById("ffApdEditBtn"),
+      closeCancelled: document.getElementById("ffApdCloseCancelled")
     };
   }
 
@@ -283,6 +297,10 @@
     ui.notes.classList.toggle("is-empty", view.notesEmpty);
     ui.statusRow.hidden = !view.statusLabel;
     ui.status.textContent = view.statusLabel;
+    if (ui.reasonRow) {
+      ui.reasonRow.hidden = !view.isCancelled || !view.cancellationReason;
+      if (ui.reason) ui.reason.textContent = view.cancellationReason;
+    }
   }
 
   function paintEdit(ui) {
@@ -330,18 +348,29 @@
     var ui = els();
     if (!ui.root || !current || !current.appointment) return;
     var editing = mode === "edit" && edit;
+    var confirming = mode === "cancel";
+    var cancelled = trim(current.appointment.status) === "cancelled";
     ui.title.textContent = editing ? "Edit Appointment" : "Appointment Details";
     ui.view.hidden = !!editing;
     ui.edit.hidden = !editing;
-    ui.footView.hidden = !!editing;
+    ui.footView.hidden = !!editing || confirming;
     ui.footEdit.hidden = !editing;
+    if (ui.confirm) ui.confirm.hidden = !confirming;
+    if (ui.cancelBtn) ui.cancelBtn.hidden = cancelled;
+    if (ui.editBtn) ui.editBtn.hidden = cancelled;
+    if (ui.closeCancelled) ui.closeCancelled.hidden = !cancelled;
+    if (ui.confirmGo) {
+      ui.confirmGo.disabled = !!cancelling;
+      ui.confirmGo.textContent = cancelling ? "Cancelling…" : "Cancel Appointment";
+    }
+    if (ui.confirmKeep) ui.confirmKeep.disabled = !!cancelling;
     paintView(ui, viewFrom(current.appointment, current.lineId));
     if (editing) paintEdit(ui);
   }
 
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
-    if (existing && !document.getElementById("ffApdEdit")) {
+    if (existing && (!document.getElementById("ffApdEdit") || !document.getElementById("ffApdCancel"))) {
       existing.parentNode.removeChild(existing);
       existing = null;
     }
@@ -374,6 +403,7 @@
           '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdLocation" class="ff-apd-value"></div></div>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Notes</span><div id="ffApdNotes" class="ff-apd-notes"></div></div>' +
           '<div id="ffApdStatusRow" class="ff-apd-field"><span class="ff-apd-label">Status</span><div id="ffApdStatus" class="ff-apd-value"></div></div>' +
+          '<div id="ffApdReasonRow" class="ff-apd-field" hidden><span class="ff-apd-label">Cancellation reason</span><div id="ffApdReason" class="ff-apd-notes"></div></div>' +
         "</div>" +
         '<div id="ffApdEdit" hidden>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Client</span><div id="ffApdEditClient"></div></div>' +
@@ -399,10 +429,21 @@
           '<label class="ff-appt-field"><span>Notes</span><textarea id="ffApdNotesIn" rows="3" maxlength="2000" placeholder="Add a note..."></textarea></label>' +
           '<div id="ffApdError" class="ff-apd-error" hidden></div>' +
         "</div>" +
+        '<div id="ffApdCancel" class="ff-apd-confirm" hidden>' +
+          "<h3>Cancel appointment?</h3>" +
+          "<p>This will remove the appointment from the active calendar, but it will remain in the client's appointment history.</p>" +
+          '<label class="ff-appt-field"><span>Cancellation reason (optional)</span><textarea id="ffApdCancelReason" rows="2" maxlength="2000"></textarea></label>' +
+          '<div id="ffApdCancelError" class="ff-apd-error" hidden></div>' +
+          '<div class="ff-apd-confirm-actions">' +
+            '<button type="button" class="ff-apd-ghost" id="ffApdKeep" data-ff-apd-act="keep">Keep Appointment</button>' +
+            '<button type="button" class="ff-apd-danger" id="ffApdConfirmCancel" data-ff-apd-act="confirm-cancel">Cancel Appointment</button>' +
+          "</div>" +
+        "</div>" +
       "</div>" +
       '<footer id="ffApdFootView" class="ff-apd-foot">' +
-        '<button type="button" class="ff-apd-ghost" data-ff-apd-act="close">Close</button>' +
-        '<button type="button" class="ff-apd-primary" data-ff-apd-act="edit">Edit Appointment</button>' +
+        '<button type="button" class="ff-apd-danger-text" id="ffApdCancelBtn" data-ff-apd-act="ask-cancel">Cancel Appointment</button>' +
+        '<button type="button" class="ff-apd-ghost" id="ffApdCloseCancelled" data-ff-apd-act="close" hidden>Close</button>' +
+        '<button type="button" class="ff-apd-primary" id="ffApdEditBtn" data-ff-apd-act="edit">Edit Appointment</button>' +
       "</footer>" +
       '<footer id="ffApdFootEdit" class="ff-apd-foot" hidden>' +
         '<button type="button" class="ff-apd-ghost" data-ff-apd-act="cancel-edit">Cancel</button>' +
@@ -418,9 +459,70 @@
     return st && typeof st.getSelectedDateKey === "function" ? String(st.getSelectedDateKey() || "") : "";
   }
 
+  function askCancel() {
+    if (!current || !current.appointment || current.appointment.status === "cancelled") return;
+    if (mode === "edit") return;
+    mode = "cancel";
+    cancelling = false;
+    var ui = els();
+    if (ui.confirmReason && document.activeElement !== ui.confirmReason) ui.confirmReason.value = "";
+    if (ui.confirmError) {
+      ui.confirmError.hidden = true;
+      ui.confirmError.textContent = "";
+    }
+    paint();
+    placeLive();
+    setTimeout(function () {
+      if (ui.confirmReason) ui.confirmReason.focus();
+    }, 20);
+  }
+
+  function keepAppointment() {
+    if (cancelling) return;
+    mode = "view";
+    paint();
+    placeLive();
+  }
+
+  async function confirmCancel() {
+    if (!current || !current.appointment || cancelling) return;
+    if (current.appointment.status === "cancelled") {
+      close();
+      return;
+    }
+    var api = repo();
+    if (!api || typeof api.cancelAppointment !== "function") return;
+    var ui = els();
+    var reason = ui.confirmReason ? ui.confirmReason.value : "";
+    cancelling = true;
+    if (ui.confirmError) {
+      ui.confirmError.hidden = true;
+      ui.confirmError.textContent = "";
+    }
+    paint();
+    var result;
+    try {
+      result = await api.cancelAppointment(current.appointment.appointmentId, reason);
+    } catch (err) {
+      result = { ok: false, error: err && err.message ? err.message : "This appointment could not be cancelled." };
+    }
+    cancelling = false;
+    if (!result || !result.ok) {
+      if (ui.confirmError) {
+        ui.confirmError.hidden = false;
+        ui.confirmError.textContent = (result && result.error) || "This appointment could not be cancelled.";
+      }
+      paint();
+      placeLive();
+      return;
+    }
+    close();
+  }
+
   async function enterEdit() {
     var api = form();
     if (!api || !current || !current.appointment) return;
+    if (current.appointment.status === "cancelled") return;
     var line = pickLine(current.appointment, current.lineId);
     var loc = current.appointment.locationId;
     var startMin = line ? minutesOf(line.startAt, loc) : null;
@@ -486,6 +588,10 @@
   }
 
   function requestClose() {
+    if (mode === "cancel") {
+      keepAppointment();
+      return;
+    }
     if (mode === "edit" && form() && edit && form().isEditDirty(edit)) {
       if (!window.confirm("Discard unsaved changes?")) return;
     }
@@ -535,6 +641,7 @@
     current = null;
     mode = "view";
     edit = null;
+    cancelling = false;
     if (ui.root) {
       ui.root.hidden = true;
       ui.root.classList.remove("is-open");
@@ -571,6 +678,7 @@
     };
     mode = "view";
     edit = null;
+    cancelling = false;
     ensureDom();
     var ui = els();
     ui.root.hidden = false;
@@ -590,6 +698,9 @@
       else if (name === "edit") enterEdit();
       else if (name === "cancel-edit") cancelEdit();
       else if (name === "save") saveEdit();
+      else if (name === "ask-cancel") askCancel();
+      else if (name === "keep") keepAppointment();
+      else if (name === "confirm-cancel") confirmCancel();
     });
     root.addEventListener("input", function (ev) {
       if (mode !== "edit" || !edit || !form()) return;
@@ -625,6 +736,7 @@
     if (document.getElementById("ffLiveDeskPanel") && document.getElementById("ffLiveDeskPanel").classList.contains("is-open")) return;
     ev.preventDefault();
     if (mode === "edit") cancelEdit();
+    else if (mode === "cancel") keepAppointment();
     else close();
   });
 

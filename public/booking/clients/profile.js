@@ -390,9 +390,14 @@
         return;
       }
       var toggle = ev.target && ev.target.closest ? ev.target.closest("[data-ff-cli-appt-toggle]") : null;
-      if (toggle && apptsUi()) {
+      if (toggle) {
         ev.preventDefault();
-        apptsUi().toggle(els().appts, toggle.getAttribute("data-ff-cli-appt-toggle"));
+        var apptId = toggle.getAttribute("data-ff-cli-appt-toggle");
+        if (window.ffBookingAppointmentDetails && typeof window.ffBookingAppointmentDetails.open === "function") {
+          window.ffBookingAppointmentDetails.open({ appointmentId: apptId });
+        } else if (apptsUi()) {
+          apptsUi().toggle(els().appts, apptId);
+        }
         return;
       }
       var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-clip]") : null;

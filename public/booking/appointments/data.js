@@ -82,6 +82,14 @@ function emitAppointmentUpdated(appointment) {
   } catch (_) {}
 }
 
+function emitAppointmentCancelled(appointment) {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-booking-appointment-cancelled", {
+      detail: { appointment: appointment || null },
+    }));
+  } catch (_) {}
+}
+
 function asTimestamp(value) {
   const date = requireModel().toDate(value);
   return date ? Timestamp.fromDate(date) : null;
@@ -530,6 +538,10 @@ async function cancelAppointment(appointmentId, reason) {
   if (!id) return { ok: false, error: "Missing appointmentId." };
   const existing = await getAppointmentById(id, salonId);
   if (!existing) return { ok: false, error: "Appointment not found." };
+  if (existing.status === "cancelled") {
+    emitAppointmentCancelled(existing);
+    return { ok: true, appointment: existing, alreadyCancelled: true };
+  }
   await updateDoc(doc(db, `salons/${salonId}/appointments/${id}`), {
     status: "cancelled",
     cancelledAt: serverTimestamp(),
@@ -537,7 +549,9 @@ async function cancelAppointment(appointmentId, reason) {
     cancellationReason: api.normalizeNotes(reason),
     updatedAt: serverTimestamp(),
   });
-  return { ok: true, appointment: await getAppointmentById(id, salonId) };
+  const appointment = await getAppointmentById(id, salonId);
+  emitAppointmentCancelled(appointment);
+  return { ok: true, appointment };
 }
 
 const api = {
