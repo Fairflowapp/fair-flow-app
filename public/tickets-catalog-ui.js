@@ -11,9 +11,9 @@
  * out to each sub-module, and injects the render layer's entry points into the
  * tabs/edit modules (breaking the dependency cycle: render -> {tabs, edit}).
  */
-import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260818_staff_dur_ui";
+import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260824_svc_dur_hm";
 import { initCatalogTabs } from "./tickets-catalog-tabs.js?v=20260818_staff_dur_ui";
-import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260818_staff_dur_ui";
+import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260824_svc_dur_hm";
 
 export function initTicketsCatalogUI(deps) {
   initCatalogRender({

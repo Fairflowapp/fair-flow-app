@@ -9,7 +9,8 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, parseServiceDurationMinutesInput, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_dur_hm";
+import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 
@@ -405,7 +406,6 @@ function _ffCatalogEditorOpen(opts) {
   const catSel = document.getElementById('servicesCatalogEditorCategory');
   const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
-  const durationInp = document.getElementById('servicesCatalogEditorDuration');
   const activeWrap = document.getElementById('servicesCatalogEditorActiveWrap');
   const activeInp = document.getElementById('servicesCatalogEditorActive');
   const overrideWrap = document.getElementById('servicesCatalogOverrideWrap');
@@ -422,7 +422,7 @@ function _ffCatalogEditorOpen(opts) {
   nameInp.value = '';
   nameInp.placeholder = '';
   priceInp.value = '';
-  if (durationInp) durationInp.value = '';
+  if (wrapDuration) wrapDuration.innerHTML = '';
   catSel.innerHTML = '';
   if (catSel) catSel.style.display = 'block';
   if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
@@ -457,9 +457,12 @@ function _ffCatalogEditorOpen(opts) {
     wrapPrice.style.display = 'block';
     if (wrapDuration) wrapDuration.style.display = 'block';
     priceInp.placeholder = isSharedServiceMode ? `Default price (${ffTicketCurSym()})` : `Default price (${ffTicketCurSym()})`;
-    if (durationInp) {
-      durationInp.placeholder = 'Duration (minutes)';
-      durationInp.value = '30';
+    if (wrapDuration) {
+      wrapDuration.innerHTML = serviceDurationControlsHtml(30, {
+        hoursId: 'servicesCatalogEditorDurationHours',
+        minutesId: 'servicesCatalogEditorDurationMinutes',
+        errorId: 'servicesCatalogEditorDurationError'
+      });
     }
     if (isSharedServiceMode) {
       if (catSel) catSel.style.display = 'none';
@@ -492,7 +495,13 @@ function _ffCatalogEditorOpen(opts) {
       priceInp.value = isSharedServiceMode
         ? (s.sharedDefaultPrice != null ? String(s.sharedDefaultPrice) : '')
         : (s.defaultPrice != null ? String(s.defaultPrice) : '');
-      if (durationInp) durationInp.value = String(resolveServiceDurationMinutes(s));
+      if (wrapDuration) {
+        wrapDuration.innerHTML = serviceDurationControlsHtml(resolveServiceDurationMinutes(s), {
+          hoursId: 'servicesCatalogEditorDurationHours',
+          minutesId: 'servicesCatalogEditorDurationMinutes',
+          errorId: 'servicesCatalogEditorDurationError'
+        });
+      }
       if (isSharedServiceMode) {
         if (catTextInp) catTextInp.value = s.category || '';
         if (activeInp) activeInp.checked = s.active !== false;
@@ -531,7 +540,9 @@ async function _ffCatalogEditorSubmit(ctx) {
   const catSel = document.getElementById('servicesCatalogEditorCategory');
   const catTextInp = document.getElementById('servicesCatalogEditorCategoryText');
   const priceInp = document.getElementById('servicesCatalogEditorPrice');
-  const durationInp = document.getElementById('servicesCatalogEditorDuration');
+  const durationHours = document.getElementById('servicesCatalogEditorDurationHours');
+  const durationMinutesInput = document.getElementById('servicesCatalogEditorDurationMinutes');
+  const durationError = document.getElementById('servicesCatalogEditorDurationError');
   const activeInp = document.getElementById('servicesCatalogEditorActive');
   const overrideCustom = document.getElementById('servicesCatalogOverrideCustom');
   const overridePriceInp = document.getElementById('servicesCatalogOverridePrice');
@@ -548,8 +559,11 @@ async function _ffCatalogEditorSubmit(ctx) {
   if (!name) { flashErr(nameInp); return; }
   const isServiceMode = ctx.mode === 'service-add' || ctx.mode === 'service-edit'
     || ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit';
-  const durationMinutes = isServiceMode ? parseServiceDurationMinutesInput(durationInp?.value) : null;
-  if (isServiceMode && durationMinutes == null) { flashErr(durationInp); return; }
+  const durationMinutes = isServiceMode ? joinServiceDurationMinutes(durationHours?.value, durationMinutesInput?.value) : null;
+  if (isServiceMode && durationMinutes == null) {
+    showServiceDurationError(durationError, durationHours, durationMinutesInput);
+    return;
+  }
 
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   try {
