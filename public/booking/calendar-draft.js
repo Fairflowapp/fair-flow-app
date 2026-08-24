@@ -4,13 +4,10 @@
 (function () {
   var draft = null;
 
-  function time() { return window.ffBookingTime || null; }
   function layout() { return window.ffBookingCalLayout || null; }
   function calState() { return window.ffBookingCalState || null; }
 
   function formatTime(min) {
-    var api = time();
-    if (!api) return "";
     var h = Math.floor(((Number(min) % 1440) + 1440) % 1440 / 60);
     var m = ((Number(min) % 1440) + 1440) % 1440 % 60;
     var suffix = h >= 12 ? "PM" : "AM";
@@ -19,10 +16,43 @@
     return hour12 + ":" + String(m).padStart(2, "0") + " " + suffix;
   }
 
-  function labelOf(spec) {
-    var clock = formatTime(spec.startMin);
-    if (spec.title) return spec.title;
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function holdLabel(spec) {
+    var clock = formatTime(spec && spec.startMin);
     return clock ? "Hold · " + clock : "Hold";
+  }
+
+  function rangeLabel(spec) {
+    var start = formatTime(spec && spec.startMin);
+    var duration = Number(spec && spec.durationMinutes) > 0 ? Number(spec.durationMinutes) : 30;
+    var end = formatTime(spec && spec.startMin + duration);
+    if (!start || !end) return "";
+    return start + " – " + end;
+  }
+
+  function bodyHtml(spec) {
+    if (!spec) return "";
+    var client = String(spec.clientName || "").trim();
+    var service = String(spec.title || spec.serviceName || "").trim();
+    var lines = [];
+    if (client) {
+      lines.push('<span class="ff-cal-hold-name">' + escapeHtml(client) + "</span>");
+    }
+    if (service) {
+      lines.push('<span class="' + (client ? "ff-cal-hold-svc" : "ff-cal-hold-name") + '">' + escapeHtml(service) + "</span>");
+      var range = rangeLabel(spec);
+      if (range) lines.push('<span class="ff-cal-hold-time">' + escapeHtml(range) + "</span>");
+    } else {
+      lines.push('<span class="ff-cal-hold-meta">' + escapeHtml(holdLabel(spec)) + "</span>");
+    }
+    return lines.join("");
   }
 
   function clearDom(root) {
@@ -50,7 +80,7 @@
     el.setAttribute("data-ff-cal-hold", "");
     el.style.top = rect.top + "px";
     el.style.height = Math.max(rect.height, 28) + "px";
-    el.textContent = labelOf(draft);
+    el.innerHTML = bodyHtml(draft);
     col.appendChild(el);
   }
 
@@ -65,7 +95,8 @@
       dateKey: String(spec.dateKey),
       startMin: Number(spec.startMin),
       durationMinutes: Number(spec.durationMinutes) > 0 ? Number(spec.durationMinutes) : 30,
-      title: spec.title ? String(spec.title) : ""
+      title: spec.title ? String(spec.title) : "",
+      clientName: spec.clientName ? String(spec.clientName) : ""
     };
     sync();
   }
@@ -79,6 +110,8 @@
     set: set,
     clear: clear,
     sync: sync,
-    get: function () { return draft; }
+    get: function () { return draft; },
+    bodyHtml: bodyHtml,
+    formatTime: formatTime
   };
 })();

@@ -46,6 +46,9 @@
       durationMinutes: state.durationMinutes || 30,
       title: state.service && state.service.name
         ? state.service.name
+        : "",
+      clientName: state.client && state.client.displayName
+        ? state.client.displayName
         : ""
     });
   }
