@@ -44,18 +44,27 @@
   color: var(--text, #111827);
 }
 .ff-cli-add {
-  border: 0;
-  background: #5b21b6;
+  border: none;
+  background: #7c3aed;
   color: #fff;
-  border-radius: 8px;
-  height: 36px;
-  padding: 0 12px;
+  border-radius: 999px;
+  min-height: 36px;
+  padding: 8px 18px;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
+  white-space: nowrap;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .ff-cli-add:hover {
-  background: #4c1d95;
+  filter: brightness(0.96);
+}
+.ff-cli-add:active {
+  filter: brightness(0.92);
 }
 .ff-cli-search {
   padding: 0 22px 10px;
