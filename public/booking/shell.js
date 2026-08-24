@@ -212,6 +212,11 @@
         window.ffBookingAppointmentDrawer.forceClose();
       }
     } catch (_) {}
+    try {
+      if (window.ffBookingAppointmentDetails && typeof window.ffBookingAppointmentDetails.forceClose === "function") {
+        window.ffBookingAppointmentDetails.forceClose();
+      }
+    } catch (_) {}
   }
 
   function closeClientsDrawer() {

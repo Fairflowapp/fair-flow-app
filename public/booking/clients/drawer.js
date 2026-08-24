@@ -99,6 +99,9 @@
 
   function openAdd() {
     if (!canOpen()) return;
+    if (window.ffBookingAppointmentDetails && window.ffBookingAppointmentDetails.forceClose) {
+      window.ffBookingAppointmentDetails.forceClose();
+    }
     if (window.ffBookingClientsOptions) window.ffBookingClientsOptions.close();
     if (profile()) profile().close();
     ensureDom();

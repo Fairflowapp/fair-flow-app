@@ -122,6 +122,9 @@
 
   function open() {
     if (!canOpen()) return;
+    if (window.ffBookingAppointmentDetails && window.ffBookingAppointmentDetails.forceClose) {
+      window.ffBookingAppointmentDetails.forceClose();
+    }
     if (window.ffBookingClientProfile) window.ffBookingClientProfile.close();
     ensureDom();
     paintChecked();

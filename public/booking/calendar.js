@@ -412,8 +412,19 @@
       if (!t || typeof t.closest !== "function") return;
       var root = document.getElementById(ROOT_ID);
       if (!root || !root.contains(t)) return;
-      if (t.closest("[data-ff-cal-card]")) {
+      if (t.closest("[data-ff-cal-hold]")) {
         ev.preventDefault();
+        return;
+      }
+      var card = t.closest("[data-ff-cal-card]");
+      if (card) {
+        ev.preventDefault();
+        if (window.ffBookingAppointmentDetails && typeof window.ffBookingAppointmentDetails.open === "function") {
+          window.ffBookingAppointmentDetails.open({
+            appointmentId: card.getAttribute("data-ff-cal-card"),
+            lineId: card.getAttribute("data-ff-cal-line")
+          });
+        }
         return;
       }
       var st = state();

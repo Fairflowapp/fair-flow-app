@@ -297,6 +297,9 @@
 
   async function open(idOrClient) {
     if (!canOpen()) return;
+    if (window.ffBookingAppointmentDetails && window.ffBookingAppointmentDetails.forceClose) {
+      window.ffBookingAppointmentDetails.forceClose();
+    }
     if (window.ffBookingClientsOptions) window.ffBookingClientsOptions.close();
     ensureDom();
     var id = idOrClient && idOrClient.clientId ? idOrClient.clientId : String(idOrClient || "").trim();

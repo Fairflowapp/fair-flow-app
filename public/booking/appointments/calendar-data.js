@@ -76,10 +76,20 @@
     return cardsFrom(cache.rows, locationId);
   }
 
+  function getCachedById(appointmentId) {
+    var id = String(appointmentId || "").trim();
+    if (!id) return null;
+    var hit = cache.rows.find(function (row) {
+      return row && String(row.appointmentId || "") === id;
+    });
+    return hit || null;
+  }
+
   window.ffBookingCalAppointments = {
     loadForView: loadForView,
     cardsForView: cardsForView,
     cardsFrom: cardsFrom,
-    getCached: function () { return cache.rows.slice(); }
+    getCached: function () { return cache.rows.slice(); },
+    getCachedById: getCachedById
   };
 })();
