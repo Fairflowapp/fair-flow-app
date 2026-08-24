@@ -76,7 +76,7 @@
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
           (collapsed ? ICON_CHEVRON_RIGHT : ICON_CHEVRON_LEFT) +
         "</svg>" +
-        '<span class="ff-booking-sidebar-toggle-label">' + (collapsed ? "Expand" : "Collapse") + "</span>";
+        (collapsed ? "" : '<span class="ff-booking-sidebar-toggle-label">Collapse</span>');
     }
     el.querySelectorAll("[data-ff-booking-section]").forEach(function (btn) {
       var label = btn.getAttribute("data-ff-booking-label") || btn.textContent || "";
