@@ -151,7 +151,6 @@
   }
 
   function hideOpsServices() {
-    opsServicesOpen = false;
     var el = document.getElementById("servicesScreen");
     if (!el) return;
     el.style.display = "none";
@@ -171,10 +170,8 @@
 
   function openOpsServices() {
     if (state() && state().isBooking()) setWorkspaceVisible(true);
-    if (opsServicesOpen) {
-      showServicesScreen();
-      return;
-    }
+    showServicesScreen();
+    if (opsServicesOpen) return;
     if (typeof window.goToServices !== "function") return;
     opsServicesOpen = true;
     Promise.resolve(window.goToServices()).then(function () {
@@ -191,7 +188,8 @@
     var root = document.getElementById(WORKSPACE_ID);
     if (root) {
       root.querySelectorAll("[data-ff-booking-page]").forEach(function (page) {
-        page.classList.toggle("is-active", page.getAttribute("data-ff-booking-page") === section);
+        var id = page.getAttribute("data-ff-booking-page");
+        page.classList.toggle("is-active", id === section && id !== "services");
       });
     }
     if (section === "services") {
