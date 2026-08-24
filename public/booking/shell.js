@@ -225,6 +225,11 @@
         window.ffBookingClientsOptions.forceClose();
       }
     } catch (_) {}
+    try {
+      if (window.ffBookingClientProfile && typeof window.ffBookingClientProfile.forceClose === "function") {
+        window.ffBookingClientProfile.forceClose();
+      }
+    } catch (_) {}
   }
 
   function applyArea(area) {

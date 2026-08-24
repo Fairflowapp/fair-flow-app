@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -420,6 +421,38 @@ async function getAppointmentsForRange(startDateTime, endDateTime, locationId) {
   return queryStartRange(requireSalon(), startDateTime, endDateTime, { locationId: loc });
 }
 
+const CLIENT_HISTORY_LIMIT = 20;
+
+async function getClientAppointments(clientId, options) {
+  const salonId = requireSalon();
+  const id = String(clientId || "").trim();
+  if (!id) return { upcoming: [], past: [] };
+  const cap = Math.min(CLIENT_HISTORY_LIMIT, Math.max(1, Number(options && options.limit) || CLIENT_HISTORY_LIMIT));
+  const now = Timestamp.now();
+  const ref = appointmentsRef(salonId);
+  const [upSnap, pastSnap] = await Promise.all([
+    getDocs(query(
+      ref,
+      where("clientId", "==", id),
+      where("startAt", ">=", now),
+      orderBy("startAt", "asc"),
+      limit(cap)
+    )),
+    getDocs(query(
+      ref,
+      where("clientId", "==", id),
+      where("startAt", "<", now),
+      orderBy("startAt", "desc"),
+      limit(cap)
+    )),
+  ]);
+  return {
+    upcoming: upSnap.docs.map(toAppointment),
+    past: pastSnap.docs.map(toAppointment),
+    limit: cap,
+  };
+}
+
 async function getProviderAppointments(providerId, startDateTime, endDateTime, locationId) {
   const id = String(providerId || "").trim();
   if (!id) return [];
@@ -500,6 +533,7 @@ const api = {
   getAppointmentById,
   getAppointmentsForDate,
   getAppointmentsForRange,
+  getClientAppointments,
   getProviderAppointments,
   updateAppointment,
   cancelAppointment,
@@ -513,6 +547,7 @@ export {
   getAppointmentById,
   getAppointmentsForDate,
   getAppointmentsForRange,
+  getClientAppointments,
   getProviderAppointments,
   updateAppointment,
   cancelAppointment,

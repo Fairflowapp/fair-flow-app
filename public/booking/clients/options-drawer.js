@@ -122,6 +122,7 @@
 
   function open() {
     if (!canOpen()) return;
+    if (window.ffBookingClientProfile) window.ffBookingClientProfile.close();
     ensureDom();
     paintChecked();
     var overlay = document.getElementById(OVERLAY_ID);

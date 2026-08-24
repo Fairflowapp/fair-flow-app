@@ -344,6 +344,7 @@
       }
       if (t.closest("[data-ff-cli-act=options]")) {
         ev.preventDefault();
+        if (window.ffBookingClientProfile) window.ffBookingClientProfile.close();
         if (options()) options().open();
         return;
       }
@@ -358,10 +359,11 @@
         return;
       }
       var row = t.closest("[data-ff-cli-id]");
-      if (row && window.ffBookingClientsDrawer) {
+      if (row) {
         ev.preventDefault();
         if (options()) options().close();
-        window.ffBookingClientsDrawer.openDetails(row.getAttribute("data-ff-cli-id"));
+        if (window.ffBookingClientProfile) window.ffBookingClientProfile.open(row.getAttribute("data-ff-cli-id"));
+        else if (window.ffBookingClientsDrawer) window.ffBookingClientsDrawer.openDetails(row.getAttribute("data-ff-cli-id"));
       }
     });
     document.addEventListener("input", function (ev) {
