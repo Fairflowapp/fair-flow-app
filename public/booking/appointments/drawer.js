@@ -35,22 +35,13 @@
 
   function syncHold() {
     if (!window.ffBookingCalDraft) return;
-    if (!state) {
+    var api = form();
+    var spec = state && api && typeof api.holdSpec === "function" ? api.holdSpec(state) : null;
+    if (!spec) {
       window.ffBookingCalDraft.clear();
       return;
     }
-    window.ffBookingCalDraft.set({
-      providerId: state.providerId,
-      dateKey: state.dateKey,
-      startMin: state.startMin,
-      durationMinutes: state.durationMinutes || 30,
-      title: state.service && state.service.name
-        ? state.service.name
-        : "",
-      clientName: state.client && state.client.displayName
-        ? state.client.displayName
-        : ""
-    });
+    window.ffBookingCalDraft.set(spec);
   }
 
   function escapeHtml(value) {
@@ -145,6 +136,10 @@
 
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
+    if (existing && !document.getElementById("ffApptLines")) {
+      existing.parentNode.removeChild(existing);
+      existing = null;
+    }
     if (existing && existing.parentNode !== host()) host().appendChild(existing);
     if (existing) return;
     var aside = document.createElement("aside");
@@ -164,10 +159,10 @@
           '<span>Location</span>' +
           '<input id="ffApptLocation" type="text" readonly>' +
         "</label>" +
-        '<div class="ff-appt-row">' +
-          '<label class="ff-appt-field"><span>Date</span><input id="ffApptDate" type="date"></label>' +
-          '<label class="ff-appt-field"><span>Start time</span><select id="ffApptStart"></select></label>' +
-        "</div>" +
+        '<label class="ff-appt-field">' +
+          "<span>Date</span>" +
+          '<input id="ffApptDate" type="date">' +
+        "</label>" +
         '<label class="ff-appt-field" id="ffApptClientField">' +
           "<span>Client</span>" +
           '<div id="ffApptClientSearchWrap">' +
@@ -187,23 +182,11 @@
           '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save client</button>' +
           '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
         "</div>" +
-        '<label class="ff-appt-field">' +
-          '<span>Service</span>' +
-          '<select id="ffApptService"></select>' +
-        "</label>" +
-        '<div id="ffApptSummary" class="ff-appt-summary" hidden>' +
-          '<div><span>Duration</span><strong id="ffApptDur"></strong></div>' +
-          '<div><span>End time</span><strong id="ffApptEnd"></strong></div>' +
-          '<div><span>Price</span><strong id="ffApptPrice"></strong></div>' +
+        '<div class="ff-appt-field">' +
+          "<span>Services</span>" +
+          '<div id="ffApptLines" class="ff-appt-lines"></div>' +
+          '<button type="button" class="ff-appt-add-line" data-ff-appt-act="add-line">+ Add another service</button>' +
         "</div>" +
-        '<div id="ffApptCap" class="ff-appt-cap" hidden></div>' +
-        '<label class="ff-appt-field">' +
-          '<span>Provider</span>' +
-          '<div class="ff-appt-provider-row">' +
-            '<span id="ffApptProviderAvatar" class="ff-appt-avatar" hidden></span>' +
-            '<select id="ffApptProvider"></select>' +
-          "</div>" +
-        "</label>" +
         '<label class="ff-appt-field">' +
           '<span>Notes (optional)</span>' +
           '<textarea id="ffApptNotes" rows="2" maxlength="2000" placeholder="Add a note..."></textarea>' +
@@ -228,16 +211,8 @@
       chosen: document.getElementById("ffApptClientChosen"),
       newBox: document.getElementById("ffApptNewClient"),
       clientMsg: document.getElementById("ffApptClientMsg"),
-      service: document.getElementById("ffApptService"),
-      provider: document.getElementById("ffApptProvider"),
-      avatar: document.getElementById("ffApptProviderAvatar"),
+      lines: document.getElementById("ffApptLines"),
       date: document.getElementById("ffApptDate"),
-      start: document.getElementById("ffApptStart"),
-      summary: document.getElementById("ffApptSummary"),
-      dur: document.getElementById("ffApptDur"),
-      end: document.getElementById("ffApptEnd"),
-      price: document.getElementById("ffApptPrice"),
-      cap: document.getElementById("ffApptCap"),
       notes: document.getElementById("ffApptNotes"),
       error: document.getElementById("ffApptError"),
       create: document.getElementById("ffApptCreate")
@@ -249,46 +224,21 @@
     var ui = els();
     if (!api || !ui.root || !state) return;
     var providers = providersForLocation(state.locationId);
-    if (state.providerId && !providers.some(function (emp) { return emp.id === state.providerId; })) {
-      providers = providers.concat([{ id: state.providerId, firstName: form().providerName(state.providerId) }]);
-    }
-    ui.provider.innerHTML = providers.map(function (emp) {
-      return '<option value="' + escapeHtml(emp.id) + '"' + (emp.id === state.providerId ? " selected" : "") + ">" +
-        escapeHtml(emp.firstName || emp.name || "Provider") + "</option>";
-    }).join("");
-    ui.service.innerHTML = '<option value="">Select a service</option>' + (state.services || []).map(function (svc) {
-      return '<option value="' + escapeHtml(svc.id) + '"' + (svc.id === state.serviceId ? " selected" : "") + ">" +
-        escapeHtml(svc.name) + " · " + svc.durationMinutes + " min · " + money(svc.price) +
-        "</option>";
-    }).join("");
-    ui.date.value = state.dateKey || "";
-    ui.start.innerHTML = timeOptions(state.startMin);
-    ui.notes.value = state.notes || "";
-    if (ui.location) ui.location.value = locationLabel(state.locationId);
-    var selected = providers.find(function (emp) { return emp.id === state.providerId; }) || null;
-    if (ui.avatar) {
-      var src = selected && selected.photoURL ? String(selected.photoURL).trim() : "";
-      if (src) {
-        ui.avatar.hidden = false;
-        ui.avatar.innerHTML = '<img src="' + escapeHtml(src) + '" alt="">';
-      } else {
-        ui.avatar.hidden = true;
-        ui.avatar.innerHTML = "";
+    (state.lines || []).forEach(function (line) {
+      if (line && line.providerId && !providers.some(function (emp) { return emp.id === line.providerId; })) {
+        providers = providers.concat([{ id: line.providerId, firstName: api.providerName(line.providerId) }]);
       }
+    });
+    ui.date.value = state.dateKey || "";
+    if (document.activeElement !== ui.notes) ui.notes.value = state.notes || "";
+    if (ui.location) ui.location.value = locationLabel(state.locationId);
+    if (ui.lines && typeof api.linesHtml === "function") {
+      ui.lines.innerHTML = api.linesHtml(state, providers);
     }
     paintClientState();
-    if (ui.summary) ui.summary.hidden = !state.service;
-    if (state.service) {
-      if (ui.dur) ui.dur.textContent = state.durationMinutes ? state.durationMinutes + " min" : "—";
-      if (ui.end) ui.end.textContent = state.endMin ? api.formatMinutes(state.endMin) : "—";
-      if (ui.price) ui.price.textContent = money(state.price);
-    }
-    if (ui.cap) {
-      ui.cap.hidden = !state.capabilityMessage;
-      ui.cap.textContent = state.capabilityMessage || "";
-    }
-    ui.error.hidden = !state.error;
-    ui.error.textContent = state.error || "";
+    var lineError = !!(state.error && state.errorLineKey);
+    ui.error.hidden = !state.error || lineError;
+    ui.error.textContent = lineError ? "" : (state.error || "");
     ui.create.disabled = !api.canCreate(state) || state.creating;
     ui.create.textContent = state.creating ? "Creating…" : "Create Appointment";
     syncHold();
@@ -468,6 +418,13 @@
 
   function bindDrawer(root) {
     root.addEventListener("click", function (ev) {
+      var api = form();
+      var remove = ev.target && ev.target.closest ? ev.target.closest("[data-ff-line-act='remove']") : null;
+      if (remove && api && state) {
+        state = api.removeLine(state, remove.getAttribute("data-ff-line"));
+        paint();
+        return;
+      }
       var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-appt-act]") : null;
       if (!act) {
         var hit = ev.target && ev.target.closest ? ev.target.closest("[data-ff-appt-client]") : null;
@@ -478,7 +435,10 @@
       if (name === "close") requestClose();
       else if (name === "create") createAppointment();
       else if (name === "clear-client") clearClient();
-      else if (name === "new-client") {
+      else if (name === "add-line" && api && state) {
+        state = api.addLine(state);
+        paint();
+      } else if (name === "new-client") {
         els().newBox.hidden = !els().newBox.hidden;
         if (!els().newBox.hidden) document.getElementById("ffApptFirst").focus();
       } else if (name === "save-client") saveNewClient();
@@ -495,10 +455,17 @@
     root.addEventListener("change", async function (ev) {
       var api = form();
       if (!api || !state) return;
-      if (ev.target.id === "ffApptService") state = api.setService(state, ev.target.value);
-      else if (ev.target.id === "ffApptProvider") state = await api.setProvider(state, ev.target.value);
-      else if (ev.target.id === "ffApptDate") state = api.setDate(state, ev.target.value);
-      else if (ev.target.id === "ffApptStart") state = api.setStart(state, ev.target.value);
+      var field = ev.target && ev.target.closest ? ev.target.closest("[data-ff-line-field]") : null;
+      var wrap = ev.target && ev.target.closest ? ev.target.closest("[data-ff-line]") : null;
+      if (field && wrap) {
+        var key = wrap.getAttribute("data-ff-line");
+        var kind = field.getAttribute("data-ff-line-field");
+        if (kind === "service") state = api.setLineService(state, key, ev.target.value);
+        else if (kind === "provider") state = await api.setLineProvider(state, key, ev.target.value);
+        else if (kind === "start") state = api.setLineStart(state, key, ev.target.value);
+      } else if (ev.target.id === "ffApptDate") {
+        state = api.setDate(state, ev.target.value);
+      }
       paint();
     });
     root.addEventListener("keydown", function (ev) {

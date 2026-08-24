@@ -102,6 +102,33 @@ check("date label", view.dateLabel === "Monday, Aug 24, 2026");
 check("location label", view.locationLabel === "Soso spa");
 check("notes", view.notes === "Prefers quiet room" && view.notesEmpty === false);
 check("status label", view.statusLabel === "Scheduled");
+check("single-service total matches line", view.total === 55 && view.totalLabel === "$55");
+check("single-service list has one row", view.services.length === 1);
+
+const multi = details.viewFrom({
+  appointmentId: "appt_m",
+  status: "scheduled",
+  locationId: "locA",
+  dateKey: "2026-08-24",
+  notes: "",
+  clientSnapshot: { displayName: "Shiri A", phone: "9546306513" },
+  serviceLines: [
+    appointment.serviceLines[0],
+    {
+      lineId: "line_2",
+      providerId: "bobo",
+      providerNameSnapshot: "bobo",
+      serviceNameSnapshot: "Pedicure",
+      startAt: utc(16, 45),
+      endAt: utc(17, 45),
+      durationMinutes: 60,
+      priceSnapshot: 65
+    }
+  ]
+}, "line_2");
+check("W details lists all services", multi.services.length === 2 && multi.services[1].serviceName === "Pedicure");
+check("X details total is the sum", multi.total === 120 && multi.totalLabel === "$120");
+check("clicked line still identifies itself", multi.serviceName === "Pedicure");
 
 const emailOnly = details.viewFrom({
   appointmentId: "appt_2",

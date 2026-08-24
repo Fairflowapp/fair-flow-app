@@ -97,6 +97,19 @@ check("10:15 clock", render.clock(14 * 60 + 15) === "2:15" || render.clock(10 * 
 check("10:15 label", render.clock(10 * 60 + 15) === "10:15");
 check("isActiveStatus hides cancelled", model.isActiveStatus("cancelled") === false);
 
+const multiCards = data.cardsFrom([{
+  appointmentId: "A123",
+  status: "scheduled",
+  clientSnapshot: { displayName: "Shiri A" },
+  serviceLines: [
+    { lineId: "l1", providerId: "koko", serviceNameSnapshot: "Manicure", startAt: utc(15, 45), endAt: utc(16, 45), durationMinutes: 60 },
+    { lineId: "l2", providerId: "bobo", serviceNameSnapshot: "Pedicure", startAt: utc(16, 45), endAt: utc(17, 45), durationMinutes: 60 }
+  ]
+}], "locA");
+check("T one card per service line", multiCards.length === 2);
+check("U both cards share appointmentId", multiCards[0].appointmentId === "A123" && multiCards[1].appointmentId === "A123");
+check("each card keeps its line and provider", multiCards[0].lineId === "l1" && multiCards[1].providerId === "bobo");
+
 const overlap = render.overlapLanes([
   { providerId: "bobo", startMin: 615, endMin: 675 },
   { providerId: "bobo", startMin: 630, endMin: 690 }

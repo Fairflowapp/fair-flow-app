@@ -1,5 +1,6 @@
 /**
  * In-progress visit hold on the Calendar. Not a saved appointment card.
+ * One temporary block per service line.
  */
 (function () {
   var draft = null;
@@ -55,48 +56,75 @@
     return lines.join("");
   }
 
+  function normalizeLines(spec) {
+    if (!spec) return [];
+    var clientName = spec.clientName ? String(spec.clientName) : "";
+    var raw = Array.isArray(spec.lines) && spec.lines.length
+      ? spec.lines
+      : (spec.providerId && Number.isFinite(Number(spec.startMin)) ? [spec] : []);
+    return raw.filter(function (line) {
+      return line && line.providerId && Number.isFinite(Number(line.startMin));
+    }).map(function (line) {
+      return {
+        providerId: String(line.providerId),
+        startMin: Number(line.startMin),
+        durationMinutes: Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30,
+        title: line.title || line.serviceName ? String(line.title || line.serviceName) : "",
+        clientName: line.clientName ? String(line.clientName) : clientName
+      };
+    });
+  }
+
   function clearDom(root) {
     if (!root) return;
     root.querySelectorAll("[data-ff-cal-hold]").forEach(function (el) { el.remove(); });
   }
 
+  function paintLine(root, axis, lay, line) {
+    var col = root.querySelector('[data-ff-cal-emp="' + line.providerId + '"]');
+    if (!col) return;
+    var rect = lay.windowToRect(line.startMin, line.startMin + line.durationMinutes, axis.startMin, axis.endMin);
+    if (!rect) return;
+    var el = document.createElement("div");
+    el.className = "ff-cal-hold";
+    el.setAttribute("data-ff-cal-hold", "");
+    el.setAttribute("data-ff-cal-hold-provider", line.providerId);
+    el.style.top = rect.top + "px";
+    el.style.height = Math.max(rect.height, 28) + "px";
+    el.innerHTML = bodyHtml(line);
+    col.appendChild(el);
+  }
+
   function sync(root) {
-    root = root || document.getElementById("ffBookingCalendarRoot");
+    root = root || (typeof document !== "undefined" && document && document.getElementById
+      ? document.getElementById("ffBookingCalendarRoot")
+      : null);
     if (!root) return;
     clearDom(root);
-    if (!draft) return;
+    if (!draft || !draft.lines || !draft.lines.length) return;
     var st = calState();
     var lay = layout();
     if (!st || !lay) return;
     if (st.getSelectedDateKey() !== draft.dateKey) return;
     var axis = st.getAxis();
-    var col = root.querySelector('[data-ff-cal-emp="' + draft.providerId + '"]');
-    if (!col || !axis) return;
-    var duration = Number(draft.durationMinutes) > 0 ? Number(draft.durationMinutes) : 30;
-    var rect = lay.windowToRect(draft.startMin, draft.startMin + duration, axis.startMin, axis.endMin);
-    if (!rect) return;
-    var el = document.createElement("div");
-    el.className = "ff-cal-hold";
-    el.setAttribute("data-ff-cal-hold", "");
-    el.style.top = rect.top + "px";
-    el.style.height = Math.max(rect.height, 28) + "px";
-    el.innerHTML = bodyHtml(draft);
-    col.appendChild(el);
+    if (!axis) return;
+    draft.lines.forEach(function (line) {
+      paintLine(root, axis, lay, line);
+    });
   }
 
   function set(spec) {
-    if (!spec || !spec.providerId || !spec.dateKey || !Number.isFinite(Number(spec.startMin))) {
+    var lines = normalizeLines(spec);
+    var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
+    if (!dateKey || !lines.length) {
       draft = null;
       sync();
       return;
     }
     draft = {
-      providerId: String(spec.providerId),
-      dateKey: String(spec.dateKey),
-      startMin: Number(spec.startMin),
-      durationMinutes: Number(spec.durationMinutes) > 0 ? Number(spec.durationMinutes) : 30,
-      title: spec.title ? String(spec.title) : "",
-      clientName: spec.clientName ? String(spec.clientName) : ""
+      dateKey: dateKey,
+      clientName: spec.clientName ? String(spec.clientName) : "",
+      lines: lines
     };
     sync();
   }
@@ -106,11 +134,25 @@
     sync();
   }
 
+  function snapshot() {
+    if (!draft) return null;
+    var first = draft.lines[0] || {};
+    return {
+      providerId: first.providerId,
+      dateKey: draft.dateKey,
+      startMin: first.startMin,
+      durationMinutes: first.durationMinutes,
+      title: first.title,
+      clientName: draft.clientName,
+      lines: draft.lines.slice()
+    };
+  }
+
   window.ffBookingCalDraft = {
     set: set,
     clear: clear,
     sync: sync,
-    get: function () { return draft; },
+    get: snapshot,
     bodyHtml: bodyHtml,
     formatTime: formatTime
   };

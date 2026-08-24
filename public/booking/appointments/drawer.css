@@ -264,6 +264,62 @@ body:not(.ff-booking-area) .ff-appt {
 .ff-appt-secondary:hover {
   border-color: var(--ff-brand-purple, #9d68b9);
 }
+.ff-appt-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ff-appt-line {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: #FFFFFF;
+}
+.ff-appt-line.is-error {
+  border-color: #fecaca;
+}
+.ff-appt-line-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ff-appt-line-head strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #111827);
+}
+.ff-appt-line-remove {
+  border: 0;
+  background: transparent;
+  color: var(--sub, #6b7280);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.ff-appt-line-remove:hover {
+  background: var(--muted, #f7f7f8);
+  color: var(--text, #111827);
+}
+.ff-appt-add-line {
+  align-self: flex-start;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ff-brand-purple, #9d68b9);
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0;
+  cursor: pointer;
+}
+.ff-appt-add-line:hover {
+  text-decoration: underline;
+}
 .ff-appt-summary {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;

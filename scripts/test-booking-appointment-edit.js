@@ -155,7 +155,12 @@ const twoLines = model.mergeServiceLinePatch([
   providerId: "koko",
   durationMinutes: 60
 }]);
-check("partial patch keeps other service lines", twoLines.length === 2 && twoLines[1].lineId === "line_2");
+check("incoming lines replace the stored set", twoLines.length === 1 && twoLines[0].lineId === "line_1");
+const added = model.mergeServiceLinePatch(existing, [
+  existing[0],
+  { serviceId: "pedi", providerId: "bobo", durationMinutes: 60, priceSnapshot: 65, serviceNameSnapshot: "Pedicure" }
+]);
+check("new line is appended without inheriting first-line price", added.length === 2 && added[1].priceSnapshot === 65 && added[1].serviceId === "pedi");
 
 if (failed) process.exit(1);
 console.log("All Edit Appointment helper tests passed.");

@@ -119,6 +119,43 @@ body:not(.ff-booking-area) .ff-apd { display: none !important; }
   font-weight: 500;
   color: var(--sub, #6b7280);
 }
+.ff-apd-svc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: #FFFFFF;
+}
+.ff-apd-svc + .ff-apd-svc {
+  margin-top: 8px;
+}
+.ff-apd-svc strong {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text, #111827);
+}
+.ff-apd-svc span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sub, #6b7280);
+}
+.ff-apd-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sub, #6b7280);
+}
+.ff-apd-total strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text, #111827);
+}
 .ff-apd-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

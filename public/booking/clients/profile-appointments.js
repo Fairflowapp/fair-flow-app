@@ -72,7 +72,7 @@
       var name = String(line && line.serviceNameSnapshot || "").trim();
       if (name && names.indexOf(name) === -1) names.push(name);
     });
-    return names.join(", ") || "Service";
+    return names.join(" + ") || "Service";
   }
 
   function providerNames(appt) {

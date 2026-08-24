@@ -367,21 +367,16 @@
     var existing = Array.isArray(existingLines) ? existingLines : [];
     var incoming = incomingLines != null ? incomingLines : existing;
     if (!Array.isArray(incoming)) incoming = existing;
-    var used = {};
-    var out = incoming.map(function (line) {
+    return incoming.map(function (line) {
       var row = line && typeof line === "object" ? line : {};
-      var prev = existing.find(function (item) {
-        return item && trimText(item.lineId) && trimText(item.lineId) === trimText(row.lineId);
-      }) || existing[0] || {};
-      var merged = mergeOneLine(prev, row);
-      if (merged.lineId) used[merged.lineId] = true;
-      return merged;
+      var incomingId = trimText(row.lineId);
+      var prev = incomingId
+        ? existing.find(function (item) {
+          return item && trimText(item.lineId) === incomingId;
+        }) || {}
+        : {};
+      return mergeOneLine(prev, row);
     });
-    existing.forEach(function (prev) {
-      var id = prev && trimText(prev.lineId);
-      if (id && !used[id]) out.push(mergeOneLine(prev, prev));
-    });
-    return out;
   }
 
   function fromDoc(id, data) {

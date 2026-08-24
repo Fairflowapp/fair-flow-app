@@ -40,6 +40,7 @@ check("UI opens profile by clientId", ui.includes("ffBookingClientProfile.open")
 check("drawer add still uses createClient", drawer.includes("api.createClient(values())"));
 check("indexes include clientId + startAt", indexes.includes('"fieldPath": "clientId"') && indexes.includes('"fieldPath": "startAt"'));
 check("status labels do not write status", appts.includes("Checked In") && appts.includes("No Show") && !appts.includes("updateAppointment"));
+check("AH multi-service summary uses plus", appts.includes('names.join(" + ")'));
 
 if (failed) process.exit(1);
 console.log("All Client Profile static checks passed.");

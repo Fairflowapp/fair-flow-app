@@ -310,9 +310,12 @@ async function validateAppointment(data, options) {
     return { ok: false, code: api.CODES.INVALID_CLIENT, error: "Client was not found." };
   }
   const lines = [];
-  for (const rawLine of checked.fields.serviceLines) {
-    const built = await buildServiceLine(salonId, checked.fields.locationId, rawLine);
-    if (!built.ok) return built;
+  for (let i = 0; i < checked.fields.serviceLines.length; i += 1) {
+    const built = await buildServiceLine(salonId, checked.fields.locationId, checked.fields.serviceLines[i]);
+    if (!built.ok) {
+      built.lineIndex = i;
+      return built;
+    }
     lines.push(built.line);
   }
   for (let i = 0; i < lines.length; i += 1) {
@@ -332,6 +335,7 @@ async function validateAppointment(data, options) {
         providerId: line.providerId,
         appointmentId: conflict.appointment && conflict.appointment.appointmentId,
         lineId: line.lineId,
+        lineIndex: i,
       };
     }
     for (let j = i + 1; j < lines.length; j += 1) {
@@ -342,6 +346,8 @@ async function validateAppointment(data, options) {
           code: api.CODES.APPOINTMENT_CONFLICT,
           error: "Service lines for the same provider overlap.",
           providerId: line.providerId,
+          lineId: other.lineId,
+          lineIndex: j,
         };
       }
     }

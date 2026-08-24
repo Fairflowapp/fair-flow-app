@@ -80,5 +80,20 @@ check("escapes client HTML", draft.bodyHtml({
   title: ""
 }).indexOf("&lt;b&gt;X&lt;/b&gt;") !== -1);
 
+draft.set({
+  dateKey: "2026-08-24",
+  clientName: "Shiri A",
+  lines: [
+    { providerId: "koko", startMin: 11 * 60 + 45, durationMinutes: 60, title: "Manicure" },
+    { providerId: "bobo", startMin: 12 * 60 + 45, durationMinutes: 60, title: "Pedicure" }
+  ]
+});
+const multi = draft.get();
+check("Q draft keeps one hold per line", multi && multi.lines.length === 2);
+check("R draft keep providers separate", multi.lines[0].providerId === "koko" && multi.lines[1].providerId === "bobo");
+check("S draft keep start times separate", multi.lines[0].startMin === 705 && multi.lines[1].startMin === 765);
+draft.clear();
+check("clear removes all holds", draft.get() === null);
+
 if (failed) process.exit(1);
 console.log("All Calendar draft preview tests passed.");
