@@ -125,6 +125,19 @@ async function searchPhone(salonId, rawPhone) {
   return [...byId.values()].slice(0, cap);
 }
 
+async function searchPhonePrefixes(salonId, digits) {
+  const api = requireModel();
+  const sid = String(salonId || "").trim();
+  const prefix = String(digits || "").replace(/\D/g, "");
+  if (!sid || prefix.length < 3) return [];
+  const snap = await getDocs(query(
+    clientsRef(sid),
+    where("phoneKeyPrefixes", "array-contains", prefix),
+    limit(api.SEARCH_LIMIT)
+  ));
+  return snap.docs.map(toClient);
+}
+
 async function findClientByPhone(phone, salonId) {
   const rows = await searchPhone(String(salonId || currentSalonId() || "").trim(), phone);
   return rows[0] || null;
@@ -191,7 +204,9 @@ async function searchClients(rawQuery, salonId) {
     return hit ? [hit] : [];
   }
   if (classified.kind === "phone") {
-    return searchPhone(sid, classified.value);
+    const exact = await searchPhone(sid, classified.value);
+    if (exact.length) return exact;
+    return searchPhonePrefixes(sid, classified.value);
   }
   return searchName(sid, classified.value);
 }
@@ -229,6 +244,7 @@ async function createClient(input) {
     emailNormalized: checked.fields.emailNormalized,
     phoneDigits: checked.fields.phoneDigits,
     phoneKeys: checked.fields.phoneKeys,
+    phoneKeyPrefixes: checked.fields.phoneKeyPrefixes,
     createdAtLocationId: currentLocationId(),
     createdByUid: actor.uid,
     createdByStaffId: actor.staffId,
@@ -363,6 +379,7 @@ async function updateClient(clientId, patch) {
     emailNormalized: merged.emailNormalized,
     phoneDigits: merged.phoneDigits,
     phoneKeys: merged.phoneKeys,
+    phoneKeyPrefixes: merged.phoneKeyPrefixes,
     updatedAt: serverTimestamp(),
   });
   const client = await getClientById(id, salonId);

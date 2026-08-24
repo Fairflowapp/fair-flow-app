@@ -63,6 +63,25 @@
     return uniqueStrings(keys);
   }
 
+  var PREFIX_MIN = 3;
+
+  /**
+   * Prefixes of canonical phoneKeys, from 3 digits through the full key.
+   * Used only for targeted array-contains partial lookup.
+   */
+  function phoneKeyPrefixes(value) {
+    var keys = phoneKeys(value);
+    var prefixes = [];
+    keys.forEach(function (key) {
+      var digits = phoneDigits(key);
+      var i;
+      for (i = PREFIX_MIN; i <= digits.length; i += 1) {
+        prefixes.push(digits.slice(0, i));
+      }
+    });
+    return uniqueStrings(prefixes);
+  }
+
   function uniqueStrings(list) {
     var seen = {};
     var out = [];
@@ -83,7 +102,7 @@
     var digits = phoneDigits(value);
     var raw = trimText(value);
     if (!digits) return false;
-    if (digits.length >= 7 && digits.length === stripPhonePunctuation(raw).length) return true;
+    if (digits.length >= PREFIX_MIN && digits.length === stripPhonePunctuation(raw).length) return true;
     return digits.length >= 10 && digits.length / Math.max(raw.length, 1) >= 0.6;
   }
 
@@ -107,7 +126,8 @@
       displayNameNormalized: displayName(firstNameNormalized, lastNameNormalized),
       emailNormalized: normalizeEmail(email),
       phoneDigits: phoneDigits(phone),
-      phoneKeys: phoneKeys(phone)
+      phoneKeys: phoneKeys(phone),
+      phoneKeyPrefixes: phoneKeyPrefixes(phone)
     };
   }
 
@@ -140,6 +160,7 @@
       emailNormalized: String(raw.emailNormalized || normalizeEmail(raw.email)),
       phoneDigits: String(raw.phoneDigits || phoneDigits(raw.phone)),
       phoneKeys: Array.isArray(raw.phoneKeys) ? raw.phoneKeys.slice() : phoneKeys(raw.phone),
+      phoneKeyPrefixes: Array.isArray(raw.phoneKeyPrefixes) ? raw.phoneKeyPrefixes.slice() : phoneKeyPrefixes(raw.phone),
       createdAtLocationId: String(raw.createdAtLocationId || ""),
       createdByUid: String(raw.createdByUid || ""),
       createdByStaffId: String(raw.createdByStaffId || ""),
@@ -167,6 +188,7 @@
     isEmailLike: isEmailLike,
     phoneDigits: phoneDigits,
     phoneKeys: phoneKeys,
+    phoneKeyPrefixes: phoneKeyPrefixes,
     buildSearchFields: buildSearchFields,
     validateCreate: validateCreate,
     fromDoc: fromDoc,

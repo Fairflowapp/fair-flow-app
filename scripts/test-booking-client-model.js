@@ -110,9 +110,25 @@ check(
   );
 });
 check(
+  "partial digits classify as phone for prefix search",
+  model.classifyQuery("954").kind === "phone"
+  && model.classifyQuery("9546").kind === "phone"
+  && model.classifyQuery("954600").kind === "phone"
+  && model.classifyQuery("(954) 600").kind === "phone"
+);
+check(
   "partial digits are not an exact phoneKeys match",
-  model.classifyQuery("954600").kind === "name"
-  && model.phoneKeys("954600").indexOf("9546000292") === -1
+  model.phoneKeys("954600").indexOf("9546000292") === -1
+);
+const prefixes = model.phoneKeyPrefixes("(954) 600-0292");
+check(
+  "phoneKeyPrefixes start at 3 digits and include both US forms",
+  prefixes.indexOf("95") === -1
+  && prefixes.indexOf("954") !== -1
+  && prefixes.indexOf("954600") !== -1
+  && prefixes.indexOf("9546000292") !== -1
+  && prefixes.indexOf("195") !== -1
+  && prefixes.indexOf("19546000292") !== -1
 );
 check(
   "classifyQuery still treats a name prefix as name",
