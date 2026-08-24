@@ -220,6 +220,11 @@
         window.ffBookingClientsDrawer.forceClose();
       }
     } catch (_) {}
+    try {
+      if (window.ffBookingClientsOptions && typeof window.ffBookingClientsOptions.forceClose === "function") {
+        window.ffBookingClientsOptions.forceClose();
+      }
+    } catch (_) {}
   }
 
   function applyArea(area) {

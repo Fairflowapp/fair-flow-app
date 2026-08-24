@@ -1,9 +1,9 @@
 /**
- * Booking Clients V1 screen. Recent 50 + targeted search via ffBookingClients.
- * Does not load the clients collection.
+ * Booking Clients V2 screen. Bounded browse + targeted search via ffBookingClients.
  */
 (function () {
   var ROOT_ID = "ffBookingClientsRoot";
+  var PAGE_SIZE = 50;
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var searchTimer = null;
   var bound = false;
@@ -11,8 +11,14 @@
   var rows = [];
   var status = "idle";
   var searchGen = 0;
+  var pageIndex = 0;
+  var cursorStack = [];
+  var hasMore = false;
+  var totalCount = null;
+  var mode = "browse";
 
   function repo() { return window.ffBookingClients || null; }
+  function options() { return window.ffBookingClientsOptions || null; }
 
   function isVisible() {
     var shell = window.ffBookingState;
@@ -62,65 +68,182 @@
     return MONTHS[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear();
   }
 
+  function daysAgo(days) {
+    return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  }
+
+  function startOfThisYear() {
+    var tm = window.ffBookingTime;
+    if (tm && typeof tm.now === "function" && typeof tm.zonedDateKey === "function") {
+      var key = tm.zonedDateKey(tm.now());
+      var y = parseInt(String(key || "").slice(0, 4), 10);
+      if (y) return new Date(y, 0, 1);
+    }
+    return new Date(new Date().getFullYear(), 0, 1);
+  }
+
+  function rangeFrom(kind) {
+    if (kind === "30") return daysAgo(30);
+    if (kind === "90") return daysAgo(90);
+    if (kind === "year") return startOfThisYear();
+    return null;
+  }
+
+  function browseSpec(cursor) {
+    var f = options() && options().getFilters ? options().getFilters() : { created: "all", updated: "all", sort: "updated_desc" };
+    return {
+      sort: f.sort || "updated_desc",
+      createdFrom: rangeFrom(f.created),
+      updatedFrom: rangeFrom(f.updated),
+      cursor: cursor || null,
+      pageSize: PAGE_SIZE
+    };
+  }
+
+  function filtersActive() {
+    return !!(options() && options().hasActiveFilters && options().hasActiveFilters());
+  }
+
+  function emptyCopy() {
+    if (status === "loading") return "Loading...";
+    if (status === "searching") return "Searching...";
+    if (mode === "search") return "No clients found";
+    if (filtersActive()) return "No clients match these filters";
+    return "No clients yet";
+  }
+
+  function avatarHtml(row) {
+    var url = String(row && row.photoUrl || "").trim();
+    if (url) {
+      return '<img class="ff-cli-avatar" src="' + escapeHtml(url) + '" alt="">';
+    }
+    return '<span class="ff-cli-initials">' + escapeHtml(initials(row)) + "</span>";
+  }
+
   function bodyHtml() {
-    if (status === "loading") return '<div class="ff-cli-empty">Loading...</div>';
-    if (status === "searching") return '<div class="ff-cli-empty">Searching...</div>';
-    if (status === "empty") return '<div class="ff-cli-empty">No clients found.</div>';
-    if (!rows.length) return '<div class="ff-cli-empty">No clients yet.</div>';
+    if (status === "loading" || status === "searching" || !rows.length) {
+      return '<div class="ff-cli-empty">' + escapeHtml(emptyCopy()) + "</div>";
+    }
     return (
       '<table class="ff-cli-table">' +
-        "<thead><tr><th>Client</th><th>Phone</th><th>Email</th><th>Last updated</th><th></th></tr></thead>" +
+        "<thead><tr><th>Client</th><th>Email</th><th>Phone</th><th>Last updated</th></tr></thead>" +
         "<tbody>" +
         rows.map(function (row) {
           return '<tr class="ff-cli-row" data-ff-cli-id="' + escapeHtml(row.clientId) + '">' +
-            '<td><span class="ff-cli-who"><span class="ff-cli-initials">' + escapeHtml(initials(row)) +
-            '</span><span class="ff-cli-name">' + escapeHtml(row.displayName || "Client") + "</span></span></td>" +
-            '<td class="ff-cli-phone">' + escapeHtml(dash(row.phone)) + "</td>" +
+            '<td><span class="ff-cli-who">' + avatarHtml(row) +
+            '<span class="ff-cli-name">' + escapeHtml(row.displayName || "Client") + "</span></span></td>" +
             '<td class="ff-cli-email">' + escapeHtml(dash(row.email)) + "</td>" +
+            '<td class="ff-cli-phone">' + escapeHtml(dash(row.phone)) + "</td>" +
             '<td class="ff-cli-updated">' + escapeHtml(formatUpdated(row.updatedAt || row.createdAt)) + "</td>" +
-            '<td class="ff-cli-more"><span class="ff-cli-dots" aria-hidden="true">⋮</span></td>' +
           "</tr>";
         }).join("") +
         "</tbody></table>"
     );
   }
 
+  function countHtml() {
+    if (mode === "search") {
+      if (!rows.length) return "";
+      return '<span class="ff-cli-count">' + rows.length + (rows.length === 1 ? " result" : " results") + "</span>";
+    }
+    if (totalCount == null) return "";
+    return '<span class="ff-cli-count">' + totalCount + (totalCount === 1 ? " client" : " clients") + "</span>";
+  }
+
+  function pagerHtml() {
+    if (mode !== "browse") return "";
+    if (pageIndex === 0 && !hasMore && rows.length < PAGE_SIZE && totalCount != null && totalCount <= PAGE_SIZE) return "";
+    if (pageIndex === 0 && !hasMore && !rows.length) return "";
+    return (
+      '<div class="ff-cli-pager">' +
+        '<button type="button" class="ff-cli-page-btn" data-ff-cli-page="prev"' + (pageIndex <= 0 ? " disabled" : "") + ">Previous</button>" +
+        '<button type="button" class="ff-cli-page-btn" data-ff-cli-page="next"' + (hasMore ? "" : " disabled") + ">Next</button>" +
+      "</div>"
+    );
+  }
+
+  function slidersIcon() {
+    return (
+      '<span class="ff-cli-opt-icon" aria-hidden="true">' +
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">' +
+          '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>' +
+          '<line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>' +
+          '<line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>' +
+          '<line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line>' +
+          '<line x1="17" y1="16" x2="23" y2="16"></line>' +
+        "</svg>" +
+      "</span>"
+    );
+  }
+
   function paint() {
     var root = document.getElementById(ROOT_ID);
     if (!root) return;
+    var active = document.activeElement && document.activeElement.id === "ffCliSearch";
+    var caret = active ? document.getElementById("ffCliSearch").selectionStart : null;
     root.innerHTML =
       '<div class="ff-cli">' +
         '<div class="ff-cli-toolbar">' +
-          "<h1>Clients</h1>" +
-          '<button type="button" class="ff-cli-add" data-ff-cli-act="add">+ Add Client</button>' +
+          '<div class="ff-cli-toolbar-left">' +
+            '<button type="button" class="ff-cli-add" data-ff-cli-act="add">+ Add Client</button>' +
+            '<input id="ffCliSearch" class="ff-cli-search-input" type="search" autocomplete="off" placeholder="Search by name, email, or phone" value="' +
+            escapeHtml(queryText) + '">' +
+          "</div>" +
+          '<button type="button" class="ff-cli-options" data-ff-cli-act="options">' + slidersIcon() + "Options</button>" +
         "</div>" +
-        '<div class="ff-cli-search">' +
-          '<input id="ffCliSearch" type="search" autocomplete="off" placeholder="Search clients by name, phone or email" value="' +
-          escapeHtml(queryText) + '">' +
-        "</div>" +
+        '<div class="ff-cli-meta">' + countHtml() + "</div>" +
         '<div class="ff-cli-body">' + bodyHtml() + "</div>" +
+        pagerHtml() +
       "</div>";
     var input = document.getElementById("ffCliSearch");
-    if (input && document.activeElement === input) {
-      var end = input.value.length;
-      input.setSelectionRange(end, end);
+    if (input && active) {
+      input.focus();
+      var pos = caret == null ? input.value.length : caret;
+      try { input.setSelectionRange(pos, pos); } catch (_) {}
     }
   }
 
-  async function loadRecent() {
+  function resetPaging() {
+    pageIndex = 0;
+    cursorStack = [];
+    hasMore = false;
+  }
+
+  async function loadCount() {
+    var api = repo();
+    if (!api || typeof api.countClients !== "function") {
+      totalCount = null;
+      return;
+    }
+    try {
+      totalCount = await api.countClients(browseSpec(null));
+    } catch (_) {
+      totalCount = null;
+    }
+  }
+
+  async function loadBrowse(cursor) {
     var api = repo();
     var gen = ++searchGen;
+    mode = "browse";
     status = "loading";
     paint();
-    var found = [];
+    var page = { clients: [], cursor: null, hasMore: false };
     try {
-      found = api && typeof api.getRecentClients === "function" ? await api.getRecentClients(50) : [];
+      page = api && typeof api.listClientsPage === "function"
+        ? await api.listClientsPage(browseSpec(cursor))
+        : { clients: await api.getRecentClients(PAGE_SIZE), cursor: null, hasMore: false };
     } catch (_) {
-      found = [];
+      page = { clients: [], cursor: null, hasMore: false };
     }
     if (gen !== searchGen) return;
-    rows = found || [];
-    status = "recent";
+    rows = page.clients || [];
+    hasMore = !!page.hasMore;
+    if (cursorStack.length === pageIndex) cursorStack.push(page.cursor || null);
+    else cursorStack[pageIndex] = page.cursor || null;
+    status = rows.length ? "browse" : "empty";
+    await loadCount();
+    if (gen !== searchGen) return;
     paint();
   }
 
@@ -129,26 +252,24 @@
     var q = String(raw || "").trim();
     queryText = q;
     if (!q) {
-      await loadRecent();
+      resetPaging();
+      await loadBrowse(null);
       return;
     }
-    if (!api) {
-      rows = [];
-      status = "empty";
-      paint();
-      return;
-    }
+    if (options()) options().close();
     var gen = ++searchGen;
+    mode = "search";
     status = "searching";
     paint();
     var found = [];
     try {
-      found = await api.searchClients(q);
+      found = api ? await api.searchClients(q) : [];
     } catch (_) {
       found = [];
     }
     if (gen !== searchGen) return;
     rows = found || [];
+    totalCount = null;
     status = rows.length ? "results" : "empty";
     paint();
   }
@@ -159,9 +280,15 @@
   }
 
   function showClient(client) {
-    rows = client ? [client] : [];
-    status = client ? "results" : "idle";
-    paint();
+    queryText = "";
+    resetPaging();
+    if (client) {
+      rows = [client];
+      status = "browse";
+      mode = "browse";
+      paint();
+    }
+    loadBrowse(null);
   }
 
   function replaceClient(client) {
@@ -169,15 +296,38 @@
     var next = rows.slice();
     var idx = next.findIndex(function (row) { return row.clientId === client.clientId; });
     if (idx >= 0) next[idx] = client;
-    else next = [client];
+    else next = [client].concat(next);
     rows = next;
-    status = "results";
+    status = rows.length ? (mode === "search" ? "results" : "browse") : "empty";
     paint();
+  }
+
+  function goNext() {
+    if (!hasMore) return;
+    pageIndex += 1;
+    loadBrowse(cursorStack[pageIndex - 1] || null);
+  }
+
+  function goPrev() {
+    if (pageIndex <= 0) return;
+    pageIndex -= 1;
+    cursorStack.length = pageIndex + 1;
+    var prevCursor = pageIndex === 0 ? null : cursorStack[pageIndex - 1];
+    loadBrowse(prevCursor);
+  }
+
+  function onFiltersChanged() {
+    if (String(queryText || "").trim()) return;
+    resetPaging();
+    loadBrowse(null);
   }
 
   function bind() {
     if (bound) return;
     bound = true;
+    if (options() && typeof options().setOnChange === "function") {
+      options().setOnChange(onFiltersChanged);
+    }
     document.addEventListener("click", function (ev) {
       var t = ev.target;
       if (!t || typeof t.closest !== "function") return;
@@ -185,12 +335,29 @@
       if (!root || !root.contains(t)) return;
       if (t.closest("[data-ff-cli-act=add]")) {
         ev.preventDefault();
+        if (options()) options().close();
         if (window.ffBookingClientsDrawer) window.ffBookingClientsDrawer.openAdd();
+        return;
+      }
+      if (t.closest("[data-ff-cli-act=options]")) {
+        ev.preventDefault();
+        if (options()) options().open();
+        return;
+      }
+      if (t.closest("[data-ff-cli-page=next]")) {
+        ev.preventDefault();
+        goNext();
+        return;
+      }
+      if (t.closest("[data-ff-cli-page=prev]")) {
+        ev.preventDefault();
+        goPrev();
         return;
       }
       var row = t.closest("[data-ff-cli-id]");
       if (row && window.ffBookingClientsDrawer) {
         ev.preventDefault();
+        if (options()) options().close();
         window.ffBookingClientsDrawer.openDetails(row.getAttribute("data-ff-cli-id"));
       }
     });
@@ -202,7 +369,8 @@
     document.addEventListener("ff-booking-client-created", function () {
       if (!isVisible()) return;
       if (String(queryText || "").trim()) return;
-      loadRecent();
+      resetPaging();
+      loadBrowse(null);
     });
   }
 
@@ -210,7 +378,10 @@
     bind();
     if (!isVisible()) return;
     if (String(queryText || "").trim()) runSearch(queryText);
-    else loadRecent();
+    else {
+      resetPaging();
+      loadBrowse(null);
+    }
   }
 
   window.ffRefreshBookingClients = refresh;

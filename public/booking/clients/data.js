@@ -7,12 +7,15 @@ import {
   addDoc,
   collection,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   limit,
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
+  Timestamp,
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
@@ -213,15 +216,84 @@ async function createClient(input) {
   return { ok: true, created: true, duplicate: false, client };
 }
 
-async function getRecentClients(max) {
+const PAGE_SIZE = 50;
+const SORTS = {
+  updated_desc: { field: "updatedAt", dir: "desc" },
+  created_desc: { field: "createdAt", dir: "desc" },
+  name_asc: { field: "displayNameNormalized", dir: "asc" },
+  name_desc: { field: "displayNameNormalized", dir: "desc" },
+};
+
+function toTimestamp(value) {
+  if (!value) return null;
+  if (value instanceof Timestamp) return value;
+  if (typeof value.toDate === "function") return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Timestamp.fromDate(date);
+}
+
+function browseConstraints(opts) {
+  const createdFrom = toTimestamp(opts && opts.createdFrom);
+  const updatedFrom = toTimestamp(opts && opts.updatedFrom);
+  const sort = SORTS[(opts && opts.sort) || ""] || SORTS.updated_desc;
+  const constraints = [];
+  if (createdFrom) constraints.push(where("createdAt", ">=", createdFrom));
+  if (updatedFrom) constraints.push(where("updatedAt", ">=", updatedFrom));
+
+  const ineq = [];
+  if (createdFrom) ineq.push("createdAt");
+  if (updatedFrom) ineq.push("updatedAt");
+
+  if (!ineq.length) {
+    constraints.push(orderBy(sort.field, sort.dir));
+  } else if (ineq.indexOf(sort.field) >= 0) {
+    constraints.push(orderBy(sort.field, sort.dir));
+    const other = ineq.find((field) => field !== sort.field);
+    if (other) constraints.push(orderBy(other, "desc"));
+  } else {
+    constraints.push(orderBy(ineq[0], "desc"));
+    if (ineq[1]) constraints.push(orderBy(ineq[1], "desc"));
+    constraints.push(orderBy(sort.field, sort.dir));
+  }
+  return constraints;
+}
+
+async function listClientsPage(opts) {
   const salonId = requireSalon();
-  const cap = Math.min(50, Math.max(1, Number(max) || 50));
-  const snap = await getDocs(query(
-    clientsRef(salonId),
-    orderBy("updatedAt", "desc"),
-    limit(cap)
-  ));
-  return snap.docs.map(toClient);
+  const spec = opts && typeof opts === "object" ? opts : {};
+  const cap = Math.min(PAGE_SIZE, Math.max(1, Number(spec.pageSize) || PAGE_SIZE));
+  const constraints = browseConstraints(spec);
+  if (spec.cursor) constraints.push(startAfter(spec.cursor));
+  constraints.push(limit(cap + 1));
+  const snap = await getDocs(query(clientsRef(salonId), ...constraints));
+  const hasMore = snap.docs.length > cap;
+  const pageDocs = hasMore ? snap.docs.slice(0, cap) : snap.docs;
+  return {
+    clients: pageDocs.map(toClient),
+    cursor: pageDocs.length ? pageDocs[pageDocs.length - 1] : null,
+    hasMore,
+    pageSize: cap,
+  };
+}
+
+async function countClients(opts) {
+  const salonId = requireSalon();
+  try {
+    const snap = await getCountFromServer(query(clientsRef(salonId), ...browseConstraints(opts || {})));
+    const n = snap && snap.data ? Number(snap.data().count) : NaN;
+    return Number.isFinite(n) ? n : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function getRecentClients(max) {
+  const page = await listClientsPage({
+    sort: "updated_desc",
+    pageSize: Math.min(50, Math.max(1, Number(max) || 50)),
+  });
+  return page.clients;
 }
 
 async function updateClient(clientId, patch) {
@@ -276,12 +348,15 @@ const api = {
   createClient,
   getClientById,
   getRecentClients,
+  listClientsPage,
+  countClients,
   searchClients,
   findClientByPhone,
   findClientByEmail,
   updateClient,
   currentSalonId,
   currentLocationId,
+  PAGE_SIZE,
 };
 
 window.ffBookingClients = api;
@@ -289,6 +364,8 @@ export {
   createClient,
   getClientById,
   getRecentClients,
+  listClientsPage,
+  countClients,
   searchClients,
   findClientByPhone,
   findClientByEmail,

@@ -139,7 +139,8 @@
       createdByUid: String(raw.createdByUid || ""),
       createdByStaffId: String(raw.createdByStaffId || ""),
       createdAt: raw.createdAt || null,
-      updatedAt: raw.updatedAt || null
+      updatedAt: raw.updatedAt || null,
+      photoUrl: String(raw.photoUrl || raw.photo || raw.avatarUrl || "")
     };
   }
 
