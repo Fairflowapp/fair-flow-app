@@ -272,32 +272,16 @@ body:not(.ff-booking-area) .ff-cli-opt-drawer,
 body:not(.ff-booking-area) .ff-cli-opt-overlay {
   display: none !important;
 }
-.ff-cli-opt-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 18px;
-  flex: 0 0 auto;
-  background: #5b21b6;
-  color: #fff;
-}
-.ff-cli-opt-head h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-.ff-cli-opt-head .ff-cli-x {
-  color: #fff;
-}
-.ff-cli-opt-head .ff-cli-x:hover {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+.ff-cli-opt-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
 }
 .ff-cli-opt-body {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 16px 18px 24px;
+  padding: 14px 48px 24px 18px;
 }
 .ff-cli-opt-group {
   margin: 0 0 18px;

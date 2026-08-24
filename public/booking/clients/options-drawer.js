@@ -39,10 +39,7 @@
 
   function html() {
     return (
-      '<header class="ff-cli-opt-head">' +
-        "<h2>Client Options</h2>" +
-        '<button type="button" class="ff-cli-x" data-ff-cli-opt="close" aria-label="Close">×</button>' +
-      "</header>" +
+      '<button type="button" class="ff-cli-x ff-cli-opt-close" data-ff-cli-opt="close" aria-label="Close">×</button>' +
       '<div class="ff-cli-opt-body">' +
         group("Client created",
           radio("ffCliCreated", "all", "All time", filters.created === "all") +
