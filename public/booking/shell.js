@@ -1,6 +1,6 @@
 /**
- * Booking shell: product switch, section nav, and placeholder workspaces.
- * Does not own Live Floor, auth, salon, or Operations screens.
+ * Booking shell: product switch and workspace. Internal screens live in
+ * the left sidebar (sidebar.js). Does not own Live Floor, auth, or Operations.
  */
 (function () {
   var SWITCH_ID = "ffProductSwitch";
@@ -11,6 +11,22 @@
     clients: { title: "Clients", body: "Client management coming soon." },
     services: { title: "Services", body: "Service management coming soon." }
   };
+  var ICON_SCHEDULE =
+    '<rect x="3" y="4" width="18" height="18" rx="2"></rect>' +
+    '<line x1="16" y1="2" x2="16" y2="6"></line>' +
+    '<line x1="8" y1="2" x2="8" y2="6"></line>' +
+    '<line x1="3" y1="10" x2="21" y2="10"></line>';
+  var opsServicesOpen = false;
+
+  function navIcon(paths) {
+    return (
+      '<span class="ff-booking-nav-icon" aria-hidden="true">' +
+        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+          paths +
+        "</svg>" +
+      "</span>"
+    );
+  }
 
   function state() {
     return window.ffBookingState || null;
@@ -32,7 +48,8 @@
     wrap.setAttribute("aria-label", "Fair Flow product area");
     wrap.innerHTML =
       '<button type="button" class="ff-product-switch-btn is-active" data-ff-area="operations" role="tab" aria-selected="true">Operations</button>' +
-      '<button type="button" class="ff-product-switch-btn" data-ff-area="booking" role="tab" aria-selected="false">Booking</button>';
+      '<button type="button" class="ff-product-switch-btn" data-ff-area="booking" role="tab" aria-selected="false">' +
+        navIcon(ICON_SCHEDULE) + "Booking</button>";
     wrap.addEventListener("click", function (ev) {
       var btn = ev.target && ev.target.closest ? ev.target.closest("[data-ff-area]") : null;
       if (!btn) return;
@@ -43,29 +60,25 @@
     return wrap;
   }
 
-  function ensureSectionNav() {
-    var existing = document.getElementById(SECTION_NAV_ID);
-    if (existing) return existing;
-    var rest = document.querySelector(".header-toolbar-rest");
-    if (!rest) return null;
-    var nav = document.createElement("nav");
-    nav.id = SECTION_NAV_ID;
-    nav.className = "ff-booking-section-nav";
-    nav.setAttribute("aria-label", "Booking");
-    nav.innerHTML =
-      '<button type="button" class="ff-booking-section-btn is-active" data-ff-booking-section="calendar">Calendar</button>' +
-      '<button type="button" class="ff-booking-section-btn" data-ff-booking-section="clients">Clients</button>' +
-      '<button type="button" class="ff-booking-section-btn" data-ff-booking-section="services">Services</button>';
-    nav.addEventListener("click", function (ev) {
-      var btn = ev.target && ev.target.closest ? ev.target.closest("[data-ff-booking-section]") : null;
-      if (!btn) return;
-      ev.preventDefault();
-      setSection(btn.getAttribute("data-ff-booking-section"));
-    });
-    var opsNav = rest.querySelector(".toolbar-nav-main");
-    if (opsNav) rest.insertBefore(nav, opsNav);
-    else rest.appendChild(nav);
-    return nav;
+  function removeTopSectionNav() {
+    var leftover = document.getElementById(SECTION_NAV_ID);
+    if (leftover && leftover.parentNode) leftover.parentNode.removeChild(leftover);
+  }
+
+  function ensureMain(workspace) {
+    var main = document.getElementById("ffBookingMain");
+    if (main) return main;
+    main = document.createElement("div");
+    main.id = "ffBookingMain";
+    main.className = "ff-booking-main";
+    var pages = workspace.querySelectorAll("[data-ff-booking-page]");
+    if (pages.length) {
+      pages.forEach(function (page) { main.appendChild(page); });
+    } else {
+      main.innerHTML = pageHtml("calendar") + pageHtml("clients") + pageHtml("services");
+    }
+    workspace.appendChild(main);
+    return main;
   }
 
   function pageHtml(id) {
@@ -94,14 +107,19 @@
 
   function ensureWorkspace() {
     var existing = document.getElementById(WORKSPACE_ID);
-    if (existing) return existing;
-    var root = document.createElement("div");
-    root.id = WORKSPACE_ID;
-    root.className = "ff-booking-workspace";
-    root.setAttribute("hidden", "");
-    root.innerHTML = pageHtml("calendar") + pageHtml("clients") + pageHtml("services");
-    document.body.appendChild(root);
-    return root;
+    if (!existing) {
+      existing = document.createElement("div");
+      existing.id = WORKSPACE_ID;
+      existing.className = "ff-booking-workspace";
+      existing.setAttribute("hidden", "");
+      document.body.appendChild(existing);
+    }
+    removeTopSectionNav();
+    if (window.ffBookingSidebar && typeof window.ffBookingSidebar.ensure === "function") {
+      window.ffBookingSidebar.ensure(existing, setSection);
+    }
+    ensureMain(existing);
+    return existing;
   }
 
   function paintSwitch(area) {
@@ -114,18 +132,74 @@
     });
   }
 
+  function setWorkspaceVisible(show) {
+    var workspace = document.getElementById(WORKSPACE_ID);
+    if (!workspace) return;
+    if (show) workspace.removeAttribute("hidden");
+    else workspace.setAttribute("hidden", "");
+  }
+
+  function restoreOpsChromeAfterServices() {
+    var ov = document.getElementById("owner-view");
+    if (ov) {
+      ov.style.display = "";
+      ov.style.pointerEvents = "";
+    }
+    [document.querySelector(".joinBar"), document.querySelector(".wrap"), document.getElementById("queueControls")].forEach(function (el) {
+      if (el) el.style.display = "";
+    });
+  }
+
+  function hideOpsServices() {
+    opsServicesOpen = false;
+    var el = document.getElementById("servicesScreen");
+    if (!el) return;
+    el.style.display = "none";
+    el.style.pointerEvents = "none";
+    el.style.zIndex = "";
+  }
+
+  function showServicesScreen() {
+    var el = document.getElementById("servicesScreen");
+    if (!el) return false;
+    el.style.display = "block";
+    el.style.pointerEvents = "auto";
+    el.style.zIndex = "9866";
+    restoreOpsChromeAfterServices();
+    return true;
+  }
+
+  function openOpsServices() {
+    if (state() && state().isBooking()) setWorkspaceVisible(true);
+    if (opsServicesOpen) {
+      showServicesScreen();
+      return;
+    }
+    if (typeof window.goToServices !== "function") return;
+    opsServicesOpen = true;
+    Promise.resolve(window.goToServices()).then(function () {
+      if (!showServicesScreen()) opsServicesOpen = false;
+    }).catch(function () {
+      opsServicesOpen = false;
+    });
+  }
+
   function paintSection(section) {
-    var nav = document.getElementById(SECTION_NAV_ID);
-    if (nav) {
-      nav.querySelectorAll("[data-ff-booking-section]").forEach(function (btn) {
-        btn.classList.toggle("is-active", btn.getAttribute("data-ff-booking-section") === section);
-      });
+    if (window.ffBookingSidebar && typeof window.ffBookingSidebar.paint === "function") {
+      window.ffBookingSidebar.paint(section);
     }
     var root = document.getElementById(WORKSPACE_ID);
-    if (!root) return;
-    root.querySelectorAll("[data-ff-booking-page]").forEach(function (page) {
-      page.classList.toggle("is-active", page.getAttribute("data-ff-booking-page") === section);
-    });
+    if (root) {
+      root.querySelectorAll("[data-ff-booking-page]").forEach(function (page) {
+        page.classList.toggle("is-active", page.getAttribute("data-ff-booking-page") === section);
+      });
+    }
+    if (section === "services") {
+      openOpsServices();
+      return;
+    }
+    hideOpsServices();
+    if (state() && state().isBooking()) setWorkspaceVisible(true);
     if (section === "calendar" && typeof window.ffRefreshBookingCalendar === "function") {
       window.ffRefreshBookingCalendar();
     }
@@ -157,10 +231,12 @@
       closeClientsDrawer();
     }
     if (document.body) document.body.classList.toggle("ff-booking-area", inBooking);
-    var workspace = document.getElementById(WORKSPACE_ID);
-    if (workspace) {
-      if (inBooking) workspace.removeAttribute("hidden");
-      else workspace.setAttribute("hidden", "");
+    if (window.ffBookingSidebar && typeof window.ffBookingSidebar.setVisible === "function") {
+      window.ffBookingSidebar.setVisible(inBooking);
+    }
+    if (!inBooking) {
+      hideOpsServices();
+      setWorkspaceVisible(false);
     }
     paintSwitch(area);
     if (inBooking) paintSection(state() ? state().getSection() : "calendar");
@@ -198,7 +274,7 @@
   function refreshVisibility() {
     var allowed = canAccess();
     ensureSwitch();
-    ensureSectionNav();
+    removeTopSectionNav();
     ensureWorkspace();
     var wrap = document.getElementById(SWITCH_ID);
     if (wrap) wrap.classList.toggle("is-ready", allowed);
@@ -218,7 +294,7 @@
       if (!st || !st.isBooking()) return;
       var t = ev.target;
       if (!t || typeof t.closest !== "function") return;
-      if (t.closest("#" + SWITCH_ID) || t.closest("#" + SECTION_NAV_ID) || t.closest("#" + WORKSPACE_ID)) return;
+      if (t.closest("#" + SWITCH_ID) || t.closest("#" + WORKSPACE_ID) || t.closest("#servicesScreen")) return;
       if (t.closest(".nav-item, .apps-panel-item, [data-app]")) {
         goToOperations();
       }
@@ -232,7 +308,7 @@
 
   function boot() {
     ensureSwitch();
-    ensureSectionNav();
+    removeTopSectionNav();
     ensureWorkspace();
     bindOpsEscape();
     refreshVisibility();

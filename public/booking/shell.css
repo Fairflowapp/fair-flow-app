@@ -15,62 +15,53 @@
   display: inline-flex;
 }
 .ff-product-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.82);
+  color: #f5f3ff;
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  padding: 6px 11px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: normal;
+  line-height: 1.25;
+  padding: 6px 14px;
   border-radius: 999px;
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
 }
 .ff-product-switch-btn:hover {
   color: #fff;
+  background: rgba(167, 139, 250, 0.28);
 }
 .ff-product-switch-btn.is-active {
-  background: #fff;
-  color: #5b21b6;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 700;
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-.ff-booking-section-nav {
-  display: none;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-body.ff-booking-area .toolbar-nav-main {
+body.ff-booking-area .toolbar-nav-main,
+body.ff-booking-area .ff-booking-section-nav,
+#ffBookingSectionNav {
   display: none !important;
 }
-body.ff-booking-area .ff-booking-section-nav {
-  display: flex;
+.ff-booking-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
-.ff-booking-section-btn {
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.92);
-  color: #111827;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 24px;
-  height: 24px;
-  padding: 0 12px;
-  border-radius: 999px;
-  opacity: 0.78;
-}
-.ff-booking-section-btn:hover {
-  opacity: 1;
-}
-.ff-booking-section-btn.is-active {
-  opacity: 1;
-  font-weight: 800;
-  color: #7c3aed;
-  border-color: #a78bfa;
-  background: #ede9fe;
+.ff-booking-nav-icon svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+  stroke: currentColor;
 }
 
 .ff-booking-workspace {
@@ -81,12 +72,14 @@ body.ff-booking-area .ff-booking-section-nav {
   right: 0;
   bottom: 0;
   z-index: 9865;
-  background: #f5f7fb;
-  overflow: auto;
+  background: #ffffff;
+  overflow: hidden;
   -webkit-overflow-scrolling: touch;
 }
 .ff-booking-workspace:not([hidden]) {
-  display: block;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
 }
 .ff-booking-page {
   display: none;
@@ -117,10 +110,23 @@ body.ff-logged-out .ff-product-switch {
   display: none !important;
 }
 
+/* The product switch takes ~200px. Keep the existing hide-* cascade, just
+   hide Training/Schedule sooner so they never sit half-clipped under LIVE/Apps. */
+@media (max-width: 1900px) {
+  body:has(.ff-product-switch.is-ready) .hide-1 {
+    display: none !important;
+  }
+}
+@media (max-width: 1620px) {
+  body:has(.ff-product-switch.is-ready) .hide-2 {
+    display: none !important;
+  }
+}
+
 @media (max-width: 720px) {
   .ff-product-switch-btn {
-    padding: 6px 8px;
-    font-size: 10px;
+    padding: 6px 10px;
+    font-size: 12px;
   }
   .ff-booking-page {
     padding: 28px 18px;

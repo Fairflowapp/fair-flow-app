@@ -1,0 +1,152 @@
+/* Booking left sidebar. Scoped to the Booking workspace only. */
+
+:root {
+  --ff-booking-sidebar-expanded: 200px;
+  --ff-booking-sidebar-collapsed: 58px;
+  --ff-booking-sidebar-w: var(--ff-booking-sidebar-expanded);
+}
+
+.ff-booking-sidebar {
+  display: none;
+  flex: 0 0 var(--ff-booking-sidebar-w);
+  width: var(--ff-booking-sidebar-w);
+  max-width: var(--ff-booking-sidebar-w);
+  min-width: var(--ff-booking-sidebar-collapsed);
+  align-self: stretch;
+  flex-direction: column;
+  background: #ffffff;
+  border-right: 1px solid var(--border, #e5e7eb);
+  z-index: 1;
+  min-height: 0;
+  box-sizing: border-box;
+}
+body.ff-booking-area .ff-booking-sidebar {
+  display: flex;
+}
+
+.ff-booking-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ff-booking-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #374151;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.ff-booking-sidebar-item:hover {
+  background: #f5f3ff;
+  color: #1f1633;
+}
+.ff-booking-sidebar-item.is-active {
+  background: #f5f3ff;
+  color: var(--ff-brand-purple, #9d68b9);
+  font-weight: 600;
+}
+.ff-booking-sidebar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+}
+.ff-booking-sidebar-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  stroke: currentColor;
+}
+.ff-booking-sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-booking-sidebar-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-top: 1px solid var(--border, #e5e7eb);
+  background: #ffffff;
+  color: #6b7280;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.ff-booking-sidebar-toggle:hover {
+  background: #f9fafb;
+  color: #374151;
+}
+.ff-booking-sidebar-toggle svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  stroke: currentColor;
+}
+
+.ff-booking-sidebar.is-collapsed .ff-booking-sidebar-item {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+.ff-booking-sidebar.is-collapsed .ff-booking-sidebar-label,
+.ff-booking-sidebar.is-collapsed .ff-booking-sidebar-toggle-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.ff-booking-sidebar.is-collapsed .ff-booking-sidebar-toggle {
+  justify-content: center;
+  padding: 0;
+}
+
+.ff-booking-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+body.ff-booking-area #servicesScreen {
+  left: var(--ff-booking-sidebar-w, 200px) !important;
+}
