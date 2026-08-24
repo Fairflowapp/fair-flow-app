@@ -6,7 +6,7 @@
   var ID = "ffBookingSidebar";
   var KEY = "ff-booking-sidebar-collapsed";
   var EXPANDED_W = 200;
-  var COLLAPSED_W = 58;
+  var COLLAPSED_W_TOKEN = "var(--header-h, 60px)";
   var NARROW_PX = 1180;
   var ICON_SCHEDULE =
     '<rect x="3" y="4" width="18" height="18" rx="2"></rect>' +
@@ -61,9 +61,20 @@
     } catch (_) {}
   }
 
+  function collapsedWidthPx() {
+    var raw = "";
+    try {
+      raw = getComputedStyle(document.documentElement).getPropertyValue("--header-h").trim();
+    } catch (_) {}
+    var n = parseFloat(raw);
+    return n > 0 ? n : 60;
+  }
+
   function applyWidth(collapsed) {
-    var width = collapsed ? COLLAPSED_W : EXPANDED_W;
-    document.documentElement.style.setProperty("--ff-booking-sidebar-w", width + "px");
+    document.documentElement.style.setProperty(
+      "--ff-booking-sidebar-w",
+      collapsed ? COLLAPSED_W_TOKEN : EXPANDED_W + "px"
+    );
     var el = document.getElementById(ID);
     if (!el) return;
     el.classList.toggle("is-collapsed", collapsed);
@@ -188,6 +199,6 @@
     setVisible: setVisible,
     isCollapsed: isCollapsed,
     expandedWidth: EXPANDED_W,
-    collapsedWidth: COLLAPSED_W
+    collapsedWidth: collapsedWidthPx
   };
 })();
