@@ -179,28 +179,30 @@
   function paint() {
     var root = document.getElementById(ROOT_ID);
     if (!root) return;
-    var active = document.activeElement && document.activeElement.id === "ffCliSearch";
-    var caret = active ? document.getElementById("ffCliSearch").selectionStart : null;
-    root.innerHTML =
-      '<div class="ff-cli">' +
-        '<div class="ff-cli-toolbar">' +
-          '<div class="ff-cli-toolbar-left">' +
-            '<button type="button" class="ff-cli-add" data-ff-cli-act="add">+ Add Client</button>' +
-            '<input id="ffCliSearch" class="ff-cli-search-input" type="search" autocomplete="off" placeholder="Search by name, email, or phone" value="' +
-            escapeHtml(queryText) + '">' +
+    if (!root.querySelector(".ff-cli")) {
+      root.innerHTML =
+        '<div class="ff-cli">' +
+          '<div class="ff-cli-toolbar">' +
+            '<div class="ff-cli-toolbar-left">' +
+              '<button type="button" class="ff-cli-add" data-ff-cli-act="add">+ Add Client</button>' +
+              '<input id="ffCliSearch" class="ff-cli-search-input" type="text" inputmode="search" autocomplete="off" placeholder="Search by name, email, or phone" value="' +
+              escapeHtml(queryText) + '">' +
+            "</div>" +
+            '<button type="button" class="ff-cli-options" data-ff-cli-act="options">' + slidersIcon() + "Options</button>" +
           "</div>" +
-          '<button type="button" class="ff-cli-options" data-ff-cli-act="options">' + slidersIcon() + "Options</button>" +
-        "</div>" +
-        '<div class="ff-cli-meta">' + countHtml() + "</div>" +
-        '<div class="ff-cli-body">' + bodyHtml() + "</div>" +
-        pagerHtml() +
-      "</div>";
-    var input = document.getElementById("ffCliSearch");
-    if (input && active) {
-      input.focus();
-      var pos = caret == null ? input.value.length : caret;
-      try { input.setSelectionRange(pos, pos); } catch (_) {}
+          '<div class="ff-cli-meta"></div>' +
+          '<div class="ff-cli-body"></div>' +
+          '<div class="ff-cli-pager-slot"></div>' +
+        "</div>";
     }
+    var input = document.getElementById("ffCliSearch");
+    if (input && document.activeElement !== input) input.value = queryText;
+    var meta = root.querySelector(".ff-cli-meta");
+    var body = root.querySelector(".ff-cli-body");
+    var pagerSlot = root.querySelector(".ff-cli-pager-slot");
+    if (meta) meta.innerHTML = countHtml();
+    if (body) body.innerHTML = bodyHtml();
+    if (pagerSlot) pagerSlot.innerHTML = pagerHtml();
   }
 
   function resetPaging() {
@@ -264,8 +266,9 @@
     var found = [];
     try {
       found = api ? await api.searchClients(q) : [];
-    } catch (_) {
+    } catch (err) {
       found = [];
+      try { console.error("Client search failed", err); } catch (_) {}
     }
     if (gen !== searchGen) return;
     rows = found || [];

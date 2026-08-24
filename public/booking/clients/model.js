@@ -75,10 +75,15 @@
     return out;
   }
 
+  function stripPhonePunctuation(value) {
+    return String(value == null ? "" : value).replace(/[\s().+\-\u2010-\u2015\u2212/]/g, "");
+  }
+
   function looksLikePhoneQuery(value) {
     var digits = phoneDigits(value);
     var raw = trimText(value);
-    if (digits.length >= 7 && digits.length === raw.replace(/[\s().+\-]/g, "").length) return true;
+    if (!digits) return false;
+    if (digits.length >= 7 && digits.length === stripPhonePunctuation(raw).length) return true;
     return digits.length >= 10 && digits.length / Math.max(raw.length, 1) >= 0.6;
   }
 

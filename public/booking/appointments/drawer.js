@@ -112,7 +112,7 @@
         "</div>" +
         '<label class="ff-appt-field">' +
           '<span>Client</span>' +
-          '<input id="ffApptClientQ" type="search" autocomplete="off" placeholder="Search by name, phone or email">' +
+          '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search by name, phone or email">' +
           '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
           '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ Add new client</button>' +
           '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
@@ -262,7 +262,12 @@
       showClientResults([]);
       return;
     }
-    var rows = await api.searchClients(query);
+    var rows = [];
+    try {
+      rows = await api.searchClients(query);
+    } catch (err) {
+      try { console.error("Client search failed", err); } catch (_) {}
+    }
     showClientResults(rows || []);
   }
 

@@ -90,18 +90,44 @@ async function getClientById(clientId, salonId) {
   return toClient(snap);
 }
 
-async function findClientByPhone(phone, salonId) {
+async function searchPhone(salonId, rawPhone) {
   const api = requireModel();
-  const sid = String(salonId || currentSalonId() || "").trim();
-  const keys = api.phoneKeys(phone);
-  if (!sid || !keys.length) return null;
-  const snap = await getDocs(query(
-    clientsRef(sid),
-    where("phoneKeys", "array-contains-any", keys.slice(0, 10)),
-    limit(5)
-  ));
-  if (snap.empty) return null;
-  return toClient(snap.docs[0]);
+  const sid = String(salonId || "").trim();
+  const keys = api.phoneKeys(rawPhone);
+  if (!sid || !keys.length) return [];
+  const cap = api.SEARCH_LIMIT;
+  const ref = clientsRef(sid);
+  const byId = new Map();
+
+  function addSnap(snap) {
+    if (!snap) return;
+    snap.docs.forEach((docSnap) => {
+      if (!byId.has(docSnap.id)) byId.set(docSnap.id, toClient(docSnap));
+    });
+  }
+
+  try {
+    addSnap(await getDocs(query(
+      ref,
+      where("phoneKeys", "array-contains-any", keys.slice(0, 10)),
+      limit(cap)
+    )));
+  } catch (_) {}
+
+  if (!byId.size) {
+    await Promise.all(keys.map(async (key) => {
+      try {
+        addSnap(await getDocs(query(ref, where("phoneDigits", "==", key), limit(cap))));
+      } catch (_) {}
+    }));
+  }
+
+  return [...byId.values()].slice(0, cap);
+}
+
+async function findClientByPhone(phone, salonId) {
+  const rows = await searchPhone(String(salonId || currentSalonId() || "").trim(), phone);
+  return rows[0] || null;
 }
 
 async function findClientByEmail(email, salonId) {
@@ -165,8 +191,7 @@ async function searchClients(rawQuery, salonId) {
     return hit ? [hit] : [];
   }
   if (classified.kind === "phone") {
-    const hit = await findClientByPhone(classified.value, sid);
-    return hit ? [hit] : [];
+    return searchPhone(sid, classified.value);
   }
   return searchName(sid, classified.value);
 }

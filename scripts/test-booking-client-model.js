@@ -94,6 +94,26 @@ check(
   "classifyQuery still treats phone digits as phone",
   model.classifyQuery("3055551212").kind === "phone"
 );
+[
+  "9546000292",
+  "954-600-0292",
+  "(954) 600-0292",
+  "+1 954 600 0292",
+  "19546000292",
+].forEach((q) => {
+  const classified = model.classifyQuery(q);
+  const keys = model.phoneKeys(q);
+  check("classifyQuery treats " + JSON.stringify(q) + " as phone", classified.kind === "phone");
+  check(
+    "phoneKeys for " + JSON.stringify(q) + " share 10-digit and +1 forms",
+    keys.indexOf("9546000292") !== -1 && keys.indexOf("19546000292") !== -1
+  );
+});
+check(
+  "partial digits are not an exact phoneKeys match",
+  model.classifyQuery("954600").kind === "name"
+  && model.phoneKeys("954600").indexOf("9546000292") === -1
+);
 check(
   "classifyQuery still treats a name prefix as name",
   model.classifyQuery("Jess").kind === "name" && model.classifyQuery("Jess").value === "jess"
