@@ -162,12 +162,76 @@ body:not(.ff-booking-area) .ff-appt {
   font-size: 12px;
   color: var(--sub, #6b7280);
 }
-.ff-appt-chosen,
 .ff-appt-note,
 .ff-appt-cap {
   font-size: 13px;
   color: var(--text, #111827);
   font-weight: 500;
+}
+#ffApptClientSearchWrap[hidden],
+.ff-appt-chosen[hidden] {
+  display: none !important;
+}
+.ff-appt-picked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  background: #FFFFFF;
+}
+.ff-appt-picked-avatar,
+.ff-appt-picked-initials {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 50%;
+}
+.ff-appt-picked-avatar {
+  object-fit: cover;
+  background: #f5f3ff;
+}
+.ff-appt-picked-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f3ff;
+  color: #5b21b6;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ff-appt-picked-id {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.ff-appt-picked-id strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text, #111827);
+}
+.ff-appt-picked-id span {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sub, #6b7280);
+}
+.ff-appt-picked-x {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border: 0;
+  background: transparent;
+  color: var(--sub, #6b7280);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  border-radius: 8px;
+}
+.ff-appt-picked-x:hover {
+  background: var(--muted, #f7f7f8);
+  color: var(--text, #111827);
 }
 .ff-appt-error {
   color: #b91c1c;
@@ -182,7 +246,6 @@ body:not(.ff-booking-area) .ff-appt {
 .ff-appt-new[hidden],
 .ff-appt-summary[hidden],
 .ff-appt-suggest[hidden],
-.ff-appt-chosen[hidden],
 .ff-appt-note[hidden],
 .ff-appt-cap[hidden],
 .ff-appt-error[hidden],
@@ -247,4 +310,7 @@ body:not(.ff-booking-area) .ff-appt {
 .ff-appt-primary:disabled {
   opacity: 0.45;
   cursor: default;
+}
+body.ff-appt-drawer-open .ff-live-desk-fab {
+  z-index: 100320;
 }

@@ -58,6 +58,96 @@
       .replace(/"/g, "&quot;");
   }
 
+  function initials(client) {
+    if (window.ffBookingClientsUi && window.ffBookingClientsUi.initials) {
+      return window.ffBookingClientsUi.initials(client);
+    }
+    var first = String(client && client.firstName || "").trim();
+    var last = String(client && client.lastName || "").trim();
+    var pair = (first.charAt(0) + last.charAt(0)).toUpperCase();
+    if (pair) return pair;
+    var name = String(client && client.displayName || "").trim();
+    return name ? name.charAt(0).toUpperCase() : "?";
+  }
+
+  function selectedClientHtml(client) {
+    var url = String(client && client.photoUrl || "").trim();
+    var avatar = url
+      ? '<img class="ff-appt-picked-avatar" src="' + escapeHtml(url) + '" alt="">'
+      : '<span class="ff-appt-picked-avatar ff-appt-picked-initials">' + escapeHtml(initials(client)) + "</span>";
+    var secondary = String(client && client.phone || "").trim() || String(client && client.email || "").trim();
+    return (
+      '<div class="ff-appt-picked">' +
+        avatar +
+        '<div class="ff-appt-picked-id">' +
+          "<strong>" + escapeHtml((client && client.displayName) || "Client") + "</strong>" +
+          (secondary ? "<span>" + escapeHtml(secondary) + "</span>" : "") +
+        "</div>" +
+        '<button type="button" class="ff-appt-picked-x" data-ff-appt-act="clear-client" aria-label="Change client">×</button>' +
+      "</div>"
+    );
+  }
+
+  function paintClientState() {
+    var ui = els();
+    var selected = !!(state && state.client && state.clientId);
+    if (ui.searchWrap) ui.searchWrap.hidden = selected;
+    if (ui.chosen) {
+      ui.chosen.hidden = !selected;
+      ui.chosen.innerHTML = selected ? selectedClientHtml(state.client) : "";
+    }
+    if (selected) {
+      showClientResults([]);
+      if (ui.newBox) ui.newBox.hidden = true;
+    }
+  }
+
+  function rememberFab(fab) {
+    if (!fab || fab.dataset.ffApptSaved === "1") return;
+    fab.dataset.ffApptSaved = "1";
+    fab.dataset.ffApptLeft = fab.style.left || "";
+    fab.dataset.ffApptRight = fab.style.right || "";
+    fab.dataset.ffApptTop = fab.style.top || "";
+    fab.dataset.ffApptBottom = fab.style.bottom || "";
+  }
+
+  function placeLiveFab() {
+    var fab = document.querySelector(".ff-live-desk-fab");
+    var drawer = document.getElementById(ROOT_ID);
+    if (!fab || !drawer || !isOpen()) return;
+    rememberFab(fab);
+    var rect = drawer.getBoundingClientRect();
+    var width = rect.width || drawer.offsetWidth || 420;
+    var leftEdge = rect.left;
+    document.documentElement.style.setProperty("--ff-appt-drawer-w", width + "px");
+    document.body.classList.add("ff-appt-drawer-open");
+    var gap = 16;
+    var fabW = fab.offsetWidth || 62;
+    if (leftEdge < gap + fabW) {
+      fab.style.right = "auto";
+      fab.style.left = "16px";
+    } else {
+      fab.style.left = "auto";
+      fab.style.right = Math.round(window.innerWidth - leftEdge + gap) + "px";
+    }
+  }
+
+  function restoreLiveFab() {
+    var fab = document.querySelector(".ff-live-desk-fab");
+    document.body.classList.remove("ff-appt-drawer-open");
+    document.documentElement.style.removeProperty("--ff-appt-drawer-w");
+    if (!fab || fab.dataset.ffApptSaved !== "1") return;
+    fab.style.left = fab.dataset.ffApptLeft || "";
+    fab.style.right = fab.dataset.ffApptRight || "";
+    fab.style.top = fab.dataset.ffApptTop || "";
+    fab.style.bottom = fab.dataset.ffApptBottom || "";
+    delete fab.dataset.ffApptSaved;
+    delete fab.dataset.ffApptLeft;
+    delete fab.dataset.ffApptRight;
+    delete fab.dataset.ffApptTop;
+    delete fab.dataset.ffApptBottom;
+  }
+
   function money(value) {
     var n = Number(value);
     if (!Number.isFinite(n)) n = 0;
@@ -110,11 +200,13 @@
           '<label class="ff-appt-field"><span>Date</span><input id="ffApptDate" type="date"></label>' +
           '<label class="ff-appt-field"><span>Start time</span><select id="ffApptStart"></select></label>' +
         "</div>" +
-        '<label class="ff-appt-field">' +
-          '<span>Client</span>' +
-          '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search by name, phone or email">' +
-          '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
-          '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ Add new client</button>' +
+        '<label class="ff-appt-field" id="ffApptClientField">' +
+          "<span>Client</span>" +
+          '<div id="ffApptClientSearchWrap">' +
+            '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search by name, phone or email">' +
+            '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
+            '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">+ Add new client</button>' +
+          "</div>" +
           '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
         "</label>" +
         '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
@@ -163,6 +255,7 @@
       root: document.getElementById(ROOT_ID),
       location: document.getElementById("ffApptLocation"),
       clientQ: document.getElementById("ffApptClientQ"),
+      searchWrap: document.getElementById("ffApptClientSearchWrap"),
       results: document.getElementById("ffApptClientResults"),
       chosen: document.getElementById("ffApptClientChosen"),
       newBox: document.getElementById("ffApptNewClient"),
@@ -215,14 +308,7 @@
         ui.avatar.innerHTML = "";
       }
     }
-    if (state.client) {
-      ui.chosen.hidden = false;
-      ui.chosen.textContent = (state.client.displayName || "Client") +
-        (state.client.phone ? " · " + state.client.phone : "");
-    } else {
-      ui.chosen.hidden = true;
-      ui.chosen.textContent = "";
-    }
+    paintClientState();
     if (ui.summary) ui.summary.hidden = !state.service;
     if (state.service) {
       if (ui.dur) ui.dur.textContent = state.durationMinutes ? state.durationMinutes + " min" : "—";
@@ -281,6 +367,20 @@
     showClientResults([]);
     els().newBox.hidden = true;
     paint();
+  }
+
+  function clearClient() {
+    var api = form();
+    if (!api || !state) return;
+    state = api.setClient(state, null);
+    var ui = els();
+    ui.clientQ.value = "";
+    showClientResults([]);
+    ui.newBox.hidden = true;
+    paint();
+    setTimeout(function () {
+      if (ui.clientQ) ui.clientQ.focus();
+    }, 20);
   }
 
   async function saveNewClient() {
@@ -356,6 +456,7 @@
     ui.root.classList.remove("is-open");
     state = null;
     showClientResults([]);
+    restoreLiveFab();
     if (window.ffBookingCalDraft) window.ffBookingCalDraft.clear();
   }
 
@@ -389,6 +490,8 @@
     syncHold();
     await api.refreshServices(state);
     paint();
+    placeLiveFab();
+    requestAnimationFrame(placeLiveFab);
     setTimeout(function () { ui.clientQ.focus(); }, 20);
   }
 
@@ -403,6 +506,7 @@
       var name = act.getAttribute("data-ff-appt-act");
       if (name === "close") requestClose();
       else if (name === "create") createAppointment();
+      else if (name === "clear-client") clearClient();
       else if (name === "new-client") {
         els().newBox.hidden = !els().newBox.hidden;
         if (!els().newBox.hidden) document.getElementById("ffApptFirst").focus();
@@ -442,6 +546,10 @@
     if (document.getElementById("ffLiveDeskPanel") && document.getElementById("ffLiveDeskPanel").classList.contains("is-open")) return;
     ev.preventDefault();
     requestClose();
+  });
+
+  window.addEventListener("resize", function () {
+    if (isOpen()) placeLiveFab();
   });
 
   document.addEventListener("ff-active-location-changed", function () {
