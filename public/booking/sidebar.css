@@ -116,7 +116,7 @@ body.ff-booking-area .ff-booking-sidebar {
 }
 
 .ff-booking-sidebar.is-collapsed {
-  background: var(--ff-brand-purple, #9d68b9);
+  background: #5b21b6;
   border-right: 0;
   color: #fff;
 }
