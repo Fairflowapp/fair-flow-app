@@ -85,6 +85,10 @@
       duration = svc ? svc.effectiveDuration(state.service.raw || state.service, state.providerId) : Number(state.service.durationMinutes) || 0;
       price = svc ? svc.effectivePrice(state.service.raw || state.service) : Number(state.service.price) || 0;
     }
+    if (state.keepStoredSnapshots && trim(state.serviceId) && trim(state.serviceId) === trim(state.originalServiceId)) {
+      if (Number(state.storedDurationMinutes) > 0) duration = Number(state.storedDurationMinutes);
+      if (state.storedPrice != null && Number.isFinite(Number(state.storedPrice))) price = Number(state.storedPrice);
+    }
     state.durationMinutes = duration;
     state.price = price;
     state.endMin = Number.isFinite(state.startMin) && duration > 0 ? state.startMin + duration : 0;
@@ -202,6 +206,124 @@
     }
   }
 
+  function timeOptionsHtml(selected) {
+    var value = Number(selected);
+    var out = [];
+    if (Number.isFinite(value) && value % 15 !== 0) {
+      out.push('<option value="' + value + '" selected>' + formatMinutes(value) + "</option>");
+    }
+    for (var m = 6 * 60; m < 22 * 60; m += 15) {
+      out.push(
+        '<option value="' + m + '"' + (m === value ? " selected" : "") + ">" +
+        formatMinutes(m) + "</option>"
+      );
+    }
+    return out.join("");
+  }
+
+  function editStateFrom(seed) {
+    var state = emptyState(seed);
+    state.appointmentId = trim(seed && seed.appointmentId);
+    state.lineId = trim(seed && seed.lineId);
+    state.clientId = trim(seed && seed.clientId);
+    state.serviceId = trim(seed && seed.serviceId);
+    state.notes = seed && seed.notes != null ? String(seed.notes) : "";
+    state.originalServiceId = trim(seed && seed.serviceId);
+    state.originalServiceName = trim(seed && seed.serviceName);
+    state.storedDurationMinutes = Number(seed && seed.durationMinutes) || 0;
+    state.storedPrice = Number.isFinite(Number(seed && seed.price)) ? Number(seed.price) : null;
+    state.keepStoredSnapshots = true;
+    state.saving = false;
+    state.original = {
+      dateKey: state.dateKey,
+      startMin: state.startMin,
+      serviceId: state.serviceId,
+      providerId: state.providerId,
+      notes: trim(state.notes)
+    };
+    state.originalService = seed && seed.serviceId ? {
+      id: trim(seed.serviceId),
+      name: trim(seed.serviceName) || "Service",
+      durationMinutes: Number(seed.durationMinutes) || 0,
+      price: Number(seed.price) || 0,
+      raw: {
+        durationMinutes: Number(seed.durationMinutes) || 0,
+        defaultPrice: Number(seed.price) || 0
+      }
+    } : null;
+    if (state.originalService) state.service = state.originalService;
+    return derive(state);
+  }
+
+  function isEditDirty(state) {
+    if (!state || !state.original) return false;
+    var o = state.original;
+    return trim(state.dateKey) !== trim(o.dateKey)
+      || Number(state.startMin) !== Number(o.startMin)
+      || trim(state.serviceId) !== trim(o.serviceId)
+      || trim(state.providerId) !== trim(o.providerId)
+      || trim(state.notes) !== trim(o.notes);
+  }
+
+  function canSave(state) {
+    return !!(
+      state
+      && isEditDirty(state)
+      && state.appointmentId
+      && state.locationId
+      && state.dateKey
+      && Number.isFinite(state.startMin)
+      && state.providerId
+      && state.serviceId
+      && state.durationMinutes > 0
+    );
+  }
+
+  function editPatch(state) {
+    var sameService = trim(state.serviceId) === trim(state.originalServiceId);
+    return {
+      notes: state.notes,
+      serviceLines: [{
+        lineId: state.lineId,
+        serviceId: state.serviceId,
+        providerId: state.providerId,
+        startAt: startAtDate(state),
+        durationMinutes: state.durationMinutes,
+        priceSnapshot: state.price,
+        serviceNameSnapshot: sameService ? state.originalServiceName : (state.service && state.service.name) || "",
+        preservePriceSnapshot: sameService,
+        preserveNameSnapshot: sameService
+      }]
+    };
+  }
+
+  async function update(state) {
+    if (!canSave(state)) {
+      state.error = state && !state.serviceId ? CODES.INVALID_SERVICE : "No changes to save.";
+      return { ok: false, error: state.error };
+    }
+    var repo = window.ffBookingAppointments;
+    if (!repo || typeof repo.updateAppointment !== "function") {
+      return { ok: false, error: "Appointments are not ready." };
+    }
+    state.saving = true;
+    state.error = "";
+    try {
+      var result = await repo.updateAppointment(state.appointmentId, editPatch(state));
+      if (!result || !result.ok) {
+        state.error = friendlyError(result && result.code, state.providerId);
+        if (!result || !result.code) state.error = (result && result.error) || "This time is no longer available.";
+        return { ok: false, code: result && result.code, error: state.error, result: result };
+      }
+      return { ok: true, appointment: result.appointment };
+    } catch (err) {
+      state.error = err && err.message ? err.message : "This appointment could not be saved.";
+      return { ok: false, error: state.error };
+    } finally {
+      state.saving = false;
+    }
+  }
+
   window.ffBookingAppointmentForm = {
     emptyState: emptyState,
     derive: derive,
@@ -215,6 +337,12 @@
     setClient: setClient,
     startAtDate: startAtDate,
     create: create,
+    timeOptionsHtml: timeOptionsHtml,
+    editStateFrom: editStateFrom,
+    isEditDirty: isEditDirty,
+    canSave: canSave,
+    editPatch: editPatch,
+    update: update,
     formatMinutes: formatMinutes,
     providerName: providerName,
     friendlyError: friendlyError

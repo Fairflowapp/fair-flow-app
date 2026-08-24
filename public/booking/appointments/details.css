@@ -181,3 +181,17 @@ body:not(.ff-booking-area) .ff-apd { display: none !important; }
   opacity: 0.45;
   cursor: default;
 }
+.ff-apd-metrics-edit {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ff-apd-error {
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ff-apd-error[hidden] {
+  display: none !important;
+}
+.ff-apd #ffApdEdit .ff-appt-field {
+  width: 100%;
+}

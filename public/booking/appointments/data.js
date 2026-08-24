@@ -74,6 +74,14 @@ function emitAppointmentCreated(appointment) {
   } catch (_) {}
 }
 
+function emitAppointmentUpdated(appointment) {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-booking-appointment-updated", {
+      detail: { appointment: appointment || null },
+    }));
+  } catch (_) {}
+}
+
 function asTimestamp(value) {
   const date = requireModel().toDate(value);
   return date ? Timestamp.fromDate(date) : null;
@@ -261,18 +269,24 @@ async function buildServiceLine(salonId, locationId, rawLine) {
   if (!fit.ok) {
     return { ...fit, serviceId, providerId };
   }
+  const preservePrice = !!(rawLine && rawLine.preservePriceSnapshot);
+  const preserveName = !!(rawLine && rawLine.preserveNameSnapshot);
   return {
     ok: true,
     line: {
       lineId: String(rawLine && rawLine.lineId || "").trim() || api.makeLineId(),
       serviceId,
-      serviceNameSnapshot: String(service.name || "").trim(),
+      serviceNameSnapshot: preserveName && String(rawLine.serviceNameSnapshot || "").trim()
+        ? String(rawLine.serviceNameSnapshot).trim()
+        : String(service.name || "").trim(),
       providerId,
       providerNameSnapshot: api.providerNameFrom(staff),
       startAt,
       endAt,
       durationMinutes,
-      priceSnapshot: api.resolvePriceSnapshot(service, providerId),
+      priceSnapshot: preservePrice && Number.isFinite(Number(rawLine.priceSnapshot))
+        ? Number(rawLine.priceSnapshot)
+        : api.resolvePriceSnapshot(service, providerId),
     },
   };
 }
@@ -481,14 +495,10 @@ async function updateAppointment(appointmentId, patch) {
     source: patch && patch.source != null ? patch.source : existing.source,
     assignmentType: patch && patch.assignmentType != null ? patch.assignmentType : existing.assignmentType,
     notes: patch && patch.notes != null ? patch.notes : existing.notes,
-    serviceLines: patch && patch.serviceLines != null ? patch.serviceLines : existing.serviceLines.map((line) => ({
-      lineId: line.lineId,
-      serviceId: line.serviceId,
-      providerId: line.providerId,
-      startAt: line.startAt,
-      endAt: line.endAt,
-      durationMinutes: line.durationMinutes,
-    })),
+    serviceLines: api.mergeServiceLinePatch(
+      existing.serviceLines,
+      patch && patch.serviceLines != null ? patch.serviceLines : existing.serviceLines
+    ),
   };
   const checked = await validateAppointment(next, { salonId, excludeAppointmentId: id });
   if (!checked.ok) return checked;
@@ -507,7 +517,9 @@ async function updateAppointment(appointmentId, patch) {
     dateKeys: row.dateKeys,
     updatedAt: serverTimestamp(),
   });
-  return { ok: true, appointment: await getAppointmentById(id, salonId) };
+  const appointment = await getAppointmentById(id, salonId);
+  emitAppointmentUpdated(appointment);
+  return { ok: true, appointment };
 }
 
 async function cancelAppointment(appointmentId, reason) {

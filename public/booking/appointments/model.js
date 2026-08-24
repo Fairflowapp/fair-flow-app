@@ -342,6 +342,48 @@
     };
   }
 
+  function mergeOneLine(prev, row) {
+    var current = prev && typeof prev === "object" ? prev : {};
+    var next = row && typeof row === "object" ? row : {};
+    var serviceId = trimText(next.serviceId) || trimText(current.serviceId);
+    var sameService = !!serviceId && trimText(current.serviceId) === serviceId;
+    return {
+      lineId: trimText(next.lineId) || trimText(current.lineId),
+      serviceId: serviceId,
+      providerId: trimText(next.providerId) || trimText(current.providerId),
+      startAt: next.startAt != null ? next.startAt : current.startAt,
+      endAt: next.endAt != null ? next.endAt : current.endAt,
+      durationMinutes: Number(next.durationMinutes) > 0 ? Number(next.durationMinutes) : Number(current.durationMinutes) || 0,
+      priceSnapshot: sameService ? Number(current.priceSnapshot) || 0 : Number(next.priceSnapshot) || 0,
+      serviceNameSnapshot: sameService
+        ? collapseSpaces(current.serviceNameSnapshot)
+        : collapseSpaces(next.serviceNameSnapshot),
+      preservePriceSnapshot: sameService,
+      preserveNameSnapshot: sameService
+    };
+  }
+
+  function mergeServiceLinePatch(existingLines, incomingLines) {
+    var existing = Array.isArray(existingLines) ? existingLines : [];
+    var incoming = incomingLines != null ? incomingLines : existing;
+    if (!Array.isArray(incoming)) incoming = existing;
+    var used = {};
+    var out = incoming.map(function (line) {
+      var row = line && typeof line === "object" ? line : {};
+      var prev = existing.find(function (item) {
+        return item && trimText(item.lineId) && trimText(item.lineId) === trimText(row.lineId);
+      }) || existing[0] || {};
+      var merged = mergeOneLine(prev, row);
+      if (merged.lineId) used[merged.lineId] = true;
+      return merged;
+    });
+    existing.forEach(function (prev) {
+      var id = prev && trimText(prev.lineId);
+      if (id && !used[id]) out.push(mergeOneLine(prev, prev));
+    });
+    return out;
+  }
+
   function fromDoc(id, data) {
     var raw = data && typeof data === "object" ? data : {};
     var snapshot = raw.clientSnapshot && typeof raw.clientSnapshot === "object" ? raw.clientSnapshot : {};
@@ -415,6 +457,7 @@
     deriveWindow: deriveWindow,
     normalizeNotes: normalizeNotes,
     normalizeCreateInput: normalizeCreateInput,
+    mergeServiceLinePatch: mergeServiceLinePatch,
     fromDoc: fromDoc
   };
 })();

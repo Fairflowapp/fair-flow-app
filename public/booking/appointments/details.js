@@ -1,6 +1,6 @@
 /**
- * Read-only Appointment Details drawer. Opens from a persisted calendar card.
- * Does not edit, cancel, reschedule, or write appointments.
+ * Appointment Details drawer with in-place Edit Mode.
+ * Writes go only through ffBookingAppointments.updateAppointment.
  */
 (function () {
   var ROOT_ID = "ffBookingApptDetails";
@@ -14,11 +14,14 @@
     no_show: "No Show"
   };
   var current = null;
+  var mode = "view";
+  var edit = null;
 
   function live() { return window.ffBookingDrawerLive || null; }
   function calAppts() { return window.ffBookingCalAppointments || null; }
   function repo() { return window.ffBookingAppointments || null; }
   function model() { return window.ffBookingAppointmentModel || null; }
+  function form() { return window.ffBookingAppointmentForm || null; }
 
   function host() {
     return document.getElementById("ffBookingWorkspace") || document.body;
@@ -58,9 +61,7 @@
   }
 
   function formatMinutes(total) {
-    if (window.ffBookingAppointmentForm && window.ffBookingAppointmentForm.formatMinutes) {
-      return window.ffBookingAppointmentForm.formatMinutes(total);
-    }
+    if (form() && form().formatMinutes) return form().formatMinutes(total);
     var m = ((Number(total) % 1440) + 1440) % 1440;
     var hour = Math.floor(m / 60);
     var min = m % 60;
@@ -182,6 +183,7 @@
       priceLabel: money(line && line.priceSnapshot),
       providerName: providerName,
       providerPhoto: photo,
+      dateKey: dateKey,
       dateLabel: dateLabel || "—",
       locationLabel: locationLabel(locationId) || "—",
       notes: notes,
@@ -214,10 +216,60 @@
     );
   }
 
-  function paint() {
-    var ui = els();
-    if (!ui.root || !current || !current.appointment) return;
-    var view = viewFrom(current.appointment, current.lineId);
+  function providersForEdit(state) {
+    var data = window.ffBookingCalData;
+    var list = [];
+    if (data && typeof data.loadCalendarEmployees === "function") {
+      list = data.loadCalendarEmployees(state.dateKey, state.locationId) || [];
+    }
+    if (state.providerId && !list.some(function (emp) { return emp && emp.id === state.providerId; })) {
+      var api = form();
+      list = list.concat([{
+        id: state.providerId,
+        firstName: api ? api.providerName(state.providerId) : "Provider"
+      }]);
+    }
+    return list;
+  }
+
+  function els() {
+    return {
+      root: document.getElementById(ROOT_ID),
+      title: document.getElementById("ffApdTitle"),
+      view: document.getElementById("ffApdView"),
+      edit: document.getElementById("ffApdEdit"),
+      footView: document.getElementById("ffApdFootView"),
+      footEdit: document.getElementById("ffApdFootEdit"),
+      client: document.getElementById("ffApdClient"),
+      editClient: document.getElementById("ffApdEditClient"),
+      service: document.getElementById("ffApdService"),
+      dur: document.getElementById("ffApdDur"),
+      start: document.getElementById("ffApdStart"),
+      end: document.getElementById("ffApdEnd"),
+      price: document.getElementById("ffApdPrice"),
+      provider: document.getElementById("ffApdProvider"),
+      date: document.getElementById("ffApdDate"),
+      location: document.getElementById("ffApdLocation"),
+      editLocation: document.getElementById("ffApdEditLocation"),
+      notes: document.getElementById("ffApdNotes"),
+      statusRow: document.getElementById("ffApdStatusRow"),
+      status: document.getElementById("ffApdStatus"),
+      dateIn: document.getElementById("ffApdDateIn"),
+      startIn: document.getElementById("ffApdStartIn"),
+      serviceIn: document.getElementById("ffApdServiceIn"),
+      editDur: document.getElementById("ffApdEditDur"),
+      editEnd: document.getElementById("ffApdEditEnd"),
+      editPrice: document.getElementById("ffApdEditPrice"),
+      cap: document.getElementById("ffApdCap"),
+      providerIn: document.getElementById("ffApdProviderIn"),
+      avatar: document.getElementById("ffApdProviderAvatar"),
+      notesIn: document.getElementById("ffApdNotesIn"),
+      error: document.getElementById("ffApdError"),
+      save: document.getElementById("ffApdSave")
+    };
+  }
+
+  function paintView(ui, view) {
     ui.client.innerHTML = clientHtml(view);
     ui.service.textContent = view.serviceName;
     ui.dur.textContent = view.durationLabel;
@@ -233,26 +285,66 @@
     ui.status.textContent = view.statusLabel;
   }
 
-  function els() {
-    return {
-      root: document.getElementById(ROOT_ID),
-      client: document.getElementById("ffApdClient"),
-      service: document.getElementById("ffApdService"),
-      dur: document.getElementById("ffApdDur"),
-      start: document.getElementById("ffApdStart"),
-      end: document.getElementById("ffApdEnd"),
-      price: document.getElementById("ffApdPrice"),
-      provider: document.getElementById("ffApdProvider"),
-      date: document.getElementById("ffApdDate"),
-      location: document.getElementById("ffApdLocation"),
-      notes: document.getElementById("ffApdNotes"),
-      statusRow: document.getElementById("ffApdStatusRow"),
-      status: document.getElementById("ffApdStatus")
-    };
+  function paintEdit(ui) {
+    var api = form();
+    if (!api || !edit) return;
+    var view = viewFrom(current.appointment, current.lineId);
+    ui.editClient.innerHTML = clientHtml(view);
+    ui.editLocation.textContent = view.locationLabel;
+    var providers = providersForEdit(edit);
+    ui.providerIn.innerHTML = providers.map(function (emp) {
+      return '<option value="' + escapeHtml(emp.id) + '"' + (emp.id === edit.providerId ? " selected" : "") + ">" +
+        escapeHtml(emp.firstName || emp.name || "Provider") + "</option>";
+    }).join("");
+    ui.serviceIn.innerHTML = '<option value="">Select a service</option>' + (edit.services || []).map(function (svc) {
+      return '<option value="' + escapeHtml(svc.id) + '"' + (svc.id === edit.serviceId ? " selected" : "") + ">" +
+        escapeHtml(svc.name) + " · " + svc.durationMinutes + " min · " + money(svc.price) +
+        "</option>";
+    }).join("");
+    ui.dateIn.value = edit.dateKey || "";
+    ui.startIn.innerHTML = api.timeOptionsHtml(edit.startMin);
+    if (document.activeElement !== ui.notesIn) ui.notesIn.value = edit.notes || "";
+    ui.editDur.textContent = edit.durationMinutes ? edit.durationMinutes + " min" : "—";
+    ui.editEnd.textContent = edit.endMin ? api.formatMinutes(edit.endMin) : "—";
+    ui.editPrice.textContent = money(edit.price);
+    if (ui.cap) {
+      ui.cap.hidden = !edit.capabilityMessage;
+      ui.cap.textContent = edit.capabilityMessage || "";
+    }
+    ui.error.hidden = !edit.error;
+    ui.error.textContent = edit.error || "";
+    var selected = providers.find(function (emp) { return emp.id === edit.providerId; }) || null;
+    var src = selected && selected.photoURL ? String(selected.photoURL).trim() : "";
+    if (src) {
+      ui.avatar.hidden = false;
+      ui.avatar.innerHTML = '<img src="' + escapeHtml(src) + '" alt="">';
+    } else {
+      ui.avatar.hidden = true;
+      ui.avatar.innerHTML = "";
+    }
+    ui.save.disabled = !api.canSave(edit) || !!edit.saving;
+    ui.save.textContent = edit.saving ? "Saving…" : "Save Changes";
+  }
+
+  function paint() {
+    var ui = els();
+    if (!ui.root || !current || !current.appointment) return;
+    var editing = mode === "edit" && edit;
+    ui.title.textContent = editing ? "Edit Appointment" : "Appointment Details";
+    ui.view.hidden = !!editing;
+    ui.edit.hidden = !editing;
+    ui.footView.hidden = !!editing;
+    ui.footEdit.hidden = !editing;
+    paintView(ui, viewFrom(current.appointment, current.lineId));
+    if (editing) paintEdit(ui);
   }
 
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
+    if (existing && !document.getElementById("ffApdEdit")) {
+      existing.parentNode.removeChild(existing);
+      existing = null;
+    }
     if (existing && existing.parentNode !== host()) host().appendChild(existing);
     if (existing) return existing;
     var aside = document.createElement("aside");
@@ -268,30 +360,136 @@
         '<button type="button" class="ff-apd-x" data-ff-apd-act="close" aria-label="Close">×</button>' +
       "</header>" +
       '<div class="ff-apd-body">' +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Client</span><div id="ffApdClient"></div></div>' +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Service</span><div id="ffApdService" class="ff-apd-value"></div></div>' +
-        '<div class="ff-apd-metrics">' +
-          '<div class="ff-apd-metric"><span>Duration</span><strong id="ffApdDur"></strong></div>' +
-          '<div class="ff-apd-metric"><span>Start time</span><strong id="ffApdStart"></strong></div>' +
-          '<div class="ff-apd-metric"><span>End time</span><strong id="ffApdEnd"></strong></div>' +
-          '<div class="ff-apd-metric"><span>Price</span><strong id="ffApdPrice"></strong></div>' +
+        '<div id="ffApdView">' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Client</span><div id="ffApdClient"></div></div>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Service</span><div id="ffApdService" class="ff-apd-value"></div></div>' +
+          '<div class="ff-apd-metrics">' +
+            '<div class="ff-apd-metric"><span>Duration</span><strong id="ffApdDur"></strong></div>' +
+            '<div class="ff-apd-metric"><span>Start time</span><strong id="ffApdStart"></strong></div>' +
+            '<div class="ff-apd-metric"><span>End time</span><strong id="ffApdEnd"></strong></div>' +
+            '<div class="ff-apd-metric"><span>Price</span><strong id="ffApdPrice"></strong></div>' +
+          "</div>" +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Provider</span><div id="ffApdProvider"></div></div>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Date</span><div id="ffApdDate" class="ff-apd-value"></div></div>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdLocation" class="ff-apd-value"></div></div>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Notes</span><div id="ffApdNotes" class="ff-apd-notes"></div></div>' +
+          '<div id="ffApdStatusRow" class="ff-apd-field"><span class="ff-apd-label">Status</span><div id="ffApdStatus" class="ff-apd-value"></div></div>' +
         "</div>" +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Provider</span><div id="ffApdProvider"></div></div>' +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Date</span><div id="ffApdDate" class="ff-apd-value"></div></div>' +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdLocation" class="ff-apd-value"></div></div>' +
-        '<div class="ff-apd-field"><span class="ff-apd-label">Notes</span><div id="ffApdNotes" class="ff-apd-notes"></div></div>' +
-        '<div id="ffApdStatusRow" class="ff-apd-field"><span class="ff-apd-label">Status</span><div id="ffApdStatus" class="ff-apd-value"></div></div>' +
+        '<div id="ffApdEdit" hidden>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Client</span><div id="ffApdEditClient"></div></div>' +
+          '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdEditLocation" class="ff-apd-value"></div></div>' +
+          '<div class="ff-appt-row">' +
+            '<label class="ff-appt-field"><span>Date</span><input id="ffApdDateIn" type="date"></label>' +
+            '<label class="ff-appt-field"><span>Start time</span><select id="ffApdStartIn"></select></label>' +
+          "</div>" +
+          '<label class="ff-appt-field"><span>Service</span><select id="ffApdServiceIn"></select></label>' +
+          '<div class="ff-apd-metrics ff-apd-metrics-edit">' +
+            '<div class="ff-apd-metric"><span>Duration</span><strong id="ffApdEditDur"></strong></div>' +
+            '<div class="ff-apd-metric"><span>End time</span><strong id="ffApdEditEnd"></strong></div>' +
+            '<div class="ff-apd-metric"><span>Price</span><strong id="ffApdEditPrice"></strong></div>' +
+          "</div>" +
+          '<div id="ffApdCap" class="ff-appt-cap" hidden></div>' +
+          '<label class="ff-appt-field">' +
+            "<span>Provider</span>" +
+            '<div class="ff-appt-provider-row">' +
+              '<span id="ffApdProviderAvatar" class="ff-appt-avatar" hidden></span>' +
+              '<select id="ffApdProviderIn"></select>' +
+            "</div>" +
+          "</label>" +
+          '<label class="ff-appt-field"><span>Notes</span><textarea id="ffApdNotesIn" rows="3" maxlength="2000" placeholder="Add a note..."></textarea></label>' +
+          '<div id="ffApdError" class="ff-apd-error" hidden></div>' +
+        "</div>" +
       "</div>" +
-      '<footer class="ff-apd-foot">' +
+      '<footer id="ffApdFootView" class="ff-apd-foot">' +
         '<button type="button" class="ff-apd-ghost" data-ff-apd-act="close">Close</button>' +
-        '<button type="button" class="ff-apd-primary" disabled aria-disabled="true">Edit Appointment</button>' +
+        '<button type="button" class="ff-apd-primary" data-ff-apd-act="edit">Edit Appointment</button>' +
+      "</footer>" +
+      '<footer id="ffApdFootEdit" class="ff-apd-foot" hidden>' +
+        '<button type="button" class="ff-apd-ghost" data-ff-apd-act="cancel-edit">Cancel</button>' +
+        '<button type="button" class="ff-apd-primary" data-ff-apd-act="save" id="ffApdSave" disabled>Save Changes</button>' +
       "</footer>";
     host().appendChild(aside);
-    aside.addEventListener("click", function (ev) {
-      var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-apd-act]") : null;
-      if (act && act.getAttribute("data-ff-apd-act") === "close") close();
-    });
+    bind(aside);
     return aside;
+  }
+
+  function visibleDateKey() {
+    var st = window.ffBookingCalState;
+    return st && typeof st.getSelectedDateKey === "function" ? String(st.getSelectedDateKey() || "") : "";
+  }
+
+  async function enterEdit() {
+    var api = form();
+    if (!api || !current || !current.appointment) return;
+    var line = pickLine(current.appointment, current.lineId);
+    var loc = current.appointment.locationId;
+    var startMin = line ? minutesOf(line.startAt, loc) : null;
+    edit = api.editStateFrom({
+      appointmentId: current.appointment.appointmentId,
+      lineId: line && line.lineId,
+      clientId: current.appointment.clientId,
+      locationId: loc,
+      dateKey: current.appointment.dateKey,
+      startMin: startMin,
+      providerId: line && line.providerId,
+      serviceId: line && line.serviceId,
+      serviceName: line && line.serviceNameSnapshot,
+      durationMinutes: line && line.durationMinutes,
+      price: line && line.priceSnapshot,
+      notes: current.appointment.notes
+    });
+    await api.refreshServices(edit);
+    if (edit.originalServiceId && !edit.service && edit.originalService) {
+      edit.serviceId = edit.originalServiceId;
+      edit.service = edit.originalService;
+      edit.services = [edit.originalService].concat(edit.services || []);
+      edit.capabilityMessage = "This service is not available with this provider.";
+      api.derive(edit);
+    } else if (edit.originalService && edit.services && !edit.services.some(function (row) { return row.id === edit.originalServiceId; })) {
+      edit.services = [edit.originalService].concat(edit.services);
+    }
+    mode = "edit";
+    paint();
+    placeLive();
+  }
+
+  function cancelEdit() {
+    mode = "view";
+    edit = null;
+    paint();
+    placeLive();
+  }
+
+  async function saveEdit() {
+    var api = form();
+    if (!api || !edit || edit.saving || !api.canSave(edit)) return;
+    edit.saving = true;
+    edit.error = "";
+    paint();
+    var result = await api.update(edit);
+    paint();
+    if (!result || !result.ok) {
+      placeLive();
+      return;
+    }
+    current.appointment = result.appointment;
+    current.lineId = (pickLine(result.appointment, current.lineId) || {}).lineId || current.lineId;
+    var savedKey = trim(result.appointment && result.appointment.dateKey);
+    mode = "view";
+    edit = null;
+    if (savedKey && savedKey !== visibleDateKey()) {
+      close();
+      return;
+    }
+    paint();
+    placeLive();
+  }
+
+  function requestClose() {
+    if (mode === "edit" && form() && edit && form().isEditDirty(edit)) {
+      if (!window.confirm("Discard unsaved changes?")) return;
+    }
+    close();
   }
 
   function closeSiblingDrawers() {
@@ -335,6 +533,8 @@
   function close() {
     var ui = els();
     current = null;
+    mode = "view";
+    edit = null;
     if (ui.root) {
       ui.root.hidden = true;
       ui.root.classList.remove("is-open");
@@ -369,6 +569,8 @@
       appointment: appointment,
       lineId: trim(spec && spec.lineId)
     };
+    mode = "view";
+    edit = null;
     ensureDom();
     var ui = els();
     ui.root.hidden = false;
@@ -379,12 +581,51 @@
     requestAnimationFrame(placeLive);
   }
 
+  function bind(root) {
+    root.addEventListener("click", function (ev) {
+      var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-apd-act]") : null;
+      if (!act) return;
+      var name = act.getAttribute("data-ff-apd-act");
+      if (name === "close") requestClose();
+      else if (name === "edit") enterEdit();
+      else if (name === "cancel-edit") cancelEdit();
+      else if (name === "save") saveEdit();
+    });
+    root.addEventListener("input", function (ev) {
+      if (mode !== "edit" || !edit || !form()) return;
+      if (ev.target.id === "ffApdNotesIn") {
+        edit.notes = ev.target.value;
+        edit.error = "";
+        var ui = els();
+        if (ui.error) {
+          ui.error.hidden = true;
+          ui.error.textContent = "";
+        }
+        if (ui.save) {
+          ui.save.disabled = !form().canSave(edit) || !!edit.saving;
+          ui.save.setAttribute("aria-disabled", ui.save.disabled ? "true" : "false");
+        }
+      }
+    });
+    root.addEventListener("change", async function (ev) {
+      var api = form();
+      if (mode !== "edit" || !api || !edit) return;
+      if (ev.target.id === "ffApdDateIn") edit = api.setDate(edit, ev.target.value);
+      else if (ev.target.id === "ffApdStartIn") edit = api.setStart(edit, ev.target.value);
+      else if (ev.target.id === "ffApdServiceIn") edit = api.setService(edit, ev.target.value);
+      else if (ev.target.id === "ffApdProviderIn") edit = await api.setProvider(edit, ev.target.value);
+      else return;
+      paint();
+    });
+  }
+
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape" || !isOpen()) return;
     if (document.getElementById("ffLiveFloorDrawer") && document.getElementById("ffLiveFloorDrawer").classList.contains("is-open")) return;
     if (document.getElementById("ffLiveDeskPanel") && document.getElementById("ffLiveDeskPanel").classList.contains("is-open")) return;
     ev.preventDefault();
-    close();
+    if (mode === "edit") cancelEdit();
+    else close();
   });
 
   window.addEventListener("resize", function () {
@@ -401,6 +642,8 @@
     forceClose: forceClose,
     isOpen: isOpen,
     viewFrom: viewFrom,
+    getMode: function () { return mode; },
+    getEditState: function () { return edit; },
     getCurrentId: function () {
       return current && current.appointment ? current.appointment.appointmentId : "";
     }
