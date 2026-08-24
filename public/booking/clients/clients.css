@@ -45,14 +45,17 @@
 }
 .ff-cli-add {
   border: 0;
-  background: var(--ff-brand-purple, #9d68b9);
-  color: var(--ff-brand-text-on-brand, #fff);
+  background: #5b21b6;
+  color: #fff;
   border-radius: 8px;
   height: 36px;
   padding: 0 12px;
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
+}
+.ff-cli-add:hover {
+  background: #4c1d95;
 }
 .ff-cli-search {
   padding: 0 22px 10px;
