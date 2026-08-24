@@ -10,7 +10,7 @@ import { join } from "path";
 import { pathToFileURL } from "url";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
-import { Timestamp, getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const ROOT = "/Users/shiriadmoni/fair-flow-booking";
 const SDK_DIR = "/tmp/ff-client-itest-sdk";
@@ -128,6 +128,7 @@ async function main() {
     const jessica = created.client;
     const otherId = other.client.clientId;
 
+    const Ts = admin.firestore.Timestamp;
     const now = Date.now();
     const futureStart = new Date(now + 2 * 24 * 60 * 60 * 1000);
     const futureEnd = new Date(futureStart.getTime() + 60 * 60 * 1000);
@@ -143,32 +144,32 @@ async function main() {
     const col = admin.firestore().collection(`salons/${SALON}/appointments`);
     const upcomingRef = await col.add({
       clientId: jessica.clientId, locationId: "locA", status: "scheduled",
-      startAt: Timestamp.fromDate(futureStart), endAt: Timestamp.fromDate(futureEnd),
-      serviceLines: [line(Timestamp.fromDate(futureStart), Timestamp.fromDate(futureEnd), "locA")],
+      startAt: Ts.fromDate(futureStart), endAt: Ts.fromDate(futureEnd),
+      serviceLines: [line(Ts.fromDate(futureStart), Ts.fromDate(futureEnd), "locA")],
       createdByUid: UID,
     });
     await col.add({
       clientId: jessica.clientId, locationId: "locA", status: "completed",
-      startAt: Timestamp.fromDate(pastStart), endAt: Timestamp.fromDate(pastEnd),
-      serviceLines: [line(Timestamp.fromDate(pastStart), Timestamp.fromDate(pastEnd), "locA")],
+      startAt: Ts.fromDate(pastStart), endAt: Ts.fromDate(pastEnd),
+      serviceLines: [line(Ts.fromDate(pastStart), Ts.fromDate(pastEnd), "locA")],
       createdByUid: UID,
     });
     await col.add({
       clientId: jessica.clientId, locationId: "locA", status: "cancelled",
-      startAt: Timestamp.fromDate(cancelStart), endAt: Timestamp.fromDate(cancelEnd),
-      serviceLines: [line(Timestamp.fromDate(cancelStart), Timestamp.fromDate(cancelEnd), "locA")],
+      startAt: Ts.fromDate(cancelStart), endAt: Ts.fromDate(cancelEnd),
+      serviceLines: [line(Ts.fromDate(cancelStart), Ts.fromDate(cancelEnd), "locA")],
       createdByUid: UID,
     });
     await col.add({
       clientId: jessica.clientId, locationId: "locB", status: "completed",
-      startAt: Timestamp.fromDate(otherLocStart), endAt: Timestamp.fromDate(otherLocEnd),
-      serviceLines: [line(Timestamp.fromDate(otherLocStart), Timestamp.fromDate(otherLocEnd), "locB")],
+      startAt: Ts.fromDate(otherLocStart), endAt: Ts.fromDate(otherLocEnd),
+      serviceLines: [line(Ts.fromDate(otherLocStart), Ts.fromDate(otherLocEnd), "locB")],
       createdByUid: UID,
     });
     await col.add({
       clientId: otherId, locationId: "locA", status: "scheduled",
-      startAt: Timestamp.fromDate(otherClientStart), endAt: Timestamp.fromDate(otherClientEnd),
-      serviceLines: [line(Timestamp.fromDate(otherClientStart), Timestamp.fromDate(otherClientEnd), "locA")],
+      startAt: Ts.fromDate(otherClientStart), endAt: Ts.fromDate(otherClientEnd),
+      serviceLines: [line(Ts.fromDate(otherClientStart), Ts.fromDate(otherClientEnd), "locA")],
       createdByUid: UID,
     });
 
