@@ -697,6 +697,13 @@
         );
       }
       var withName = line.providerId ? providerName(line.providerId) : "Provider";
+      var emp = lineProviders.find(function (row) { return row && row.id === line.providerId; }) || null;
+      var photo = emp ? trim(emp.photoURL || emp.photoUrl || emp.avatarUrl) : "";
+      var avatar = photo
+        ? '<img class="ff-appt-chip-av" src="' + escapeHtml(photo) + '" alt="">'
+        : '<span class="ff-appt-chip-av">' + escapeHtml(withName.charAt(0).toUpperCase()) + "</span>";
+      var startLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
+      var endLabel = Number.isFinite(Number(line.endMin)) ? formatMinutes(line.endMin) : "—";
       return (
         '<div class="ff-appt-svc' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           rail +
@@ -710,16 +717,21 @@
                   escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
                 : "") +
             "</div>" +
+            '<div class="ff-appt-strip">' +
+              '<label class="ff-appt-strip-start">' +
+                '<select data-ff-line-field="start" aria-label="Start time">' + timeOptionsHtml(line.startMin) + "</select>" +
+                '<span class="ff-appt-strip-value">' + escapeHtml(startLabel) + "</span>" +
+              "</label>" +
+              '<span class="ff-appt-strip-line" aria-hidden="true"></span>' +
+              '<span class="ff-appt-strip-end">' + escapeHtml(endLabel) + "</span>" +
+            "</div>" +
             '<div class="ff-appt-card-row">' +
               '<button type="button" class="ff-appt-chip" data-ff-appt-act="open-provider-picker" data-ff-line="' +
-                escapeHtml(line.key) + '">' + escapeHtml(withName) +
+                escapeHtml(line.key) + '">' + avatar +
+                "<span>" + escapeHtml(withName) + "</span>" +
                 '<span class="ff-appt-caret" aria-hidden="true">▾</span></button>' +
-              '<label class="ff-appt-chip ff-appt-chip-time">' +
-                '<select data-ff-line-field="start" aria-label="Start time">' + timeOptionsHtml(line.startMin) + "</select>" +
-                '<span class="ff-appt-caret" aria-hidden="true">▾</span>' +
-              "</label>" +
+              '<span class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
             "</div>" +
-            '<div class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</div>" +
             (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
             (pickingService ? servicePickerHtml(state, line, ui) : "") +
             '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +

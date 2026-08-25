@@ -4,7 +4,7 @@
  */
 (function () {
   var ROOT_ID = "ffBookingApptDrawer";
-  var UI_VERSION = "guided-v1";
+  var UI_VERSION = "guided-v2";
   var searchTimer = null;
   var searchGen = 0;
   var state = null;
@@ -187,7 +187,6 @@
             '<div id="ffApptClientSearchWrap">' +
               '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search or create client">' +
               '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
-              '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">Create new client</button>' +
             "</div>" +
             '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
           "</div>" +
@@ -211,19 +210,10 @@
           '<button type="button" class="ff-appt-note-toggle" id="ffApptNoteToggle" data-ff-appt-act="add-note">+ Add note</button>' +
           '<textarea id="ffApptNotes" class="ff-appt-note-input" rows="2" maxlength="2000" placeholder="Add a note" hidden></textarea>' +
         "</div>" +
-        '<section class="ff-appt-step ff-appt-summary-step" id="ffApptSummaryStep" hidden aria-label="Summary">' +
-          '<div class="ff-appt-step-h"><span>03</span> Summary</div>' +
-          '<div class="ff-appt-recap">' +
-            '<div id="ffApptSummaryWho" class="ff-appt-recap-who"></div>' +
-            '<div class="ff-appt-recap-row">' +
-              '<span id="ffApptSummaryWhen"></span>' +
-              '<strong id="ffApptSummaryTotal">$0</strong>' +
-            "</div>" +
-          "</div>" +
-        "</section>" +
         '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
       "</form>" +
       '<footer class="ff-appt-foot">' +
+        '<div id="ffApptMeta" class="ff-appt-foot-meta" hidden></div>' +
         '<div class="ff-appt-foot-total"><span>Total</span><strong id="ffApptTotal">$0</strong></div>' +
         '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book Appointment</button>' +
       "</footer>";
@@ -246,10 +236,7 @@
       date: document.getElementById("ffApptDate"),
       notes: document.getElementById("ffApptNotes"),
       noteToggle: document.getElementById("ffApptNoteToggle"),
-      summaryStep: document.getElementById("ffApptSummaryStep"),
-      summaryWho: document.getElementById("ffApptSummaryWho"),
-      summaryWhen: document.getElementById("ffApptSummaryWhen"),
-      summaryTotal: document.getElementById("ffApptSummaryTotal"),
+      meta: document.getElementById("ffApptMeta"),
       error: document.getElementById("ffApptError"),
       total: document.getElementById("ffApptTotal"),
       create: document.getElementById("ffApptCreate")
@@ -259,12 +246,14 @@
   function paintSummary() {
     var api = form();
     var ui = els();
-    if (!api || !ui.summaryStep) return;
+    if (!api) return;
     var lines = (state.lines || []).filter(function (line) { return line && line.serviceId; });
     var total = typeof api.linesTotal === "function" ? api.linesTotal(state) : 0;
     if (ui.total) ui.total.textContent = money(total);
+    if (!ui.meta) return;
     if (!lines.length) {
-      ui.summaryStep.hidden = true;
+      ui.meta.hidden = true;
+      ui.meta.textContent = "";
       return;
     }
     var names = [];
@@ -280,17 +269,11 @@
     var ends = lines.map(function (line) { return Number(line.endMin); }).filter(Number.isFinite);
     var start = starts.length ? Math.min.apply(null, starts) : null;
     var end = ends.length ? Math.max.apply(null, ends) : null;
-    ui.summaryStep.hidden = false;
-    if (ui.summaryWho) {
-      ui.summaryWho.textContent = lines.length + (lines.length === 1 ? " service" : " services") +
-        (names.length ? " · " + names.join(" + ") : "");
-    }
-    if (ui.summaryWhen) {
-      ui.summaryWhen.textContent = start != null && end != null
-        ? api.formatMinutes(start) + " – " + api.formatMinutes(end)
-        : "";
-    }
-    if (ui.summaryTotal) ui.summaryTotal.textContent = money(total);
+    var who = lines.length + (lines.length === 1 ? " service" : " services") +
+      (names.length ? " · " + names.join(" + ") : "");
+    var when = start != null && end != null ? api.formatMinutes(start) + " – " + api.formatMinutes(end) : "";
+    ui.meta.hidden = false;
+    ui.meta.textContent = when ? who + "\n" + when : who;
   }
 
   function paint() {
@@ -351,24 +334,23 @@
     var ui = els();
     if (!ui.results) return;
     var list = rows || [];
-    if (!list.length && kind !== "loading") {
-      ui.results.hidden = true;
-      ui.results.innerHTML = "";
-      return;
-    }
     ui.results.hidden = false;
-    if (!list.length) {
-      ui.results.innerHTML = '<div class="ff-appt-picker-empty">Loading clients…</div>';
+    var create = '<button type="button" class="ff-appt-hit ff-appt-hit-create" data-ff-appt-act="new-client">+ Create new client</button>';
+    if (kind === "loading") {
+      ui.results.innerHTML = '<div class="ff-appt-picker-empty">Loading clients…</div>' + create;
       return;
     }
     ui.results.innerHTML =
-      (kind === "recent" ? '<div class="ff-appt-picker-cat">Recent clients</div>' : "") +
-      list.map(function (row) {
-        return '<button type="button" class="ff-appt-hit" data-ff-appt-client="' + escapeHtml(row.clientId) + '">' +
-          "<strong>" + escapeHtml(row.displayName || "Client") + "</strong>" +
-          "<span>" + escapeHtml(formatPhone(row.phone) || row.email || "") + "</span>" +
-          "</button>";
-      }).join("");
+      (kind === "recent" ? '<div class="ff-appt-picker-cat">Recent</div>' : "") +
+      (list.length
+        ? list.map(function (row) {
+          return '<button type="button" class="ff-appt-hit" data-ff-appt-client="' + escapeHtml(row.clientId) + '">' +
+            "<strong>" + escapeHtml(row.displayName || "Client") + "</strong>" +
+            "<span>" + escapeHtml(formatPhone(row.phone) || row.email || "") + "</span>" +
+            "</button>";
+        }).join("")
+        : '<div class="ff-appt-picker-empty">No matching clients</div>') +
+      create;
   }
 
   function hideClientResults() {
