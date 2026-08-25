@@ -250,6 +250,18 @@ check("picker follows Services category order", comboAt !== -1 && handsAt !== -1
 check("Hands and HANDS stay one category", handsDup === -1);
 check("picker follows Services order inside a category", pickerOrder.indexOf("Gel Mani") !== -1 && pickerOrder.indexOf("Gel Mani") < pickerOrder.indexOf("Dazzle Dry Manicure"));
 
+emptyCreate.catalogServices = [
+  { id: "c1", name: "UV Gel Mani / Reg Pedi", category: "Combo", categoryId: "shared:combo", categorySortOrder: 0, sortOrder: 0, price: 80 },
+  { id: "c2", name: "Manicure / Pedicure", category: "Combo/", categoryKey: "combo/", categorySortOrder: 0, sortOrder: 1, price: 70 },
+  { id: "c3", name: "Dip Mani / UV Gel Pedi", category: "Combo", categoryId: "shared:combo", categorySortOrder: 0, sortOrder: 2, price: 90 }
+];
+const pickerCombo = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  expandedCats: { Combo: true }
+});
+check("Combo labels collapse to one Services category", (pickerCombo.match(/data-ff-cat="Combo"/g) || []).length === 1);
+check("split Combo labels keep all services", pickerCombo.indexOf("UV Gel Mani / Reg Pedi") !== -1 && pickerCombo.indexOf("Manicure / Pedicure") !== -1 && pickerCombo.indexOf("Dip Mani / UV Gel Pedi") !== -1);
+
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",
   locationId: "locA",

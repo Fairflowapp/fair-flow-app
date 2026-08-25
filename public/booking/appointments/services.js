@@ -82,23 +82,35 @@ async function loadCatalog() {
   return loadLocationCatalog();
 }
 
-function categoryKey(name) {
-  return String(name || "").trim().toLowerCase();
+function categorySlug(name) {
+  return String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other";
 }
 
-function categoryRanks(categories) {
-  const ranks = {};
+function categoryGroupId(service) {
+  const id = String(service && service.categoryId || "").trim();
+  if (id) return id;
+  return "shared:" + categorySlug(service && service.category);
+}
+
+function categoryMeta(categories) {
+  const byId = {};
   (categories || []).forEach((cat, index) => {
-    const key = categoryKey(cat && cat.name);
-    if (!key || ranks[key] != null) return;
-    ranks[key] = Number.isFinite(Number(cat.sortOrder)) ? Number(cat.sortOrder) : index;
+    const name = String(cat && cat.name || "").trim();
+    const id = String(cat && cat.id || "").trim() || ("shared:" + categorySlug(name));
+    if (!name || byId[id]) return;
+    byId[id] = {
+      name,
+      sortOrder: Number.isFinite(Number(cat.sortOrder)) ? Number(cat.sortOrder) : index
+    };
   });
-  return ranks;
+  return byId;
 }
 
-function toPickerRow(service, providerId, ranks) {
-  const category = String(service.category || "").trim();
-  const key = categoryKey(category);
+function toPickerRow(service, providerId, meta) {
+  const rawName = String(service.category || "").trim();
+  const categoryId = categoryGroupId(service);
+  const info = meta && (meta[categoryId] || meta["shared:" + categorySlug(rawName)]);
+  const category = (info && info.name) || rawName;
   return {
     id: service.id,
     name: String(service.name || "").trim(),
@@ -106,8 +118,9 @@ function toPickerRow(service, providerId, ranks) {
     defaultDurationMinutes: resolveServiceDurationMinutes(service),
     price: effectivePrice(service),
     category,
-    categoryKey: key,
-    categorySortOrder: ranks && ranks[key] != null ? ranks[key] : 999,
+    categoryId,
+    categoryKey: categoryId,
+    categorySortOrder: info && info.sortOrder != null ? info.sortOrder : 999,
     sortOrder: Number.isFinite(Number(service.sortOrder)) ? Number(service.sortOrder) : 999,
     staffOverrides: service.staffOverrides || {},
     raw: service,
@@ -123,11 +136,11 @@ function sortPickerRows(rows) {
 }
 
 function pickerRowsFromCatalog(catalog, providerId) {
-  const ranks = categoryRanks(catalog && catalog.categories);
+  const meta = categoryMeta(catalog && catalog.categories);
   return sortPickerRows(
     ((catalog && catalog.services) || [])
       .filter((service) => isActive(service) && (!providerId || isCapable(service, providerId)))
-      .map((service) => toPickerRow(service, providerId, ranks))
+      .map((service) => toPickerRow(service, providerId, meta))
   );
 }
 

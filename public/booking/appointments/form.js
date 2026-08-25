@@ -621,10 +621,15 @@
     var seen = {};
     rows.forEach(function (svc) {
       var cat = trim(svc.category) || "Services";
-      var key = trim(svc.categoryKey || cat).toLowerCase() || "services";
+      var key = trim(svc.categoryId);
+      if (!key && trim(svc.categoryKey).indexOf("shared:") === 0) key = trim(svc.categoryKey);
+      if (!key) {
+        var slug = trim(svc.categoryKey || cat).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other";
+        key = "shared:" + slug;
+      }
       if (!seen[key]) {
         seen[key] = groups.length;
-        groups.push({ name: cat, services: [] });
+        groups.push({ key: key, name: cat, services: [] });
       }
       groups[seen[key]].services.push(svc);
     });
