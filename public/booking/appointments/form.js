@@ -74,6 +74,17 @@
     return hour12 + ":" + String(min).padStart(2, "0") + " " + suffix;
   }
 
+  // Same rules as tickets-service-duration.formatServiceDurationLabel.
+  function formatDurationLabel(totalMinutes) {
+    var n = Number(totalMinutes);
+    if (!Number.isInteger(n) || n < 1) return "";
+    var hours = Math.floor(n / 60);
+    var minutes = n % 60;
+    if (hours > 0 && minutes > 0) return hours + " hr " + minutes + " min";
+    if (hours > 0) return hours + " hr";
+    return minutes + " min";
+  }
+
   function emptyLine(seed) {
     var storedPrice = seed && seed.storedPrice != null ? seed.storedPrice : seed && seed.price;
     return {
@@ -179,6 +190,7 @@
       lines: [emptyLine(seed)],
       error: "",
       errorLineKey: "",
+      catalogServices: [],
       creating: false
     };
     return derive(state);
@@ -232,8 +244,28 @@
     return syncHead(state);
   }
 
+  async function refreshCatalog(state) {
+    var api = window.ffBookingAppointmentServices;
+    if (!state) return state;
+    try {
+      state.catalogServices = api && typeof api.listAll === "function" ? await api.listAll() : [];
+    } catch (_) {
+      state.catalogServices = [];
+    }
+    return state;
+  }
+
+  function findServiceRow(state, line, serviceId) {
+    var id = trim(serviceId);
+    if (!id) return null;
+    return (line && line.services || []).find(function (row) { return row.id === id; })
+      || (state && state.catalogServices || []).find(function (row) { return row.id === id; })
+      || null;
+  }
+
   async function refreshServices(state) {
     ensureLines(state);
+    await refreshCatalog(state);
     for (var i = 0; i < state.lines.length; i += 1) {
       await refreshLineServices(state, state.lines[i]);
     }
@@ -246,8 +278,14 @@
     if (!line) return derive(state);
     var id = trim(serviceId);
     line.serviceId = id;
-    line.service = (line.services || []).find(function (row) { return row.id === id; }) || null;
+    line.service = findServiceRow(state, line, id);
     line.capabilityMessage = "";
+    if (line.service && line.providerId) {
+      var svcApi = window.ffBookingAppointmentServices;
+      if (svcApi && typeof svcApi.isCapable === "function" && !svcApi.isCapable(line.service.raw || line.service, line.providerId)) {
+        line.capabilityMessage = "This provider is not available for this service.";
+      }
+    }
     state.error = "";
     state.errorLineKey = "";
     return derive(state);
@@ -549,6 +587,133 @@
     return { dateKey: state.dateKey, clientName: clientName, lines: lines };
   }
 
+  function pickerServices(state, line) {
+    if (line && trim(line.providerId) && (line.services || []).length) return line.services;
+    return (state && state.catalogServices) || [];
+  }
+
+  function servicePickerHtml(state, line, options) {
+    var query = trim(options && options.serviceQ).toLowerCase();
+    var rows = pickerServices(state, line).filter(function (svc) {
+      if (!svc || !svc.name) return false;
+      if (!query) return true;
+      return String(svc.name).toLowerCase().indexOf(query) !== -1
+        || String(svc.category || "").toLowerCase().indexOf(query) !== -1;
+    });
+    var groups = [];
+    var seen = {};
+    rows.forEach(function (svc) {
+      var cat = trim(svc.category) || "Services";
+      if (!seen[cat]) {
+        seen[cat] = groups.length;
+        groups.push({ name: cat, services: [] });
+      }
+      groups[seen[cat]].services.push(svc);
+    });
+    var list = groups.map(function (group) {
+      return '<div class="ff-appt-picker-cat">' + escapeHtml(group.name) + "</div>" +
+        group.services.map(function (svc) {
+          return '<button type="button" class="ff-appt-svc-row" data-ff-appt-act="pick-service" data-ff-line="' +
+            escapeHtml(line.key) + '" data-ff-service="' + escapeHtml(svc.id) + '">' +
+            "<span>" + escapeHtml(svc.name) + "</span>" +
+            "<strong>" + escapeHtml(money(svc.price)) + "</strong>" +
+            "</button>";
+        }).join("");
+    }).join("");
+    return (
+      '<div class="ff-appt-picker" data-ff-picker="service">' +
+        '<input type="search" class="ff-appt-picker-q" data-ff-service-q placeholder="Search..." value="' +
+          escapeHtml(options && options.serviceQ || "") + '" autocomplete="off">' +
+        '<div class="ff-appt-picker-list">' +
+          (list || '<div class="ff-appt-picker-empty">No services found</div>') +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function providerPickerHtml(line, providers, options) {
+    var query = trim(options && options.providerQ).toLowerCase();
+    var rows = (providers || []).filter(function (emp) {
+      if (!emp || !emp.id) return false;
+      var name = trim(emp.firstName || emp.name);
+      return !query || name.toLowerCase().indexOf(query) !== -1;
+    });
+    var list = rows.map(function (emp) {
+      var name = trim(emp.firstName || emp.name) || "Provider";
+      var photo = trim(emp.photoURL || emp.photoUrl || emp.avatarUrl);
+      var avatar = photo
+        ? '<img src="' + escapeHtml(photo) + '" alt="">'
+        : "<span>" + escapeHtml(name.charAt(0).toUpperCase()) + "</span>";
+      return '<button type="button" class="ff-appt-prov-row" data-ff-appt-act="pick-provider" data-ff-line="' +
+        escapeHtml(line.key) + '" data-ff-provider="' + escapeHtml(emp.id) + '">' +
+        '<span class="ff-appt-prov-avatar">' + avatar + "</span>" +
+        "<span>" + escapeHtml(name) + "</span>" +
+        "</button>";
+    }).join("");
+    return (
+      '<div class="ff-appt-picker" data-ff-picker="provider">' +
+        '<input type="search" class="ff-appt-picker-q" data-ff-provider-q placeholder="Search..." value="' +
+          escapeHtml(options && options.providerQ || "") + '" autocomplete="off">' +
+        '<div class="ff-appt-picker-list">' +
+          (list || '<div class="ff-appt-picker-empty">No providers found</div>') +
+        "</div>" +
+      "</div>"
+    );
+  }
+
+  function createLinesHtml(state, providers, options) {
+    var rows = (state && state.lines) || [];
+    var list = Array.isArray(providers) ? providers : [];
+    var ui = options || {};
+    var canRemove = rows.length > 1;
+    var showError = ui.showError !== false;
+    return rows.map(function (line) {
+      var lineProviders = list.slice();
+      if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
+        lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
+      }
+      var err = showError && state.errorLineKey === line.key && state.error;
+      var pickingService = ui.servicePickerKey === line.key;
+      var pickingProvider = ui.providerPickerKey === line.key;
+      if (!trim(line.serviceId)) {
+        return (
+          '<div class="ff-appt-block is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+            '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
+              escapeHtml(line.key) + '">Search or select service</button>' +
+            (pickingService ? servicePickerHtml(state, line, ui) : "") +
+            (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+          "</div>"
+        );
+      }
+      var withName = line.providerId ? providerName(line.providerId) : "Select provider";
+      return (
+        '<div class="ff-appt-block' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+          '<div class="ff-appt-block-top">' +
+            "<strong>" + escapeHtml((line.service && line.service.name) || "Service") + "</strong>" +
+            (canRemove
+              ? '<button type="button" class="ff-appt-block-x" data-ff-line-act="remove" data-ff-line="' +
+                escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
+              : "") +
+          "</div>" +
+          '<div class="ff-appt-block-meta">' +
+            '<div><span>with</span>' +
+              '<button type="button" class="ff-appt-inline" data-ff-appt-act="open-provider-picker" data-ff-line="' +
+                escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
+            "</div>" +
+            (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
+            '<div><span>at</span>' +
+              '<select data-ff-line-field="start">' + timeOptionsHtml(line.startMin) + "</select>" +
+            "</div>" +
+            '<div><span>for</span><strong>' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</strong></div>" +
+            "<div><span></span><strong>" + escapeHtml(money(line.price)) + "</strong></div>" +
+          "</div>" +
+          '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
+          (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+        "</div>"
+      );
+    }).join("");
+  }
+
   function linesHtml(state, providers, options) {
     var rows = (state && state.lines) || [];
     var list = Array.isArray(providers) ? providers : [];
@@ -632,6 +797,8 @@
     friendlyError: friendlyError,
     holdSpec: holdSpec,
     linesHtml: linesHtml,
+    createLinesHtml: createLinesHtml,
+    formatDurationLabel: formatDurationLabel,
     lineComplete: lineComplete,
     applyRepoError: applyRepoError
   };

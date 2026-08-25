@@ -177,6 +177,23 @@ const html = form.linesHtml(state, [
 check("editor renders both lines", html.indexOf("Service 1") !== -1 && html.indexOf("Service 2") !== -1);
 check("remove is subtle not a danger button", html.indexOf("ff-appt-line-remove") !== -1 && html.indexOf("ff-apd-danger") === -1);
 
+check("duration 45 stays minutes", form.formatDurationLabel(45) === "45 min");
+check("duration 60 is 1 hr", form.formatDurationLabel(60) === "1 hr");
+check("duration 75 is 1 hr 15 min", form.formatDurationLabel(75) === "1 hr 15 min");
+check("duration 105 is 1 hr 45 min", form.formatDurationLabel(105) === "1 hr 45 min");
+check("duration never prints raw minutes over an hour", form.formatDurationLabel(105).indexOf("105 min") === -1);
+
+const createHtml = form.createLinesHtml(state, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+]);
+check("create UI renders compact blocks", createHtml.indexOf("ff-appt-block") !== -1 && createHtml.indexOf("Service 1") === -1);
+check("create UI shows human duration", createHtml.indexOf("1 hr") !== -1 && createHtml.indexOf("60 min") === -1);
+check("create UI keeps line keys", createHtml.indexOf(state.lines[0].key) !== -1 && createHtml.indexOf(state.lines[1].key) !== -1);
+
+const emptyCreate = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 735 });
+check("empty create line is a search row", form.createLinesHtml(emptyCreate, []).indexOf("Search or select service") !== -1);
+
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",
   locationId: "locA",

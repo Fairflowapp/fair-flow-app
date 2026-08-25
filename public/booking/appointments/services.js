@@ -72,19 +72,32 @@ async function loadCatalog() {
   return loadLocationServices();
 }
 
+function toPickerRow(service, providerId) {
+  return {
+    id: service.id,
+    name: String(service.name || "").trim(),
+    durationMinutes: providerId ? effectiveDuration(service, providerId) : resolveServiceDurationMinutes(service),
+    defaultDurationMinutes: resolveServiceDurationMinutes(service),
+    price: effectivePrice(service),
+    category: String(service.category || "").trim(),
+    staffOverrides: service.staffOverrides || {},
+    raw: service,
+  };
+}
+
+async function listAll() {
+  const rows = await loadCatalog();
+  return rows
+    .filter((service) => isActive(service))
+    .map((service) => toPickerRow(service))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function listForProvider(providerId) {
   const rows = await loadCatalog();
   return rows
     .filter((service) => isActive(service) && isCapable(service, providerId))
-    .map((service) => ({
-      id: service.id,
-      name: String(service.name || "").trim(),
-      durationMinutes: effectiveDuration(service, providerId),
-      defaultDurationMinutes: resolveServiceDurationMinutes(service),
-      price: effectivePrice(service),
-      staffOverrides: service.staffOverrides || {},
-      raw: service,
-    }))
+    .map((service) => toPickerRow(service, providerId))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -94,6 +107,7 @@ function getById(list, serviceId) {
 }
 
 const api = {
+  listAll,
   listForProvider,
   getById,
   isCapable,
@@ -104,6 +118,7 @@ const api = {
 
 window.ffBookingAppointmentServices = api;
 export {
+  listAll,
   listForProvider,
   getById,
   isCapable,
