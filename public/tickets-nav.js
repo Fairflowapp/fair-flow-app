@@ -16,7 +16,7 @@
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
 import { renderTicketsList } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260824_svc_load_fix";
 import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260818_staff_dur_ui";
 
 let showToast, loadCurrentUserProfile, enrichTicketsProfileFromMemberDoc, loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility;
@@ -222,10 +222,21 @@ export async function goToServices() {
     if (typeof window.ffSyncShellHeaderInset === 'function') window.ffSyncShellHeaderInset();
   } catch (e) {}
 
+  const list = document.getElementById('servicesCatalogV2List');
+  if (list) list.innerHTML = '<div style="padding:0 20px;color:#6b7280;font-size:12px;">Loading services…</div>';
+
   try {
     await loadCurrentUserProfile();
     await enrichTicketsProfileFromMemberDoc();
     let sharedCatalog = await loadSharedCatalogForManager();
+    const hasShared = !!(sharedCatalog && (
+      (sharedCatalog.services || []).length > 0 || (sharedCatalog.categories || []).length > 0
+    ));
+    if (hasShared) {
+      ticketsState._ffCatalogModalMode = 'shared';
+      renderServicesCatalogV2();
+      return;
+    }
     const backfillResult = await seedSharedServiceCatalogFromLocationCatalogIfEmpty();
     if (backfillResult && backfillResult.seeded) {
       sharedCatalog = await loadSharedCatalogForManager();

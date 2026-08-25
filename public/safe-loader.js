@@ -12,7 +12,7 @@
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 450 },
         { src: "/location-switcher.js?v=20260514_location_fallback", type: "module", delay: 500 },
         { src: "/queue-cloud.js?v=20260813_sync_intent", type: "module", delay: 550 },
-        { src: "/tickets.js?v=20260824_svc_dur_hm", type: "module", delay: 600 },
+        { src: "/tickets.js?v=20260824_svc_load_fix", type: "module", delay: 600 },
         { src: "/tasks-cloud.js?v=20260727_tasks_done_60d", type: "module", delay: 650 },
         { src: "/points-engine.js?v=20260625_points_split", type: "module", delay: 700 },
         { src: "/schedule-helpers.js?v=20260816_sat_open", type: "module", delay: 750 },

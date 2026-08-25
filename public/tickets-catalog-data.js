@@ -340,48 +340,8 @@ function getSharedServicesForCatalogManager() {
     })
     .filter((s) => s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  const sharedKeys = new Set(services.map((s) => serviceCatalogStableKey(s.name, s.category)));
-  const localCategories = ticketsState._rawCategories
-    .filter(_ffServiceMatchesActiveLocation)
-    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  localCategories.forEach((c) => {
-    const name = normalizeSharedCategoryName(c?.name);
-    const id = serviceCategoryDisplayId(name);
-    if (!categoryMap.has(id)) {
-      categoryMap.set(id, {
-        ...c,
-        id,
-        sourceCategoryId: c?.id || id,
-        name,
-        sortOrder: Number.isFinite(Number(c?.sortOrder)) ? Number(c.sortOrder) : categoryMap.size
-      });
-    }
-  });
-  const localServices = ticketsState._rawServices
-    .filter(_ffServiceMatchesActiveLocation)
-    .map((s) => {
-      const cat = localCategories.find((c) => c.id === s.categoryId);
-      const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
-      return {
-        ...s,
-        category: categoryName,
-        categoryId: serviceCategoryDisplayId(categoryName),
-        sourceCategoryId: s.categoryId,
-        isSharedService: false
-      };
-    })
-    .filter((s) => !sharedKeys.has(serviceCatalogStableKey(s.name, s.category || 'Other')))
-    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  const mergedServices = [];
-  const seenServices = new Set();
-  [...services, ...localServices].forEach((svc) => {
-    const key = serviceCatalogStableKey(svc.name, svc.category || 'Other');
-    if (seenServices.has(key)) return;
-    seenServices.add(key);
-    mergedServices.push(svc);
-  });
   return {
-    services: mergedServices,
+    services,
     categories: Array.from(categoryMap.values()).sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))
   };
 }
@@ -487,6 +447,14 @@ async function deleteSharedService(serviceId) {
   const accountId = getTicketsAccountId();
   if (!accountId || !serviceId) return;
   await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), serviceId));
+  ticketsState._rawSharedServices = (ticketsState._rawSharedServices || []).filter((row) => row && row.id !== serviceId);
+  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
+    ? (window.ffGetActiveLocations() || [])
+    : [];
+  await Promise.all(locations.map((loc) => {
+    if (!loc || !loc.id) return Promise.resolve();
+    return deleteDoc(doc(db, `accounts/${accountId}/locations/${loc.id}/serviceOverrides`, serviceId)).catch(() => {});
+  }));
   console.log('[SharedServicesUI] deleted shared service', { serviceId });
 }
 
@@ -570,6 +538,12 @@ async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
   const accountId = getTicketsAccountId();
   if (!accountId) return { seeded: false, reason: 'no-account' };
   if (ticketsState._ffServicesSharedBackfillChecked) return { seeded: false, reason: 'already-checked' };
+  const sharedAlreadyPopulated = (ticketsState._rawSharedServices || []).length > 0
+    || (ticketsState._rawSharedCategories || []).length > 0;
+  if (sharedAlreadyPopulated) {
+    ticketsState._ffServicesSharedBackfillChecked = true;
+    return { seeded: false, reason: 'shared-already-populated' };
+  }
   ticketsState._ffServicesSharedBackfillChecked = true;
   await loadLocationCatalogForManager();
   const localServices = Array.isArray(ticketsState._rawServices) ? ticketsState._rawServices.filter((s) => s && String(s.name || '').trim()) : [];
