@@ -609,6 +609,11 @@
     });
   }
 
+  function categoryGroupKey(svc) {
+    var name = trim(svc && svc.category) || "Services";
+    return "shared:" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other";
+  }
+
   function servicePickerHtml(state, line, options) {
     var query = trim(options && options.serviceQ).toLowerCase();
     var rows = sortCatalogServices(pickerServices(state, line).filter(function (svc) {
@@ -621,13 +626,8 @@
     var seen = {};
     rows.forEach(function (svc) {
       var cat = trim(svc.category) || "Services";
-      var key = trim(svc.categoryId);
-      if (!key && trim(svc.categoryKey).indexOf("shared:") === 0) key = trim(svc.categoryKey);
-      if (!key) {
-        var slug = trim(svc.categoryKey || cat).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other";
-        key = "shared:" + slug;
-      }
-      if (!seen[key]) {
+      var key = categoryGroupKey(svc);
+      if (seen[key] == null) {
         seen[key] = groups.length;
         groups.push({ key: key, name: cat, services: [] });
       }

@@ -86,31 +86,29 @@ function categorySlug(name) {
   return String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other";
 }
 
-function categoryGroupId(service) {
-  const id = String(service && service.categoryId || "").trim();
-  if (id) return id;
-  return "shared:" + categorySlug(service && service.category);
-}
-
 function categoryMeta(categories) {
   const byId = {};
   (categories || []).forEach((cat, index) => {
     const name = String(cat && cat.name || "").trim();
-    const id = String(cat && cat.id || "").trim() || ("shared:" + categorySlug(name));
-    if (!name || byId[id]) return;
-    byId[id] = {
+    if (!name) return;
+    const info = {
       name,
       sortOrder: Number.isFinite(Number(cat.sortOrder)) ? Number(cat.sortOrder) : index
     };
+    const slugId = "shared:" + categorySlug(name);
+    const id = String(cat && cat.id || "").trim();
+    if (id && !byId[id]) byId[id] = info;
+    if (!byId[slugId]) byId[slugId] = info;
   });
   return byId;
 }
 
 function toPickerRow(service, providerId, meta) {
   const rawName = String(service.category || "").trim();
-  const categoryId = categoryGroupId(service);
-  const info = meta && (meta[categoryId] || meta["shared:" + categorySlug(rawName)]);
+  const rawId = String(service.categoryId || "").trim();
+  const info = meta && (meta[rawId] || meta["shared:" + categorySlug(rawName)]);
   const category = (info && info.name) || rawName;
+  const categoryId = "shared:" + categorySlug(category);
   return {
     id: service.id,
     name: String(service.name || "").trim(),

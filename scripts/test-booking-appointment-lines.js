@@ -262,6 +262,18 @@ const pickerCombo = form.createLinesHtml(emptyCreate, [], {
 check("Combo labels collapse to one Services category", (pickerCombo.match(/data-ff-cat="Combo"/g) || []).length === 1);
 check("split Combo labels keep all services", pickerCombo.indexOf("UV Gel Mani / Reg Pedi") !== -1 && pickerCombo.indexOf("Manicure / Pedicure") !== -1 && pickerCombo.indexOf("Dip Mani / UV Gel Pedi") !== -1);
 
+emptyCreate.catalogServices = [
+  { id: "c4", name: "Structured Gel", category: "Combo", categoryId: "legacy-combo-doc", categorySortOrder: 0, sortOrder: 0, price: 85 },
+  { id: "c5", name: "Manicure / Pedicure", category: "Combo", categoryId: "shared:combo", categorySortOrder: 0, sortOrder: 1, price: 70 },
+  { id: "c6", name: "Dip Mani / UV Gel Pedi", category: "Combo", categoryId: "shared:combo", categorySortOrder: 0, sortOrder: 2, price: 90 }
+];
+const pickerComboIds = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  expandedCats: { Combo: true }
+});
+check("Combo stays one group when category ids differ", (pickerComboIds.match(/data-ff-cat="Combo"/g) || []).length === 1);
+check("legacy Combo id still lists every service", pickerComboIds.indexOf("Structured Gel") !== -1 && pickerComboIds.indexOf("Manicure / Pedicure") !== -1 && pickerComboIds.indexOf("Dip Mani / UV Gel Pedi") !== -1);
+
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",
   locationId: "locA",
