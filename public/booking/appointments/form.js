@@ -685,28 +685,26 @@
           "</div>"
         );
       }
-      var withName = line.providerId ? providerName(line.providerId) : "Select provider";
+      var withName = line.providerId ? providerName(line.providerId) : "Provider";
       return (
         '<div class="ff-appt-block' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           '<div class="ff-appt-block-top">' +
-            "<strong>" + escapeHtml((line.service && line.service.name) || "Service") + "</strong>" +
+            '<span class="ff-appt-block-name">' + escapeHtml((line.service && line.service.name) || "Service") + "</span>" +
+            '<span class="ff-appt-block-price">' + escapeHtml(money(line.price)) + "</span>" +
             (canRemove
               ? '<button type="button" class="ff-appt-block-x" data-ff-line-act="remove" data-ff-line="' +
                 escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
               : "") +
           "</div>" +
-          '<div class="ff-appt-block-meta">' +
-            '<div><span>with</span>' +
-              '<button type="button" class="ff-appt-inline" data-ff-appt-act="open-provider-picker" data-ff-line="' +
-                escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
-            "</div>" +
-            (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
-            '<div><span>at</span>' +
-              '<select data-ff-line-field="start">' + timeOptionsHtml(line.startMin) + "</select>" +
-            "</div>" +
-            '<div><span>for</span><strong>' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</strong></div>" +
-            "<div><span></span><strong>" + escapeHtml(money(line.price)) + "</strong></div>" +
+          '<div class="ff-appt-block-sub">' +
+            '<button type="button" class="ff-appt-inline" data-ff-appt-act="open-provider-picker" data-ff-line="' +
+              escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
+            '<span class="ff-appt-dot" aria-hidden="true">·</span>' +
+            '<select data-ff-line-field="start">' + timeOptionsHtml(line.startMin) + "</select>" +
+            '<span class="ff-appt-dot" aria-hidden="true">·</span>' +
+            '<span class="ff-appt-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
           "</div>" +
+          (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
           '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
           (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
         "</div>"

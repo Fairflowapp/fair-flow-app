@@ -141,7 +141,7 @@
 
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
-    if (existing && existing.getAttribute("data-ff-appt-ui") !== "compact-v1") {
+    if (existing && existing.getAttribute("data-ff-appt-ui") !== "compact-v2") {
       existing.parentNode.removeChild(existing);
       existing = null;
     }
@@ -150,7 +150,7 @@
     var aside = document.createElement("aside");
     aside.id = ROOT_ID;
     aside.className = "ff-appt";
-    aside.setAttribute("data-ff-appt-ui", "compact-v1");
+    aside.setAttribute("data-ff-appt-ui", "compact-v2");
     aside.setAttribute("role", "dialog");
     aside.setAttribute("aria-labelledby", "ffApptTitle");
     aside.setAttribute("aria-hidden", "true");
@@ -185,12 +185,12 @@
           '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
         "</div>" +
         '<div id="ffApptLines" class="ff-appt-lines"></div>' +
-        '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line" hidden>⊕ Add service</button>' +
+        '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line" hidden>+ Add service</button>' +
         '<textarea id="ffApptNotes" class="ff-appt-note-input" rows="1" maxlength="2000" placeholder="Add a note"></textarea>' +
         '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
       "</form>" +
       '<footer class="ff-appt-foot">' +
-        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book Appointment</button>' +
+        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book appointment</button>' +
       "</footer>";
     host().appendChild(aside);
     bindDrawer(aside);
@@ -251,7 +251,7 @@
     ui.error.hidden = !state.error || lineError;
     ui.error.textContent = lineError ? "" : (state.error || "");
     ui.create.disabled = !api.canCreate(state) || state.creating;
-    ui.create.textContent = state.creating ? "Booking…" : "Book Appointment";
+    ui.create.textContent = state.creating ? "Booking…" : "Book appointment";
     if (active && active.hasAttribute) {
       var sel = null;
       if (active.hasAttribute("data-ff-service-q")) sel = ui.root.querySelector("[data-ff-service-q]");

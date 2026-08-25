@@ -188,6 +188,7 @@ const createHtml = form.createLinesHtml(state, [
   { id: "bobo", firstName: "Bobo" }
 ]);
 check("create UI renders compact blocks", createHtml.indexOf("ff-appt-block") !== -1 && createHtml.indexOf("Service 1") === -1);
+check("create UI is not a with/at/for form", createHtml.indexOf(">with<") === -1 && createHtml.indexOf(">at<") === -1 && createHtml.indexOf(">for<") === -1);
 check("create UI shows human duration", createHtml.indexOf("1 hr") !== -1 && createHtml.indexOf("60 min") === -1);
 check("create UI keeps line keys", createHtml.indexOf(state.lines[0].key) !== -1 && createHtml.indexOf(state.lines[1].key) !== -1);
 
