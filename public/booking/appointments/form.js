@@ -610,15 +610,26 @@
       }
       groups[seen[cat]].services.push(svc);
     });
+    var collapsed = (options && options.collapsedCats) || {};
     var list = groups.map(function (group) {
-      return '<div class="ff-appt-picker-cat">' + escapeHtml(group.name) + "</div>" +
-        group.services.map(function (svc) {
-          return '<button type="button" class="ff-appt-svc-row" data-ff-appt-act="pick-service" data-ff-line="' +
-            escapeHtml(line.key) + '" data-ff-service="' + escapeHtml(svc.id) + '">' +
-            "<span>" + escapeHtml(svc.name) + "</span>" +
-            "<strong>" + escapeHtml(money(svc.price)) + "</strong>" +
-            "</button>";
-        }).join("");
+      var shut = !query && !!collapsed[group.name];
+      return '<div class="ff-appt-picker-group' + (shut ? " is-collapsed" : "") + '">' +
+        '<button type="button" class="ff-appt-picker-cat" data-ff-appt-act="toggle-service-cat" data-ff-cat="' +
+          escapeHtml(group.name) + '" aria-expanded="' + (shut ? "false" : "true") + '">' +
+          "<span>" + escapeHtml(group.name) + "</span>" +
+          '<span class="ff-appt-picker-cat-count">' + group.services.length + "</span>" +
+          '<span class="ff-appt-picker-cat-caret" aria-hidden="true">▾</span>' +
+        "</button>" +
+        '<div class="ff-appt-picker-cat-list">' +
+          group.services.map(function (svc) {
+            return '<button type="button" class="ff-appt-svc-row" data-ff-appt-act="pick-service" data-ff-line="' +
+              escapeHtml(line.key) + '" data-ff-service="' + escapeHtml(svc.id) + '">' +
+              "<span>" + escapeHtml(svc.name) + "</span>" +
+              "<strong>" + escapeHtml(money(svc.price)) + "</strong>" +
+              "</button>";
+          }).join("") +
+        "</div>" +
+      "</div>";
     }).join("");
     return (
       '<div class="ff-appt-picker" data-ff-picker="service">' +

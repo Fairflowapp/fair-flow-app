@@ -214,6 +214,24 @@ check("hold still has one block per overlapping line", form.holdSpec(overlap).li
 const emptyCreate = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 735 });
 check("empty create line is a search row", form.createLinesHtml(emptyCreate, []).indexOf("Search or select service") !== -1);
 
+emptyCreate.catalogServices = [
+  { id: "mani", name: "Manicure", category: "Hands", price: 43 },
+  { id: "pedi", name: "Pedicure", category: "Feet", price: 58 }
+];
+const pickerOpen = form.createLinesHtml(emptyCreate, [], { servicePickerKey: emptyCreate.lines[0].key });
+check("service picker groups are collapsible", pickerOpen.indexOf("toggle-service-cat") !== -1 && pickerOpen.indexOf("Hands") !== -1 && pickerOpen.indexOf("Feet") !== -1);
+const pickerCollapsed = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  collapsedCats: { Feet: true }
+});
+check("service picker can collapse a category", pickerCollapsed.indexOf("is-collapsed") !== -1);
+const pickerSearch = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  serviceQ: "pedi",
+  collapsedCats: { Feet: true }
+});
+check("search keeps matching category open", pickerSearch.indexOf("is-collapsed") === -1 && pickerSearch.indexOf("Pedicure") !== -1);
+
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",
   locationId: "locA",

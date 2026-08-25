@@ -722,12 +722,46 @@ body.ff-appt-drawer-open .ff-live-desk-fab {
   overflow: auto;
 }
 .ff-appt-picker-cat {
-  padding: 4px 8px 2px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: #f6f1fa;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ff-brand-purple, #9d68b9);
+  cursor: default;
+  text-align: left;
+  box-sizing: border-box;
+}
+button.ff-appt-picker-cat {
+  cursor: pointer;
+}
+button.ff-appt-picker-cat:hover {
+  background: #efe6f6;
+}
+.ff-appt-picker-cat-count {
+  margin-left: auto;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--sub, #6b7280);
+  letter-spacing: 0;
+  color: #b08cc4;
+}
+.ff-appt-picker-cat-caret {
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ff-brand-purple, #9d68b9);
+  transform: rotate(0deg);
+}
+.ff-appt-picker-group.is-collapsed .ff-appt-picker-cat-list {
+  display: none;
+}
+.ff-appt-picker-group.is-collapsed .ff-appt-picker-cat-caret {
+  transform: rotate(-90deg);
 }
 .ff-appt-svc-row,
 .ff-appt-prov-row {
