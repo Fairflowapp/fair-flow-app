@@ -232,6 +232,24 @@ const pickerSearch = form.createLinesHtml(emptyCreate, [], {
 });
 check("search keeps matching category open", pickerSearch.indexOf("is-collapsed") === -1 && pickerSearch.indexOf("Pedicure") !== -1);
 
+emptyCreate.catalogServices = [
+  { id: "pedi", name: "Pedicure", category: "Feet", categoryKey: "feet", categorySortOrder: 2, sortOrder: 0, price: 58 },
+  { id: "mani2", name: "Dazzle Dry Manicure", category: "HANDS", categoryKey: "hands", categorySortOrder: 1, sortOrder: 1, price: 43 },
+  { id: "combo", name: "Manicure / Pedicure", category: "Combo", categoryKey: "combo", categorySortOrder: 0, sortOrder: 0, price: 80 },
+  { id: "gel", name: "Gel Mani", category: "Hands", categoryKey: "hands", categorySortOrder: 1, sortOrder: 0, price: 50 }
+];
+const pickerOrder = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  expandedCats: { Combo: true, Hands: true, Feet: true }
+});
+const comboAt = pickerOrder.indexOf('data-ff-cat="Combo"');
+const handsAt = pickerOrder.indexOf('data-ff-cat="Hands"');
+const handsDup = pickerOrder.indexOf('data-ff-cat="HANDS"');
+const feetAt = pickerOrder.indexOf('data-ff-cat="Feet"');
+check("picker follows Services category order", comboAt !== -1 && handsAt !== -1 && feetAt !== -1 && comboAt < handsAt && handsAt < feetAt);
+check("Hands and HANDS stay one category", handsDup === -1);
+check("picker follows Services order inside a category", pickerOrder.indexOf("Gel Mani") !== -1 && pickerOrder.indexOf("Gel Mani") < pickerOrder.indexOf("Dazzle Dry Manicure"));
+
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",
   locationId: "locA",

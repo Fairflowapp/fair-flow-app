@@ -52,53 +52,91 @@ function effectiveDuration(service, providerId) {
   return resolveServiceDurationForStaff(service, providerId);
 }
 
-async function loadLocationServices() {
+async function loadLocationCatalog() {
   const sid = salonId();
   const loc = locationId();
-  if (!sid) return [];
-  const snap = await getDocs(collection(db, `salons/${sid}/services`));
-  return snap.docs.map((docSnap) => {
+  if (!sid) return { services: [], categories: [] };
+  const [svcSnap, catSnap] = await Promise.all([
+    getDocs(collection(db, `salons/${sid}/services`)),
+    getDocs(collection(db, `salons/${sid}/serviceCategories`)).catch(() => ({ docs: [] }))
+  ]);
+  const categories = catSnap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+  const catById = {};
+  categories.forEach((cat) => { catById[cat.id] = cat; });
+  const services = svcSnap.docs.map((docSnap) => {
     const row = { id: docSnap.id, ...docSnap.data() };
     const rawLoc = typeof row.locationId === "string" ? row.locationId.trim() : "";
     if (loc && rawLoc && rawLoc !== loc) return null;
+    const cat = row.categoryId ? catById[row.categoryId] : null;
+    if (cat && cat.name && !String(row.category || "").trim()) row.category = cat.name;
     return row;
   }).filter(Boolean);
+  return { services, categories };
 }
 
 async function loadCatalog() {
   const shared = await loadSharedCatalogForManager();
   const sharedRows = Array.isArray(shared && shared.services) ? shared.services : [];
-  if (sharedRows.length) return sharedRows;
-  return loadLocationServices();
+  const sharedCats = Array.isArray(shared && shared.categories) ? shared.categories : [];
+  if (sharedRows.length) return { services: sharedRows, categories: sharedCats };
+  return loadLocationCatalog();
 }
 
-function toPickerRow(service, providerId) {
+function categoryKey(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function categoryRanks(categories) {
+  const ranks = {};
+  (categories || []).forEach((cat, index) => {
+    const key = categoryKey(cat && cat.name);
+    if (!key || ranks[key] != null) return;
+    ranks[key] = Number.isFinite(Number(cat.sortOrder)) ? Number(cat.sortOrder) : index;
+  });
+  return ranks;
+}
+
+function toPickerRow(service, providerId, ranks) {
+  const category = String(service.category || "").trim();
+  const key = categoryKey(category);
   return {
     id: service.id,
     name: String(service.name || "").trim(),
     durationMinutes: providerId ? effectiveDuration(service, providerId) : resolveServiceDurationMinutes(service),
     defaultDurationMinutes: resolveServiceDurationMinutes(service),
     price: effectivePrice(service),
-    category: String(service.category || "").trim(),
+    category,
+    categoryKey: key,
+    categorySortOrder: ranks && ranks[key] != null ? ranks[key] : 999,
+    sortOrder: Number.isFinite(Number(service.sortOrder)) ? Number(service.sortOrder) : 999,
     staffOverrides: service.staffOverrides || {},
     raw: service,
   };
 }
 
+function sortPickerRows(rows) {
+  return (rows || []).slice().sort((a, b) => {
+    if (a.categorySortOrder !== b.categorySortOrder) return a.categorySortOrder - b.categorySortOrder;
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function pickerRowsFromCatalog(catalog, providerId) {
+  const ranks = categoryRanks(catalog && catalog.categories);
+  return sortPickerRows(
+    ((catalog && catalog.services) || [])
+      .filter((service) => isActive(service) && (!providerId || isCapable(service, providerId)))
+      .map((service) => toPickerRow(service, providerId, ranks))
+  );
+}
+
 async function listAll() {
-  const rows = await loadCatalog();
-  return rows
-    .filter((service) => isActive(service))
-    .map((service) => toPickerRow(service))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return pickerRowsFromCatalog(await loadCatalog());
 }
 
 async function listForProvider(providerId) {
-  const rows = await loadCatalog();
-  return rows
-    .filter((service) => isActive(service) && isCapable(service, providerId))
-    .map((service) => toPickerRow(service, providerId))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return pickerRowsFromCatalog(await loadCatalog(), providerId);
 }
 
 function getById(list, serviceId) {

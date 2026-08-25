@@ -592,23 +592,41 @@
     return (state && state.catalogServices) || [];
   }
 
+  function catalogRank(value, fallback) {
+    var n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function sortCatalogServices(rows) {
+    return (rows || []).slice().sort(function (a, b) {
+      var catA = catalogRank(a && a.categorySortOrder, 999);
+      var catB = catalogRank(b && b.categorySortOrder, 999);
+      if (catA !== catB) return catA - catB;
+      var svcA = catalogRank(a && a.sortOrder, 999);
+      var svcB = catalogRank(b && b.sortOrder, 999);
+      if (svcA !== svcB) return svcA - svcB;
+      return String(a && a.name || "").localeCompare(String(b && b.name || ""));
+    });
+  }
+
   function servicePickerHtml(state, line, options) {
     var query = trim(options && options.serviceQ).toLowerCase();
-    var rows = pickerServices(state, line).filter(function (svc) {
+    var rows = sortCatalogServices(pickerServices(state, line).filter(function (svc) {
       if (!svc || !svc.name) return false;
       if (!query) return true;
       return String(svc.name).toLowerCase().indexOf(query) !== -1
         || String(svc.category || "").toLowerCase().indexOf(query) !== -1;
-    });
+    }));
     var groups = [];
     var seen = {};
     rows.forEach(function (svc) {
       var cat = trim(svc.category) || "Services";
-      if (!seen[cat]) {
-        seen[cat] = groups.length;
+      var key = trim(svc.categoryKey || cat).toLowerCase() || "services";
+      if (!seen[key]) {
+        seen[key] = groups.length;
         groups.push({ name: cat, services: [] });
       }
-      groups[seen[cat]].services.push(svc);
+      groups[seen[key]].services.push(svc);
     });
     var expanded = (options && options.expandedCats) || {};
     var list = groups.map(function (group) {
