@@ -661,54 +661,113 @@
     );
   }
 
-  function createLinesHtml(state, providers, options) {
-    var rows = (state && state.lines) || [];
+  function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+    var as = Number(aStart);
+    var ae = Number(aEnd);
+    var bs = Number(bStart);
+    var be = Number(bEnd);
+    if (!Number.isFinite(as) || !Number.isFinite(bs)) return false;
+    if (!Number.isFinite(ae)) ae = as + 1;
+    if (!Number.isFinite(be)) be = bs + 1;
+    return as < be && bs < ae;
+  }
+
+  function journeyClusters(lines) {
+    var rows = (lines || []).filter(Boolean);
+    var sorted = rows.slice().sort(function (a, b) {
+      var as = Number(a.startMin);
+      var bs = Number(b.startMin);
+      if (Number.isFinite(as) && Number.isFinite(bs) && as !== bs) return as - bs;
+      if (Number.isFinite(as) !== Number.isFinite(bs)) return Number.isFinite(as) ? -1 : 1;
+      return String(a.key || "").localeCompare(String(b.key || ""));
+    });
+    var clusters = [];
+    sorted.forEach(function (line) {
+      var placed = false;
+      for (var i = 0; i < clusters.length; i += 1) {
+        if (clusters[i].some(function (other) {
+          return rangesOverlap(line.startMin, line.endMin, other.startMin, other.endMin);
+        })) {
+          clusters[i].push(line);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) clusters.push([line]);
+    });
+    return clusters;
+  }
+
+  function linesTotal(state) {
+    return ((state && state.lines) || []).reduce(function (sum, line) {
+      var n = Number(line && line.price);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+  }
+
+  function journeyNodeHtml(state, line, providers, ui, canRemove) {
     var list = Array.isArray(providers) ? providers : [];
-    var ui = options || {};
-    var canRemove = rows.length > 1;
-    var showError = ui.showError !== false;
-    return rows.map(function (line) {
-      var lineProviders = list.slice();
-      if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
-        lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
-      }
-      var err = showError && state.errorLineKey === line.key && state.error;
-      var pickingService = ui.servicePickerKey === line.key;
-      var pickingProvider = ui.providerPickerKey === line.key;
-      if (!trim(line.serviceId)) {
-        return (
-          '<div class="ff-appt-block is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
-            '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
-              escapeHtml(line.key) + '">Search or select service</button>' +
-            (pickingService ? servicePickerHtml(state, line, ui) : "") +
-            (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-          "</div>"
-        );
-      }
-      var withName = line.providerId ? providerName(line.providerId) : "Provider";
+    if (line.providerId && !list.some(function (emp) { return emp && emp.id === line.providerId; })) {
+      list = list.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
+    }
+    var err = ui.showError !== false && state.errorLineKey === line.key && state.error;
+    var editing = ui.editingKey === line.key;
+    var timeLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
+    if (!trim(line.serviceId)) {
       return (
-        '<div class="ff-appt-block' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
-          '<div class="ff-appt-block-top">' +
-            '<span class="ff-appt-block-name">' + escapeHtml((line.service && line.service.name) || "Service") + "</span>" +
-            '<span class="ff-appt-block-price">' + escapeHtml(money(line.price)) + "</span>" +
-            (canRemove
-              ? '<button type="button" class="ff-appt-block-x" data-ff-line-act="remove" data-ff-line="' +
-                escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
-              : "") +
+        '<article class="ff-appt-node is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+          '<div class="ff-appt-node-time">' + escapeHtml(timeLabel) + "</div>" +
+          '<span class="ff-appt-node-dot" aria-hidden="true"></span>' +
+          '<button type="button" class="ff-appt-node-empty" data-ff-appt-act="open-service-picker" data-ff-line="' +
+            escapeHtml(line.key) + '">Search or select service</button>' +
+          (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+        "</article>"
+      );
+    }
+    var withName = line.providerId ? providerName(line.providerId) : "Provider";
+    var dur = formatDurationLabel(line.durationMinutes) || "—";
+    return (
+      '<article class="ff-appt-node' + (editing ? " is-editing" : "") + (err ? " is-error" : "") + '" data-ff-line="' +
+        escapeHtml(line.key) + '">' +
+        '<div class="ff-appt-node-time">' + escapeHtml(timeLabel) + "</div>" +
+        '<span class="ff-appt-node-dot" aria-hidden="true"></span>' +
+        '<div class="ff-appt-node-card" data-ff-appt-act="edit-line" data-ff-line="' + escapeHtml(line.key) + '">' +
+          (canRemove
+            ? '<button type="button" class="ff-appt-node-x" data-ff-line-act="remove" data-ff-line="' +
+              escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
+            : "") +
+          '<button type="button" class="ff-appt-node-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
+            escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>" +
+          '<button type="button" class="ff-appt-node-prov" data-ff-appt-act="open-provider-picker" data-ff-line="' +
+            escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
+          '<div class="ff-appt-node-meta">' +
+            '<span>' + escapeHtml(dur) + "</span>" +
+            '<span class="ff-appt-node-price">' + escapeHtml(money(line.price)) + "</span>" +
           "</div>" +
-          '<div class="ff-appt-block-sub">' +
-            '<button type="button" class="ff-appt-inline" data-ff-appt-act="open-provider-picker" data-ff-line="' +
-              escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
-            '<span class="ff-appt-dot" aria-hidden="true">·</span>' +
-            '<select data-ff-line-field="start">' + timeOptionsHtml(line.startMin) + "</select>" +
-            '<span class="ff-appt-dot" aria-hidden="true">·</span>' +
-            '<span class="ff-appt-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
-          "</div>" +
-          (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
+          (editing
+            ? '<label class="ff-appt-node-start"><span>Start</span><select data-ff-line-field="start">' +
+              timeOptionsHtml(line.startMin) + "</select></label>"
+            : "") +
           '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
           (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-        "</div>"
-      );
+        "</div>" +
+      "</article>"
+    );
+  }
+
+  function createLinesHtml(state, providers, options) {
+    var rows = (state && state.lines) || [];
+    var ui = options || {};
+    var canRemove = rows.length > 1;
+    var clusters = journeyClusters(rows);
+    return clusters.map(function (cluster, index) {
+      var stacked = cluster.length > 1;
+      return (index ? '<div class="ff-appt-journey-link" aria-hidden="true"></div>' : "") +
+        '<div class="ff-appt-cluster' + (stacked ? " is-stack" : "") + '">' +
+          cluster.map(function (line) {
+            return journeyNodeHtml(state, line, providers, ui, canRemove);
+          }).join("") +
+        "</div>";
     }).join("");
   }
 
@@ -796,6 +855,10 @@
     holdSpec: holdSpec,
     linesHtml: linesHtml,
     createLinesHtml: createLinesHtml,
+    journeyClusters: journeyClusters,
+    linesTotal: linesTotal,
+    servicePickerHtml: servicePickerHtml,
+    providerPickerHtml: providerPickerHtml,
     formatDurationLabel: formatDurationLabel,
     lineComplete: lineComplete,
     applyRepoError: applyRepoError

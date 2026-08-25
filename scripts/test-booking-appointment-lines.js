@@ -187,10 +187,28 @@ const createHtml = form.createLinesHtml(state, [
   { id: "koko", firstName: "Koko" },
   { id: "bobo", firstName: "Bobo" }
 ]);
-check("create UI renders compact blocks", createHtml.indexOf("ff-appt-block") !== -1 && createHtml.indexOf("Service 1") === -1);
+check("create UI renders journey nodes", createHtml.indexOf("ff-appt-node") !== -1 && createHtml.indexOf("Service 1") === -1);
 check("create UI is not a with/at/for form", createHtml.indexOf(">with<") === -1 && createHtml.indexOf(">at<") === -1 && createHtml.indexOf(">for<") === -1);
 check("create UI shows human duration", createHtml.indexOf("1 hr") !== -1 && createHtml.indexOf("60 min") === -1);
 check("create UI keeps line keys", createHtml.indexOf(state.lines[0].key) !== -1 && createHtml.indexOf(state.lines[1].key) !== -1);
+check("sequential services stay side by side", createHtml.indexOf("ff-appt-journey-link") !== -1 && createHtml.indexOf("is-stack") === -1);
+check("create total uses line prices", form.linesTotal(state) === 120);
+
+const overlap = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 10 * 60 + 30, providerId: "koko" });
+overlap.lines[0].services = [{ id: "mani", name: "Manicure", durationMinutes: 60, price: 55, raw: { durationMinutes: 60, defaultPrice: 55 } }];
+form.setLineService(overlap, overlap.lines[0].key, "mani");
+form.addLine(overlap);
+overlap.lines[1].providerId = "bobo";
+overlap.lines[1].services = [{ id: "pedi", name: "Pedicure", durationMinutes: 30, price: 31, raw: { durationMinutes: 30, defaultPrice: 31 } }];
+form.setLineService(overlap, overlap.lines[1].key, "pedi");
+form.setLineStart(overlap, overlap.lines[1].key, 10 * 60 + 30);
+const overlapHtml = form.createLinesHtml(overlap, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+]);
+check("overlapping different providers stack in one cluster", overlapHtml.indexOf("is-stack") !== -1);
+check("overlapping clusters keep both start times", overlapHtml.indexOf("10:30") !== -1);
+check("hold still has one block per overlapping line", form.holdSpec(overlap).lines.length === 2);
 
 const emptyCreate = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 735 });
 check("empty create line is a search row", form.createLinesHtml(emptyCreate, []).indexOf("Search or select service") !== -1);

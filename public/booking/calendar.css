@@ -21,6 +21,7 @@ body.ff-booking-area .ff-booking-main {
   overflow: auto;
 }
 .ff-booking-page-calendar {
+  position: relative;
   max-width: none;
   margin: 0;
   padding: 0;
@@ -179,6 +180,10 @@ body.ff-booking-area .ff-booking-main {
   min-width: 0;
   overflow: auto;
   background: #FFFFFF;
+}
+body.ff-appt-composer-open .ff-cal-viewport {
+  padding-bottom: var(--ff-appt-composer-h, 248px);
+  scroll-padding-bottom: var(--ff-appt-composer-h, 248px);
 }
 .ff-cal-board {
   display: grid;
