@@ -4,11 +4,17 @@
  */
 (function () {
   var ROOT_ID = "ffBookingApptDrawer";
-  var UI_VERSION = "composer-v1";
+  var UI_VERSION = "composer-v1.1";
+  var MIN_COMPOSER_H = 200;
+  var MAX_COMPOSER_VH = 0.72;
+  var HEIGHT_KEY = "ff-appt-composer-h";
   var searchTimer = null;
   var closeTimer = null;
+  var searchGen = 0;
   var state = null;
   var lastScroll = null;
+  var composerHeight = 0;
+  var resizing = false;
   var uiState = {
     servicePickerKey: "",
     providerPickerKey: "",
@@ -132,7 +138,7 @@
       ui.chosen.innerHTML = selected ? selectedClientHtml(state.client) : "";
     }
     if (selected) {
-      showClientResults([]);
+      hideClientResults();
       if (ui.newBox) ui.newBox.hidden = true;
     }
   }
@@ -182,6 +188,68 @@
     ui.float.innerHTML = "";
   }
 
+  function maxComposerHeight() {
+    return Math.max(MIN_COMPOSER_H, Math.round(window.innerHeight * MAX_COMPOSER_VH));
+  }
+
+  function readSavedHeight() {
+    try {
+      var raw = sessionStorage.getItem(HEIGHT_KEY);
+      var n = Number(raw);
+      return Number.isFinite(n) && n >= MIN_COMPOSER_H ? n : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function applyComposerHeight(px, persist) {
+    var root = document.getElementById(ROOT_ID);
+    if (!root) return;
+    var next = Math.max(MIN_COMPOSER_H, Math.min(maxComposerHeight(), Math.round(px)));
+    composerHeight = next;
+    root.style.height = next + "px";
+    root.style.maxHeight = "none";
+    root.classList.add("is-resized");
+    if (persist) {
+      try { sessionStorage.setItem(HEIGHT_KEY, String(next)); } catch (_) {}
+    }
+    syncComposerChrome();
+    placeLiveFab();
+  }
+
+  function restoreComposerHeight(root) {
+    var saved = readSavedHeight();
+    if (!saved) return;
+    applyComposerHeight(saved, false);
+  }
+
+  function bindResize(root) {
+    var handle = root.querySelector("[data-ff-appt-resize]");
+    if (!handle || handle.getAttribute("data-ff-bound") === "1") return;
+    handle.setAttribute("data-ff-bound", "1");
+    handle.addEventListener("pointerdown", function (ev) {
+      if (ev.button != null && ev.button !== 0) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      resizing = true;
+      root.classList.add("is-dragging");
+      var startY = ev.clientY;
+      var startH = root.getBoundingClientRect().height;
+      function move(e) {
+        applyComposerHeight(startH + (startY - e.clientY), false);
+      }
+      function up() {
+        resizing = false;
+        root.classList.remove("is-dragging");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        applyComposerHeight(root.getBoundingClientRect().height, true);
+      }
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    });
+  }
+
   function syncComposerChrome() {
     var root = document.getElementById(ROOT_ID);
     if (!root || !isOpen()) {
@@ -189,7 +257,7 @@
       document.documentElement.style.removeProperty("--ff-appt-composer-h");
       return;
     }
-    var height = Math.round(root.getBoundingClientRect().height || 248);
+    var height = Math.round(root.getBoundingClientRect().height || composerHeight || 248);
     document.documentElement.style.setProperty("--ff-appt-composer-h", height + "px");
     document.body.classList.add("ff-appt-composer-open");
   }
@@ -214,7 +282,10 @@
       existing = null;
     }
     if (existing && existing.parentNode !== host()) host().appendChild(existing);
-    if (existing) return;
+    if (existing) {
+      bindResize(existing);
+      return;
+    }
     var aside = document.createElement("aside");
     aside.id = ROOT_ID;
     aside.className = "ff-appt";
@@ -224,6 +295,7 @@
     aside.setAttribute("aria-hidden", "true");
     aside.hidden = true;
     aside.innerHTML =
+      '<div class="ff-appt-resize" data-ff-appt-resize role="separator" aria-orientation="horizontal" aria-label="Resize composer"></div>' +
       '<header class="ff-appt-head">' +
         '<div class="ff-appt-head-left">' +
           '<h2 id="ffApptTitle">New Appointment</h2>' +
@@ -238,8 +310,7 @@
             '<div class="ff-appt-kicker">Client</div>' +
             '<div id="ffApptClientField" class="ff-appt-client">' +
               '<div id="ffApptClientSearchWrap">' +
-                '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search or create client">' +
-                '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
+                '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search or create client" aria-autocomplete="list" aria-controls="ffApptClientResults">' +
                 '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">Create new client</button>' +
               "</div>" +
               '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
@@ -275,9 +346,11 @@
           '<div class="ff-appt-total"><span>Total</span><strong id="ffApptTotal">$0</strong></div>' +
           '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book Appointment</button>' +
         "</div>" +
-      "</footer>";
+      "</footer>" +
+      '<div id="ffApptClientResults" class="ff-appt-client-pop" hidden></div>';
     host().appendChild(aside);
     bindDrawer(aside);
+    bindResize(aside);
   }
 
   function els() {
@@ -359,35 +432,64 @@
     placeLiveFab();
   }
 
-  function showClientResults(rows) {
+  function showClientResults(rows, kind) {
     var ui = els();
-    if (!rows.length) {
-      ui.results.hidden = true;
-      ui.results.innerHTML = "";
+    if (!ui.results) return;
+    var list = rows || [];
+    ui.results.hidden = false;
+    if (!list.length) {
+      ui.results.innerHTML = '<div class="ff-appt-picker-empty">' +
+        (kind === "loading" ? "Loading clients…" : "No matching clients") +
+        "</div>";
       return;
     }
-    ui.results.hidden = false;
-    ui.results.innerHTML = rows.map(function (row) {
-      return '<button type="button" class="ff-appt-hit" data-ff-appt-client="' + escapeHtml(row.clientId) + '">' +
-        '<strong>' + escapeHtml(row.displayName || "Client") + "</strong>" +
-        '<span>' + escapeHtml(row.phone || row.email || "") + "</span>" +
+    ui.results.innerHTML =
+      (kind === "recent" ? '<div class="ff-appt-picker-cat">Recent clients</div>' : "") +
+      list.map(function (row) {
+        return '<button type="button" class="ff-appt-hit" data-ff-appt-client="' + escapeHtml(row.clientId) + '">' +
+          '<span class="ff-appt-hit-avatar">' + escapeHtml(initials(row)) + "</span>" +
+          '<span class="ff-appt-hit-id">' +
+            "<strong>" + escapeHtml(row.displayName || "Client") + "</strong>" +
+            "<span>" + escapeHtml(row.phone || row.email || "") + "</span>" +
+          "</span>" +
         "</button>";
-    }).join("");
+      }).join("");
+  }
+
+  function hideClientResults() {
+    var ui = els();
+    if (!ui.results) return;
+    ui.results.hidden = true;
+    ui.results.innerHTML = "";
   }
 
   async function searchClients(query) {
     var api = clients();
-    if (!api || !query) {
-      showClientResults([]);
+    var ui = els();
+    if (!ui.results) return;
+    var q = String(query || "").trim();
+    var gen = ++searchGen;
+    if (!api) {
+      showClientResults([], q ? "results" : "recent");
       return;
     }
+    showClientResults([], "loading");
     var rows = [];
     try {
-      rows = await api.searchClients(query);
+      rows = q
+        ? await api.searchClients(q)
+        : (typeof api.getRecentClients === "function" ? await api.getRecentClients(20) : []);
     } catch (err) {
       try { console.error("Client search failed", err); } catch (_) {}
     }
-    showClientResults(rows || []);
+    if (gen !== searchGen) return;
+    showClientResults(rows || [], q ? "results" : "recent");
+  }
+
+  function openClientList() {
+    var ui = els();
+    if (!ui.clientQ) return;
+    searchClients(ui.clientQ.value);
   }
 
   async function chooseClient(clientId, client) {
@@ -397,7 +499,7 @@
     if (!row) return;
     state = api.setClient(state, row);
     els().clientQ.value = "";
-    showClientResults([]);
+    hideClientResults();
     els().newBox.hidden = true;
     paint();
   }
@@ -408,7 +510,7 @@
     state = api.setClient(state, null);
     var ui = els();
     ui.clientQ.value = "";
-    showClientResults([]);
+    hideClientResults();
     ui.newBox.hidden = true;
     paint();
     setTimeout(function () {
@@ -488,7 +590,7 @@
     ui.root.setAttribute("aria-hidden", "true");
     state = null;
     resetUiState();
-    showClientResults([]);
+    hideClientResults();
     restoreLiveFab();
     if (window.ffBookingCalDraft) window.ffBookingCalDraft.clear();
     var root = ui.root;
@@ -531,7 +633,8 @@
     ui.root.setAttribute("aria-hidden", "false");
     ui.clientQ.value = "";
     ui.newBox.hidden = true;
-    showClientResults([]);
+    hideClientResults();
+    restoreComposerHeight(ui.root);
     syncHold();
     await api.refreshServices(state);
     requestAnimationFrame(function () {
@@ -539,7 +642,12 @@
       paint();
       placeLiveFab();
     });
-    setTimeout(function () { if (ui.clientQ) ui.clientQ.focus(); }, 20);
+    setTimeout(function () {
+      if (ui.clientQ) {
+        ui.clientQ.focus();
+        openClientList();
+      }
+    }, 20);
   }
 
   function bindDrawer(root) {
@@ -557,7 +665,21 @@
       var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-appt-act]") : null;
       if (!act) {
         var hit = ev.target && ev.target.closest ? ev.target.closest("[data-ff-appt-client]") : null;
-        if (hit) chooseClient(hit.getAttribute("data-ff-appt-client"));
+        if (hit) {
+          chooseClient(hit.getAttribute("data-ff-appt-client"));
+          return;
+        }
+        if (
+          ev.target.closest && ev.target.closest("#ffApptClientQ, #ffApptClientSearchWrap")
+        ) {
+          openClientList();
+          return;
+        }
+        if (
+          ev.target.closest && !ev.target.closest("#ffApptClientResults")
+        ) {
+          hideClientResults();
+        }
         else if (
           (uiState.servicePickerKey || uiState.providerPickerKey) &&
           !ev.target.closest(".ff-appt-picker, .ff-appt-float, .ff-appt-node-name, .ff-appt-node-prov, .ff-appt-node-empty, .ff-appt-add-line")
@@ -632,9 +754,13 @@
         }
         paint();
       } else if (name === "new-client") {
+        hideClientResults();
         els().newBox.hidden = !els().newBox.hidden;
         if (!els().newBox.hidden) document.getElementById("ffApptFirst").focus();
       } else if (name === "save-client") saveNewClient();
+    });
+    root.addEventListener("focusin", function (ev) {
+      if (ev.target && ev.target.id === "ffApptClientQ") openClientList();
     });
     root.addEventListener("input", function (ev) {
       if (!state) return;
@@ -678,6 +804,14 @@
     });
   }
 
+  document.addEventListener("mousedown", function (ev) {
+    if (!isOpen()) return;
+    var target = ev.target;
+    if (!target || !target.closest) return;
+    if (target.closest("#ffApptClientResults, #ffApptClientQ, #ffApptClientSearchWrap")) return;
+    hideClientResults();
+  });
+
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape" || !isOpen()) return;
     if (document.getElementById("ffLiveFloorDrawer") && document.getElementById("ffLiveFloorDrawer").classList.contains("is-open")) return;
@@ -688,6 +822,7 @@
 
   window.addEventListener("resize", function () {
     if (!isOpen()) return;
+    if (composerHeight) applyComposerHeight(composerHeight, true);
     syncComposerChrome();
     placeLiveFab();
   });
