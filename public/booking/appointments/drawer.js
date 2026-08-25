@@ -1,28 +1,15 @@
 /**
- * New Appointment Bottom Composer. Calendar stays full width; Details/Edit
- * remain a right drawer. Form state and Temporary Holds are unchanged.
+ * New Appointment right panel. Guided Client → Services → Summary flow.
+ * Form state, Multi-Service lines, and Temporary Holds stay unchanged.
  */
 (function () {
   var ROOT_ID = "ffBookingApptDrawer";
-  var UI_VERSION = "composer-v1.2";
-  var MIN_COMPOSER_H = 200;
-  var MAX_COMPOSER_VH = 0.72;
-  var HEIGHT_KEY = "ff-appt-composer-h";
+  var UI_VERSION = "guided-v1";
   var searchTimer = null;
-  var closeTimer = null;
   var searchGen = 0;
   var state = null;
   var lastScroll = null;
-  var composerHeight = 0;
-  var resizing = false;
-  var uiState = {
-    servicePickerKey: "",
-    providerPickerKey: "",
-    serviceQ: "",
-    providerQ: "",
-    editingKey: "",
-    notesOpen: false
-  };
+  var uiState = { servicePickerKey: "", providerPickerKey: "", serviceQ: "", providerQ: "", notesOpen: false };
 
   function resetUiState() {
     uiState = {
@@ -30,7 +17,6 @@
       providerPickerKey: "",
       serviceQ: "",
       providerQ: "",
-      editingKey: "",
       notesOpen: !!(state && state.notes && String(state.notes).trim())
     };
   }
@@ -46,9 +32,7 @@
   }
 
   function host() {
-    return document.querySelector("[data-ff-booking-page='calendar']")
-      || document.getElementById("ffBookingWorkspace")
-      || document.body;
+    return document.getElementById("ffBookingWorkspace") || document.body;
   }
 
   function locationLabel(id) {
@@ -70,14 +54,17 @@
     return dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
   }
 
+  function formatPhone(raw) {
+    var digits = String(raw || "").replace(/\D/g, "");
+    if (digits.length === 11 && digits.charAt(0) === "1") digits = digits.slice(1);
+    if (digits.length === 10) return digits.slice(0, 3) + " " + digits.slice(3, 6) + " " + digits.slice(6);
+    return String(raw || "").trim();
+  }
+
   function contextLabel(current) {
-    var bits = [locationLabel(current && current.locationId), formatContextDate(current && current.dateKey)].filter(Boolean);
-    var lines = (current && current.lines) || [];
-    var api = form();
-    if (lines.length === 1 && !lines[0].serviceId && Number.isFinite(Number(lines[0].startMin)) && api) {
-      bits.push(api.formatMinutes(lines[0].startMin));
-    }
-    return bits.join(" · ");
+    return [locationLabel(current && current.locationId), formatContextDate(current && current.dateKey)]
+      .filter(Boolean)
+      .join(" · ");
   }
 
   function syncHold() {
@@ -116,13 +103,13 @@
     var avatar = url
       ? '<img class="ff-appt-picked-avatar" src="' + escapeHtml(url) + '" alt="">'
       : '<span class="ff-appt-picked-avatar ff-appt-picked-initials">' + escapeHtml(initials(client)) + "</span>";
-    var secondary = String(client && client.phone || "").trim() || String(client && client.email || "").trim();
+    var phone = formatPhone(client && client.phone) || String(client && client.email || "").trim();
     return (
       '<div class="ff-appt-picked">' +
         avatar +
         '<div class="ff-appt-picked-id">' +
           "<strong>" + escapeHtml((client && client.displayName) || "Client") + "</strong>" +
-          (secondary ? "<span>" + escapeHtml(secondary) + "</span>" : "") +
+          (phone ? "<span>" + escapeHtml(phone) + "</span>" : "") +
         "</div>" +
         '<button type="button" class="ff-appt-picked-x" data-ff-appt-act="clear-client" aria-label="Change client">×</button>' +
       "</div>"
@@ -143,6 +130,17 @@
     }
   }
 
+  function placeLiveFab() {
+    var api = window.ffBookingDrawerLive;
+    var drawer = document.getElementById(ROOT_ID);
+    if (!api || !drawer || !isOpen()) return;
+    api.place(drawer);
+  }
+
+  function restoreLiveFab() {
+    if (window.ffBookingDrawerLive) window.ffBookingDrawerLive.restore();
+  }
+
   function money(value) {
     var n = Number(value);
     if (!Number.isFinite(n)) n = 0;
@@ -157,124 +155,6 @@
     return [];
   }
 
-  function findLine(key) {
-    var id = String(key || "");
-    return ((state && state.lines) || []).find(function (line) {
-      return line && (line.key === id || line.lineId === id);
-    }) || null;
-  }
-
-  function paintPicker() {
-    var ui = els();
-    var api = form();
-    if (!ui.float || !api) return;
-    var key = uiState.servicePickerKey || uiState.providerPickerKey;
-    var line = key ? findLine(key) : null;
-    var providers = state ? providersForLocation(state.locationId) : [];
-    if (line && line.providerId && !providers.some(function (emp) { return emp.id === line.providerId; })) {
-      providers = providers.concat([{ id: line.providerId, firstName: api.providerName(line.providerId) }]);
-    }
-    if (uiState.servicePickerKey && line && typeof api.servicePickerHtml === "function") {
-      ui.float.hidden = false;
-      ui.float.innerHTML = api.servicePickerHtml(state, line, uiState);
-      return;
-    }
-    if (uiState.providerPickerKey && line && typeof api.providerPickerHtml === "function") {
-      ui.float.hidden = false;
-      ui.float.innerHTML = api.providerPickerHtml(line, providers, uiState);
-      return;
-    }
-    ui.float.hidden = true;
-    ui.float.innerHTML = "";
-  }
-
-  function maxComposerHeight() {
-    return Math.max(MIN_COMPOSER_H, Math.round(window.innerHeight * MAX_COMPOSER_VH));
-  }
-
-  function readSavedHeight() {
-    try {
-      var raw = sessionStorage.getItem(HEIGHT_KEY);
-      var n = Number(raw);
-      return Number.isFinite(n) && n >= MIN_COMPOSER_H ? n : 0;
-    } catch (_) {
-      return 0;
-    }
-  }
-
-  function applyComposerHeight(px, persist) {
-    var root = document.getElementById(ROOT_ID);
-    if (!root) return;
-    var next = Math.max(MIN_COMPOSER_H, Math.min(maxComposerHeight(), Math.round(px)));
-    composerHeight = next;
-    root.style.height = next + "px";
-    root.style.maxHeight = "none";
-    root.classList.add("is-resized");
-    if (persist) {
-      try { sessionStorage.setItem(HEIGHT_KEY, String(next)); } catch (_) {}
-    }
-    syncComposerChrome();
-    placeLiveFab();
-  }
-
-  function restoreComposerHeight(root) {
-    var saved = readSavedHeight();
-    if (!saved) return;
-    applyComposerHeight(saved, false);
-  }
-
-  function bindResize(root) {
-    var handle = root.querySelector("[data-ff-appt-resize]");
-    if (!handle || handle.getAttribute("data-ff-bound") === "1") return;
-    handle.setAttribute("data-ff-bound", "1");
-    handle.addEventListener("pointerdown", function (ev) {
-      if (ev.button != null && ev.button !== 0) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      resizing = true;
-      root.classList.add("is-dragging");
-      var startY = ev.clientY;
-      var startH = root.getBoundingClientRect().height;
-      function move(e) {
-        applyComposerHeight(startH + (startY - e.clientY), false);
-      }
-      function up() {
-        resizing = false;
-        root.classList.remove("is-dragging");
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-        applyComposerHeight(root.getBoundingClientRect().height, true);
-      }
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    });
-  }
-
-  function syncComposerChrome() {
-    var root = document.getElementById(ROOT_ID);
-    if (!root || !isOpen()) {
-      document.body.classList.remove("ff-appt-composer-open");
-      document.documentElement.style.removeProperty("--ff-appt-composer-h");
-      return;
-    }
-    var height = Math.round(root.getBoundingClientRect().height || composerHeight || 248);
-    document.documentElement.style.setProperty("--ff-appt-composer-h", height + "px");
-    document.body.classList.add("ff-appt-composer-open");
-  }
-
-  function placeLiveFab() {
-    var api = window.ffBookingDrawerLive;
-    var drawer = document.getElementById(ROOT_ID);
-    if (!api || !drawer || !isOpen()) return;
-    api.place(drawer);
-  }
-
-  function restoreLiveFab() {
-    document.body.classList.remove("ff-appt-composer-open");
-    document.documentElement.style.removeProperty("--ff-appt-composer-h");
-    if (window.ffBookingDrawerLive) window.ffBookingDrawerLive.restore();
-  }
-
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
     if (existing && existing.getAttribute("data-ff-appt-ui") !== UI_VERSION) {
@@ -282,10 +162,7 @@
       existing = null;
     }
     if (existing && existing.parentNode !== host()) host().appendChild(existing);
-    if (existing) {
-      bindResize(existing);
-      return;
-    }
+    if (existing) return;
     var aside = document.createElement("aside");
     aside.id = ROOT_ID;
     aside.className = "ff-appt";
@@ -295,9 +172,8 @@
     aside.setAttribute("aria-hidden", "true");
     aside.hidden = true;
     aside.innerHTML =
-      '<div class="ff-appt-resize" data-ff-appt-resize role="separator" aria-orientation="horizontal" aria-label="Resize composer" title="Drag to resize"></div>' +
       '<header class="ff-appt-head">' +
-        '<div class="ff-appt-head-left">' +
+        '<div class="ff-appt-head-copy">' +
           '<h2 id="ffApptTitle">New Appointment</h2>' +
           '<button type="button" class="ff-appt-context" id="ffApptContext" data-ff-appt-act="edit-date"></button>' +
           '<input id="ffApptDate" class="ff-appt-date-input" type="date" tabindex="-1" aria-label="Appointment date">' +
@@ -305,53 +181,54 @@
         '<button type="button" class="ff-appt-x" data-ff-appt-act="close" aria-label="Close">×</button>' +
       "</header>" +
       '<form class="ff-appt-body" id="ffApptForm" novalidate>' +
-        '<div class="ff-appt-main">' +
-          '<section class="ff-appt-client-col" aria-label="Client">' +
-            '<div class="ff-appt-kicker">Client</div>' +
-            '<div id="ffApptClientField" class="ff-appt-client">' +
-              '<div id="ffApptClientSearchWrap">' +
-                '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search or create client" aria-autocomplete="list" aria-controls="ffApptClientResults">' +
-                '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">Create new client</button>' +
-              "</div>" +
-              '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
+        '<section class="ff-appt-step" aria-label="Client">' +
+          '<div class="ff-appt-step-h"><span>01</span> Client</div>' +
+          '<div id="ffApptClientField" class="ff-appt-client">' +
+            '<div id="ffApptClientSearchWrap">' +
+              '<input id="ffApptClientQ" type="text" inputmode="search" autocomplete="off" placeholder="Search or create client">' +
+              '<div id="ffApptClientResults" class="ff-appt-suggest" hidden></div>' +
+              '<button type="button" class="ff-appt-link" data-ff-appt-act="new-client">Create new client</button>' +
             "</div>" +
-            '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
-              '<div class="ff-appt-row">' +
-                '<label><span>First name</span><input id="ffApptFirst" type="text"></label>' +
-                '<label><span>Last name</span><input id="ffApptLast" type="text"></label>' +
-              "</div>" +
-              '<label><span>Phone</span><input id="ffApptPhone" type="tel"></label>' +
-              '<label><span>Email</span><input id="ffApptEmail" type="email"></label>' +
-              '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save client</button>' +
-              '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
+            '<div id="ffApptClientChosen" class="ff-appt-chosen" hidden></div>' +
+          "</div>" +
+          '<div id="ffApptNewClient" class="ff-appt-new" hidden>' +
+            '<div class="ff-appt-row">' +
+              '<label><span>First name</span><input id="ffApptFirst" type="text"></label>' +
+              '<label><span>Last name</span><input id="ffApptLast" type="text"></label>' +
             "</div>" +
-          "</section>" +
-          '<section class="ff-appt-journey-col" aria-label="Service Journey">' +
-            '<div class="ff-appt-kicker">Service Journey</div>' +
-            '<div class="ff-appt-journey-scroll">' +
-              '<div id="ffApptLines" class="ff-appt-journey"></div>' +
-              '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line" hidden>+ Add Service</button>' +
-            "</div>" +
-          "</section>" +
+            '<label><span>Phone</span><input id="ffApptPhone" type="tel"></label>' +
+            '<label><span>Email</span><input id="ffApptEmail" type="email"></label>' +
+            '<button type="button" class="ff-appt-secondary" data-ff-appt-act="save-client">Save client</button>' +
+            '<div id="ffApptClientMsg" class="ff-appt-note" hidden></div>' +
+          "</div>" +
+        "</section>" +
+        '<section class="ff-appt-step" aria-label="Services">' +
+          '<div class="ff-appt-step-h"><span>02</span> Services</div>' +
+          '<div id="ffApptLines" class="ff-appt-svcs"></div>' +
+          '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line" hidden>+ Add another service</button>' +
+        "</section>" +
+        '<div class="ff-appt-notes-wrap">' +
+          '<button type="button" class="ff-appt-note-toggle" id="ffApptNoteToggle" data-ff-appt-act="add-note">+ Add note</button>' +
+          '<textarea id="ffApptNotes" class="ff-appt-note-input" rows="2" maxlength="2000" placeholder="Add a note" hidden></textarea>' +
         "</div>" +
-        '<div id="ffApptFloat" class="ff-appt-float" hidden></div>' +
+        '<section class="ff-appt-step ff-appt-summary-step" id="ffApptSummaryStep" hidden aria-label="Summary">' +
+          '<div class="ff-appt-step-h"><span>03</span> Summary</div>' +
+          '<div class="ff-appt-recap">' +
+            '<div id="ffApptSummaryWho" class="ff-appt-recap-who"></div>' +
+            '<div class="ff-appt-recap-row">' +
+              '<span id="ffApptSummaryWhen"></span>' +
+              '<strong id="ffApptSummaryTotal">$0</strong>' +
+            "</div>" +
+          "</div>" +
+        "</section>" +
+        '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
       "</form>" +
       '<footer class="ff-appt-foot">' +
-        '<div class="ff-appt-foot-left">' +
-          '<button type="button" class="ff-appt-note-toggle" id="ffApptNoteToggle" data-ff-appt-act="add-note">+ Add note</button>' +
-          '<textarea id="ffApptNotes" class="ff-appt-note-input" rows="1" maxlength="2000" placeholder="Add a note" hidden></textarea>' +
-          '<div id="ffApptHint" class="ff-appt-hint">Select a client, then a service.</div>' +
-          '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
-        "</div>" +
-        '<div class="ff-appt-cta">' +
-          '<div class="ff-appt-total"><span>Total</span><strong id="ffApptTotal">$0</strong></div>' +
-          '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book Appointment</button>' +
-        "</div>" +
-      "</footer>" +
-      '<div id="ffApptClientResults" class="ff-appt-client-pop" hidden></div>';
+        '<div class="ff-appt-foot-total"><span>Total</span><strong id="ffApptTotal">$0</strong></div>' +
+        '<button type="button" class="ff-appt-primary" data-ff-appt-act="create" id="ffApptCreate">Book Appointment</button>' +
+      "</footer>";
     host().appendChild(aside);
     bindDrawer(aside);
-    bindResize(aside);
   }
 
   function els() {
@@ -366,15 +243,54 @@
       clientMsg: document.getElementById("ffApptClientMsg"),
       lines: document.getElementById("ffApptLines"),
       addLine: document.getElementById("ffApptAddLine"),
-      float: document.getElementById("ffApptFloat"),
       date: document.getElementById("ffApptDate"),
       notes: document.getElementById("ffApptNotes"),
       noteToggle: document.getElementById("ffApptNoteToggle"),
-      hint: document.getElementById("ffApptHint"),
+      summaryStep: document.getElementById("ffApptSummaryStep"),
+      summaryWho: document.getElementById("ffApptSummaryWho"),
+      summaryWhen: document.getElementById("ffApptSummaryWhen"),
+      summaryTotal: document.getElementById("ffApptSummaryTotal"),
       error: document.getElementById("ffApptError"),
       total: document.getElementById("ffApptTotal"),
       create: document.getElementById("ffApptCreate")
     };
+  }
+
+  function paintSummary() {
+    var api = form();
+    var ui = els();
+    if (!api || !ui.summaryStep) return;
+    var lines = (state.lines || []).filter(function (line) { return line && line.serviceId; });
+    var total = typeof api.linesTotal === "function" ? api.linesTotal(state) : 0;
+    if (ui.total) ui.total.textContent = money(total);
+    if (!lines.length) {
+      ui.summaryStep.hidden = true;
+      return;
+    }
+    var names = [];
+    var seen = {};
+    lines.forEach(function (line) {
+      var name = api.providerName(line.providerId);
+      if (name && !seen[name]) {
+        seen[name] = true;
+        names.push(name);
+      }
+    });
+    var starts = lines.map(function (line) { return Number(line.startMin); }).filter(Number.isFinite);
+    var ends = lines.map(function (line) { return Number(line.endMin); }).filter(Number.isFinite);
+    var start = starts.length ? Math.min.apply(null, starts) : null;
+    var end = ends.length ? Math.max.apply(null, ends) : null;
+    ui.summaryStep.hidden = false;
+    if (ui.summaryWho) {
+      ui.summaryWho.textContent = lines.length + (lines.length === 1 ? " service" : " services") +
+        (names.length ? " · " + names.join(" + ") : "");
+    }
+    if (ui.summaryWhen) {
+      ui.summaryWhen.textContent = start != null && end != null
+        ? api.formatMinutes(start) + " – " + api.formatMinutes(end)
+        : "";
+    }
+    if (ui.summaryTotal) ui.summaryTotal.textContent = money(total);
   }
 
   function paint() {
@@ -406,30 +322,14 @@
       ui.lines.innerHTML = api.createLinesHtml(state, providers, uiState);
     }
     if (ui.addLine) {
-      var hasBlock = ((state.lines || []).some(function (line) { return line && line.serviceId; }));
-      ui.addLine.hidden = !hasBlock;
-    }
-    if (ui.total) {
-      var total = typeof api.linesTotal === "function" ? api.linesTotal(state) : 0;
-      ui.total.textContent = money(total);
+      ui.addLine.hidden = !((state.lines || []).some(function (line) { return line && line.serviceId; }));
     }
     paintClientState();
-    paintPicker();
+    paintSummary();
     var lineError = !!(state.error && state.errorLineKey);
     var ready = api.canCreate(state) && !state.creating;
     ui.error.hidden = !state.error || lineError;
     ui.error.textContent = lineError ? "" : (state.error || "");
-    if (ui.hint) {
-      if ((state.error && !lineError) || ready) {
-        ui.hint.hidden = true;
-      } else if (!state.clientId) {
-        ui.hint.hidden = false;
-        ui.hint.textContent = "Select a client, then a service.";
-      } else {
-        ui.hint.hidden = false;
-        ui.hint.textContent = "Select a service to book this appointment.";
-      }
-    }
     ui.create.disabled = !!state.creating;
     ui.create.classList.toggle("is-wait", !ready);
     ui.create.setAttribute("aria-disabled", ready ? "false" : "true");
@@ -444,7 +344,6 @@
       }
     }
     syncHold();
-    syncComposerChrome();
     placeLiveFab();
   }
 
@@ -452,23 +351,23 @@
     var ui = els();
     if (!ui.results) return;
     var list = rows || [];
+    if (!list.length && kind !== "loading") {
+      ui.results.hidden = true;
+      ui.results.innerHTML = "";
+      return;
+    }
     ui.results.hidden = false;
     if (!list.length) {
-      ui.results.innerHTML = '<div class="ff-appt-picker-empty">' +
-        (kind === "loading" ? "Loading clients…" : "No matching clients") +
-        "</div>";
+      ui.results.innerHTML = '<div class="ff-appt-picker-empty">Loading clients…</div>';
       return;
     }
     ui.results.innerHTML =
       (kind === "recent" ? '<div class="ff-appt-picker-cat">Recent clients</div>' : "") +
       list.map(function (row) {
         return '<button type="button" class="ff-appt-hit" data-ff-appt-client="' + escapeHtml(row.clientId) + '">' +
-          '<span class="ff-appt-hit-avatar">' + escapeHtml(initials(row)) + "</span>" +
-          '<span class="ff-appt-hit-id">' +
-            "<strong>" + escapeHtml(row.displayName || "Client") + "</strong>" +
-            "<span>" + escapeHtml(row.phone || row.email || "") + "</span>" +
-          "</span>" +
-        "</button>";
+          "<strong>" + escapeHtml(row.displayName || "Client") + "</strong>" +
+          "<span>" + escapeHtml(formatPhone(row.phone) || row.email || "") + "</span>" +
+          "</button>";
       }).join("");
   }
 
@@ -481,15 +380,13 @@
 
   async function searchClients(query) {
     var api = clients();
-    var ui = els();
-    if (!ui.results) return;
     var q = String(query || "").trim();
     var gen = ++searchGen;
     if (!api) {
-      showClientResults([], q ? "results" : "recent");
+      showClientResults([]);
       return;
     }
-    showClientResults([], "loading");
+    if (!q) showClientResults([], "loading");
     var rows = [];
     try {
       rows = q
@@ -504,7 +401,7 @@
 
   function openClientList() {
     var ui = els();
-    if (!ui.clientQ) return;
+    if (!ui.clientQ || (ui.searchWrap && ui.searchWrap.hidden)) return;
     searchClients(ui.clientQ.value);
   }
 
@@ -530,13 +427,15 @@
     ui.newBox.hidden = true;
     paint();
     setTimeout(function () {
-      if (ui.clientQ) ui.clientQ.focus();
+      if (ui.clientQ) {
+        ui.clientQ.focus();
+        openClientList();
+      }
     }, 20);
   }
 
   async function saveNewClient() {
     var repo = clients();
-    var api = form();
     var msg = els().clientMsg;
     if (!repo) return;
     var result = await repo.createClient({
@@ -600,7 +499,6 @@
       state.error = "Select a service to book this appointment.";
       uiState.servicePickerKey = line.key;
       uiState.providerPickerKey = "";
-      uiState.editingKey = line.key;
       uiState.serviceQ = "";
       paint();
       return;
@@ -619,7 +517,7 @@
     var result = await api.create(state);
     paint();
     if (result && result.ok) {
-      close(true);
+      close();
       restoreScroll();
       toast("Appointment created");
     }
@@ -630,29 +528,28 @@
     if (state && api && api.isDirty(state)) {
       if (!window.confirm("Discard this unsaved appointment?")) return;
     }
-    close(false);
+    close();
   }
 
   function close() {
     var ui = els();
     if (!ui.root) return;
-    ui.root.classList.remove("is-open");
+    ui.root.hidden = true;
     ui.root.setAttribute("aria-hidden", "true");
+    ui.root.classList.remove("is-open");
     state = null;
     resetUiState();
     hideClientResults();
     restoreLiveFab();
     if (window.ffBookingCalDraft) window.ffBookingCalDraft.clear();
-    var root = ui.root;
-    if (closeTimer) window.clearTimeout(closeTimer);
-    closeTimer = window.setTimeout(function () {
-      if (root && !root.classList.contains("is-open")) root.hidden = true;
-    }, 200);
+    requestAnimationFrame(function () {
+      window.dispatchEvent(new Event("resize"));
+    });
   }
 
   function isOpen() {
     var root = document.getElementById(ROOT_ID);
-    return !!(root && root.classList.contains("is-open"));
+    return !!(root && !root.hidden && root.classList.contains("is-open"));
   }
 
   function forceClose() {
@@ -665,10 +562,6 @@
     if (window.ffBookingAppointmentDetails && window.ffBookingAppointmentDetails.forceClose) {
       window.ffBookingAppointmentDetails.forceClose();
     }
-    if (closeTimer) {
-      window.clearTimeout(closeTimer);
-      closeTimer = null;
-    }
     ensureDom();
     captureScroll();
     resetUiState();
@@ -680,17 +573,18 @@
     });
     var ui = els();
     ui.root.hidden = false;
+    ui.root.classList.add("is-open");
     ui.root.setAttribute("aria-hidden", "false");
     ui.clientQ.value = "";
     ui.newBox.hidden = true;
     hideClientResults();
-    restoreComposerHeight(ui.root);
     syncHold();
     await api.refreshServices(state);
+    paint();
+    placeLiveFab();
     requestAnimationFrame(function () {
-      ui.root.classList.add("is-open");
-      paint();
       placeLiveFab();
+      window.dispatchEvent(new Event("resize"));
     });
   }
 
@@ -713,20 +607,13 @@
           chooseClient(hit.getAttribute("data-ff-appt-client"));
           return;
         }
-        if (
-          ev.target.closest && ev.target.closest("#ffApptClientQ, #ffApptClientSearchWrap")
-        ) {
+        if (ev.target.closest && ev.target.closest("#ffApptClientQ, #ffApptClientSearchWrap")) {
           openClientList();
           return;
         }
         if (
-          ev.target.closest && !ev.target.closest("#ffApptClientResults")
-        ) {
-          hideClientResults();
-        }
-        else if (
           (uiState.servicePickerKey || uiState.providerPickerKey) &&
-          !ev.target.closest(".ff-appt-picker, .ff-appt-float, .ff-appt-node-name, .ff-appt-node-prov, .ff-appt-node-empty, .ff-appt-add-line")
+          !ev.target.closest(".ff-appt-picker, .ff-appt-search-row, .ff-appt-chip, .ff-appt-card-name")
         ) {
           uiState.servicePickerKey = "";
           uiState.providerPickerKey = "";
@@ -750,23 +637,14 @@
           var notes = document.getElementById("ffApptNotes");
           if (notes) notes.focus();
         }, 20);
-      } else if (name === "edit-line") {
-        if (ev.target.closest("[data-ff-line-act], [data-ff-appt-act='open-service-picker'], [data-ff-appt-act='open-provider-picker'], select")) return;
-        var editKey = act.getAttribute("data-ff-line") || "";
-        uiState.editingKey = uiState.editingKey === editKey ? "" : editKey;
-        uiState.servicePickerKey = "";
-        uiState.providerPickerKey = "";
-        paint();
       } else if (name === "open-service-picker") {
         uiState.servicePickerKey = act.getAttribute("data-ff-line") || "";
         uiState.providerPickerKey = "";
-        uiState.editingKey = uiState.servicePickerKey;
         uiState.serviceQ = "";
         paint();
       } else if (name === "open-provider-picker") {
         uiState.providerPickerKey = act.getAttribute("data-ff-line") || "";
         uiState.servicePickerKey = "";
-        uiState.editingKey = uiState.providerPickerKey;
         uiState.providerQ = "";
         paint();
       } else if (name === "pick-service" && api && state) {
@@ -787,14 +665,12 @@
           uiState.servicePickerKey = last.key;
           uiState.providerPickerKey = "";
           uiState.serviceQ = "";
-          uiState.editingKey = last.key;
         } else {
           state = api.addLine(state);
           last = state.lines[state.lines.length - 1];
           uiState.servicePickerKey = last ? last.key : "";
           uiState.providerPickerKey = "";
           uiState.serviceQ = "";
-          uiState.editingKey = last ? last.key : "";
         }
         paint();
       } else if (name === "new-client") {
@@ -836,22 +712,12 @@
       paint();
     });
     root.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter" && ev.target && ev.target.id !== "ffApptNotes") {
-        ev.preventDefault();
-      }
+      if (ev.key === "Enter" && ev.target && ev.target.id !== "ffApptNotes") ev.preventDefault();
     });
     document.getElementById("ffApptForm").addEventListener("submit", function (ev) {
       ev.preventDefault();
     });
   }
-
-  document.addEventListener("mousedown", function (ev) {
-    if (!isOpen()) return;
-    var target = ev.target;
-    if (!target || !target.closest) return;
-    if (target.closest("#ffApptClientResults, #ffApptClientQ, #ffApptClientSearchWrap")) return;
-    hideClientResults();
-  });
 
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Escape" || !isOpen()) return;
@@ -862,10 +728,7 @@
   });
 
   window.addEventListener("resize", function () {
-    if (!isOpen()) return;
-    if (composerHeight) applyComposerHeight(composerHeight, true);
-    syncComposerChrome();
-    placeLiveFab();
+    if (isOpen()) placeLiveFab();
   });
 
   document.addEventListener("ff-active-location-changed", function () {

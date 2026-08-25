@@ -622,7 +622,7 @@
     }).join("");
     return (
       '<div class="ff-appt-picker" data-ff-picker="service">' +
-        '<input type="search" class="ff-appt-picker-q" data-ff-service-q placeholder="Search..." value="' +
+        '<input type="search" class="ff-appt-picker-q" data-ff-service-q placeholder="Search services..." value="' +
           escapeHtml(options && options.serviceQ || "") + '" autocomplete="off">' +
         '<div class="ff-appt-picker-list">' +
           (list || '<div class="ff-appt-picker-empty">No services found</div>') +
@@ -661,43 +661,6 @@
     );
   }
 
-  function rangesOverlap(aStart, aEnd, bStart, bEnd) {
-    var as = Number(aStart);
-    var ae = Number(aEnd);
-    var bs = Number(bStart);
-    var be = Number(bEnd);
-    if (!Number.isFinite(as) || !Number.isFinite(bs)) return false;
-    if (!Number.isFinite(ae)) ae = as + 1;
-    if (!Number.isFinite(be)) be = bs + 1;
-    return as < be && bs < ae;
-  }
-
-  function journeyClusters(lines) {
-    var rows = (lines || []).filter(Boolean);
-    var sorted = rows.slice().sort(function (a, b) {
-      var as = Number(a.startMin);
-      var bs = Number(b.startMin);
-      if (Number.isFinite(as) && Number.isFinite(bs) && as !== bs) return as - bs;
-      if (Number.isFinite(as) !== Number.isFinite(bs)) return Number.isFinite(as) ? -1 : 1;
-      return String(a.key || "").localeCompare(String(b.key || ""));
-    });
-    var clusters = [];
-    sorted.forEach(function (line) {
-      var placed = false;
-      for (var i = 0; i < clusters.length; i += 1) {
-        if (clusters[i].some(function (other) {
-          return rangesOverlap(line.startMin, line.endMin, other.startMin, other.endMin);
-        })) {
-          clusters[i].push(line);
-          placed = true;
-          break;
-        }
-      }
-      if (!placed) clusters.push([line]);
-    });
-    return clusters;
-  }
-
   function linesTotal(state) {
     return ((state && state.lines) || []).reduce(function (sum, line) {
       var n = Number(line && line.price);
@@ -705,69 +668,65 @@
     }, 0);
   }
 
-  function journeyNodeHtml(state, line, providers, ui, canRemove) {
-    var list = Array.isArray(providers) ? providers : [];
-    if (line.providerId && !list.some(function (emp) { return emp && emp.id === line.providerId; })) {
-      list = list.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
-    }
-    var err = ui.showError !== false && state.errorLineKey === line.key && state.error;
-    var editing = ui.editingKey === line.key;
-    var timeLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
-    if (!trim(line.serviceId)) {
-      return (
-        '<article class="ff-appt-node is-empty is-needed' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
-          '<div class="ff-appt-node-time">' + escapeHtml(timeLabel) + "</div>" +
-          '<span class="ff-appt-node-dot" aria-hidden="true"></span>' +
-          '<button type="button" class="ff-appt-node-empty" data-ff-appt-act="open-service-picker" data-ff-line="' +
-            escapeHtml(line.key) + '">Search or select service</button>' +
-          (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-        "</article>"
-      );
-    }
-    var withName = line.providerId ? providerName(line.providerId) : "Provider";
-    var dur = formatDurationLabel(line.durationMinutes) || "—";
-    return (
-      '<article class="ff-appt-node' + (editing ? " is-editing" : "") + (err ? " is-error" : "") + '" data-ff-line="' +
-        escapeHtml(line.key) + '">' +
-        '<div class="ff-appt-node-time">' + escapeHtml(timeLabel) + "</div>" +
-        '<span class="ff-appt-node-dot" aria-hidden="true"></span>' +
-        '<div class="ff-appt-node-card" data-ff-appt-act="edit-line" data-ff-line="' + escapeHtml(line.key) + '">' +
-          (canRemove
-            ? '<button type="button" class="ff-appt-node-x" data-ff-line-act="remove" data-ff-line="' +
-              escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
-            : "") +
-          '<button type="button" class="ff-appt-node-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
-            escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>" +
-          '<button type="button" class="ff-appt-node-prov" data-ff-appt-act="open-provider-picker" data-ff-line="' +
-            escapeHtml(line.key) + '">' + escapeHtml(withName) + "</button>" +
-          '<div class="ff-appt-node-meta">' +
-            '<span>' + escapeHtml(dur) + "</span>" +
-            '<span class="ff-appt-node-price">' + escapeHtml(money(line.price)) + "</span>" +
-          "</div>" +
-          (editing
-            ? '<label class="ff-appt-node-start"><span>Start</span><select data-ff-line-field="start">' +
-              timeOptionsHtml(line.startMin) + "</select></label>"
-            : "") +
-          '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
-          (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-        "</div>" +
-      "</article>"
-    );
-  }
-
   function createLinesHtml(state, providers, options) {
     var rows = (state && state.lines) || [];
+    var list = Array.isArray(providers) ? providers : [];
     var ui = options || {};
     var canRemove = rows.length > 1;
-    var clusters = journeyClusters(rows);
-    return clusters.map(function (cluster, index) {
-      var stacked = cluster.length > 1;
-      return (index ? '<div class="ff-appt-journey-link" aria-hidden="true"></div>' : "") +
-        '<div class="ff-appt-cluster' + (stacked ? " is-stack" : "") + '">' +
-          cluster.map(function (line) {
-            return journeyNodeHtml(state, line, providers, ui, canRemove);
-          }).join("") +
-        "</div>";
+    var showError = ui.showError !== false;
+    return rows.map(function (line, index) {
+      var lineProviders = list.slice();
+      if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
+        lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
+      }
+      var err = showError && state.errorLineKey === line.key && state.error;
+      var pickingService = ui.servicePickerKey === line.key;
+      var pickingProvider = ui.providerPickerKey === line.key;
+      var rail = '<div class="ff-appt-rail"><span class="ff-appt-rail-node">' + (index + 1) + "</span></div>";
+      if (!trim(line.serviceId)) {
+        return (
+          '<div class="ff-appt-svc is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+            rail +
+            '<div class="ff-appt-card">' +
+              '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
+                escapeHtml(line.key) + '">Search or select service</button>' +
+              (pickingService ? servicePickerHtml(state, line, ui) : "") +
+              (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+            "</div>" +
+          "</div>"
+        );
+      }
+      var withName = line.providerId ? providerName(line.providerId) : "Provider";
+      return (
+        '<div class="ff-appt-svc' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+          rail +
+          '<div class="ff-appt-card">' +
+            '<div class="ff-appt-card-top">' +
+              '<button type="button" class="ff-appt-card-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
+                escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>" +
+              '<span class="ff-appt-card-price">' + escapeHtml(money(line.price)) + "</span>" +
+              (canRemove
+                ? '<button type="button" class="ff-appt-card-x" data-ff-line-act="remove" data-ff-line="' +
+                  escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
+                : "") +
+            "</div>" +
+            '<div class="ff-appt-card-row">' +
+              '<button type="button" class="ff-appt-chip" data-ff-appt-act="open-provider-picker" data-ff-line="' +
+                escapeHtml(line.key) + '">' + escapeHtml(withName) +
+                '<span class="ff-appt-caret" aria-hidden="true">▾</span></button>' +
+              '<label class="ff-appt-chip ff-appt-chip-time">' +
+                '<select data-ff-line-field="start" aria-label="Start time">' + timeOptionsHtml(line.startMin) + "</select>" +
+                '<span class="ff-appt-caret" aria-hidden="true">▾</span>' +
+              "</label>" +
+            "</div>" +
+            '<div class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</div>" +
+            (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
+            (pickingService ? servicePickerHtml(state, line, ui) : "") +
+            '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
+            (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+          "</div>" +
+        "</div>"
+      );
     }).join("");
   }
 
@@ -855,7 +814,6 @@
     holdSpec: holdSpec,
     linesHtml: linesHtml,
     createLinesHtml: createLinesHtml,
-    journeyClusters: journeyClusters,
     linesTotal: linesTotal,
     servicePickerHtml: servicePickerHtml,
     providerPickerHtml: providerPickerHtml,

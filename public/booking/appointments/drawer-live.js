@@ -17,22 +17,12 @@
     if (!fab || !drawer) return;
     rememberFab(fab);
     var rect = drawer.getBoundingClientRect();
-    var isComposer = drawer.getAttribute("data-ff-appt-ui") === "composer-v1";
-    if (isComposer) {
-      var height = Math.round(rect.height || 248);
-      document.documentElement.style.setProperty("--ff-appt-composer-h", height + "px");
-      document.body.classList.add("ff-appt-composer-open");
-      document.body.classList.remove("ff-appt-drawer-open");
-      document.documentElement.style.removeProperty("--ff-appt-drawer-w");
-      fab.style.left = fab.dataset.ffApptLeft || "";
-      fab.style.right = fab.dataset.ffApptRight || "";
-      fab.style.bottom = (height + 16) + "px";
-      return;
-    }
-    var width = rect.width || drawer.offsetWidth || 420;
+    var width = rect.width || drawer.offsetWidth || 390;
     var leftEdge = rect.left;
     document.documentElement.style.setProperty("--ff-appt-drawer-w", width + "px");
     document.body.classList.add("ff-appt-drawer-open");
+    document.body.classList.remove("ff-appt-composer-open");
+    document.documentElement.style.removeProperty("--ff-appt-composer-h");
     var gap = 16;
     var fabW = fab.offsetWidth || 62;
     if (leftEdge < gap + fabW) {

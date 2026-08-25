@@ -187,11 +187,11 @@ const createHtml = form.createLinesHtml(state, [
   { id: "koko", firstName: "Koko" },
   { id: "bobo", firstName: "Bobo" }
 ]);
-check("create UI renders journey nodes", createHtml.indexOf("ff-appt-node") !== -1 && createHtml.indexOf("Service 1") === -1);
+check("create UI renders service cards", createHtml.indexOf("ff-appt-card") !== -1 && createHtml.indexOf("Service 1") === -1);
 check("create UI is not a with/at/for form", createHtml.indexOf(">with<") === -1 && createHtml.indexOf(">at<") === -1 && createHtml.indexOf(">for<") === -1);
 check("create UI shows human duration", createHtml.indexOf("1 hr") !== -1 && createHtml.indexOf("60 min") === -1);
 check("create UI keeps line keys", createHtml.indexOf(state.lines[0].key) !== -1 && createHtml.indexOf(state.lines[1].key) !== -1);
-check("sequential services stay side by side", createHtml.indexOf("ff-appt-journey-link") !== -1 && createHtml.indexOf("is-stack") === -1);
+check("create UI numbers connected service cards", createHtml.indexOf("ff-appt-rail-node") !== -1 && createHtml.indexOf(">1<") !== -1 && createHtml.indexOf(">2<") !== -1);
 check("create total uses line prices", form.linesTotal(state) === 120);
 
 const overlap = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 10 * 60 + 30, providerId: "koko" });
@@ -206,8 +206,8 @@ const overlapHtml = form.createLinesHtml(overlap, [
   { id: "koko", firstName: "Koko" },
   { id: "bobo", firstName: "Bobo" }
 ]);
-check("overlapping different providers stack in one cluster", overlapHtml.indexOf("is-stack") !== -1);
-check("overlapping clusters keep both start times", overlapHtml.indexOf("10:30") !== -1);
+check("overlapping different providers still render both cards", overlapHtml.indexOf("Manicure") !== -1 && overlapHtml.indexOf("Pedicure") !== -1);
+check("overlapping lines keep both start times", overlapHtml.indexOf("10:30") !== -1);
 check("hold still has one block per overlapping line", form.holdSpec(overlap).lines.length === 2);
 
 const emptyCreate = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 735 });

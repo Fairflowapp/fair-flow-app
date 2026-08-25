@@ -181,10 +181,6 @@ body.ff-booking-area .ff-booking-main {
   overflow: auto;
   background: #FFFFFF;
 }
-body.ff-appt-composer-open .ff-cal-viewport {
-  padding-bottom: var(--ff-appt-composer-h, 248px);
-  scroll-padding-bottom: var(--ff-appt-composer-h, 248px);
-}
 .ff-cal-board {
   display: grid;
   grid-template-columns: var(--ff-cal-time-w) var(--ff-cal-canvas-w);
