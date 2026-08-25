@@ -11,9 +11,9 @@
  * out to each sub-module, and injects the render layer's entry points into the
  * tabs/edit modules (breaking the dependency cycle: render -> {tabs, edit}).
  */
-import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260824_svc_del_menu";
-import { initCatalogTabs } from "./tickets-catalog-tabs.js?v=20260824_svc_del_menu";
-import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260824_svc_del_menu";
+import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260824_svc_dnd";
+import { initCatalogTabs } from "./tickets-catalog-tabs.js?v=20260824_svc_dnd";
+import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260824_svc_dnd";
 
 export function initTicketsCatalogUI(deps) {
   initCatalogRender({
@@ -52,7 +52,7 @@ export {
   _ffWireServicesScreenDragDrop,
   _ffReorderServiceWithinCategory,
   renderServicesScreenDetail,
-} from "./tickets-catalog-render.js?v=20260824_svc_del_menu";
+} from "./tickets-catalog-render.js?v=20260824_svc_dnd";
 
 export {
   renderServicesLocationsTabHtml,
@@ -74,7 +74,7 @@ export {
   ffStaffServicesGetOverrideForStaffMember,
   ffStaffServicesDefaultsForStaffMember,
   wireServicesStaffTab,
-} from "./tickets-catalog-tabs.js?v=20260824_svc_del_menu";
+} from "./tickets-catalog-tabs.js?v=20260824_svc_dnd";
 
 export {
   _ffShowServicesCategoryDetailMenu,
@@ -93,4 +93,4 @@ export {
   _ffCatalogEditorSubmit,
   addServiceCategoryV2,
   addSharedServiceV2,
-} from "./tickets-catalog-edit.js?v=20260824_svc_del_menu";
+} from "./tickets-catalog-edit.js?v=20260824_svc_dnd";

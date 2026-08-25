@@ -9,7 +9,7 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_del_menu";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_dnd";
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
@@ -288,8 +288,24 @@ function _ffClearDragHover() {
     ticketsState._ffDragHoverEl.style.boxShadow = '';
     ticketsState._ffDragHoverEl.style.background = ticketsState._ffDragHoverEl._ffPrevBg || '';
     ticketsState._ffDragHoverEl._ffPrevBg = undefined;
+    delete ticketsState._ffDragHoverEl.dataset.dropPosition;
     ticketsState._ffDragHoverEl = null;
   }
+}
+
+function catalogRowsForDrag() {
+  return isSharedCatalogMode()
+    ? getSharedServicesForCatalogManager()
+    : getLocationServicesForCatalogManager();
+}
+
+async function refreshCatalogAfterReorder() {
+  if (isSharedCatalogMode()) {
+    await loadSharedCatalogForManager();
+  } else {
+    await Promise.all([loadServices(), loadServiceCategories()]);
+  }
+  if (typeof renderServicesCatalogV2 === 'function') renderServicesCatalogV2();
 }
 
 function _ffWireCatalogDragDrop(listEl) {
@@ -388,56 +404,107 @@ function _ffWireCatalogDragDrop(listEl) {
 
 /** Move `srcId` so it lands immediately before `beforeId` in the category
  *  order, then persist a fresh sortOrder (0,1,2,…) to every category. */
-async function _ffReorderCategoriesBefore(srcId, beforeId) {
-  const arr = [...ticketsState.serviceCategories];
-  const srcIdx = arr.findIndex(c => c.id === srcId);
+async function _ffReorderCategoriesBefore(srcId, beforeId, placeAfter) {
+  if (!srcId || srcId === '__other__' || !beforeId || beforeId === '__other__' || String(srcId) === String(beforeId)) return;
+  const shared = isSharedCatalogMode();
+  const arr = (catalogRowsForDrag().categories || [])
+    .filter((c) => c && c.id && c.id !== '__other__')
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+  const srcIdx = arr.findIndex((c) => String(c.id) === String(srcId));
   if (srcIdx < 0) return;
   const [moved] = arr.splice(srcIdx, 1);
-  const dstIdx = arr.findIndex(c => c.id === beforeId);
-  arr.splice(dstIdx >= 0 ? dstIdx : arr.length, 0, moved);
-  await Promise.all(arr.map((c, idx) => saveServiceCategory({ id: c.id, name: c.name, sortOrder: idx })));
+  let dstIdx = arr.findIndex((c) => String(c.id) === String(beforeId));
+  if (dstIdx < 0) dstIdx = arr.length;
+  else if (placeAfter) dstIdx += 1;
+  arr.splice(dstIdx, 0, moved);
+  if (shared) {
+    await Promise.all(arr.map((c, idx) => saveSharedServiceCategory({
+      id: c.docId || c.id,
+      name: c.name,
+      sortOrder: idx
+    })));
+  } else {
+    await Promise.all(arr.map((c, idx) => saveServiceCategory({ id: c.id, name: c.name, sortOrder: idx })));
+  }
+  await refreshCatalogAfterReorder();
 }
 
 /** Service reorder: insert `srcId` before `beforeSvcId` inside `targetCatId`
  *  (same or different category from source). Rewrites sortOrder for every
  *  service in the target bucket. If `targetCatId` is the virtual "Other"
  *  bucket, bail out — it isn't a real category. */
-async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId) {
+async function _ffReorderServiceBefore(srcId, beforeSvcId, targetCatId, placeAfter) {
   if (!targetCatId || targetCatId === '__other__') return;
-  const src = ticketsState.salonServices.find(s => s.id === srcId);
+  const shared = isSharedCatalogMode();
+  const data = catalogRowsForDrag();
+  const src = (data.services || []).find((s) => String(s.id) === String(srcId));
   if (!src) return;
-  const siblings = ticketsState.salonServices
-    .filter(s => s.categoryId === targetCatId && s.id !== srcId)
+  const destCat = (data.categories || []).find((c) => String(c.id) === String(targetCatId));
+  if (!destCat) return;
+  const siblings = (data.services || [])
+    .filter((s) => String(s.categoryId) === String(targetCatId) && String(s.id) !== String(srcId))
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  const beforeIdx = siblings.findIndex(s => s.id === beforeSvcId);
-  siblings.splice(beforeIdx >= 0 ? beforeIdx : siblings.length, 0, src);
-  await Promise.all(siblings.map((s, idx) => saveService({
-    id: s.id,
-    name: s.name,
-    categoryId: targetCatId,
-    defaultPrice: s.defaultPrice || 0,
-    sortOrder: idx,
-  })));
+  let beforeIdx = siblings.findIndex((s) => String(s.id) === String(beforeSvcId));
+  if (beforeIdx < 0) beforeIdx = siblings.length;
+  else if (placeAfter) beforeIdx += 1;
+  siblings.splice(beforeIdx, 0, src);
+  if (shared) {
+    await Promise.all(siblings.map((s, idx) => saveSharedService({
+      id: s.id,
+      name: s.name,
+      category: destCat.name,
+      defaultPrice: s.sharedDefaultPrice ?? s.defaultPrice ?? 0,
+      sortOrder: idx,
+      active: s.active !== false
+    })));
+  } else {
+    await Promise.all(siblings.map((s, idx) => saveService({
+      id: s.id,
+      name: s.name,
+      categoryId: targetCatId,
+      defaultPrice: s.defaultPrice || 0,
+      sortOrder: idx,
+    })));
+  }
+  ticketsState._ffOpenCats.add(targetCatId);
+  await refreshCatalogAfterReorder();
 }
 
 /** Drop on a category header = move the service to the END of that category. */
 async function _ffMoveServiceToCategoryEnd(srcId, targetCatId) {
   if (!targetCatId || targetCatId === '__other__') return;
-  const src = ticketsState.salonServices.find(s => s.id === srcId);
+  const shared = isSharedCatalogMode();
+  const data = catalogRowsForDrag();
+  const src = (data.services || []).find((s) => String(s.id) === String(srcId));
   if (!src) return;
-  if (src.categoryId === targetCatId) return;
-  const siblings = ticketsState.salonServices
-    .filter(s => s.categoryId === targetCatId)
+  if (String(src.categoryId) === String(targetCatId)) return;
+  const destCat = (data.categories || []).find((c) => String(c.id) === String(targetCatId));
+  if (!destCat) return;
+  const siblings = (data.services || [])
+    .filter((s) => String(s.categoryId) === String(targetCatId))
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   const lastOrder = siblings.length > 0 ? (siblings[siblings.length - 1].sortOrder ?? siblings.length - 1) : -1;
-  await saveService({
-    id: src.id,
-    name: src.name,
-    categoryId: targetCatId,
-    defaultPrice: src.defaultPrice || 0,
-    sortOrder: lastOrder + 1,
-  });
+  if (shared) {
+    await saveSharedService({
+      id: src.id,
+      name: src.name,
+      category: destCat.name,
+      defaultPrice: src.sharedDefaultPrice ?? src.defaultPrice ?? 0,
+      sortOrder: lastOrder + 1,
+      active: src.active !== false
+    });
+  } else {
+    await saveService({
+      id: src.id,
+      name: src.name,
+      categoryId: targetCatId,
+      defaultPrice: src.defaultPrice || 0,
+      sortOrder: lastOrder + 1,
+    });
+  }
   ticketsState._ffOpenCats.add(targetCatId);
+  await refreshCatalogAfterReorder();
 }
 
 // ---------- Shared mini editor modal (Add/Edit category or service) ----------

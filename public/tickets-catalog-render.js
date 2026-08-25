@@ -14,12 +14,12 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260824_svc_del_menu";
+import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260824_svc_dnd";
 import { formatServiceDurationLabel, joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260824_svc_del_menu";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260824_svc_del_menu";
+import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260824_svc_dnd";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260824_svc_dnd";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -337,8 +337,11 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
     const isOpen = ticketsState._ffOpenCats.has(cat.id);
     const arrow = isOpen ? '▾' : '▸';
     const isCategorySelected = String(cat.id) === String(ticketsState._ffSelectedCategoryId || '');
-    html += `<div class="staff-sidebar-section" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">`;
-    html += `<div style="display:flex;align-items:center;gap:6px;margin:0 0 6px 0;">`;
+    html += `<div class="staff-sidebar-section" data-cat-id="${escapeHtml(cat.id)}" style="padding:0 16px 12px 16px;border-top:1px solid var(--border);padding-top:12px;">`;
+    html += `<div class="ff-services-cat-head" data-cat-id="${escapeHtml(cat.id)}" style="display:flex;align-items:center;gap:6px;margin:0 0 6px 0;">`;
+    if (canEditCategory) {
+      html += `<span class="ff-services-drag-handle" draggable="true" data-drag-kind="category" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder" style="color:#9ca3af;font-size:12px;line-height:1;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>`;
+    }
     html += `<button type="button" class="ff-services-cat-toggle" data-cat-id="${escapeHtml(cat.id)}" aria-expanded="${isOpen ? 'true' : 'false'}" style="border:none;background:none;color:#6b7280;cursor:pointer;font-size:14px;line-height:1;padding:2px;width:16px;flex-shrink:0;">${arrow}</button>`;
     html += `<button type="button" class="ff-services-category-title${isCategorySelected ? ' is-selected' : ''}" data-cat-id="${escapeHtml(cat.id)}" ${canEditCategory ? '' : 'disabled'} style="margin:0;font-size:11px;font-weight:500;color:#6b7280;text-transform:none;letter-spacing:0;flex:1;text-align:left;border:none;background:${isCategorySelected ? '#ede9fe' : 'transparent'};border-radius:6px;padding:4px 6px;cursor:${canEditCategory ? 'pointer' : 'default'};">${escapeHtml(cat.name)}</button>`;
     html += `</div>`;
@@ -406,7 +409,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
   });
   list.querySelectorAll('.ff-services-sidebar-service').forEach((btn) => {
     btn.addEventListener('click', (e) => {
-      if (e.target.closest('.ffsvc-menu-btn')) return;
+      if (e.target.closest('.ffsvc-menu-btn, .ff-services-drag-handle')) return;
       ticketsState._ffSelectedServiceId = btn.getAttribute('data-svc-id');
       ticketsState._ffSelectedCategoryId = null;
       if (String(ticketsState._ffServicesInlineEditServiceId || '') !== String(ticketsState._ffSelectedServiceId || '')) {
@@ -422,76 +425,108 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
 
 function _ffWireServicesScreenDragDrop(listEl) {
   listEl.addEventListener('dragstart', (e) => {
-    const handle = e.target.closest('.ff-services-drag-handle[data-drag-kind="service"]');
+    const handle = e.target.closest('.ff-services-drag-handle[data-drag-kind]');
     if (!handle) return;
-    const row = handle.closest('.ff-services-sidebar-service');
+    e.stopPropagation();
     ticketsState._ffDragSrc = {
-      kind: 'service',
+      kind: handle.getAttribute('data-drag-kind'),
       catId: handle.getAttribute('data-cat-id') || null,
       svcId: handle.getAttribute('data-svc-id') || null,
     };
     try {
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', ticketsState._ffDragSrc.svcId || '');
+      e.dataTransfer.setData('text/plain', ticketsState._ffDragSrc.svcId || ticketsState._ffDragSrc.catId || '');
     } catch (_) {}
-    if (row) row.style.opacity = '0.4';
+    const ghost = handle.closest('.ff-services-sidebar-service, .staff-sidebar-section');
+    if (ghost) ghost.style.opacity = '0.45';
   });
 
-  listEl.addEventListener('dragend', (e) => {
-    const row = e.target.closest('.ff-services-sidebar-service');
-    if (row) row.style.opacity = '';
+  listEl.addEventListener('dragend', () => {
+    listEl.querySelectorAll('.ff-services-sidebar-service, .staff-sidebar-section').forEach((el) => {
+      el.style.opacity = '';
+    });
     _ffClearDragHover();
     ticketsState._ffDragSrc = null;
   });
 
   listEl.addEventListener('dragover', (e) => {
-    if (!ticketsState._ffDragSrc || ticketsState._ffDragSrc.kind !== 'service') return;
-    const targetSvc = e.target.closest('.ff-services-sidebar-service');
-    if (
-      !targetSvc ||
-      targetSvc.getAttribute('data-svc-id') === ticketsState._ffDragSrc.svcId ||
-      targetSvc.getAttribute('data-cat-id') !== ticketsState._ffDragSrc.catId
-    ) {
+    const src = ticketsState._ffDragSrc;
+    if (!src) return;
+    let hl = null;
+    let placeAfter = false;
+    if (src.kind === 'category') {
+      const target = e.target.closest('.staff-sidebar-section[data-cat-id]');
+      const targetId = target && target.getAttribute('data-cat-id');
+      if (target && targetId && targetId !== src.catId && targetId !== '__other__') {
+        hl = target;
+        const rect = target.getBoundingClientRect();
+        placeAfter = e.clientY > rect.top + rect.height / 2;
+      }
+    } else if (src.kind === 'service') {
+      const targetSvc = e.target.closest('.ff-services-sidebar-service');
+      const targetCat = e.target.closest('.staff-sidebar-section[data-cat-id]');
+      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== src.svcId) {
+        hl = targetSvc;
+        const rect = targetSvc.getBoundingClientRect();
+        placeAfter = e.clientY > rect.top + rect.height / 2;
+      } else if (targetCat && targetCat.getAttribute('data-cat-id') !== '__other__') {
+        hl = targetCat.querySelector('.ff-services-cat-head') || targetCat;
+      }
+    }
+    if (!hl) {
       if (ticketsState._ffDragHoverEl) _ffClearDragHover();
       return;
     }
     e.preventDefault();
     try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    if (targetSvc !== ticketsState._ffDragHoverEl) {
+    if (hl !== ticketsState._ffDragHoverEl) {
       _ffClearDragHover();
-      ticketsState._ffDragHoverEl = targetSvc;
+      ticketsState._ffDragHoverEl = hl;
+      hl._ffPrevBg = hl.style.background;
     }
-    const rect = targetSvc.getBoundingClientRect();
-    const placeAfter = e.clientY > rect.top + rect.height / 2;
-    targetSvc.dataset.dropPosition = placeAfter ? 'after' : 'before';
-    targetSvc.style.boxShadow = placeAfter
-      ? 'inset 0 -2px 0 0 #7c3aed'
-      : 'inset 0 2px 0 0 #7c3aed';
+    hl.dataset.dropPosition = placeAfter ? 'after' : 'before';
+    if (src.kind === 'service' && hl.classList.contains('ff-services-cat-head')) {
+      hl.style.background = '#ede9fe';
+      hl.style.boxShadow = '';
+    } else {
+      hl.style.boxShadow = placeAfter
+        ? 'inset 0 -2px 0 0 #7c3aed'
+        : 'inset 0 2px 0 0 #7c3aed';
+    }
   });
 
   listEl.addEventListener('drop', async (e) => {
-    if (!ticketsState._ffDragSrc || ticketsState._ffDragSrc.kind !== 'service') return;
-    const targetSvc = e.target.closest('.ff-services-sidebar-service');
     const src = ticketsState._ffDragSrc;
+    if (!src) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const placeAfter = ticketsState._ffDragHoverEl?.dataset?.dropPosition === 'after';
     _ffClearDragHover();
     ticketsState._ffDragSrc = null;
-    if (
-      !targetSvc ||
-      targetSvc.getAttribute('data-svc-id') === src.svcId ||
-      targetSvc.getAttribute('data-cat-id') !== src.catId
-    ) {
-      return;
-    }
-    e.preventDefault();
     try {
-      await _ffReorderServiceWithinCategory(
-        src.svcId,
-        targetSvc.getAttribute('data-svc-id'),
-        src.catId,
-        targetSvc.dataset.dropPosition === 'after'
-      );
-      await loadServices();
-      renderServicesCatalogV2();
+      if (src.kind === 'category') {
+        const target = e.target.closest('.staff-sidebar-section[data-cat-id]');
+        const dstId = target && target.getAttribute('data-cat-id');
+        if (dstId && dstId !== src.catId && dstId !== '__other__') {
+          await _ffReorderCategoriesBefore(src.catId, dstId, placeAfter);
+        }
+        return;
+      }
+      const targetSvc = e.target.closest('.ff-services-sidebar-service');
+      const targetCat = e.target.closest('.staff-sidebar-section[data-cat-id]');
+      if (targetSvc && targetSvc.getAttribute('data-svc-id') !== src.svcId) {
+        await _ffReorderServiceBefore(
+          src.svcId,
+          targetSvc.getAttribute('data-svc-id'),
+          targetSvc.getAttribute('data-cat-id'),
+          placeAfter
+        );
+        return;
+      }
+      const catId = targetCat && targetCat.getAttribute('data-cat-id');
+      if (catId && catId !== '__other__' && catId !== src.catId) {
+        await _ffMoveServiceToCategoryEnd(src.svcId, catId);
+      }
     } catch (err) {
       console.error('[Services] Reorder failed', err);
       showToast(err?.message || 'Reorder failed', 'error');
@@ -500,22 +535,7 @@ function _ffWireServicesScreenDragDrop(listEl) {
 }
 
 async function _ffReorderServiceWithinCategory(srcId, targetSvcId, categoryId, placeAfter) {
-  if (!categoryId || categoryId === '__other__') return;
-  const src = ticketsState.salonServices.find(s => s.id === srcId);
-  if (!src || src.categoryId !== categoryId) return;
-  const siblings = ticketsState.salonServices
-    .filter(s => s.categoryId === categoryId && s.id !== srcId)
-    .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
-  const targetIdx = siblings.findIndex(s => s.id === targetSvcId);
-  if (targetIdx < 0) return;
-  siblings.splice(targetIdx + (placeAfter ? 1 : 0), 0, src);
-  await Promise.all(siblings.map((s, idx) => saveService({
-    id: s.id,
-    name: s.name,
-    categoryId,
-    defaultPrice: s.defaultPrice || 0,
-    sortOrder: idx,
-  })));
+  await _ffReorderServiceBefore(srcId, targetSvcId, categoryId, placeAfter);
 }
 
 function renderServicesScreenDetail(catalogServices, catalogCategories) {
