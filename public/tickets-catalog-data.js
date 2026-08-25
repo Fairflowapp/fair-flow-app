@@ -438,24 +438,30 @@ async function saveSharedServiceCategory(cat) {
 async function deleteSharedServiceCategory(categoryId) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   const accountId = getTicketsAccountId();
-  if (!accountId || !categoryId) return;
-  await deleteDoc(doc(sharedServiceCategoryItemsRef(accountId), categoryId));
+  const id = String(categoryId || "").trim();
+  if (!accountId) throw new Error('Account is still loading. Try again in a moment.');
+  if (!id) throw new Error('This category could not be found.');
+  await deleteDoc(doc(sharedServiceCategoryItemsRef(accountId), id));
 }
 
 async function deleteSharedService(serviceId) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   const accountId = getTicketsAccountId();
-  if (!accountId || !serviceId) return;
-  await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), serviceId));
-  ticketsState._rawSharedServices = (ticketsState._rawSharedServices || []).filter((row) => row && row.id !== serviceId);
-  const locations = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
-    ? (window.ffGetActiveLocations() || [])
-    : [];
-  await Promise.all(locations.map((loc) => {
-    if (!loc || !loc.id) return Promise.resolve();
-    return deleteDoc(doc(db, `accounts/${accountId}/locations/${loc.id}/serviceOverrides`, serviceId)).catch(() => {});
-  }));
-  console.log('[SharedServicesUI] deleted shared service', { serviceId });
+  const id = String(serviceId || "").trim();
+  if (!accountId) throw new Error('Account is still loading. Try again in a moment.');
+  if (!id) throw new Error('This service could not be found.');
+  await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), id));
+  ticketsState._rawSharedServices = (ticketsState._rawSharedServices || []).filter((row) => row && String(row.id) !== id);
+  try {
+    const locations = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+      ? (window.ffGetActiveLocations() || [])
+      : [];
+    await Promise.all((Array.isArray(locations) ? locations : []).map((loc) => {
+      if (!loc || !loc.id) return Promise.resolve();
+      return deleteDoc(doc(db, `accounts/${accountId}/locations/${loc.id}/serviceOverrides`, id)).catch(function () {});
+    }));
+  } catch (_) {}
+  console.log('[SharedServicesUI] deleted shared service', { serviceId: id });
 }
 
 async function saveSharedServiceOverride(serviceId, price) {

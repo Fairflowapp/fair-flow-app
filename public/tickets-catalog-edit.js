@@ -9,7 +9,7 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_load_fix";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_del_fix";
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
@@ -23,29 +23,99 @@ export function initCatalogEdit(deps) {
   _ffIsServicesScreenRoot = deps._ffIsServicesScreenRoot;
 }
 
+async function askCatalogConfirm(message, title) {
+  try {
+    if (typeof ticketConfirm === 'function') return await ticketConfirm(message, title);
+  } catch (_) {}
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffConfirm === 'function') {
+      return await window.ffConfirm(message, title);
+    }
+  } catch (_) {}
+  return window.confirm(message);
+}
+
+function isSharedCatalogMode() {
+  return ticketsState._ffCatalogModalMode === 'shared';
+}
+
+async function deleteSharedCategoryWithServices(cat, catId) {
+  const catalogData = getSharedServicesForCatalogManager();
+  const lines = (catalogData.services || []).filter((s) => String(s.categoryId) === String(catId));
+  const label = cat && cat.name ? cat.name : 'this category';
+  const ok = await askCatalogConfirm(
+    lines.length
+      ? `Delete "${label}" and its ${lines.length} service${lines.length === 1 ? '' : 's'}?`
+      : `Delete "${label}"?`,
+    'Delete category'
+  );
+  if (!ok) return;
+  try {
+    for (const line of lines) {
+      await deleteSharedService(line.id);
+    }
+    const docId = String((cat && (cat.docId || cat.id)) || catId || '').trim();
+    if (docId) await deleteSharedServiceCategory(docId);
+    if (catId && String(catId) !== docId) await deleteSharedServiceCategory(catId);
+    await loadSharedCatalogForManager();
+    ticketsState._ffSelectedCategoryId = null;
+    ticketsState._ffSelectedServiceId = null;
+    ticketsState._ffOpenCats.delete(catId);
+    renderServicesCatalogV2();
+    try { setupTicketsUI(); } catch (_) {}
+    showToast('Category deleted', 'success');
+  } catch (e) {
+    showToast(e?.message || 'This category could not be deleted.', 'error');
+  }
+}
+
+async function deleteCatalogService(svcId) {
+  const id = String(svcId || '').trim();
+  if (!id) {
+    showToast('This service could not be found.', 'error');
+    return;
+  }
+  const ok = await askCatalogConfirm('Are you sure you want to delete this service?', 'Delete service');
+  if (!ok) return;
+  try {
+    const sharedRow = getSharedServicesForCatalogManager().services.find((s) => String(s.id) === id);
+    const useShared = isSharedCatalogMode() || !!(sharedRow && sharedRow.isSharedService);
+    if (useShared) {
+      await deleteSharedService(id);
+      await loadSharedCatalogForManager();
+    } else {
+      await deleteService(id);
+      await loadServices();
+    }
+    if (String(ticketsState._ffSelectedServiceId || '') === id) ticketsState._ffSelectedServiceId = null;
+    renderServicesCatalogV2();
+    try { setupTicketsUI(); } catch (_) {}
+    showToast('Service deleted', 'success');
+  } catch (e) {
+    showToast(e?.message || 'This service could not be deleted.', 'error');
+  }
+}
+
 function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
-  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
+  const isSharedCatalog = isSharedCatalogMode();
   const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
   const cat = catalogData.categories.find((c) => String(c.id) === String(catId));
-  if (!cat) return;
+  if (!cat) {
+    showToast('This category could not be found.', 'error');
+    return;
+  }
   const pop = _ffBuildPopover(anchorBtn, [
     { label: 'Delete Category', danger: true, onClick: async () => {
-      const count = (catalogData.services || []).filter((s) => String(s.categoryId) === String(catId)).length;
-      if (count > 0) {
-        showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
+      if (isSharedCatalog) {
+        await deleteSharedCategoryWithServices(cat, catId);
         return;
       }
-      const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
+      const ok = await askCatalogConfirm(`Delete "${cat.name}"? Services inside must be moved first.`, 'Delete category');
       if (!ok) return;
       try {
-        if (isSharedCatalog) {
-          await deleteSharedServiceCategory(cat.docId || catId);
-          await loadSharedCatalogForManager();
-        } else {
-          await deleteServiceCategory(catId);
-          await Promise.all([loadServiceCategories(), loadServices()]);
-        }
+        await deleteServiceCategory(catId);
+        await Promise.all([loadServiceCategories(), loadServices()]);
         ticketsState._ffSelectedCategoryId = null;
         ticketsState._ffOpenCats.delete(catId);
         renderServicesCatalogV2();
@@ -62,28 +132,18 @@ function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
 function _ffShowCategoryMenu(anchorBtn, catId) {
   _ffCloseAllPopovers();
   if (!ffCanManageServices()) return;
-  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
+  const isSharedCatalog = isSharedCatalogMode();
   const catalogData = isSharedCatalog ? getSharedServicesForCatalogManager() : getLocationServicesForCatalogManager();
-  const cat = catalogData.categories.find((c) => c.id === catId);
-  if (!cat) return;
+  const cat = catalogData.categories.find((c) => String(c.id) === String(catId));
+  if (!cat) {
+    showToast('This category could not be found.', 'error');
+    return;
+  }
   if (isSharedCatalog) {
     const pop = _ffBuildPopover(anchorBtn, [
       { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'shared-category-edit', categoryId: catId }) },
       { label: 'Delete category', danger: true, onClick: async () => {
-        const count = (catalogData.services || []).filter((s) => String(s.categoryId) === String(catId)).length;
-        if (count > 0) {
-          showToast(`Cannot delete: ${count} service(s) use this category.`, 'error');
-          return;
-        }
-        const ok = await ticketConfirm(`Delete "${cat.name}"?`, 'Delete category');
-        if (!ok) return;
-        try {
-          await deleteSharedServiceCategory(cat.docId || catId);
-          await loadSharedCatalogForManager();
-          ticketsState._ffOpenCats.delete(catId);
-          renderServicesCatalogV2();
-          showToast('Category deleted', 'success');
-        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+        await deleteSharedCategoryWithServices(cat, catId);
       }},
     ]);
     document.body.appendChild(pop);
@@ -92,14 +152,14 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
   const pop = _ffBuildPopover(anchorBtn, [
     { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: 'category-edit', categoryId: catId }) },
     { label: 'Delete category', danger: true, onClick: async () => {
-      const ok = await ticketConfirm(`Delete "${cat.name}"? Services inside must be moved first.`, 'Delete category');
+      const ok = await askCatalogConfirm(`Delete "${cat.name}"? Services inside must be moved first.`, 'Delete category');
       if (!ok) return;
       try {
         await deleteServiceCategory(catId);
         await Promise.all([loadServiceCategories(), loadServices()]);
         ticketsState._ffOpenCats.delete(catId);
         renderServicesCatalogV2();
-    setupTicketsUI();
+        try { setupTicketsUI(); } catch (_) {}
         showToast('Category deleted', 'success');
   } catch (e) { showToast(e?.message || 'Failed', 'error'); }
     }},
@@ -111,11 +171,15 @@ function _ffShowCategoryMenu(anchorBtn, catId) {
 function _ffShowServiceMenu(anchorBtn, svcId) {
   _ffCloseAllPopovers();
   if (!ffCanManageServices()) return;
-  const isSharedCatalog = ticketsState._ffCatalogModalMode === 'shared';
+  const isSharedCatalog = isSharedCatalogMode();
   const svc = isSharedCatalog
-    ? getSharedServicesForCatalogManager().services.find((s) => s.id === svcId)
-    : ticketsState.salonServices.find((s) => s.id === svcId);
-  if (!svc) return;
+    ? getSharedServicesForCatalogManager().services.find((s) => String(s.id) === String(svcId))
+    : (ticketsState.salonServices.find((s) => String(s.id) === String(svcId))
+      || getSharedServicesForCatalogManager().services.find((s) => String(s.id) === String(svcId)));
+  if (!svc) {
+    showToast('This service could not be found.', 'error');
+    return;
+  }
   const items = [
     { label: 'Edit service', onClick: () => {
       if (_ffIsServicesScreenRoot()) {
@@ -130,16 +194,7 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
   ];
   if (isSharedCatalog) {
     items.push({ label: 'Delete service', danger: true, onClick: async () => {
-      const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
-      if (!ok) return;
-      try {
-        await deleteSharedService(svcId);
-        if (ticketsState._ffSelectedServiceId === svcId) ticketsState._ffSelectedServiceId = null;
-        await loadSharedCatalogForManager();
-        renderServicesCatalogV2();
-        setupTicketsUI();
-        showToast('Service deleted', 'success');
-      } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+      await deleteCatalogService(svcId);
     }});
     const pop = _ffBuildPopover(anchorBtn, items);
     document.body.appendChild(pop);
@@ -153,15 +208,7 @@ function _ffShowServiceMenu(anchorBtn, svcId) {
     items.push({ label: 'Move to category…', onClick: () => _ffShowMoveServicePicker(anchorBtn, svcId) });
   }
   items.push({ label: 'Delete service', danger: true, onClick: async () => {
-    const ok = await ticketConfirm('Are you sure you want to delete this service?', 'Delete service');
-    if (!ok) return;
-    try {
-      await deleteService(svcId);
-      await loadServices();
-      renderServicesCatalogV2();
-          setupTicketsUI();
-      showToast('Service deleted', 'success');
-        } catch (e) { showToast(e?.message || 'Failed', 'error'); }
+    await deleteCatalogService(svcId);
   }});
   const pop = _ffBuildPopover(anchorBtn, items);
   document.body.appendChild(pop);
@@ -684,4 +731,6 @@ export {
   _ffCatalogEditorSubmit,
   addServiceCategoryV2,
   addSharedServiceV2,
+  deleteCatalogService,
+  deleteSharedCategoryWithServices,
 };

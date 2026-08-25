@@ -14,12 +14,12 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260824_svc_load_fix";
+import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260824_svc_del_fix";
 import { formatServiceDurationLabel, joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260824_svc_load_fix";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260824_svc_load_fix";
+import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260824_svc_del_fix";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, deleteCatalogService, deleteSharedCategoryWithServices } from "./tickets-catalog-edit.js?v=20260824_svc_del_fix";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -568,6 +568,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selectedCategory.name || '')}</div>
           </div>
         </div>
+        ${ffCanManageServices() ? '<div style="padding-top:14px;"><button type="button" id="servicesCategoryDeleteBtn" style="padding:7px 12px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Delete category</button></div>' : ''}
       </div>
     `;
     const categoryActionsBtn = root.querySelector('#servicesCategoryActionsBtn');
@@ -584,6 +585,18 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         e.preventDefault();
         e.stopPropagation();
         _ffCatalogEditorOpen({ mode: categoryMode, categoryId: selectedCategory.id });
+      });
+    }
+    const categoryDeleteBtn = root.querySelector('#servicesCategoryDeleteBtn');
+    if (categoryDeleteBtn) {
+      categoryDeleteBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (ticketsState._ffCatalogModalMode === 'shared') {
+          await deleteSharedCategoryWithServices(selectedCategory, selectedCategory.id);
+          return;
+        }
+        _ffShowServicesCategoryDetailMenu(categoryDeleteBtn, String(selectedCategory.id));
       });
     }
     return;
@@ -687,6 +700,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           <div style="font-size:13px;color:#111827;font-weight:600;">${selected.taxable === true ? 'On' : 'Off'}</div>
         </div>
       </div>
+      ${canManageServices ? '<div style="padding-top:14px;"><button type="button" id="servicesDetailDeleteBtn" style="padding:7px 12px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:999px;cursor:pointer;font-size:12px;font-weight:700;">Delete service</button></div>' : ''}
     </div>
   `;
   }
@@ -726,6 +740,14 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         renderServicesCatalogV2();
       });
     }
+  }
+  const deleteBtn = root.querySelector('#servicesDetailDeleteBtn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      await deleteCatalogService(selected.id);
+    });
   }
   const cancelBtn = root.querySelector('#servicesInlineEditCancelBtn');
   if (cancelBtn) {
