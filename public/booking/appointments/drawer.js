@@ -4,7 +4,7 @@
  */
 (function () {
   var ROOT_ID = "ffBookingApptDrawer";
-  var UI_VERSION = "composer-v1.1";
+  var UI_VERSION = "composer-v1.2";
   var MIN_COMPOSER_H = 200;
   var MAX_COMPOSER_VH = 0.72;
   var HEIGHT_KEY = "ff-appt-composer-h";
@@ -295,7 +295,7 @@
     aside.setAttribute("aria-hidden", "true");
     aside.hidden = true;
     aside.innerHTML =
-      '<div class="ff-appt-resize" data-ff-appt-resize role="separator" aria-orientation="horizontal" aria-label="Resize composer"></div>' +
+      '<div class="ff-appt-resize" data-ff-appt-resize role="separator" aria-orientation="horizontal" aria-label="Resize composer" title="Drag to resize"></div>' +
       '<header class="ff-appt-head">' +
         '<div class="ff-appt-head-left">' +
           '<h2 id="ffApptTitle">New Appointment</h2>' +
@@ -340,6 +340,7 @@
         '<div class="ff-appt-foot-left">' +
           '<button type="button" class="ff-appt-note-toggle" id="ffApptNoteToggle" data-ff-appt-act="add-note">+ Add note</button>' +
           '<textarea id="ffApptNotes" class="ff-appt-note-input" rows="1" maxlength="2000" placeholder="Add a note" hidden></textarea>' +
+          '<div id="ffApptHint" class="ff-appt-hint">Select a client, then a service.</div>' +
           '<div id="ffApptError" class="ff-appt-error" hidden></div>' +
         "</div>" +
         '<div class="ff-appt-cta">' +
@@ -369,6 +370,7 @@
       date: document.getElementById("ffApptDate"),
       notes: document.getElementById("ffApptNotes"),
       noteToggle: document.getElementById("ffApptNoteToggle"),
+      hint: document.getElementById("ffApptHint"),
       error: document.getElementById("ffApptError"),
       total: document.getElementById("ffApptTotal"),
       create: document.getElementById("ffApptCreate")
@@ -414,9 +416,23 @@
     paintClientState();
     paintPicker();
     var lineError = !!(state.error && state.errorLineKey);
+    var ready = api.canCreate(state) && !state.creating;
     ui.error.hidden = !state.error || lineError;
     ui.error.textContent = lineError ? "" : (state.error || "");
-    ui.create.disabled = !api.canCreate(state) || state.creating;
+    if (ui.hint) {
+      if ((state.error && !lineError) || ready) {
+        ui.hint.hidden = true;
+      } else if (!state.clientId) {
+        ui.hint.hidden = false;
+        ui.hint.textContent = "Select a client, then a service.";
+      } else {
+        ui.hint.hidden = false;
+        ui.hint.textContent = "Select a service to book this appointment.";
+      }
+    }
+    ui.create.disabled = !!state.creating;
+    ui.create.classList.toggle("is-wait", !ready);
+    ui.create.setAttribute("aria-disabled", ready ? "false" : "true");
     ui.create.textContent = state.creating ? "Booking…" : "Book Appointment";
     if (active && active.hasAttribute) {
       var sel = null;
@@ -563,9 +579,43 @@
     }
   }
 
+  function firstIncompleteLine() {
+    return ((state && state.lines) || []).find(function (line) {
+      return line && !line.serviceId;
+    }) || null;
+  }
+
+  function guideCreate() {
+    hideClientResults();
+    if (!state || !state.clientId) {
+      state.error = "Select a client to book this appointment.";
+      paint();
+      var q = els().clientQ;
+      if (q) q.focus();
+      openClientList();
+      return;
+    }
+    var line = firstIncompleteLine();
+    if (line) {
+      state.error = "Select a service to book this appointment.";
+      uiState.servicePickerKey = line.key;
+      uiState.providerPickerKey = "";
+      uiState.editingKey = line.key;
+      uiState.serviceQ = "";
+      paint();
+      return;
+    }
+    state.error = "Complete the appointment before booking.";
+    paint();
+  }
+
   async function createAppointment() {
     var api = form();
-    if (!api || !state) return;
+    if (!api || !state || state.creating) return;
+    if (!api.canCreate(state)) {
+      guideCreate();
+      return;
+    }
     var result = await api.create(state);
     paint();
     if (result && result.ok) {
@@ -642,12 +692,6 @@
       paint();
       placeLiveFab();
     });
-    setTimeout(function () {
-      if (ui.clientQ) {
-        ui.clientQ.focus();
-        openClientList();
-      }
-    }, 20);
   }
 
   function bindDrawer(root) {
@@ -758,9 +802,6 @@
         els().newBox.hidden = !els().newBox.hidden;
         if (!els().newBox.hidden) document.getElementById("ffApptFirst").focus();
       } else if (name === "save-client") saveNewClient();
-    });
-    root.addEventListener("focusin", function (ev) {
-      if (ev.target && ev.target.id === "ffApptClientQ") openClientList();
     });
     root.addEventListener("input", function (ev) {
       if (!state) return;

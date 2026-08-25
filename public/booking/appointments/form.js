@@ -715,7 +715,7 @@
     var timeLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
     if (!trim(line.serviceId)) {
       return (
-        '<article class="ff-appt-node is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+        '<article class="ff-appt-node is-empty is-needed' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           '<div class="ff-appt-node-time">' + escapeHtml(timeLabel) + "</div>" +
           '<span class="ff-appt-node-dot" aria-hidden="true"></span>' +
           '<button type="button" class="ff-appt-node-empty" data-ff-appt-act="open-service-picker" data-ff-line="' +
