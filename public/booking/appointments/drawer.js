@@ -9,7 +9,7 @@
   var searchGen = 0;
   var state = null;
   var lastScroll = null;
-  var uiState = { servicePickerKey: "", providerPickerKey: "", serviceQ: "", providerQ: "", notesOpen: false, collapsedCats: {} };
+  var uiState = { servicePickerKey: "", providerPickerKey: "", serviceQ: "", providerQ: "", notesOpen: false, expandedCats: {} };
 
   function resetUiState() {
     uiState = {
@@ -18,7 +18,7 @@
       serviceQ: "",
       providerQ: "",
       notesOpen: !!(state && state.notes && String(state.notes).trim()),
-      collapsedCats: {}
+      expandedCats: {}
     };
   }
   function form() { return window.ffBookingAppointmentForm || null; }
@@ -633,11 +633,11 @@
       } else if (name === "toggle-service-cat") {
         var cat = act.getAttribute("data-ff-cat") || "";
         if (!cat) return;
-        if (!uiState.collapsedCats) uiState.collapsedCats = {};
-        uiState.collapsedCats[cat] = !uiState.collapsedCats[cat];
+        if (!uiState.expandedCats) uiState.expandedCats = {};
+        uiState.expandedCats[cat] = !uiState.expandedCats[cat];
         var group = act.closest(".ff-appt-picker-group");
-        if (group) group.classList.toggle("is-collapsed", !!uiState.collapsedCats[cat]);
-        act.setAttribute("aria-expanded", uiState.collapsedCats[cat] ? "false" : "true");
+        if (group) group.classList.toggle("is-collapsed", !uiState.expandedCats[cat]);
+        act.setAttribute("aria-expanded", uiState.expandedCats[cat] ? "true" : "false");
       } else if (name === "pick-service" && api && state) {
         state = api.setLineService(state, act.getAttribute("data-ff-line"), act.getAttribute("data-ff-service"));
         uiState.servicePickerKey = "";

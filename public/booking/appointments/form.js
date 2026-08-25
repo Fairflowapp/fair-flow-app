@@ -610,9 +610,9 @@
       }
       groups[seen[cat]].services.push(svc);
     });
-    var collapsed = (options && options.collapsedCats) || {};
+    var expanded = (options && options.expandedCats) || {};
     var list = groups.map(function (group) {
-      var shut = !query && !!collapsed[group.name];
+      var shut = !query && !expanded[group.name];
       return '<div class="ff-appt-picker-group' + (shut ? " is-collapsed" : "") + '">' +
         '<button type="button" class="ff-appt-picker-cat" data-ff-appt-act="toggle-service-cat" data-ff-cat="' +
           escapeHtml(group.name) + '" aria-expanded="' + (shut ? "false" : "true") + '">' +

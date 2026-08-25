@@ -220,15 +220,15 @@ emptyCreate.catalogServices = [
 ];
 const pickerOpen = form.createLinesHtml(emptyCreate, [], { servicePickerKey: emptyCreate.lines[0].key });
 check("service picker groups are collapsible", pickerOpen.indexOf("toggle-service-cat") !== -1 && pickerOpen.indexOf("Hands") !== -1 && pickerOpen.indexOf("Feet") !== -1);
-const pickerCollapsed = form.createLinesHtml(emptyCreate, [], {
+check("service categories start closed", pickerOpen.indexOf("is-collapsed") !== -1);
+const pickerExpanded = form.createLinesHtml(emptyCreate, [], {
   servicePickerKey: emptyCreate.lines[0].key,
-  collapsedCats: { Feet: true }
+  expandedCats: { Hands: true }
 });
-check("service picker can collapse a category", pickerCollapsed.indexOf("is-collapsed") !== -1);
+check("service picker can open a category", pickerExpanded.indexOf('data-ff-cat="Hands"') !== -1 && pickerExpanded.indexOf("is-collapsed") !== -1);
 const pickerSearch = form.createLinesHtml(emptyCreate, [], {
   servicePickerKey: emptyCreate.lines[0].key,
-  serviceQ: "pedi",
-  collapsedCats: { Feet: true }
+  serviceQ: "pedi"
 });
 check("search keeps matching category open", pickerSearch.indexOf("is-collapsed") === -1 && pickerSearch.indexOf("Pedicure") !== -1);
 
