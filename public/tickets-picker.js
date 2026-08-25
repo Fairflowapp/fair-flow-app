@@ -13,7 +13,7 @@ import { _ticketsCurrentStaffRow, updateTicketsTabsVisibility } from "./tickets-
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { subscribeTickets } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
 import { addProductToTicket } from "./tickets-modal.js?v=20260818_staff_dur_ui";
-import { canStaffSendNewTicket } from "./tickets-catalog-ui.js?v=20260824_svc_del_fix";
+import { canStaffSendNewTicket } from "./tickets-catalog-ui.js?v=20260824_svc_del_menu";
 import { subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
 
 let doServiceSelect, getActiveTicketsSalonId, getProductsGroupedByCategory, getServicesGroupedByCategory, getTicketPriceForProductAndActiveLocation, isTicketPickerServiceAvailableForActiveLocation;

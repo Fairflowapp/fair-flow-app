@@ -9,7 +9,7 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_del_fix";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_del_menu";
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
@@ -106,6 +106,7 @@ function _ffShowServicesCategoryDetailMenu(anchorBtn, catId) {
     return;
   }
   const pop = _ffBuildPopover(anchorBtn, [
+    { label: 'Rename category', onClick: () => _ffCatalogEditorOpen({ mode: isSharedCatalog ? 'shared-category-edit' : 'category-edit', categoryId: catId }) },
     { label: 'Delete Category', danger: true, onClick: async () => {
       if (isSharedCatalog) {
         await deleteSharedCategoryWithServices(cat, catId);
