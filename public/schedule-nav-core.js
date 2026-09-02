@@ -10,11 +10,12 @@ import {
   where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { auth, db } from "/app.js?v=20260610_force_lp_ios";
-import { isApprovedRequest } from "./schedule-availability.js?v=20260615_default_schedule_source";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+import { isApprovedRequest } from "./schedule-availability.js?v=20260902_sched_dual";
+import { inboxItemMatchesActiveLocation, inboxGetActiveLocationId } from "./inbox-helpers.js?v=20260901_sched_req";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { _ffSchedActiveLocId } from "./schedule-ack.js?v=20260702_schedule_ack";
-import { getStaffByScheduleKey } from "./schedule-dnd.js?v=20260702_schedule_dnd";
+import { _ffSchedActiveLocId, _ffSchedUserHasMultipleLocations, _ffSchedPrimaryLocationId } from "./schedule-ack.js?v=20260902_sched_dual";
+import { getStaffByScheduleKey } from "./schedule-dnd.js?v=20260827_1258notes";
 import {
   formatScheduleRawRangeDisplay,
   getDayNameFromDateKey,
@@ -25,7 +26,7 @@ import {
 import {
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
 
 // -- injected via initScheduleNavCore() (wired in schedule-nav-runtime.js) --
 let renderScheduleBoard;
@@ -460,34 +461,33 @@ function renderScheduleViewTabs() {
 }
 
 /**
- * A staff row is visible in the active branch's schedule when:
- *   • no active location is resolved (single-branch salon or bootstrap), OR
- *   • the staff is the Owner (business owner is always present), OR
- *   • `allowedLocationIds` is explicitly set and contains the active location, OR
- *   • `allowedLocationIds` is empty/missing but `primaryLocationId` matches, OR
- *   • neither field is set (legacy row) — we treat that as "no assignment
- *     chosen yet" and keep them visible to avoid silently losing legacy data.
- *
- * Admins and managers who DID pick specific locations via the Locations tab
- * are filtered — the user's expectation is that Magi (Manager, toggled only
- * at Key Biscayne) must NOT appear in Brickell's grid.
+ * A staff row is visible in the active branch's schedule when they are
+ * assigned to that branch. Dual-location staff (allowed at 2+ locations)
+ * appear on every assigned board, each with its own hours.
  */
 function _ffSchedStaffInActiveLocation(staff) {
+  const multi = _ffSchedUserHasMultipleLocations();
   const activeLoc = _ffSchedActiveLocId();
-  if (!activeLoc) return true;
+  if (!activeLoc) return !multi;
   if (!staff) return false;
   const role = String(staff.role || "").toLowerCase().trim();
   const isOwner = role === "owner" || staff.isOwner === true;
+  let allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : [];
+  let primary = typeof staff.primaryLocationId === "string" ? staff.primaryLocationId.trim() : "";
+  try {
+    if (typeof window !== "undefined" && typeof window.ffEnsureStaffLocationFields === "function") {
+      const f = window.ffEnsureStaffLocationFields(staff);
+      if (Array.isArray(f.allowedLocationIds)) allowed = f.allowedLocationIds;
+      if (typeof f.primaryLocationId === "string") primary = f.primaryLocationId.trim();
+    }
+  } catch (_) {}
+  const allowedIds = allowed.map((id) => String(id || "").trim()).filter(Boolean);
+  if (allowedIds.length > 0) return allowedIds.indexOf(activeLoc) !== -1;
   if (isOwner) return true;
-  const allowed = Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : [];
-  if (allowed.length > 0) {
-    return allowed.indexOf(activeLoc) !== -1;
-  }
-  const primary = typeof staff.primaryLocationId === "string" ? staff.primaryLocationId.trim() : "";
   if (primary) return primary === activeLoc;
-  // Legacy row with no assignment info: default to visible so pre-existing
-  // staff don't disappear. Users can fix this by opening the Locations tab.
-  return true;
+  if (!multi) return true;
+  const salonPrimary = _ffSchedPrimaryLocationId();
+  return !!salonPrimary && activeLoc === salonPrimary;
 }
 
 /**
@@ -612,22 +612,15 @@ function scheduleInboxUserIsFirestoreManager() {
 async function loadApprovedScheduleRequests() {
   const salonId = String(window.currentSalonId || "").trim();
   if (!salonId) return [];
-  const activeLocId = _ffSchedActiveLocId();
+  const activeLocId = _ffSchedActiveLocId() || inboxGetActiveLocationId();
+  if (_ffSchedUserHasMultipleLocations() && !activeLocId) return [];
   const mapDoc = (docSnap) => ({ id: docSnap.id, ...docSnap.data() });
   const keepScheduleType = (item) =>
     SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY.has(String(item?.type || "").trim());
-  // When a location is active, only keep requests that either belong to that
-  // branch (`locationId` stamped) or legacy items with no `locationId` (so
-  // they still appear for the default branch and don't disappear silently).
-  const keepLocation = (item) => {
-    if (!activeLocId) return true;
-    const raw = item && typeof item.locationId === "string" ? item.locationId.trim() : "";
-    // Legacy (unstamped) items fall through to "default" — visible in the
-    // first branch only so they don't leak sideways. When multiple locations
-    // exist we treat missing locationId as default.
-    const effective = raw || "default";
-    return effective === activeLocId;
-  };
+  // Same rule as Inbox: stamped locationId must match this branch. Legacy
+  // unstamped rows stay on the primary location only — never every branch
+  // the staff member is allowed to work.
+  const keepLocation = (item) => inboxItemMatchesActiveLocation(item, activeLocId);
   const filterPipeline = (docs) =>
     docs.map(mapDoc).filter(keepScheduleType).filter(keepLocation).filter(isApprovedRequest);
 

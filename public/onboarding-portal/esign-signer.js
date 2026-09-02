@@ -7,9 +7,9 @@
 import {
   esc,
   classifyEsignError,
-} from "./esign-signer-helpers.js?v=20260810_od_split_v1";
-import { attachEsignPaint } from "./esign-signer-paint.js?v=20260810_od_split_v1";
-import { attachEsignChrome } from "./esign-signer-chrome.js?v=20260810_od_split_v1";
+} from "./esign-signer-helpers.js?v=20260816_od_pdfb64";
+import { attachEsignPaint } from "./esign-signer-paint.js?v=20260816_od_pdfb64";
+import { attachEsignChrome } from "./esign-signer-chrome.js?v=20260816_od_pdfb64";
 
 /**
  * Mount e-sign experience into hostEl.
@@ -135,7 +135,7 @@ export function mountEsignSigner(hostEl, opts) {
       </div>`;
     try {
       s.packet = await s.portalHttp(s.getPacketName, {
-        s.sessionToken,
+        sessionToken: s.sessionToken,
         taskId: s.task.id,
       });
       if (s.destroyed) return;
@@ -218,8 +218,8 @@ export function mountEsignSigner(hostEl, opts) {
     }
     if (errEl) errEl.textContent = "";
 
-    // Build field s.values for server
-    const fieldValues = { ...values };
+    // Build field values for server
+    const fieldValues = { ...(s.values || {}) };
     s.schema().forEach((f) => {
       if (f.type === "typed_name" && !fieldValues[f.id]) {
         fieldValues[f.id] = s.typedName;
@@ -236,7 +236,7 @@ export function mountEsignSigner(hostEl, opts) {
         : "typed";
     const signature = {
       method,
-      s.typedName: s.typedName.trim(),
+      typedName: String(s.typedName || "").trim(),
     };
     if (method === "drawn" && s.drawnPng) {
       signature.pngBase64 = s.drawnPng;
@@ -245,7 +245,7 @@ export function mountEsignSigner(hostEl, opts) {
     let succeeded = false;
     try {
       const result = await s.portalHttp(s.submitName, {
-        s.sessionToken,
+        sessionToken: s.sessionToken,
         taskId: s.task.id,
         consentAccepted: true,
         consentText: s.packet.consentText,
@@ -263,17 +263,20 @@ export function mountEsignSigner(hostEl, opts) {
       const info = classifyEsignError(e);
       if (info.kind === "cancelled" || info.kind === "invalid") {
         if (typeof s.onFatalError === "function") s.onFatalError(e, info);
-        else if (errEl) errEl.textContent = info.body;
+        else if (errEl) errEl.textContent = info.body || String((e && e.message) || e);
       } else if (info.kind === "completed") {
         succeeded = true;
         if (typeof s.onCompleted === "function") s.onCompleted({ ok: true, alreadyCompleted: true });
         else s.setBanner("ok", info.title, info.body, false);
       } else {
-        if (errEl) errEl.textContent = info.body;
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = "Sign & submit";
+        if (errEl) {
+          errEl.textContent =
+            (info && info.body) || String((e && e.message) || e || "Submit failed");
         }
+      }
+      if (!succeeded && btn) {
+        btn.disabled = false;
+        btn.textContent = "Sign & submit";
       }
     } finally {
       // Keep s.busy after success so a double-tap cannot re-s.submit.

@@ -5,10 +5,10 @@
 // that inventory.js / injectMockStylesOnce() stay unchanged (same import, same
 // concatenated value, identical cascade order).
 
-import { INVENTORY_STYLES_SHELL } from "./inventory-styles-shell.js?v=20260728_inv_mobile_unstick";
-import { INVENTORY_STYLES_ORDERS } from "./inventory-styles-orders.js?v=20260728_inv_mobile_unstick";
-import { INVENTORY_STYLES_INSIGHTS } from "./inventory-styles-insights.js?v=20260728_inv_mobile_unstick";
-import { INVENTORY_STYLES_TABLE } from "./inventory-styles-table.js?v=20260728_inv_mobile_unstick";
+import { INVENTORY_STYLES_SHELL } from "./inventory-styles-shell.js?v=20260902_inv_iso";
+import { INVENTORY_STYLES_ORDERS } from "./inventory-styles-orders.js?v=20260902_inv_iso";
+import { INVENTORY_STYLES_INSIGHTS } from "./inventory-styles-insights.js?v=20260902_inv_iso";
+import { INVENTORY_STYLES_TABLE } from "./inventory-styles-table.js?v=20260902_inv_iso";
 
 export const INVENTORY_STYLES =
   INVENTORY_STYLES_SHELL +

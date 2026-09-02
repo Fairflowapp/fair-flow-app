@@ -16,7 +16,7 @@ import {
   flushInventoryTableToFirestore,
   loadInventoryTableForSub,
   prepareInventoryTableStateForMount,
-} from "./inventory-table-persist.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-table-persist.js?v=20260902_inv_iso";
 
 import {
   applyInvMobileColumnClasses,
@@ -27,7 +27,7 @@ import {
   isInvMobileNarrow,
   resetInvMobileOptionalColumns,
   scheduleSyncInvColWidthsAfterLayout,
-} from "./inventory-table-layout.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-table-layout.js?v=20260902_inv_iso";
 
 import {
   initInventoryTableRows,
@@ -41,7 +41,7 @@ import {
   findInvEditInput,
   getInvCellKeyFromEl,
   removeInventoryGroup,
-} from "./inventory-table-rows.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-table-rows.js?v=20260902_inv_iso";
 
 import {
   initInventoryTableUi,
@@ -55,7 +55,7 @@ import {
   renderInventoryOrderCellBreakdownModal,
   renderInventoryTableCardHtml,
   renderRemoveGroupModal,
-} from "./inventory-table-ui.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-table-ui.js?v=20260902_inv_iso";
 
 export function initInventoryTable(deps) {
   initInventoryTableUi({

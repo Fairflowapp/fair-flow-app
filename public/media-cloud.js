@@ -296,20 +296,57 @@ function _ffActiveLocationIdForMedia() {
   }
 }
 
-/**
- * Filter content works to the active location. Legacy docs without a
- * `locationId` are treated as belonging to the Owner's "default" branch so
- * historical works don't vanish after the multi-location upgrade.
- */
+function _ffMediaUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _ffMediaPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+function _ffMediaHasActiveLocationForWrite() {
+  if (!_ffMediaUserHasMultipleLocations()) return true;
+  return !!_ffActiveLocationIdForMedia();
+}
+
+/** Work / category belongs to the active branch only. Legacy unstamped: primary branch. */
+export function mediaItemMatchesActiveLocation(item) {
+  const multi = _ffMediaUserHasMultipleLocations();
+  const active = _ffActiveLocationIdForMedia();
+  const explicit = item && typeof item.locationId === "string" ? item.locationId.trim() : "";
+  if (!active) return !multi;
+  if (explicit) return explicit === active;
+  if (!multi) return true;
+  const primary = _ffMediaPrimaryLocationId();
+  return !!primary && active === primary;
+}
+
 function _ffFilterContentWorksByLocation(items) {
-  const locId = _ffActiveLocationIdForMedia();
-  if (!locId) return items; // no active location yet → show everything (onboarding)
-  return items.filter((w) => {
-    const raw = w && typeof w.locationId === "string" ? w.locationId.trim() : "";
-    // Missing `locationId` = legacy work → only visible in the default branch.
-    const effective = raw || "default";
-    return effective === locId;
-  });
+  return (Array.isArray(items) ? items : []).filter(mediaItemMatchesActiveLocation);
 }
 
 // =====================
@@ -336,6 +373,9 @@ export async function createContentWork(data) {
   const locId = (typeof data.locationId === "string" && data.locationId.trim())
     ? data.locationId.trim()
     : _ffActiveLocationIdForMedia();
+  if (!locId && !_ffMediaHasActiveLocationForWrite()) {
+    throw new Error("Choose a location before uploading media.");
+  }
 
   const docData = sanitize({
     salonId,
@@ -353,7 +393,7 @@ export async function createContentWork(data) {
     duplicate: data.duplicate ?? false,
     status: data.status ?? "active",
     postedCount: 0,
-    locationId: locId || null,
+    ...(locId ? { locationId: locId } : {}),
     createdAt: serverTimestamp(),
     updatedAt: null,
   });
@@ -395,7 +435,9 @@ export async function getContentWork(workId) {
   if (!salonId) return null;
   const snap = await getDoc(contentWorksRef(salonId, workId));
   if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() };
+  const work = { id: snap.id, ...snap.data() };
+  if (!mediaItemMatchesActiveLocation(work)) return null;
+  return work;
 }
 
 /**
@@ -979,16 +1021,7 @@ export function subscribePostedHistory(workId, callback) {
  * every location for backward compatibility until the Owner re-saves them.
  */
 function _ffFilterCategoriesByLocation(items) {
-  const locId = _ffActiveLocationIdForMedia();
-  if (!locId) return items; // no active location → show everything (onboarding)
-  // STRICT per-location scoping: a category is visible in this branch only
-  // when its `locationId` matches. Legacy docs without `locationId` are
-  // hidden on purpose to prevent cross-branch leaks; the Owner re-adds the
-  // ones they actually want in each location (quick and unambiguous).
-  return items.filter((c) => {
-    const raw = c && typeof c.locationId === "string" ? c.locationId.trim() : "";
-    return raw === locId;
-  });
+  return (Array.isArray(items) ? items : []).filter(mediaItemMatchesActiveLocation);
 }
 
 /**
@@ -1060,12 +1093,15 @@ export async function createMediaCategory(data) {
   const locId = (typeof data.locationId === "string" && data.locationId.trim())
     ? data.locationId.trim()
     : _ffActiveLocationIdForMedia();
+  if (!locId && !_ffMediaHasActiveLocationForWrite()) {
+    throw new Error("Choose a location before adding a media category.");
+  }
 
   const docData = sanitize({
     name: String(data.name || "").trim() || "Unnamed",
     active: data.active !== false,
     sortOrder: data.sortOrder ?? maxOrder + 1,
-    locationId: locId || null,
+    ...(locId ? { locationId: locId } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdByUid: uid,

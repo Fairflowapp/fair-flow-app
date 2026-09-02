@@ -5,10 +5,10 @@
 // Board rendering callbacks still live in schedule-ui.js and are injected via
 // initScheduleDnd().
 
-import { validateScheduleDraft } from "./schedule-validator.js?v=20260409_coverage_total_staff_skip";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+import { validateScheduleDraft } from "./schedule-validator.js?v=20260817_build_hours";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { loadCrossLocationBusyForWeek } from "./schedule-cloud.js?v=20260702_schedule_cloud";
+import { loadCrossLocationBusyForWeek } from "./schedule-cloud.js?v=20260902_sched_dual";
 import {
   formatScheduleTimeRangeDisplay,
   getApprovedPartialTimeConflictMessage,
@@ -22,14 +22,15 @@ import {
   findDraftDay,
   getAssignmentId,
   persistScheduleDraftOverrideFromState,
+  pushScheduleUndoSnapshot,
   removeManualOffForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260816_cell_notes7";
+} from "./schedule-draft.js?v=20260902_sched_dual";
 import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
 
 // -- injected via initScheduleDnd() (wired in schedule-ui.js) --
 let renderScheduleBoard;
@@ -247,6 +248,13 @@ function remapAssignmentToStaff(assignment, staff) {
 }
 
 function revalidateLocalDraft(nextDraft) {
+  try {
+    if (scheduleState.schedulePreviewState.draft) {
+      pushScheduleUndoSnapshot();
+    }
+  } catch (e) {
+    console.warn("[ScheduleUI] undo snapshot on edit failed", e);
+  }
   const coverageRules = scheduleState.schedulePreviewState.coverageRules !== undefined
     ? scheduleState.schedulePreviewState.coverageRules
     : (window.settings && typeof window.settings.coverageRules === "object" ? window.settings.coverageRules : undefined);
@@ -270,7 +278,11 @@ function revalidateLocalDraft(nextDraft) {
   if (typeof window !== "undefined") {
     window.ffSchedulePreviewState = scheduleState.schedulePreviewState;
   }
-  persistScheduleDraftOverrideFromState();
+  try {
+    persistScheduleDraftOverrideFromState();
+  } catch (e) {
+    console.warn("[ScheduleUI] persist after edit failed", e);
+  }
 }
 
 function clearDropZoneVisual(zone) {
@@ -411,7 +423,12 @@ function completeScheduleDrop(payload, targetStaffId, targetDate, options = {}) 
   console.log("[Schedule DnD] drop", { payload, targetStaffId, targetDate });
   if (!nextDraft) return;
 
-  revalidateLocalDraft(nextDraft);
+  try {
+    revalidateLocalDraft(nextDraft);
+  } catch (e) {
+    console.error("[Schedule DnD] drop apply failed", e);
+    scheduleState.schedulePreviewState.draft = nextDraft;
+  }
   renderScheduleSummary(scheduleState.schedulePreviewState.validation, scheduleState.schedulePreviewState.validation?.days || []);
   renderScheduleViewTabs();
   renderScheduleBoard(scheduleState.schedulePreviewState.draft, scheduleState.schedulePreviewState.validation, scheduleState.schedulePreviewState.staffList);

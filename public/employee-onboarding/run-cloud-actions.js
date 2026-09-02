@@ -6,16 +6,16 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   serverTimestamp,
-  onSnapshot,
   Timestamp,
+  onSnapshot,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import {
   ref as storageRef,
   uploadBytes,
-  getDownloadURL,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { db, storage } from "/app.js?v=20260610_force_lp_ios";
 import {
@@ -26,8 +26,11 @@ import {
   runsCol,
   tasksCol,
   taskDoc,
-  _txUpdateTask,
-} from "./run-cloud-shared.js?v=20260810_od_split_v1";
+} from "./run-cloud-shared.js?v=20260812_od_s5";
+import {
+  ffOnboardingCall,
+  ffOnboardingCallError,
+} from "./onboarding-cf.js?v=20260812_od_s5";
 
 /**
  * Policy acknowledgement completion (employee or manager). Idempotent.
@@ -49,29 +52,16 @@ export async function ffAcknowledgeOnboardingPolicyTask({
   if (_actionLocks.has(lock)) return null;
   _actionLocks.add(lock);
   try {
-    return await _txUpdateTask(salonId, sid, rid, tid, (task) => {
-      if (task.taskType !== "policy_acknowledgement") {
-        throw new Error("Not a policy acknowledgement task");
-      }
-      if (task.status === "completed") return null;
-      const cfg = task.configSnapshot || {};
-      if (cfg.requireTypedName && !_trim(typedName)) {
-        throw new Error("Full name is required");
-      }
-      const uid = _uid();
-      return {
-        status: "completed",
-        result: {
-          acknowledgedAt: Timestamp.now(),
-          acknowledgedByUid: uid,
-          acknowledgedByName: cfg.requireTypedName ? _trim(typedName) : null,
-          policyVersion: String(cfg.version || "1.0"),
-        },
-        completedAt: serverTimestamp(),
-        completedBy: uid,
-        updatedAt: serverTimestamp(),
-      };
+    await ffOnboardingCall("acknowledgeOnboardingPolicyTask", {
+      salonId,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+      typedName: typedName || "",
     });
+    return { ok: true };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Acknowledge failed"));
   } finally {
     _actionLocks.delete(lock);
   }
@@ -99,31 +89,14 @@ export async function ffCompleteOnboardingTaskFromInboxApprove({
   if (_actionLocks.has(lock)) return null;
   _actionLocks.add(lock);
   try {
-    await _txUpdateTask(sidSalon, sid, rid, tid, (task) => {
-      const prev = task.result || {};
-      if (
-        task.status === "completed" &&
-        prev.linkedDocumentId &&
-        linkedDocumentId &&
-        prev.linkedDocumentId === linkedDocumentId
-      ) {
-        return null;
-      }
-      return {
-        status: "completed",
-        result: {
-          ...prev,
-          linkedDocumentId: linkedDocumentId || prev.linkedDocumentId || null,
-          inboxItemId: inboxItemId || prev.inboxItemId || null,
-          approvedAt: Timestamp.now(),
-          approvedBy: approverUid || _uid(),
-          rejectedAt: null,
-          rejectionReason: null,
-        },
-        completedAt: serverTimestamp(),
-        completedBy: approverUid || _uid(),
-        updatedAt: serverTimestamp(),
-      };
+    await ffOnboardingCall("completeOnboardingTaskFromInboxApprove", {
+      salonId: sidSalon,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+      inboxItemId: inboxItemId || "",
+      linkedDocumentId: linkedDocumentId || "",
+      approverUid: approverUid || _uid(),
     });
     return true;
   } catch (e) {
@@ -154,19 +127,13 @@ export async function ffRejectOnboardingTaskFromInbox({
   if (_actionLocks.has(lock)) return null;
   _actionLocks.add(lock);
   try {
-    await _txUpdateTask(sidSalon, sid, rid, tid, (task) => {
-      if (task.status === "completed") return null;
-      const prev = task.result || {};
-      return {
-        status: "rejected",
-        result: {
-          ...prev,
-          inboxItemId: inboxItemId || prev.inboxItemId || null,
-          rejectedAt: Timestamp.now(),
-          rejectionReason: reason || null,
-        },
-        updatedAt: serverTimestamp(),
-      };
+    await ffOnboardingCall("rejectOnboardingTaskFromInbox", {
+      salonId: sidSalon,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+      inboxItemId: inboxItemId || "",
+      reason: reason || "",
     });
     return true;
   } catch (e) {
@@ -177,8 +144,165 @@ export async function ffRejectOnboardingTaskFromInbox({
   }
 }
 
+/** Void one completed e-sign task and reopen it for the employee. */
+export async function ffReopenOnboardingEsignTask({
+  staffId,
+  runId,
+  taskId,
+} = {}) {
+  const salonId = _salonId();
+  const sid = _trim(staffId);
+  const rid = _trim(runId);
+  const tid = _trim(taskId);
+  if (!salonId || !sid || !rid || !tid) throw new Error("Missing ids");
+  const lock = `${salonId}::${sid}::${rid}::${tid}::reopen`;
+  if (_actionLocks.has(lock)) throw new Error("Already working on this form.");
+  _actionLocks.add(lock);
+  try {
+    return await ffOnboardingCall("reopenOnboardingEsignTask", {
+      salonId,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+    });
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not reopen this form."));
+  } finally {
+    _actionLocks.delete(lock);
+  }
+}
+
+function _parseExpTs(raw) {
+  const s = _trim(raw);
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(`${s.slice(0, 10)}T12:00:00.000Z`);
+    if (!Number.isNaN(d.getTime())) return Timestamp.fromDate(d);
+  }
+  return null;
+}
+
+async function _writeStaffDocFromOnboardingUpload({
+  salonId,
+  staffId,
+  runId,
+  taskId,
+  task,
+  storagePath,
+  fileName,
+  expirationDate,
+  notes,
+  documentType,
+}) {
+  const typeName = String(
+    documentType || (task && (task.templateNameSnapshot || task.templateId)) || "Document"
+  );
+  const templateId = _trim((task && task.templateId) || taskId);
+  let documentId = `${taskId}_upload`;
+  try {
+    const snap = await getDocs(collection(db, `salons/${salonId}/staff/${staffId}/documents`));
+    const match = snap.docs.find((d) => {
+      const row = d.data() || {};
+      return (
+        _trim(row.onboardingTemplateId) === templateId &&
+        String(row.lifecycleStatus || "").toLowerCase() !== "archived"
+      );
+    });
+    if (match) documentId = match.id;
+  } catch (_) {}
+  const expTs = _parseExpTs(expirationDate);
+  const ref = doc(db, `salons/${salonId}/staff/${staffId}/documents`, documentId);
+  const prev = await getDoc(ref);
+  const payload = {
+    title: typeName,
+    type: typeName,
+    fileName: fileName || null,
+    storagePath,
+    approvalStatus: "approved",
+    approvedBy: "onboarding_portal",
+    approvedAt: serverTimestamp(),
+    lifecycleStatus: "active",
+    via: "portal_upload",
+    onboardingRunId: runId,
+    onboardingTaskId: taskId,
+    onboardingTemplateId: templateId || null,
+    uploadedByUid: _uid() || "onboarding_portal",
+    notes: notes || null,
+    updatedAt: serverTimestamp(),
+  };
+  if (expTs) payload.expirationDate = expTs;
+  if (!prev.exists()) payload.createdAt = serverTimestamp();
+  await setDoc(ref, payload, { merge: true });
+  return documentId;
+}
+
+/** Convert a leftover waiting_approval upload into a staff document (no Inbox). */
+export async function ffPromoteOnboardingWaitingUpload({ staffId, runId, taskId } = {}) {
+  const salonId = _salonId();
+  const sid = _trim(staffId);
+  const rid = _trim(runId);
+  const tid = _trim(taskId);
+  if (!salonId || !sid || !rid || !tid) return null;
+  const snap = await getDoc(taskDoc(salonId, sid, rid, tid));
+  if (!snap.exists()) return null;
+  const task = snap.data() || {};
+  if (task.taskType !== "document" && task.taskType !== "file_upload") return null;
+  if (String(task.status || "") !== "waiting_approval") return null;
+  const res = task.result || {};
+  let expirationDate = res.expirationDate || null;
+  let notes = null;
+  let storagePath = _trim(res.storagePath);
+  let fileName = res.fileName || null;
+  const inboxId = _trim(res.inboxItemId);
+  if (inboxId) {
+    try {
+      const isnap = await getDoc(doc(db, `salons/${salonId}/inboxItems`, inboxId));
+      if (isnap.exists()) {
+        const d = (isnap.data() || {}).data || {};
+        expirationDate = expirationDate || d.expirationDate || null;
+        notes = d.notes || null;
+        storagePath = storagePath || _trim(d.storagePath || d.filePath);
+        fileName = fileName || d.fileName || null;
+      }
+    } catch (_) {}
+  }
+  if (!storagePath) return null;
+  const documentId = await _writeStaffDocFromOnboardingUpload({
+    salonId,
+    staffId: sid,
+    runId: rid,
+    taskId: tid,
+    task,
+    storagePath,
+    fileName,
+    expirationDate,
+    notes,
+    documentType: task.templateNameSnapshot || task.templateId,
+  });
+  await ffOnboardingCall("completeOnboardingTaskFromInboxApprove", {
+    salonId,
+    staffId: sid,
+    runId: rid,
+    taskId: tid,
+    inboxItemId: inboxId,
+    linkedDocumentId: documentId,
+    approverUid: _uid(),
+  });
+  if (inboxId) {
+    try {
+      await updateDoc(doc(db, `salons/${salonId}/inboxItems`, inboxId), {
+        status: "archived",
+        unreadForManagers: false,
+        updatedAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+      });
+    } catch (_) {}
+  }
+  return documentId;
+}
+
 /**
- * Create document_upload inbox item for an onboarding task (same path as Inbox submit).
+ * Save an onboarding upload to the staff Documents tab. No Inbox approval.
  */
 export async function ffSubmitOnboardingDocumentUpload({
   staffId,
@@ -223,100 +347,33 @@ export async function ffSubmitOnboardingDocumentUpload({
     const path = `salons/${salonId}/staff/${sid}/documents/${documentType}/${yyyyMm}/${fileId}_${safeName}`;
     const fileRef = storageRef(storage, path);
     await uploadBytes(fileRef, file);
-    const fileUrl = await getDownloadURL(fileRef);
 
     const uid = _uid();
     if (!uid) throw new Error("Not signed in");
-    const profile =
-      (typeof window !== "undefined" && window.inboxState && window.inboxState.currentUserProfile) ||
-      {};
-    let creatorStaffId = _trim(profile.staffId);
-    if (!creatorStaffId) {
-      try {
-        creatorStaffId = _trim(
-          (typeof localStorage !== "undefined" &&
-            localStorage.getItem("ff_authedStaffId_v1")) ||
-            ""
-        );
-      } catch (_) {}
-    }
-    if (!creatorStaffId) creatorStaffId = sid; // manager acting on behalf — still a string for rules
-    const creatorName = String(
-      profile.name || profile.displayName || "User"
-    ).trim();
-    const creatorRole = String(profile.role || "technician").trim();
-    let locId = null;
-    try {
-      if (typeof window.ffGetActiveLocationId === "function") {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === "string" && v.trim()) locId = v.trim();
-      }
-    } catch (_) {}
 
-    const data = {
-      documentType,
-      expirationDate: expirationDate || null,
-      filePath: path,
-      fileUrl,
+    const documentId = await _writeStaffDocFromOnboardingUpload({
+      salonId,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+      task,
+      storagePath: path,
       fileName: file.name,
-      notes: notes || null,
-      documentOwnerStaffId: sid,
-      onboardingRunId: rid,
-      onboardingTaskId: tid,
-      templateId: task.templateId || tid,
-      taskType: task.taskType,
-    };
+      expirationDate,
+      notes,
+      documentType,
+    });
+    await ffOnboardingCall("completeOnboardingTaskFromInboxApprove", {
+      salonId,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
+      inboxItemId: "",
+      linkedDocumentId: documentId,
+      approverUid: uid,
+    });
 
-    // Match inbox-submit.js create shape (rules lock visibility / identity fields).
-    const inboxPayload = {
-      tenantId: salonId,
-      locationId: locId,
-      type: "document_upload",
-      status: "open",
-      priority: "normal",
-      assignedTo: null,
-      sentToStaffIds: [],
-      sentToNames: [],
-      data,
-      managerNotes: null,
-      responseNote: null,
-      decidedBy: null,
-      decidedAt: null,
-      needsInfoQuestion: null,
-      staffReply: null,
-      visibility: "managers_only",
-      unreadForManagers: true,
-      documentOwnerStaffId: sid,
-      createdByUid: uid,
-      createdByStaffId: creatorStaffId,
-      createdByName: creatorName,
-      createdByRole: creatorRole,
-      forUid: uid,
-      forStaffId: creatorStaffId,
-      forStaffName: creatorName,
-      createdAt: serverTimestamp(),
-      lastActivityAt: serverTimestamp(),
-      updatedAt: null,
-    };
-
-    const iref = doc(collection(db, `salons/${salonId}/inboxItems`));
-    await setDoc(iref, inboxPayload);
-
-    // Mark waiting_approval (idempotent if already). Progress → CF.
-    if (task.status !== "waiting_approval") {
-      await updateDoc(tref, {
-        status: "waiting_approval",
-        result: {
-          ...(task.result || {}),
-          inboxItemId: iref.id,
-          fileName: file.name,
-          storagePath: path,
-        },
-        updatedAt: serverTimestamp(),
-      });
-    }
-
-    return { inboxItemId: iref.id, storagePath: path };
+    return { linkedDocumentId: documentId, storagePath: path };
   } finally {
     _actionLocks.delete(lock);
   }

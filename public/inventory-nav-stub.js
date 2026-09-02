@@ -4,7 +4,7 @@
       return window.goToInventory();
     }
     try {
-      await import('/inventory.js?v=20260728_inv_mobile_unstick');
+      await import('/inventory.js?v=20260902_prod_cats');
     } catch (e) {
       console.error('[Inventory mock] load failed', e);
       return;

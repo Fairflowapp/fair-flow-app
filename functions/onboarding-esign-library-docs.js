@@ -10,10 +10,13 @@ const {
   MAX_SIZE_BYTES,
   MAX_PAGES,
   PDF_MIME,
+  REGULATED_TIERS,
+  db,
   requireAuth,
   trimStr,
   assertCanManageOnboardingSettings,
   assertStandardTier,
+  normalizeComplianceTier,
   docsCol,
   docRef,
   versionsCol,
@@ -195,19 +198,27 @@ exports.createOnboardingSignatureDocumentVersionUpload = onCall(
       errorMessage: null,
     });
 
+    const stagingPath = `onboardingUploads/${salonId}/${uid}/${versionId}.pdf`;
     const bucket = await resolveBucket();
     const file = bucket.file(storagePath);
-    const [uploadUrl] = await file.getSignedUrl({
-      version: "v4",
-      action: "write",
-      expires: Date.now() + UPLOAD_URL_TTL_MS,
-      contentType: PDF_MIME,
-    });
+    let uploadUrl = null;
+    try {
+      const [url] = await file.getSignedUrl({
+        version: "v4",
+        action: "write",
+        expires: Date.now() + UPLOAD_URL_TTL_MS,
+        contentType: PDF_MIME,
+      });
+      uploadUrl = url;
+    } catch (signErr) {
+      console.warn("[EsignLibrary] getSignedUrl unavailable, client will use staging upload", signErr && signErr.message);
+    }
 
     return {
       documentId,
       versionId,
       uploadUrl,
+      stagingPath,
       storagePath,
       contentType: PDF_MIME,
       maxSizeBytes: MAX_SIZE_BYTES,
@@ -285,6 +296,18 @@ exports.finalizeOnboardingSignatureDocumentVersion = onCall(
 
     const bucket = await resolveBucket();
     const file = bucket.file(storagePath);
+    const stagingPath = trimStr(request.data && request.data.stagingPath);
+    if (stagingPath) {
+      if (!stagingPath.startsWith(`onboardingUploads/${salonId}/`)) {
+        throw new HttpsError("invalid-argument", "Invalid staging path.");
+      }
+      const stagingFile = bucket.file(stagingPath);
+      const [stagingExists] = await stagingFile.exists();
+      if (stagingExists) {
+        await stagingFile.copy(file);
+        try { await stagingFile.delete({ ignoreNotFound: true }); } catch (_) {}
+      }
+    }
 
     async function markFailed(message) {
       await vref.set(

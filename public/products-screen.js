@@ -7,13 +7,13 @@
 import {
   escapeHtml,
   formatMoney,
-} from "./products-helpers.js?v=20260626_products_split";
-import { pstate } from "./products-state.js?v=20260626_products_split";
+} from "./products-helpers.js?v=20260902_prod_cats";
+import { pstate } from "./products-state.js?v=20260902_prod_cats";
 import {
   ffCanManageProducts,
   loadProductsCatalog,
   reorderProductWithinCategory,
-} from "./products-data.js?v=20260626_products_split";
+} from "./products-data.js?v=20260902_prod_cats";
 import {
   categoryName,
   groupedProductsNested,
@@ -25,7 +25,7 @@ import {
   renderProductLocationsTab,
   renderProductStaffTab,
   renderProductInventoryTab,
-} from "./products-ui.js?v=20260626_products_split";
+} from "./products-ui.js?v=20260902_prod_cats";
 import {
   closeProductsEditor,
   renderProductsEditor,
@@ -38,7 +38,7 @@ import {
   wireProductLocationsTab,
   wireProductStaffTab,
   wireProductInventoryTab,
-} from "./products-editor.js?v=20260702_products_split";
+} from "./products-editor.js?v=20260902_prod_cats";
 
 // ===== Products screen mobile drill-down (list -> product menu -> section) =====
 // Mirrors the Services screen pattern. On phones (<=640px) the two-pane desktop
@@ -509,5 +509,33 @@ window.goToProducts = goToProducts;
 window.ffCloseProductsScreen = ffCloseProductsScreen;
 window.ffProductsAddCategory = ffProductsAddCategory;
 window.ffProductsAddProduct = ffProductsAddProduct;
+
+if (typeof document !== "undefined" && !window.__ffProductsLocationListenerBound) {
+  window.__ffProductsLocationListenerBound = true;
+  const reloadProductsForLocation = async () => {
+    try { closeProductsEditor(); } catch (_) {}
+    pstate.products = [];
+    pstate.productCategories = [];
+    pstate.selectedProductId = null;
+    pstate.selectedCategoryId = null;
+    pstate.editorState = null;
+    pstate.productsSidebarRenderedOnce = false;
+    pstate.openProductCats.clear();
+    const list = document.getElementById("productsCatalogList");
+    if (list) list.innerHTML = "";
+    const screen = document.getElementById("productsScreen");
+    if (!screen || screen.style.display === "none") return;
+    await loadProductsCatalog();
+    pstate.selectedProductId = pstate.products[0]?.id || null;
+    pstate.selectedCategoryId = pstate.selectedProductId ? null : (pstate.productCategories[0]?.id || null);
+    renderProducts();
+  };
+  document.addEventListener("ff-active-location-changed", () => {
+    reloadProductsForLocation().catch((err) => console.warn("[Products] location reload failed", err));
+  });
+  document.addEventListener("ff-product-share-changed", () => {
+    reloadProductsForLocation().catch((err) => console.warn("[Products] share reload failed", err));
+  });
+}
 
 export { renderProducts };

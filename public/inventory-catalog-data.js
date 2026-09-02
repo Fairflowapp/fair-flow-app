@@ -4,7 +4,8 @@
 // Fix: imports sharedInvSort (was missing since the original catalog extraction,
 // causing a swallowed ReferenceError in shared-catalog load/import).
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
+import { productDocInActiveLoc } from "./products-location.js?v=20260902_prod_cats";
 import {
   newRowId,
   cloneCategoryTree,
@@ -14,7 +15,7 @@ import {
   INV_PRODUCTS_GENERAL_SUB,
   SHARED_INV_DEFAULT_GROUP_ID,
   sharedInvSort,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   doc,
@@ -31,6 +32,7 @@ let getSalonId;
 let mountOrRefreshMockUi;
 let _ffInvActiveLocId;
 let _ffInvDocInActiveLoc;
+let _ffInvHasActiveLocationForWrite;
 let ffCanManageInventory;
 let findSubMeta;
 let prepareInventoryTableStateForMount;
@@ -43,6 +45,7 @@ export function initCatalogData(deps) {
     mountOrRefreshMockUi,
     _ffInvActiveLocId,
     _ffInvDocInActiveLoc,
+    _ffInvHasActiveLocationForWrite,
     ffCanManageInventory,
     findSubMeta,
     prepareInventoryTableStateForMount,
@@ -59,7 +62,20 @@ function sharedInvSubcategoriesRef(accountId, catId) {
   return collection(db, `accounts/${accountId}/shared/inventoryCatalog/categories/${catId}/subcategories`);
 }
 
+async function loadSharedInventoryShareEnabled(accountId) {
+  if (!accountId) return false;
+  try {
+    const snap = await getDoc(doc(db, `accounts/${accountId}/shared/inventoryCatalog`));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    return data.shareEnabled === true || data.enabled === true;
+  } catch (e) {
+    console.warn("[SharedInventory] share flag load failed", e);
+    return false;
+  }
+}
+
 async function tryLoadSharedInventoryCategories(accountId) {
+  if (!(await loadSharedInventoryShareEnabled(accountId))) return false;
   try {
     const catSnap = await getDocs(sharedInvCategoriesRef(accountId));
     const rawCats = catSnap.docs
@@ -139,10 +155,21 @@ async function loadInventoryCategoriesFromFirestore() {
   }
   invState._invCatLoadError = null;
   invState._invUsingSharedCatalog = false;
-  const [productTree, legacyTree] = await Promise.all([
-    loadProductsForInventory(salonId),
-    loadLegacyInventoryCategoryTree(salonId),
-  ]);
+  if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) {
+    invState._categoryTree = [];
+    invState._persistedCategoryTree = [];
+    invState._invProductsList = [];
+    invState._invCatLoadError = "Choose a location to view inventory.";
+    return;
+  }
+  const productTree = await loadProductsForInventory(salonId);
+  if (await tryLoadSharedInventoryCategories(salonId)) {
+    invState._categoryTree = [...(invState._categoryTree || []), ...productTree];
+    invState._expandedCategoryIds = new Set(invState._categoryTree.map((c) => c.id));
+    ensureValidSubcategorySelection();
+    return;
+  }
+  const legacyTree = await loadLegacyInventoryCategoryTree(salonId);
   invState._categoryTree = [...legacyTree, ...productTree];
   invState._persistedCategoryTree = cloneCategoryTree(legacyTree);
   invState._expandedCategoryIds = new Set(invState._categoryTree.map((c) => c.id));
@@ -151,6 +178,12 @@ async function loadInventoryCategoriesFromFirestore() {
 
 async function persistInventoryCategoryTree(desiredTree) {
   if (!ffCanManageInventory()) return;
+  if (invState._invUsingSharedCatalog) {
+    throw new Error("Shared catalog is on. Edit categories in Shared Setup.");
+  }
+  if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) {
+    throw new Error("Choose a location before changing inventory categories.");
+  }
   const salonId = await getSalonId();
   if (!salonId) throw new Error("No salon");
 
@@ -504,16 +537,21 @@ async function loadProductsForInventory(salonId) {
   invState._invProductsList = [];
   invState._invProductCatSubs = new Map();
   try {
+    if (typeof window.ffLoadProductCatalogShareEnabled === "function") {
+      try { await window.ffLoadProductCatalogShareEnabled(); } catch (_) {}
+    }
     const [catSnap, prodSnap] = await Promise.all([
       getDocs(collection(db, `salons/${salonId}/productCategories`)),
       getDocs(collection(db, `salons/${salonId}/products`)),
     ]);
-    const cats = catSnap.docs
+    const catsAll = catSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
-    invState._invProductsList = prodSnap.docs
+    const productsAll = prodSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    const cats = catsAll;
+    invState._invProductsList = productsAll.filter(productDocInActiveLoc);
     const catIds = new Set(cats.map((c) => c.id));
     const tree = cats.map((c) => {
       const catId = String(c.id);

@@ -21,6 +21,10 @@ import {
   deleteObject,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
+import {
+  ffOpenInAppDocumentOverlay,
+  ffIsPhoneDocViewer,
+} from "/inapp-pdf-viewer.js?v=20260825_od_iospdf";
 import { sdState, STAFF_DOC_FILTER_IDS, getMediaDownloadUrlCallable } from "./staff-documents-state.js?v=20260701_staffdoc_state_split";
 import {
   trimStr,
@@ -390,9 +394,12 @@ function ffStaffDocsIsImageDocument(url, fileName) {
 
 function ffOpenStaffDocumentIosViewer(url, fileName) {
   if (!url) return false;
+  const isBlob = /^(blob:|data:)/i.test(String(url || ""));
+  if (isBlob || ffStaffDocsIsImageDocument(url, fileName)) {
+    return ffOpenInAppDocumentOverlay(url, fileName || "Document");
+  }
   const rid = `ffstaffdoc_view_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const safeTitle = escapeHtml(fileName || "Document");
-  const isImage = ffStaffDocsIsImageDocument(url, fileName);
   const overlay = document.createElement("div");
   overlay.id = rid;
   overlay.setAttribute("role", "dialog");
@@ -405,13 +412,8 @@ function ffOpenStaffDocumentIosViewer(url, fileName) {
       <button type="button" data-ff-doc-view-close style="border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer;">Close</button>
     </div>
     <div style="flex:1 1 auto;min-height:0;background:#fff;border-radius:14px;overflow:hidden;display:flex;align-items:center;justify-content:center;">
-      ${
-        isImage
-          ? `<img src="${escapeAttr(url)}" alt="${safeTitle}" style="display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;" />`
-          : `<iframe src="${escapeAttr(url)}" title="${safeTitle}" style="width:100%;height:100%;border:0;background:#fff;"></iframe>`
-      }
-    </div>
-  `;
+      <iframe src="${escapeAttr(url)}" title="${safeTitle}" style="width:100%;height:100%;border:0;background:#fff;"></iframe>
+    </div>`;
   const close = () => {
     try {
       overlay.remove();
@@ -428,7 +430,9 @@ function ffOpenStaffDocumentIosViewer(url, fileName) {
 }
 
 function openStaffDocumentResolvedUrl(url, tab, fileName) {
-  if (ffStaffDocsIsIosMobile()) {
+  const isBlob = /^(blob:|data:)/i.test(String(url || ""));
+  const phone = ffStaffDocsIsIosMobile() || ffIsPhoneDocViewer();
+  if (ffStaffDocsIsIosMobile() || (isBlob && phone)) {
     closePopupIfOpen(tab);
     return ffOpenStaffDocumentIosViewer(url, fileName);
   }
@@ -561,6 +565,54 @@ function ffStaffDocClickTargetEl(e) {
   return null;
 }
 
+/** S1 sealed paths — client Storage read denied; use getOnboardingArtifactReadUrl. */
+function isSealedOnboardingStoragePath(storagePath) {
+  const p = trimStr(storagePath);
+  if (!p) return false;
+  if (p.startsWith("onboardingArtifacts/")) return true;
+  if (p.includes("/onboarding-portal/") || p.includes("/onboarding-signature-library/")) {
+    return true;
+  }
+  return /_signed\.pdf$/i.test(p) || /_certificate\.pdf$/i.test(p);
+}
+
+function isOnboardingLinkedDoc(d, storagePath) {
+  if (isPortalEsignDocument(d)) return true;
+  if (isSealedOnboardingStoragePath(storagePath)) return true;
+  if (trimStr(d && d.onboardingRunId) || trimStr(d && d.onboardingTaskId)) return true;
+  return false;
+}
+
+function onboardingReadKind(d, storagePath) {
+  const path = trimStr(storagePath);
+  if (String((d && d.esignKind) || "").toLowerCase() === "certificate") {
+    return "certificate";
+  }
+  if (/_certificate\.pdf$/i.test(path)) return "certificate";
+  if (isPortalEsignDocument(d) || /_signed\.pdf$/i.test(path)) return "signed";
+  return "upload";
+}
+
+async function resolveOnboardingArtifactReadUrl(storagePath, staffId, docData) {
+  const d = docData || {};
+  const getter =
+    typeof window !== "undefined" &&
+    typeof window.ffGetOnboardingArtifactReadUrl === "function"
+      ? window.ffGetOnboardingArtifactReadUrl
+      : null;
+  if (!getter) {
+    throw new Error("Onboarding read module not loaded yet. Refresh and try again.");
+  }
+  const meta = await getter({
+    storagePath: trimStr(storagePath),
+    staffId: trimStr(staffId),
+    runId: trimStr(d.onboardingRunId),
+    taskId: trimStr(d.onboardingTaskId),
+    kind: onboardingReadKind(d, storagePath),
+  });
+  return trimStr(meta && (meta.readUrl || meta.url));
+}
+
 async function ffHandleStaffDocumentActionClick(e) {
   const el = ffStaffDocClickTargetEl(e);
   const filterBtn = el && el.closest && el.closest("button[data-ff-doc-filter]");
@@ -636,6 +688,34 @@ async function ffHandleStaffDocumentActionClick(e) {
       const storagePath = trimStr(d.storagePath || d.filePath || "");
       const fileUrl = trimStr(d.fileUrl || "");
       const fileNameHint = trimStr(d.fileName || "");
+      const onboardingLinked = isOnboardingLinkedDoc(d, storagePath);
+
+      // S7: onboarding files — never getDownloadURL / stored fileUrl.
+      // Use short-lived getOnboardingArtifactReadUrl only.
+      if (
+        onboardingLinked &&
+        (storagePath ||
+          (trimStr(d.onboardingRunId) && trimStr(d.onboardingTaskId)))
+      ) {
+        if (!auth.currentUser) {
+          closePopupIfOpen(tab);
+          ffToast("Sign in to view files.", "error");
+          return;
+        }
+        const url = await resolveOnboardingArtifactReadUrl(
+          storagePath,
+          staffId,
+          d
+        );
+        if (url) {
+          openStaffDocumentResolvedUrl(url, tab, fileNameHint);
+        } else {
+          closePopupIfOpen(tab);
+          ffToast("Could not open onboarding document.", "error");
+        }
+        return;
+      }
+
       // Inbox-approved docs usually have a Firebase download URL; open before Cloud Function path.
       if (fileUrl.startsWith("https://") || fileUrl.startsWith("http://")) {
         openStaffDocumentResolvedUrl(fileUrl, tab, fileNameHint);
@@ -660,6 +740,18 @@ async function ffHandleStaffDocumentActionClick(e) {
             url = res?.data?.url || "";
           } catch (cerr) {
             console.warn("[staff-documents] getMediaDownloadUrl", cerr);
+          }
+        }
+        // Fallback: path may be an onboarding artifact without via=portal_esign
+        if (!url && isSealedOnboardingStoragePath(storagePath)) {
+          try {
+            url = await resolveOnboardingArtifactReadUrl(
+              storagePath,
+              staffId,
+              d
+            );
+          } catch (aerr) {
+            console.warn("[staff-documents] artifact readUrl", aerr);
           }
         }
         if (url) {

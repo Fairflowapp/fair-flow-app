@@ -11,7 +11,7 @@ import {
   setDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   parseNum,
@@ -20,12 +20,12 @@ import {
   sortOrderBuilderLines,
   seedOrderBuilderSelectionIfEmpty,
   sanitizeManualItemForDraft,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
-import { getCategoryTree } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
-import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260728_inv_mobile_unstick";
-import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260728_inv_mobile_unstick";
-import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260902_prod_cats";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260902_inv_iso";
+import { toggleShoppingRowQty } from "./inventory-orders-detail.js?v=20260902_inv_iso";
+import { loadInventoryOrderDraft, scheduleInventoryOrderDraftSave } from "./inventory-orders-drafts.js?v=20260902_inv_iso";
+import { handleInventoryOrderReceiptFileSelected } from "./inventory-orders-receipts.js?v=20260902_inv_iso";
 
 // ── injected by initOrdersBuilder() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi, getSelectedSubMeta, fetchSubcategoryInventoryDoc, findCategoryAndSubForSubId, goToInventory;

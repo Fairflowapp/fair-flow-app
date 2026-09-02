@@ -2,7 +2,7 @@
 // Orders detail — UI (modal render, export/print, row interactions). Extracted verbatim from inventory-orders-detail.js.
 // Firestore commits & local drafts live in inventory-orders-detail-commit.js.
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   parseNum,
@@ -21,12 +21,12 @@ import {
   formatInventoryOrderStatusDisplay,
   formatInventoryOrderOrderedByDisplay,
   sortOrderDetailPairsOpenFirst,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 import {
   isInvOrderDetailCommitBusy,
   parseInventoryCellRefFromOrderLine,
   ensureShoppingDraft,
-} from "./inventory-orders-detail-commit.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-detail-commit.js?v=20260902_inv_iso";
 
 // ── injected by initOrdersDetailUi() (orchestrator spine) ──
 let mountOrRefreshMockUi;

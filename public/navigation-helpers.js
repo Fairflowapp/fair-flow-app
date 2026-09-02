@@ -1,5 +1,8 @@
-// Navigation function to return to Queue view
-function goToQueue() {
+// Navigation function to return to Queue view.
+// opts.force === true: user tapped Queue — close Apps. Restore timers must
+// call goToQueue() without force so they do not slam the Apps panel shut.
+function goToQueue(opts) {
+  var forceCloseApps = !!(opts && opts.force === true);
   try {
     document.body.classList.add('ff-queue-route-active', 'ff-queue-ui-visible', 'ff-ui-ready');
     document.body.classList.remove('ff-auth-resolving', 'ff-staff-members-open', 'ff-dashboard-open', 'ff-dashboard-analytics-open');
@@ -7,6 +10,18 @@ function goToQueue() {
   if (typeof window.ffCloseGlobalBlockingOverlays === 'function') {
     try {
       window.ffCloseGlobalBlockingOverlays();
+    } catch (e) {}
+  }
+  if (forceCloseApps) {
+    try {
+      var appsBackdrop = document.getElementById('appsOverlayBackdrop');
+      var appsPanel = document.getElementById('appsPanel');
+      if (appsBackdrop) {
+        appsBackdrop.style.display = 'none';
+        appsBackdrop.style.pointerEvents = '';
+      }
+      if (appsPanel) appsPanel.style.display = 'none';
+      document.body.style.overflow = '';
     } catch (e) {}
   }
   try {
@@ -1273,12 +1288,10 @@ function mapTrainingItemDoc(docSnap) {
     description: data.description || '',
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
-    // locationIds: empty array or missing = visible at ALL locations (legacy
-    // trainings have no locationIds field and should remain visible everywhere).
-    // Non-empty array = visible only at the listed locations.
     locationIds: Array.isArray(data.locationIds)
       ? data.locationIds.map((id) => String(id || '').trim()).filter(Boolean)
       : [],
+    shareEnabled: data.shareEnabled === true || data.allLocations === true,
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -1330,6 +1343,9 @@ async function fetchTrainingItems() {
 }
 
 async function createTrainingItem(data) {
+  if (!trainingHasActiveLocationForWrite()) {
+    throw new Error('Choose a location before saving training.');
+  }
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
   const { collection, addDoc, serverTimestamp } = await getTrainingFirestoreApi();
@@ -1341,6 +1357,7 @@ async function createTrainingItem(data) {
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
     locationIds: Array.isArray(data.locationIds) ? data.locationIds : [],
+    shareEnabled: data.shareEnabled === true,
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -1351,6 +1368,9 @@ async function createTrainingItem(data) {
 }
 
 async function updateTrainingItem(id, data) {
+  if (!trainingHasActiveLocationForWrite()) {
+    throw new Error('Choose a location before saving training.');
+  }
   const salonId = getCurrentTrainingSalonId();
   const db = getTrainingDb();
   const { doc, getDoc, updateDoc, serverTimestamp } = await getTrainingFirestoreApi();
@@ -1365,6 +1385,7 @@ async function updateTrainingItem(id, data) {
     visibleToRoles: Array.isArray(data.visibleToRoles) ? data.visibleToRoles : [],
     technicianTypes: Array.isArray(data.technicianTypes) ? data.technicianTypes : [],
     locationIds: Array.isArray(data.locationIds) ? data.locationIds : [],
+    shareEnabled: data.shareEnabled === true,
     required: data.required === true,
     contentBlocks: Array.isArray(data.contentBlocks) ? data.contentBlocks : [],
     quizQuestions: Array.isArray(data.quizQuestions) ? data.quizQuestions : [],
@@ -1560,6 +1581,9 @@ function _ffInstallTrainingLocationListener() {
   window.__ff_training_loc_listener_installed = true;
   document.addEventListener('ff-active-location-changed', () => {
     try {
+      if (typeof ffCloseTrainingOverlaysForNavigation === 'function') {
+        ffCloseTrainingOverlaysForNavigation();
+      }
       const trainingScreen = document.getElementById('trainingScreen');
       if (trainingScreen && trainingScreen.style.display !== 'none') {
         const detailsView = document.getElementById('trainingDetailsView');
@@ -1740,6 +1764,59 @@ function buildTrainingUserContextFromStaff(staff) {
   };
 }
 
+function trainingActiveLocationId() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window !== 'undefined' && typeof window.__ff_active_location_id === 'string'
+      ? window.__ff_active_location_id.trim()
+      : '';
+    if (raw) return raw;
+  } catch (_) {}
+  return '';
+}
+
+function trainingUserHasMultipleLocations() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== 'undefined' && typeof window.ffGetLocations === 'function') {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function trainingPrimaryLocationId() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffResolveCurrentStaff === 'function' && typeof w.ffEnsureStaffLocationFields === 'function') {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === 'function') {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+function trainingHasActiveLocationForWrite() {
+  if (!trainingUserHasMultipleLocations()) return true;
+  return !!trainingActiveLocationId();
+}
+
 /**
  * Whether a specific staff record can receive a training notification based
  * on the training's locationIds vs the staff's allowedLocationIds.
@@ -1750,16 +1827,34 @@ function buildTrainingUserContextFromStaff(staff) {
  * notify a Key-Biscayne-only staff if the training is tagged for that branch.
  */
 function isTrainingVisibleForStaff(trainingItem, staff) {
-  const locIds = Array.isArray(trainingItem?.locationIds) ? trainingItem.locationIds : [];
-  if (!locIds.length) return true;
-  const staffAllowed = Array.isArray(staff?.allowedLocationIds)
+  if (!staff) return false;
+  if (trainingItem && trainingItem.shareEnabled === true) return true;
+  const locIds = Array.isArray(trainingItem?.locationIds)
+    ? trainingItem.locationIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  let staffAllowed = Array.isArray(staff?.allowedLocationIds)
     ? staff.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
-  // Legacy staff without explicit location assignments shouldn't be blocked
-  // from training - they pre-date the per-location model and are assumed to
-  // work everywhere in the salon.
-  if (!staffAllowed.length) return true;
-  return staffAllowed.some((lid) => locIds.includes(lid));
+  let staffPrimary = typeof staff?.primaryLocationId === 'string' ? staff.primaryLocationId.trim() : '';
+  try {
+    if (typeof window.ffEnsureStaffLocationFields === 'function') {
+      const f = window.ffEnsureStaffLocationFields(staff);
+      if (Array.isArray(f.allowedLocationIds)) {
+        staffAllowed = f.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean);
+      }
+      if (typeof f.primaryLocationId === 'string') staffPrimary = f.primaryLocationId.trim();
+    }
+  } catch (_) {}
+  if (locIds.length) {
+    if (!staffAllowed.length) {
+      return !trainingUserHasMultipleLocations() || (!!staffPrimary && locIds.includes(staffPrimary));
+    }
+    return staffAllowed.some((lid) => locIds.includes(lid));
+  }
+  if (!trainingUserHasMultipleLocations()) return true;
+  const primary = trainingPrimaryLocationId();
+  if (staffAllowed.length) return !!primary && staffAllowed.includes(primary);
+  return !!primary && staffPrimary === primary;
 }
 
 function isStaffEligibleForTrainingNotification(trainingItem, staff) {
@@ -1771,7 +1866,7 @@ function isStaffEligibleForTrainingNotification(trainingItem, staff) {
   if (!isTrainingVisibleForStaff(trainingItem, staff)) return false;
   // Run the rest of the relevance check (role + technician-type) without
   // re-applying the location gate - we already handled it above.
-  const trainingWithoutLocationGate = { ...trainingItem, locationIds: [] };
+  const trainingWithoutLocationGate = { ...trainingItem, locationIds: [], shareEnabled: true };
   return isTrainingRelevantToCurrentUser(trainingWithoutLocationGate, buildTrainingUserContextFromStaff(staff));
 }
 
@@ -2039,28 +2134,30 @@ function getTrainingReportsStaffList() {
 }
 
 /**
- * Whether a staff record belongs to the currently-active location for the
- * purposes of Training reports.
- *
- * - If the salon has only one location, or the caller cannot resolve an
- *   active id, everyone passes (single-branch / legacy mode).
- * - Staff without any allowedLocationIds pre-date the multi-location model
- *   and are treated as "works everywhere" so they don't silently disappear
- *   from reports after a migration.
- * - Otherwise, the staff must have the active location in their
- *   allowedLocationIds list.
+ * Staff belongs to the active branch for Training reports.
+ * Unassigned staff: single-location accounts, or the staff primary only.
  */
 function isStaffAtCurrentTrainingLocation(staff) {
   if (!staff) return false;
-  const activeLocId = (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function')
-    ? String(window.ffGetActiveLocationId() || '').trim()
-    : '';
-  if (!activeLocId) return true;
-  const allowed = Array.isArray(staff.allowedLocationIds)
+  const multi = trainingUserHasMultipleLocations();
+  const activeLocId = trainingActiveLocationId();
+  if (!activeLocId) return !multi;
+  let allowed = Array.isArray(staff.allowedLocationIds)
     ? staff.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
-  if (!allowed.length) return true;
-  return allowed.includes(activeLocId);
+  let primary = typeof staff.primaryLocationId === 'string' ? staff.primaryLocationId.trim() : '';
+  try {
+    if (typeof window.ffEnsureStaffLocationFields === 'function') {
+      const f = window.ffEnsureStaffLocationFields(staff);
+      if (Array.isArray(f.allowedLocationIds)) {
+        allowed = f.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean);
+      }
+      if (typeof f.primaryLocationId === 'string') primary = f.primaryLocationId.trim();
+    }
+  } catch (_) {}
+  if (allowed.length) return allowed.includes(activeLocId);
+  if (!multi) return true;
+  return !!primary && primary === activeLocId;
 }
 
 function getStaffRoleForTraining(staff) {
@@ -2772,7 +2869,7 @@ async function sendTrainingReminderFromReport(trainingId, staffLookupKey) {
   try {
     if (typeof window.ffSendTrainingReminderChat !== 'function') {
       try {
-        await import('/chat.js?v=20260701_chat_compose_split');
+        await import('/chat.js?v=20260819_live_group_title');
       } catch (eImp) {
         console.warn('[Training] Could not load chat module for reminder', eImp);
       }
@@ -3438,25 +3535,23 @@ function getCurrentTrainingUserContext() {
 }
 
 /**
- * Check whether a training item is visible at the currently active location.
- *
- * Rules:
- * - Training with empty/missing locationIds is "salon-wide" - always visible.
- * - Training with one or more locationIds is only visible when the user's
- *   active location matches one of them.
- * - If we can't determine an active location (single-location salon, or the
- *   location switcher hasn't initialized yet), we fall back to "visible" so
- *   we don't accidentally hide content from users who only operate in one
- *   salon.
+ * Training belongs to the active branch only.
+ * Explicit locationIds must include the active location.
+ * shareEnabled = visible at every location.
+ * Unstamped/legacy (empty locationIds, not shared): single-location or primary only.
  */
 function isTrainingVisibleAtCurrentLocation(item) {
-  const locIds = Array.isArray(item?.locationIds) ? item.locationIds : [];
-  if (!locIds.length) return true;
-  const activeLocId = (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function')
-    ? String(window.ffGetActiveLocationId() || '').trim()
-    : '';
-  if (!activeLocId) return true;
-  return locIds.some((id) => String(id || '').trim() === activeLocId);
+  const multi = trainingUserHasMultipleLocations();
+  const activeLocId = trainingActiveLocationId();
+  if (!activeLocId) return !multi;
+  if (item && item.shareEnabled === true) return true;
+  const locIds = Array.isArray(item?.locationIds)
+    ? item.locationIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  if (locIds.length) return locIds.includes(activeLocId);
+  if (!multi) return true;
+  const primary = trainingPrimaryLocationId();
+  return !!primary && activeLocId === primary;
 }
 
 /** Map Firestore / legacy labels to canonical training audience roles */
@@ -3593,7 +3688,7 @@ function resetTrainingForm() {
   if (descriptionInput) descriptionInput.value = '';
   document.querySelectorAll('input[name="trainingVisibleRole"]').forEach((cb) => { cb.checked = false; });
   document.querySelectorAll('input[name="trainingTechnicianType"]').forEach((cb) => { cb.checked = false; cb.disabled = false; });
-  populateTrainingLocationCheckboxes([]);
+  populateTrainingLocationCheckboxes([], false);
   trainingDraftBlocks = [];
   trainingDraftQuizQuestions = [];
   if (validation) validation.style.display = 'none';
@@ -3604,17 +3699,10 @@ function resetTrainingForm() {
 
 /**
  * Rebuild the "Visible At Locations" checkbox list inside the training modal.
- *
- * - If the salon has zero or one location we hide the whole section, because
- *   the concept of "per-location training" is meaningless there.
- * - An "All locations" master checkbox sits on top. When it's checked, the
- *   individual location checkboxes are cleared and disabled - this mirrors
- *   the "select all_technicians or specific types" pattern we use for
- *   Service Provider Types and keeps the UX consistent.
- * - `preSelected` is the array of locationIds already saved on the training
- *   (empty for new trainings or legacy salon-wide trainings).
+ * New trainings default to the active location. "All locations" is an
+ * explicit share, not the empty-selection fallback.
  */
-function populateTrainingLocationCheckboxes(preSelected) {
+function populateTrainingLocationCheckboxes(preSelected, shareEnabled) {
   const wrap = document.getElementById('trainingLocationsWrap');
   const container = document.getElementById('trainingLocationsCheckboxes');
   if (!wrap || !container) return;
@@ -3630,7 +3718,12 @@ function populateTrainingLocationCheckboxes(preSelected) {
   const selected = Array.isArray(preSelected)
     ? preSelected.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
-  const isAllLocations = selected.length === 0;
+  const activeLoc = trainingActiveLocationId();
+  let isAllLocations = shareEnabled === true;
+  let selectedIds = selected;
+  if (!isAllLocations && !selectedIds.length && activeLoc) {
+    selectedIds = [activeLoc];
+  }
   container.innerHTML = '';
 
   // Helper that builds a chip-styled label matching the modern modal design.
@@ -3664,30 +3757,36 @@ function populateTrainingLocationCheckboxes(preSelected) {
     const { label: lbl } = buildChip(
       String(loc.id),
       loc.name || loc.id,
-      selected.includes(String(loc.id)),
+      selectedIds.includes(String(loc.id)),
       isAllLocations
     );
     container.appendChild(lbl);
   });
 
-  // Wire up the "All locations" toggle so it clears + disables the specific
-  // checkboxes when re-activated. This prevents the user from saving an
-  // inconsistent state like "All locations + Brickell only".
+  const selectActiveLocationChip = () => {
+    if (!activeLoc) return;
+    const match = container.querySelector(`input[name="trainingLocation"][value="${activeLoc}"]`);
+    if (match) match.checked = true;
+  };
+
   allCb.addEventListener('change', () => {
     const specific = container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])');
     if (allCb.checked) {
       specific.forEach((el) => { el.checked = false; el.disabled = true; });
     } else {
       specific.forEach((el) => { el.disabled = false; });
+      const anyChecked = Array.from(specific).some((c) => c.checked);
+      if (!anyChecked) selectActiveLocationChip();
     }
   });
-  // Unchecking every specific location auto-restores the "All" state.
   container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])').forEach((el) => {
     el.addEventListener('change', () => {
-      const anyChecked = Array.from(container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])'))
-        .some((c) => c.checked);
+      const specific = Array.from(container.querySelectorAll('input[name="trainingLocation"]:not([value="__all__"])'));
+      const anyChecked = specific.some((c) => c.checked);
       if (anyChecked) {
         allCb.checked = false;
+      } else {
+        selectActiveLocationChip();
       }
     });
   });
@@ -3761,6 +3860,12 @@ function _ffEnsureTrainingModalPortal() {
 
 function openCreateTrainingModal() {
   try { console.log('TrainingModal opening'); } catch (_) {}
+  if (!trainingHasActiveLocationForWrite()) {
+    if (typeof window.showToast === 'function') {
+      window.showToast('Choose a location before creating training.');
+    }
+    return;
+  }
   const modal = _ffEnsureTrainingModalPortal();
   const modalTitle = document.getElementById('trainingModalTitle');
   const saveBtn = document.getElementById('trainingSaveBtn');
@@ -3798,7 +3903,10 @@ function openEditTrainingModal(itemId) {
     const cb = document.querySelector(`input[name="trainingTechnicianType"][value="${t}"]`);
     if (cb) cb.checked = true;
   });
-  populateTrainingLocationCheckboxes(Array.isArray(item.locationIds) ? item.locationIds : []);
+  populateTrainingLocationCheckboxes(
+    Array.isArray(item.locationIds) ? item.locationIds : [],
+    item.shareEnabled === true
+  );
   trainingDraftBlocks = (item.contentBlocks || []).map((b) => JSON.parse(JSON.stringify(b)));
   trainingDraftQuizQuestions = (item.quizQuestions || []).map((q) => JSON.parse(JSON.stringify(q)));
   syncTechnicianTypesUI();
@@ -3846,23 +3954,25 @@ function collectTrainingFormData() {
   const requiredInput = document.getElementById('trainingRequiredInput');
   const sendNotificationInput = document.getElementById('trainingSendNotificationInput');
   const descriptionInput = document.getElementById('trainingDescriptionInput');
-  // Collect selected locations. The "__all__" sentinel means "salon-wide" and
-  // is persisted as an empty array (matches legacy trainings created before
-  // per-location scoping existed). Any specific selection overrides "__all__"
-  // even if both were somehow checked, to avoid an inconsistent record.
   const allLocCb = document.querySelector('input[name="trainingLocation"][value="__all__"]');
   const specificLocIds = Array.from(document.querySelectorAll('input[name="trainingLocation"]:checked'))
     .map((el) => el.value)
     .filter((v) => v && v !== '__all__');
-  const locationIds = (allLocCb && allLocCb.checked && specificLocIds.length === 0)
-    ? []
-    : specificLocIds;
+  const shareEnabled = !!(allLocCb && allLocCb.checked && specificLocIds.length === 0);
+  let locationIds = specificLocIds;
+  if (shareEnabled) {
+    locationIds = [];
+  } else if (!locationIds.length) {
+    const loc = trainingActiveLocationId();
+    locationIds = loc ? [loc] : [];
+  }
   return {
     title: titleInput?.value?.trim() || '',
     category: categorySelect?.value?.trim() || '',
     visibleToRoles: Array.from(document.querySelectorAll('input[name="trainingVisibleRole"]:checked')).map((el) => el.value),
     technicianTypes: Array.from(document.querySelectorAll('input[name="trainingTechnicianType"]:checked')).map((el) => el.value),
     locationIds,
+    shareEnabled,
     required: !!requiredInput?.checked,
     sendNotificationNow: !!sendNotificationInput?.checked,
     description: descriptionInput?.value?.trim() || '',
@@ -3896,7 +4006,18 @@ function validateTrainingForm(data) {
 
 async function saveTrainingItemLocal() {
   const validation = document.getElementById('trainingValidationMsg');
+  if (!trainingHasActiveLocationForWrite()) {
+    if (validation) {
+      validation.textContent = 'Choose a location before saving training.';
+      validation.style.display = 'block';
+    }
+    return;
+  }
   const data = collectTrainingFormData();
+  if (trainingUserHasMultipleLocations() && data.shareEnabled !== true && !data.locationIds.length) {
+    const loc = trainingActiveLocationId();
+    if (loc) data.locationIds = [loc];
+  }
   const validationMsg = validateTrainingForm(data);
   if (validation) validation.style.display = 'none';
   if (validationMsg) {
@@ -4105,12 +4226,10 @@ function renderTrainingLibrary() {
     const completedBadge = isCompleted
       ? '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:#d1fae5;border:1px solid #10b981;color:#059669;font-weight:600;">Completed -</span>'
       : '';
-    // Location badge: tell managers at a glance which locations a training
-    // is pinned to. Empty locationIds (the common case) = salon-wide, no
-    // badge. Otherwise show the location name(s) so it's obvious when a
-    // training will NOT appear at certain branches.
     let locationBadge = '';
-    if (Array.isArray(item.locationIds) && item.locationIds.length > 0) {
+    if (item.shareEnabled === true) {
+      locationBadge = '<span title="Shared with every location" style="font-size:10px;padding:2px 6px;border-radius:4px;background:#f5f3ff;border:1px solid #ddd6fe;color:#6d28d9;font-weight:600;">All locations</span>';
+    } else if (Array.isArray(item.locationIds) && item.locationIds.length > 0) {
       const allLocs = (typeof window !== 'undefined' && typeof window.ffGetActiveLocations === 'function')
         ? (window.ffGetActiveLocations() || [])
         : [];

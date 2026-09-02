@@ -15,17 +15,19 @@ import {
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { generateWeeklySchedule } from "./schedule-generator.js?v=20260615_default_schedule_source";
-import { getEffectiveAvailabilityForDate } from "./schedule-availability.js?v=20260615_default_schedule_source";
+import { generateWeeklySchedule } from "./schedule-generator.js?v=20260817_build_hours";
+import { getEffectiveAvailabilityForDate } from "./schedule-availability.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   _ffSchedActiveLocId,
+  _ffSchedHasActiveLocationForWrite,
   _ffSchedPerLocDocId,
+  _ffSchedUserHasMultipleLocations,
   ffScheduleAppToast,
   getAuthedStaffIdForSchedule,
   loadScheduleWeekPingMap,
-} from "./schedule-ack.js?v=20260702_schedule_ack";
-import { getSchedulePublishDocRef } from "./schedule-cloud.js?v=20260702_schedule_cloud";
+} from "./schedule-ack.js?v=20260902_sched_dual";
+import { getSchedulePublishDocRef } from "./schedule-cloud.js?v=20260902_sched_dual";
 import {
   formatWeekLabel,
   getScheduleStaffKey,
@@ -36,12 +38,18 @@ import {
   ensureScheduleRebuildConfirmModal,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
 
 // -- injected via initScheduleDraft() (wired in schedule-ui.js) --
 let _ffActiveLocationNameForIcs;
 let applyBusinessSettingsToDraft;
-let cloneStandByByDateMap;
+let cloneStandByByDateMap = function cloneStandByByDateMap(map) {
+  try {
+    return JSON.parse(JSON.stringify(map && typeof map === "object" ? map : {}));
+  } catch (_) {
+    return {};
+  }
+};
 let getBusinessStatusForDate;
 let getStaffByScheduleKey;
 let normalizeStandByBlock;
@@ -55,7 +63,6 @@ export function initScheduleDraft(deps) {
   ({
     _ffActiveLocationNameForIcs,
     applyBusinessSettingsToDraft,
-    cloneStandByByDateMap,
     getBusinessStatusForDate,
     getStaffByScheduleKey,
     normalizeStandByBlock,
@@ -65,6 +72,9 @@ export function initScheduleDraft(deps) {
     revalidateLocalDraft,
     standByMapsEqual,
   } = deps);
+  if (typeof deps.cloneStandByByDateMap === "function") {
+    cloneStandByByDateMap = deps.cloneStandByByDateMap;
+  }
 }
 
 function buildAssignmentLookup(draft) {
@@ -191,12 +201,13 @@ function computeFingerprintMapForDraft(draft, staffList) {
 async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList) {
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId || !weekStart || !draft) return;
+  if (!_ffSchedHasActiveLocationForWrite()) return;
   const fp = computeFingerprintMapForDraft(draft, staffList);
   const ref = getSchedulePublishDocRef();
   if (!ref) return;
   const standByByDate =
     scheduleState.schedulePreviewState?.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-      ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+      ? cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate)
       : {};
   try {
     await setDoc(
@@ -220,18 +231,69 @@ async function persistStaffShiftFingerprintsForWeek(weekStart, draft, staffList)
   }
 }
 
-/**
- * Explicit "Save" — writes the current week draft to the CLOUD snapshot
- * (`weekDraftSnapshots[weekStart]`) without publishing it to staff. This makes
- * edits survive a page refresh reliably (loaded from Firestore, not only the
- * device's localStorage) and syncs the draft to the manager's other devices.
- * Staff still can't see the week until it is Published.
- */
-async function saveScheduleWeekDraftToCloud() {
+let _scheduleWeekDraftAutosaveTimer = null;
+let _scheduleWeekDraftAutosaveInFlight = false;
+let _scheduleWeekDraftAutosaveQueued = false;
+
+function setScheduleSaveStatus(text, kind) {
+  const btn = document.getElementById("scheduleSaveDraftBtn");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = text;
+  btn.dataset.ffSaveStatusSeeded = "1";
+  btn.classList.remove("is-ok", "is-busy", "is-error");
+  const state = kind === "error" ? "is-error" : kind === "busy" ? "is-busy" : "is-ok";
+  btn.classList.add(state);
+  btn.style.background = "";
+  btn.style.borderColor = "";
+  btn.style.color = "";
+  const canEdit = scheduleUserCanManualEdit();
+  const buildUi = !canEdit || scheduleState.schedulePreviewMode === "build";
+  btn.style.display = canEdit && buildUi && state !== "is-ok" ? "inline-flex" : "none";
+}
+
+function markScheduleLocalDirty(weekStart) {
+  const dk = getScheduleLocalDirtyStorageKey(weekStart);
+  if (dk && typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(dk, "1");
+    } catch (_) {
+      /* ignore */
+    }
+  }
+}
+
+function queueScheduleWeekDraftAutosave() {
   if (!scheduleUserCanManualEdit()) return;
+  if (_scheduleWeekDraftAutosaveTimer) {
+    clearTimeout(_scheduleWeekDraftAutosaveTimer);
+  }
+  setScheduleSaveStatus("Saving", "busy");
+  _scheduleWeekDraftAutosaveTimer = setTimeout(() => {
+    _scheduleWeekDraftAutosaveTimer = null;
+    void saveScheduleWeekDraftToCloud({ silent: true });
+  }, 450);
+}
+
+/**
+ * Last write on the server is the source of truth (same idea as the queue).
+ * Edits auto-save to `weekDraftSnapshots`. Staff still only see a week after it
+ * is Published — but once it is, every device shows this snapshot.
+ */
+async function saveScheduleWeekDraftToCloud(options = {}) {
+  if (!scheduleUserCanManualEdit()) return;
+  const silent = options.silent === true;
+  if (_scheduleWeekDraftAutosaveInFlight) {
+    _scheduleWeekDraftAutosaveQueued = true;
+    return;
+  }
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId) {
-    ffScheduleAppToast("No salon selected.", 3500);
+    if (!silent) ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  if (!_ffSchedHasActiveLocationForWrite()) {
+    if (!silent) ffScheduleAppToast("Choose a location before saving this schedule.", 3500);
     return;
   }
   const weekRange = getWeekRange(scheduleState.schedulePreviewWeekStart);
@@ -239,29 +301,21 @@ async function saveScheduleWeekDraftToCloud() {
   const draft = scheduleState.schedulePreviewState.draft;
   const staffList = scheduleState.schedulePreviewState.staffList;
   if (!weekStart || !draft || !Array.isArray(staffList)) {
-    ffScheduleAppToast("Schedule is still loading.", 3000);
+    if (!silent) ffScheduleAppToast("Schedule is still loading.", 3000);
     return;
   }
-  const btn = document.getElementById("scheduleSaveDraftBtn");
-  const prevLabel = btn ? btn.textContent : "";
-  if (btn) {
-    btn.disabled = true;
-    btn.style.opacity = "0.7";
-    btn.style.cursor = "default";
-    btn.textContent = "Saving…";
-  }
+  _scheduleWeekDraftAutosaveInFlight = true;
+  setScheduleSaveStatus("Saving", "busy");
   try {
-    // Keep this device's local override in sync with what we push to cloud.
-    persistScheduleDraftOverrideFromState();
+    persistScheduleDraftOverrideFromState({ skipAutosave: true });
     const ref = getSchedulePublishDocRef();
     if (!ref) throw new Error("No schedule document reference.");
     const standByByDate =
       scheduleState.schedulePreviewState?.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-        ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+        ? cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate)
         : {};
-    // Write ONLY the draft snapshot — intentionally NOT the staffShiftFingerprints,
-    // so the "Notify staff of changes" baseline (set at the last Publish) is
-    // preserved and still detects edits made after publishing.
+    scheduleState.scheduleSkipNextDraftSnapshotRefresh = true;
+    scheduleState.scheduleSkipDraftRefreshUntil = Date.now() + 4000;
     await setDoc(
       ref,
       {
@@ -277,16 +331,20 @@ async function saveScheduleWeekDraftToCloud() {
       },
       { merge: true },
     );
-    ffScheduleAppToast("Saved. This draft will survive refresh and sync to your other devices.", 4500);
+    clearScheduleLocalDirtyForCurrentUser(weekStart);
+    setScheduleSaveStatus("Saved", "ok");
+    queuePublishedWeekAutoNotify();
   } catch (e) {
+    scheduleState.scheduleSkipNextDraftSnapshotRefresh = false;
+    markScheduleLocalDirty(weekStart);
     console.error("[ScheduleUI] save week draft to cloud", e);
-    ffScheduleAppToast(e?.message || "Could not save the draft. Check connection or Firestore rules.", 5000);
+    setScheduleSaveStatus("Not saved", "error");
+    ffScheduleAppToast("Could not save the schedule. Check connection.", 5000);
   } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.style.opacity = "1";
-      btn.style.cursor = "pointer";
-      btn.textContent = prevLabel || "Save";
+    _scheduleWeekDraftAutosaveInFlight = false;
+    if (_scheduleWeekDraftAutosaveQueued) {
+      _scheduleWeekDraftAutosaveQueued = false;
+      queueScheduleWeekDraftAutosave();
     }
   }
 }
@@ -304,7 +362,7 @@ async function syncPublishedWeekStandByToCloud(weekStart) {
   if (!ref) return;
   const standByByDate =
     scheduleState.schedulePreviewState?.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-      ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+      ? cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate)
       : {};
   try {
     await setDoc(
@@ -324,27 +382,124 @@ async function syncPublishedWeekStandByToCloud(weekStart) {
     ffScheduleAppToast("Stand by saved — visible to all staff.", 3500);
   } catch (e) {
     console.warn("[ScheduleUI] sync stand-by to cloud", e);
-    ffScheduleAppToast(e?.message || "Could not save stand by to the cloud.", 4500);
+    ffScheduleAppToast("Could not save stand by. Check connection.", 4500);
   }
 }
 
-async function notifyStaffScheduleChanges() {
+function updateScheduleUndoUi() {
+  if (typeof window !== "undefined") window.ffUpdateScheduleUndoUi = updateScheduleUndoUi;
+  const btn = document.getElementById("scheduleUndoBtn");
+  if (!btn) return;
+  const canEdit = scheduleUserCanManualEdit();
+  const buildUi = !canEdit || scheduleState.schedulePreviewMode === "build";
+  const canUndo = canEdit && buildUi && scheduleState.scheduleUndoStack.length > 0;
+  btn.style.display = canEdit && buildUi ? "inline-flex" : "none";
+  btn.disabled = !canUndo;
+  btn.style.opacity = canUndo ? "1" : "0.4";
+  btn.style.cursor = canUndo ? "pointer" : "default";
+}
+
+function cloneStandByMapSafe(map) {
+  try {
+    return JSON.parse(JSON.stringify(map && typeof map === "object" ? map : {}));
+  } catch (_) {
+    return {};
+  }
+}
+
+function snapshotScheduleForUndo() {
+  const draft = scheduleState.schedulePreviewState.draft;
+  if (!draft) return null;
+  return {
+    days: serializeDraftDaysForStorage(draft),
+    standByByDate: cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate),
+  };
+}
+
+function pushScheduleUndoSnapshot() {
+  if (scheduleState.scheduleUndoSkip) return;
+  try {
+    const snap = snapshotScheduleForUndo();
+    if (!snap) return;
+    scheduleState.scheduleUndoStack.push(snap);
+    if (scheduleState.scheduleUndoStack.length > 30) scheduleState.scheduleUndoStack.shift();
+    updateScheduleUndoUi();
+  } catch (e) {
+    console.warn("[ScheduleUI] undo snapshot failed", e);
+  }
+}
+
+function clearScheduleUndoStack() {
+  scheduleState.scheduleUndoStack = [];
+  updateScheduleUndoUi();
+}
+
+function undoScheduleLastEdit() {
   if (!scheduleUserCanManualEdit()) return;
+  const snap = scheduleState.scheduleUndoStack.pop();
+  if (!snap) {
+    updateScheduleUndoUi();
+    return;
+  }
+  const staffList = scheduleState.schedulePreviewState.staffList || [];
+  const base = cloneScheduleDraft(scheduleState.schedulePreviewState.draft);
+  const next = applyDraftDaysOverride(base, snap.days, staffList);
+  scheduleState.schedulePreviewState.standByByDate = cloneStandByMapSafe(snap.standByByDate);
+  scheduleState.scheduleUndoSkip = true;
+  revalidateLocalDraft(next);
+  scheduleState.scheduleUndoSkip = false;
+  if (typeof renderScheduleSummary === "function") {
+    renderScheduleSummary(
+      scheduleState.schedulePreviewState.validation,
+      scheduleState.schedulePreviewState.validation?.days || [],
+    );
+  }
+  if (typeof renderScheduleBoard === "function") {
+    renderScheduleBoard(
+      scheduleState.schedulePreviewState.draft,
+      scheduleState.schedulePreviewState.validation,
+      scheduleState.schedulePreviewState.staffList,
+    );
+  }
+  updateScheduleUndoUi();
+}
+
+let _publishedWeekNotifyTimer = null;
+
+function queuePublishedWeekAutoNotify() {
+  const weekRange = getWeekRange(scheduleState.schedulePreviewWeekStart);
+  const key = weekRange.startDate;
+  if (scheduleState.schedulePublishedMap[key] !== true) return;
+  if (_publishedWeekNotifyTimer) clearTimeout(_publishedWeekNotifyTimer);
+  _publishedWeekNotifyTimer = setTimeout(() => {
+    _publishedWeekNotifyTimer = null;
+    void notifyStaffScheduleChanges({ silent: true });
+  }, 1800);
+}
+
+async function notifyStaffScheduleChanges(options = {}) {
+  if (!scheduleUserCanManualEdit()) return;
+  const silent = options.silent === true;
+  const forceAll = options.forceAll === true;
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId) {
-    ffScheduleAppToast("No salon selected.", 3500);
+    if (!silent) ffScheduleAppToast("No salon selected.", 3500);
+    return;
+  }
+  if (!_ffSchedHasActiveLocationForWrite()) {
+    if (!silent) ffScheduleAppToast("Choose a location before notifying staff.", 3500);
     return;
   }
   const weekRange = getWeekRange(scheduleState.schedulePreviewWeekStart);
   const key = weekRange.startDate;
-  if (scheduleState.schedulePublishedMap[key] !== true) {
-    ffScheduleAppToast("Publish this week to staff before notifying about changes.", 4000);
+  if (!forceAll && scheduleState.schedulePublishedMap[key] !== true) {
+    if (!silent) ffScheduleAppToast("Publish this week to staff before notifying about changes.", 4000);
     return;
   }
   const draft = scheduleState.schedulePreviewState.draft;
   const staffList = scheduleState.schedulePreviewState.staffList;
   if (!draft || !Array.isArray(staffList)) {
-    ffScheduleAppToast("Schedule is still loading.", 3000);
+    if (!silent) ffScheduleAppToast("Schedule is still loading.", 3000);
     return;
   }
   const fpNew = computeFingerprintMapForDraft(draft, staffList);
@@ -367,20 +522,29 @@ async function notifyStaffScheduleChanges() {
   const standByChanged = !standByMapsEqual(cloudStandByMap, localStandByMap);
   const allKeys = new Set([...Object.keys(fpNew), ...Object.keys(fpOld)]);
   const changed = [];
-  for (const k of allKeys) {
-    if (fpNew[k] !== fpOld[k]) changed.push(k);
+  if (forceAll) {
+    (staffList || []).forEach((staff) => {
+      const k = getScheduleStaffKey(staff);
+      if (k) changed.push(k);
+    });
+  } else {
+    for (const k of allKeys) {
+      if (fpNew[k] !== fpOld[k]) changed.push(k);
+    }
   }
   if (changed.length === 0 && !standByChanged) {
-    ffScheduleAppToast("No shift changes detected since the last publish or notify.", 4000);
+    if (!silent) ffScheduleAppToast("No shift changes detected since the last publish or notify.", 4000);
     return;
   }
-  persistScheduleDraftOverrideFromState();
+  persistScheduleDraftOverrideFromState({ skipAutosave: true });
   const batch = writeBatch(db);
   const weeksRef = getSchedulePublishDocRef();
   if (!weeksRef) return;
   const locId = _ffSchedActiveLocId();
   for (const sid of changed) {
-    const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${_ffSchedPerLocDocId(key, sid)}`);
+    const pingId = _ffSchedPerLocDocId(key, sid);
+    if (!pingId) continue;
+    const pingRef = doc(db, `salons/${salonId}/scheduleStaffChangePings/${pingId}`);
     batch.set(
       pingRef,
       {
@@ -395,7 +559,7 @@ async function notifyStaffScheduleChanges() {
   }
   const standByByDate =
     scheduleState.schedulePreviewState?.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-      ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+      ? cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate)
       : {};
   batch.set(
     weeksRef,
@@ -424,10 +588,14 @@ async function notifyStaffScheduleChanges() {
     const wrAfter = getWeekRange(scheduleState.schedulePreviewWeekStart);
     clearSharedScheduleDraftOverrideForWeek(wrAfter);
     clearScheduleLocalDirtyForCurrentUser(key);
-    if (changed.length === 0 && standByChanged) {
-      ffScheduleAppToast("Stand by updated for this week (saved to the cloud).", 4000);
-    } else {
-      ffScheduleAppToast(`Notified ${changed.length} staff member(s) with updated shifts.`, 4500);
+    if (!silent) {
+      if (forceAll) {
+        ffScheduleAppToast("Published — the team was notified.", 4500);
+      } else if (changed.length === 0 && standByChanged) {
+        ffScheduleAppToast("Stand by updated for this week.", 4000);
+      } else {
+        ffScheduleAppToast(`Team notified (${changed.length}).`, 4000);
+      }
     }
     await loadScheduleWeekPingMap(key);
     if (
@@ -477,9 +645,9 @@ function getSchedulePreviewSalonStorageKey() {
   const s = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   const loc = _ffSchedActiveLocId();
   const base = s || "_local";
-  // Include active location so different branches never share the same
-  // localStorage bucket for draft overrides / manual-off / dirty markers.
-  return loc ? `${base}__${loc}` : base;
+  if (loc) return `${base}__${loc}`;
+  if (_ffSchedUserHasMultipleLocations()) return `${base}__noloc`;
+  return base;
 }
 
 function getScheduleManualOffStorageKey(weekRange) {
@@ -592,7 +760,7 @@ async function discardSavedScheduleWeekDraftAndReload() {
     const lossLine = published
       ? `<br/><br/><span style="color:#b91c1c;font-weight:700;">Warning: this week is already published.</span> ` +
         `Rebuilding will replace the schedule your staff currently see with a fresh auto-generated one. ` +
-        `You'll need to review and Save / re-publish.`
+        `You'll need to review it — it is already visible to staff.`
       : `<br/><br/>Your saved edits for this week will be replaced by a new schedule generated from your coverage rules.`;
     bodyEl.innerHTML = scopeLine + lossLine;
   }
@@ -645,7 +813,7 @@ function loadScheduleDraftOverridePayload(weekRange) {
     const standByStaffId = typeof parsed.standByStaffId === "string" ? parsed.standByStaffId.trim() : "";
     const standByByDate =
       parsed.standByByDate && typeof parsed.standByByDate === "object"
-        ? cloneStandByByDateMap(parsed.standByByDate)
+        ? cloneStandByMapSafe(parsed.standByByDate)
         : {};
     return {
       days: days && days.length ? days : null,
@@ -698,8 +866,8 @@ function applyDraftDaysOverride(draft, savedDays, staffList) {
   };
 }
 
-/** Full week (shifts + OFF) after local edits — survives refresh on this browser. */
-function persistScheduleDraftOverrideFromState() {
+/** Local cache only. Server snapshot is the source of truth — dirty is set only if a cloud write fails. */
+function persistScheduleDraftOverrideFromState(options = {}) {
   const weekRange = scheduleState.schedulePreviewState.weekRange;
   const draft = scheduleState.schedulePreviewState.draft;
   const key = getScheduleDraftOverrideStorageKey(weekRange);
@@ -713,17 +881,16 @@ function persistScheduleDraftOverrideFromState() {
         days: serializeDraftDaysForStorage(draft),
         standByByDate:
           scheduleState.schedulePreviewState.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-            ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+            ? cloneStandByMapSafe(scheduleState.schedulePreviewState.standByByDate)
             : {},
       }),
     );
     if (manualKey) localStorage.removeItem(manualKey);
-    if (scheduleUserCanManualEdit()) {
-      const dk = getScheduleLocalDirtyStorageKey(weekRange.startDate);
-      if (dk) localStorage.setItem(dk, "1");
-    }
   } catch (e) {
     console.warn("[ScheduleUI] persist draft override", e);
+  }
+  if (options.skipAutosave !== true && scheduleUserCanManualEdit()) {
+    queueScheduleWeekDraftAutosave();
   }
 }
 
@@ -783,6 +950,7 @@ export {
   applyDraftDaysOverride,
   buildAssignmentLookup,
   clearScheduleLocalDirtyForCurrentUser,
+  clearScheduleUndoStack,
   clearSharedScheduleDraftOverrideForWeek,
   cloneCellNotesByStaffId,
   cloneScheduleDraft,
@@ -805,7 +973,9 @@ export {
   notifyStaffScheduleChanges,
   persistScheduleDraftOverrideFromState,
   persistScheduleManualOffFromState,
+  queueScheduleWeekDraftAutosave,
   persistStaffShiftFingerprintsForWeek,
+  pushScheduleUndoSnapshot,
   removeManualOffForStaffDay,
   runDiscardSavedScheduleWeekDraftAndReload,
   saveScheduleWeekDraftToCloud,
@@ -814,4 +984,6 @@ export {
   simpleHashString,
   staffDayBlockedByApprovedInbox,
   syncPublishedWeekStandByToCloud,
+  undoScheduleLastEdit,
+  updateScheduleUndoUi,
 };

@@ -70,7 +70,6 @@ async function queueOnboardingReminder({
   if (!forceManual && kind !== REMINDER_KIND_MANUAL && reminderAlreadySent(run.portal, kind)) {
     return { ok: true, skipped: true, reason: "already_sent", kind };
   }
-
   const staff = staffSnap.exists ? staffSnap.data() || {} : {};
   const toEmail = trimStr(staff.email).toLowerCase();
   if (!toEmail || !toEmail.includes("@")) {

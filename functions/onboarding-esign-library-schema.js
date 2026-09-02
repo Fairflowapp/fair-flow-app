@@ -18,9 +18,10 @@ const {
   normalizeAndValidateFieldSchema,
   versionIsImmutable,
 } = require("./onboarding-esign-library-helpers");
+const { writeOnboardingAccessAudit } = require("./onboarding-access-audit");
 
 exports.getOnboardingSignatureDocumentVersionReadUrl = onCall(
-  { region: REGION },
+  { region: REGION, timeoutSeconds: 60, memory: "512MiB" },
   async (request) => {
     const uid = requireAuth(request);
     const salonId = trimStr(request.data && request.data.salonId);
@@ -59,16 +60,40 @@ exports.getOnboardingSignatureDocumentVersionReadUrl = onCall(
     if (!exists) throw new HttpsError("not-found", "PDF file missing in storage.");
 
     const expiresMs = Date.now() + READ_URL_TTL_MS;
-    const [readUrl] = await file.getSignedUrl({
-      version: "v4",
-      action: "read",
-      expires: expiresMs,
-    });
+    let pdfBase64 = null;
+    try {
+      const [buf] = await file.download();
+      // Callable response limit is ~10MB; base64 adds ~33%.
+      if (buf && buf.length && buf.length <= 6.5 * 1024 * 1024) {
+        pdfBase64 = buf.toString("base64");
+      }
+    } catch (dlErr) {
+      console.warn("[EsignLibrary] preview download failed", dlErr && dlErr.message);
+    }
+    if (!pdfBase64) {
+      throw new HttpsError(
+        "internal",
+        "Could not open the PDF to mark signatures. Try a smaller PDF."
+      );
+    }
+
+    try {
+      await writeOnboardingAccessAudit({
+        salonId,
+        uid,
+        action: "library_preview",
+        storagePath,
+        kind: "library",
+        extra: { documentId, versionId },
+      });
+    } catch (_) {}
 
     return {
       documentId,
       versionId,
-      readUrl,
+      pdfBase64,
+      readUrl: null,
+      previewPath: null,
       expiresAt: new Date(expiresMs).toISOString(),
       sha256: ver.sha256 || null,
       pageCount: ver.pageCount || null,

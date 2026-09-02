@@ -2,19 +2,19 @@
 // Navigation entry point and lifecycle listeners (currency/location changes).
 // Extracted verbatim from inventory.js (Phase 15).
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
-import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260728_inv_mobile_unstick";
-import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
-import { loadInventoryTableForSub } from "./inventory-table.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
+import { mountOrRefreshMockUi } from "./inventory-shell.js?v=20260902_inv_iso";
+import { loadInventoryCategoriesFromFirestore } from "./inventory-catalog.js?v=20260902_prod_cats";
+import { loadInventoryTableForSub } from "./inventory-table.js?v=20260902_inv_iso";
 import {
   loadInventoryOrdersList,
   loadInventoryOrderDraft,
-} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders.js?v=20260902_inv_iso";
 import {
   refreshInventoryInsightsAsync,
   scanInventorySuggestionsOnce,
   scanProductReorderAlertsOnce,
-} from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-insights.js?v=20260902_prod_cats";
 
 /**
  * External hook: force-reload a subcategory's inventory data so live changes (e.g. approved supply
@@ -73,6 +73,28 @@ if (typeof window !== "undefined") {
       invState._invObPickPanelOpen = false;
       invState._invTableLoadedForSubId = null;
       invState._selectedSubcategoryId = null;
+      invState._groups = null;
+      invState._rows = null;
+      invState._manageCategoriesOpen = false;
+      invState._catManageDraftTree = null;
+      invState._catDeleteModal = null;
+      invState._catMenuKey = null;
+      invState._renameCatId = null;
+      invState._renameSubKey = null;
+      invState._editCellKey = null;
+      invState._invRowMenu = null;
+      invState._invRowDeleteModalRowId = null;
+      invState._invOrdersDetailOrderId = null;
+      invState._invOrdersMenu = null;
+      invState._invOrdersDeleteConfirmOrderId = null;
+      invState._invOrdersMarkOrderedConfirmOrderId = null;
+      invState._invOrdersRenameModal = null;
+      invState._invOrderDetailLineViewIdx = null;
+      invState._invOrderCellBreakdownModal = null;
+      invState._invReceiptInfoModalOrderId = null;
+      invState._invOrderBuilderAddModal = null;
+      invState._invDraftsPicker = { open: false, loading: false, error: null, drafts: [] };
+      invState._invTableLoadSeq += 1;
       // Always re-load categories from Firestore with the new location filter,
       // even if the Inventory screen is not the active view right now. Skipping
       // the load when `isMounted` was false created a race where the tree
@@ -104,6 +126,8 @@ if (typeof window !== "undefined") {
   };
   document.addEventListener("ff-active-location-changed", _ffInvHandleLocationChanged);
   window.addEventListener("ff-active-location-changed", _ffInvHandleLocationChanged);
+  document.addEventListener("ff-inventory-share-changed", _ffInvHandleLocationChanged);
+  window.addEventListener("ff-inventory-share-changed", _ffInvHandleLocationChanged);
 }
 
 function hideFullscreenPeersForInventory() {

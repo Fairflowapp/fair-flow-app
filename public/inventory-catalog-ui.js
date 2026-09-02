@@ -3,17 +3,17 @@
 // rendering. Extracted verbatim from inventory-catalog.js. Tree state and
 // getters live in inventory-catalog-data.js.
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   renderInlineNewSub,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 import {
   getCategoryTree,
   getLegacyCategoryTreeForManage,
   getManageCategoryTree,
   ensureCatManageDraft,
-} from "./inventory-catalog-data.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-catalog-data.js?v=20260902_prod_cats";
 
 // ── injected inventory.js internals (set once via initCatalogUi) ──
 let mountOrRefreshMockUi;
@@ -344,9 +344,10 @@ function renderManageCategoriesFooter() {
     : "";
   const saveBusy = invState._catSaveBusy ? " disabled" : "";
   const saveLabel = invState._catSaveBusy ? "Saving…" : "Save";
+  const sharedOn = !!invState._invUsingSharedCatalog;
   return `<div class="ff-inv2-cat-manage-footer">
-  ${inlineNewCat}
-  <button type="button" class="ff-inv2-cat-manage-save" data-cat-manage-save="1"${saveBusy}>${saveLabel}</button>
+  ${sharedOn ? "" : inlineNewCat}
+  ${sharedOn ? "" : `<button type="button" class="ff-inv2-cat-manage-save" data-cat-manage-save="1"${saveBusy}>${saveLabel}</button>`}
 </div>`;
 }
 
@@ -361,12 +362,12 @@ function renderManageCategoriesModal() {
       <div class="ff-inv2-cat-manage-head-main">
         <div class="ff-inv2-cat-manage-title-row">
           <h2 id="ff-inv2-cat-manage-title" class="ff-inv2-cat-manage-h2">Manage Categories</h2>
-          <button type="button" class="ff-inv2-cat-manage-add-head" data-cat-inline-newcat="1">+ Add Category</button>
+          ${invState._invUsingSharedCatalog ? "" : `<button type="button" class="ff-inv2-cat-manage-add-head" data-cat-inline-newcat="1">+ Add Category</button>`}
         </div>
       </div>
       <button type="button" class="ff-inv2-cat-manage-close" data-cat-manage-close="1" aria-label="Close">×</button>
     </div>
-    <p class="ff-inv2-cat-manage-subtitle">Save to sync categories and subcategories to the cloud for this salon.</p>
+    <p class="ff-inv2-cat-manage-subtitle">${invState._invUsingSharedCatalog ? "Shared catalog is on. Edit categories in Shared Setup — they appear in every location." : "Save to sync categories and subcategories to the cloud for this location."}</p>
     <div class="ff-inv2-cat-manage-body">${blocks || `<p class="ff-inv2-cat-manage-empty">No categories yet. Use + Add Category above.</p>`}</div>
     ${renderManageCategoriesFooter()}
   </div>

@@ -53,7 +53,7 @@ export function buildInsights(snap) {
   }
   // Overtime
   if (snap.time.hasData && snap.time.overtimeHours >= 5) {
-    out.push({ kind: "warn", icon: "⚠️", text: `High overtime this week — ${snap.time.overtimeHours.toFixed(1)}h beyond 40h/staff.` });
+    out.push({ kind: "warn", icon: "⚠️", text: `High overtime — ${snap.time.overtimeHours.toFixed(1)}h beyond 40h/staff per week.` });
   }
   // Tasks completion
   if (snap.tasks.hasData && snap.tasks.completionRate != null && snap.tasks.completionRate < 50) {

@@ -16,13 +16,13 @@ import {
   getStaffDefaultProductCommission,
   formatProductCommissionDefault,
   getProductInventory,
-} from "./products-helpers.js?v=20260626_products_split";
-import { pstate } from "./products-state.js?v=20260626_products_split";
+} from "./products-helpers.js?v=20260902_prod_cats";
+import { pstate } from "./products-state.js?v=20260902_prod_cats";
 import {
   findCategory,
   getCategorySubcategories,
   ffProductsActiveLocId,
-} from "./products-data.js?v=20260626_products_split";
+} from "./products-data.js?v=20260902_prod_cats";
 
 export function categoryName(categoryId) {
   const match = pstate.productCategories.find((cat) => String(cat.id) === String(categoryId));

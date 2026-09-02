@@ -12,7 +12,7 @@ import {
   root,
   destroyEsign,
   requestRender,
-} from "./app-shared.js?v=20260810_od_split_v1";
+} from "./app-shared.js?v=20260812_od_portal_sameorigin";
 
 export function renderHome(dto, { completedView }) {
   const salon = (dto.salon && dto.salon.name) || "Your salon";

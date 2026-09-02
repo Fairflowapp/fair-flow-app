@@ -21,11 +21,55 @@ let floorCategoriesUnsub = null;
 let floorRegularRequestsUnsub = null;
 let floorFlowsUnsub = null;
 let floorOrdersUnsub = null;
+let rawFloorCategories = [];
+let rawFloorRegularRequests = [];
+let rawFloorFlows = [];
+let rawFloorOrders = [];
 let floorCategories = [];
 let floorRegularRequests = [];
 let floorFlows = [];
 let floorOrders = [];
 let floorEditingFlowId = null;
+
+function getActiveLocationIdForFloor() {
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const value = window.ffGetActiveLocationId();
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  } catch (_) {}
+  return typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+}
+
+function floorUserHasMultipleLocations() {
+  try {
+    if (typeof window.ffUserHasMultipleLocations === 'function') return !!window.ffUserHasMultipleLocations();
+  } catch (_) {}
+  return false;
+}
+
+function floorDocMatchesActiveLocation(item) {
+  const activeLoc = getActiveLocationIdForFloor();
+  if (!activeLoc) return !floorUserHasMultipleLocations();
+  const loc = item && typeof item.locationId === 'string' ? item.locationId.trim() : '';
+  if (loc) return loc === activeLoc;
+  return !floorUserHasMultipleLocations();
+}
+
+function applyFloorLocationFilter() {
+  floorCategories = sortByOrderThenName(rawFloorCategories.filter(floorDocMatchesActiveLocation));
+  floorRegularRequests = sortByOrderThenName(rawFloorRegularRequests.filter(floorDocMatchesActiveLocation));
+  floorFlows = sortByOrderThenName(rawFloorFlows.filter(floorDocMatchesActiveLocation));
+  floorOrders = rawFloorOrders.filter(floorDocMatchesActiveLocation);
+  syncWindowState();
+  renderFloorOrders();
+}
+
+function stampFloorLocation(payload) {
+  const loc = getActiveLocationIdForFloor();
+  if (loc) payload.locationId = loc;
+  return payload;
+}
 
 // Live Desk reads current floor orders (who sent what) for its overview.
 if (typeof window !== 'undefined') {
@@ -495,10 +539,10 @@ async function updateFloorOrderStatus(orderId, patch, optimisticPatch = {}) {
   if (!orderId) return false;
   try {
     await updateDoc(doc(db, `salons/${floorSalonId}/floorOrders`, orderId), patch);
-    floorOrders = floorOrders.map((order) => (
+    rawFloorOrders = rawFloorOrders.map((order) => (
       order.id === orderId ? { ...order, ...optimisticPatch } : order
     ));
-    renderFloorOrders();
+    applyFloorLocationFilter();
     return true;
   } catch (err) {
     reportFloorWriteError('Update floor order', err);
@@ -561,10 +605,10 @@ window.ffConfirmDeleteFloorOrder = async function(orderId) {
   }
   try {
     await deleteDoc(doc(db, `salons/${floorSalonId}/floorOrders`, orderId));
-    floorOrders = floorOrders.filter((order) => order.id !== orderId);
+    rawFloorOrders = rawFloorOrders.filter((order) => order.id !== orderId);
     window.ffCloseFloorOrderDeleteConfirm();
     window.ffCloseFloorOrderDetails();
-    renderFloorOrders();
+    applyFloorLocationFilter();
     toast('Floor order deleted.');
   } catch (err) {
     reportFloorWriteError('Delete floor order', err);
@@ -649,8 +693,8 @@ function subscribeFloorCollections() {
   floorCategoriesUnsub = onSnapshot(
     query(collection(db, `salons/${floorSalonId}/floorCategories`), orderBy('order', 'asc')),
     (snap) => {
-      floorCategories = sortByOrderThenName(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      syncWindowState();
+      rawFloorCategories = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyFloorLocationFilter();
     },
     (err) => console.warn('[Floor] categories subscription failed', err)
   );
@@ -658,8 +702,8 @@ function subscribeFloorCollections() {
   floorRegularRequestsUnsub = onSnapshot(
     query(collection(db, `salons/${floorSalonId}/floorRegularRequests`), orderBy('order', 'asc')),
     (snap) => {
-      floorRegularRequests = sortByOrderThenName(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      syncWindowState();
+      rawFloorRegularRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyFloorLocationFilter();
     },
     (err) => console.warn('[Floor] regular requests subscription failed', err)
   );
@@ -667,9 +711,8 @@ function subscribeFloorCollections() {
   floorFlowsUnsub = onSnapshot(
     query(collection(db, `salons/${floorSalonId}/floorFlows`), orderBy('order', 'asc')),
     (snap) => {
-      const baseFlows = sortByOrderThenName(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      floorFlows = baseFlows;
-      syncWindowState();
+      rawFloorFlows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyFloorLocationFilter();
     },
     (err) => console.warn('[Floor] flows subscription failed', err)
   );
@@ -677,8 +720,8 @@ function subscribeFloorCollections() {
   floorOrdersUnsub = onSnapshot(
     query(collection(db, `salons/${floorSalonId}/floorOrders`), orderBy('createdAtMs', 'desc')),
     (snap) => {
-      floorOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      renderFloorOrders();
+      rawFloorOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyFloorLocationFilter();
     },
     (err) => console.warn('[Floor] orders subscription failed', err)
   );
@@ -687,6 +730,10 @@ function subscribeFloorCollections() {
 function requireFloorContext() {
   if (!floorSalonId) {
     toast('Floor settings are still loading. Try again in a moment.');
+    return false;
+  }
+  if (floorUserHasMultipleLocations() && !getActiveLocationIdForFloor()) {
+    toast('Select a location first.');
     return false;
   }
   return true;
@@ -703,13 +750,13 @@ window.ffAddFloorCategoryUiOnly = async function() {
     return;
   }
   try {
-    await addDoc(collection(db, `salons/${floorSalonId}/floorCategories`), {
+    await addDoc(collection(db, `salons/${floorSalonId}/floorCategories`), stampFloorLocation({
       name,
       order: floorCategories.length,
       createdAt: serverTimestamp(),
       createdBy: floorUser?.uid || null,
       updatedAt: serverTimestamp()
-    });
+    }));
     if (input) input.value = '';
   } catch (err) {
     reportFloorWriteError('Add category', err);
@@ -757,14 +804,14 @@ window.ffAddFloorRegularRequestUiOnly = async function() {
     return;
   }
   try {
-    await addDoc(collection(db, `salons/${floorSalonId}/floorRegularRequests`), {
+    await addDoc(collection(db, `salons/${floorSalonId}/floorRegularRequests`), stampFloorLocation({
       name,
       category,
       order: floorRegularRequests.length,
       createdAt: serverTimestamp(),
       createdBy: floorUser?.uid || null,
       updatedAt: serverTimestamp()
-    });
+    }));
     if (nameInput) nameInput.value = '';
     if (categoryInput) categoryInput.value = '';
   } catch (err) {
@@ -925,6 +972,7 @@ window.ffSendFloorOrder = async function(selected, flowState = {}, options = {})
       createdByEmail: floorUser?.email || ''
     };
     if (clientName) payload.clientName = clientName;
+    stampFloorLocation(payload);
     await addDoc(collection(db, `salons/${floorSalonId}/floorOrders`), payload);
     toast('Floor order sent.');
     return true;
@@ -987,12 +1035,12 @@ window.ffFloorFlowUiOnlySave = async function() {
     if (isEditing) {
       batch.update(flowRef, flowPayload);
     } else {
-      batch.set(flowRef, {
+      batch.set(flowRef, stampFloorLocation({
         ...flowPayload,
         order: floorFlows.length,
         createdAt: serverTimestamp(),
         createdBy: floorUser?.uid || null
-      });
+      }));
     }
     draft.steps.forEach((step, idx) => {
       const stepRef = doc(db, `salons/${floorSalonId}/floorFlows/${flowRef.id}/steps`, stepIdMap[step.id]);
@@ -1028,9 +1076,14 @@ onAuthStateChanged(auth, async (user) => {
   floorUser = user || null;
   if (!user) {
     floorSalonId = null;
+    rawFloorCategories = [];
+    rawFloorRegularRequests = [];
+    rawFloorFlows = [];
+    rawFloorOrders = [];
     floorCategories = [];
     floorRegularRequests = [];
     floorFlows = [];
+    floorOrders = [];
     syncWindowState();
     return;
   }
@@ -1049,3 +1102,24 @@ setTimeout(async () => {
   floorSalonId = salonId;
   subscribeFloorCollections();
 }, 2500);
+
+if (typeof document !== 'undefined' && !window.__ffFloorLocationListenerBound) {
+  window.__ffFloorLocationListenerBound = true;
+  document.addEventListener('ff-active-location-changed', function () {
+    try {
+      if (typeof window.ffCloseFloorOrderDetails === 'function') window.ffCloseFloorOrderDetails();
+      if (typeof window.ffCloseFloorOrderDeleteConfirm === 'function') window.ffCloseFloorOrderDeleteConfirm();
+      if (typeof window.ffCancelFloorFlowEdit === 'function') window.ffCancelFloorFlowEdit();
+    } catch (_) {}
+    try {
+      window.__ffFloorSelectedOrderRequest = null;
+      window.__ffFloorOrderFlowState = null;
+      window.__ffFloorOrderDraft = null;
+      window.__ffFloorOpenOrderCategoryIdx = undefined;
+    } catch (_) {}
+    applyFloorLocationFilter();
+    try {
+      if (typeof window.ffRenderFloorOrderPicker === 'function') window.ffRenderFloorOrderPicker();
+    } catch (_) {}
+  });
+}

@@ -6,7 +6,7 @@
  */
 import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260719_media_lightbox";
+import { mediaState } from "./media-state.js?v=20260901_media_iso";
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {

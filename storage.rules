@@ -90,6 +90,15 @@ service firebase.storage {
       allow read, write: if signedIn();
     }
 
+    // Chat group photos — salon members read; signed-in users may upload a small image.
+    match /salons/{salonId}/chatGroups/{conversationId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.resource != null
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...
     match /salons/{salonId}/media/{workId}/{allPaths=**} {
       allow read, write: if signedIn();
@@ -184,6 +193,25 @@ service firebase.storage {
     // Legacy path (pre-S1); new writes use onboardingArtifacts/library/…
     match /salons/{salonId}/onboarding-signature-library/{allPaths=**} {
       allow read, write: if false;
+    }
+
+    // Temporary manager PDF drop for e-sign library when signed URLs are unavailable.
+    match /onboardingUploads/{salonId}/{userId}/{fileName} {
+      allow write: if signedIn()
+        && uid() == userId
+        && isManagerSalonStorage(salonId)
+        && fileName.matches('.*\\.pdf')
+        && request.resource.size < 20 * 1024 * 1024;
+      allow delete: if signedIn() && uid() == userId;
+      allow read: if false;
+    }
+
+    // Temporary manager preview when V4 signed read URLs are unavailable.
+    match /onboardingPreview/{salonId}/{userId}/{fileName} {
+      allow read: if signedIn()
+        && uid() == userId
+        && isManagerSalonStorage(salonId);
+      allow write, delete: if false;
     }
 
     // ===== ONBOARDING ARTIFACTS (S1 security) =====

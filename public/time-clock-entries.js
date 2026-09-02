@@ -115,7 +115,7 @@
  * and never logged, never persisted, never included in error messages.
  */
 
-import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { doc, getDoc, collection, query, where, getDocs, orderBy, limit, startAfter, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 
 // ───────────────────────── salon id resolution ─────────────────────────
@@ -598,6 +598,8 @@ export async function ffListTimeEntriesForSalon(options = {}) {
   const maxResults = (typeof options.maxResults === "number" && options.maxResults > 0)
     ? Math.min(options.maxResults, 2000)
     : 500;
+  const pageAll = options.pageAll === true && !!(fromTs || toTs);
+  const pageSize = pageAll ? Math.min(maxResults, 500) : maxResults;
 
   const colRef = timeEntriesCollectionRef(salonId);
   const mapSnapToRows = (snap) => {
@@ -615,6 +617,25 @@ export async function ffListTimeEntriesForSalon(options = {}) {
     return rows;
   };
 
+  const runPagedRangeQuery = async () => {
+    const out = [];
+    let lastDoc = null;
+    for (let page = 0; page < 40; page += 1) {
+      const parts = [];
+      if (fromTs) parts.push(where("clockInAt", ">=", fromTs));
+      if (toTs) parts.push(where("clockInAt", "<", toTs));
+      parts.push(orderBy("clockInAt", "desc"));
+      if (lastDoc) parts.push(startAfter(lastDoc));
+      parts.push(limit(pageSize));
+      const snap = await getDocs(query(colRef, ...parts));
+      if (snap.empty) break;
+      out.push(...mapSnapToRows(snap));
+      if (snap.size < pageSize) break;
+      lastDoc = snap.docs[snap.docs.length - 1];
+    }
+    return out;
+  };
+
   const runQuery = async () => {
     if (fromTs || toTs) {
       const parts = [];
@@ -628,9 +649,9 @@ export async function ffListTimeEntriesForSalon(options = {}) {
   };
 
   try {
+    if (pageAll) return await runPagedRangeQuery();
     const snap = await runQuery();
-    const rows = mapSnapToRows(snap);
-    return rows;
+    return mapSnapToRows(snap);
   } catch (e) {
     console.warn("[TimeClockEntries] ffListTimeEntriesForSalon failed", e);
     // Fallback: older clients / index issues — unbounded newest-N scan + in-memory filters.

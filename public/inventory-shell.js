@@ -3,15 +3,15 @@
 // and read-only UI affordances. Extracted verbatim from inventory.js (Phase 11).
 // Cross-module render/helpers are injected via initInventoryShell() from the orchestrator.
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
-import { escapeHtml } from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
-import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
+import { escapeHtml } from "./inventory-helpers.js?v=20260902_inv_iso";
+import { INVENTORY_STYLES } from "./inventory-styles.js?v=20260902_inv_iso";
 import {
   STYLE_ID,
   ffCanManageInventory,
   _ffInvActiveLocId,
   _ffInvUserHasMultipleLocations,
-} from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-spine.js?v=20260902_inv_iso";
 
 // ── injected by initInventoryShell() (orchestrator spine + sub-app render fns) ──
 let ensureInventoryScreenDelegates;

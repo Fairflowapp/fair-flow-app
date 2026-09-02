@@ -15,14 +15,14 @@ import {
   getActiveLocationId,
   getLocationLabel,
   readTasksState,
-} from "./tasks-analytics-data.js?v=20260625_tasks_analytics_split";
+} from "./tasks-analytics-data.js?v=20260816_dash_tasks";
 import {
   normalizeTasks,
   filterRowsByRange,
   computeMetrics,
   buildInsights,
   fmtRate,
-} from "./tasks-analytics-compute.js?v=20260625_tasks_analytics_split";
+} from "./tasks-analytics-compute.js?v=20260816_tasks_week";
 import {
   renderEmpty,
   renderSummary,
@@ -97,11 +97,12 @@ function formatDate(date) {
 }
 
 function loadRangeState() {
+  _rangeState = { mode: "thisWeek", customStart: "", customEnd: "" };
   try {
     const parsed = JSON.parse(localStorage.getItem(RANGE_STORAGE_KEY) || "{}");
-    if (parsed && typeof parsed === "object") {
+    if (parsed && typeof parsed === "object" && clean(parsed.mode) === "custom") {
       _rangeState = {
-        mode: clean(parsed.mode) || "thisWeek",
+        mode: "custom",
         customStart: clean(parsed.customStart),
         customEnd: clean(parsed.customEnd),
       };

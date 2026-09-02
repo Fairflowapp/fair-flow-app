@@ -8,22 +8,22 @@
 <!-- Inbox module-graph preload: parallel-fetch inbox.js + all sub-modules to collapse the
      ES-module import waterfall, so the first Inbox open is not slow/blank. Keep ?v= in sync
      with the import statements in inbox.js and the script-loader entry below. -->
-<link rel="modulepreload" href="/inbox.js?v=20260810_owner_inbox_load_v5">
+<link rel="modulepreload" href="/inbox.js?v=20260901_sched_req">
 <link rel="modulepreload" href="/inbox-state.js?v=20260629_inbox_state_split">
-<link rel="modulepreload" href="/inbox-helpers.js?v=20260810_owner_inbox_load_v5">
+<link rel="modulepreload" href="/inbox-helpers.js?v=20260901_sched_req">
 <link rel="modulepreload" href="/inbox-utils.js?v=20260630_inbox_utils_split">
-<link rel="modulepreload" href="/inbox-data.js?v=20260810_owner_inbox_load_v5">
+<link rel="modulepreload" href="/inbox-data.js?v=20260901_inbox_iso">
 <link rel="modulepreload" href="/inbox-types.js?v=20260630_inbox_types_split">
 <link rel="modulepreload" href="/inbox-documents.js?v=20260629_inbox_documents_split">
 <link rel="modulepreload" href="/inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split">
 <link rel="modulepreload" href="/inbox-supplies.js?v=20260629_inbox_supplies_split">
-<link rel="modulepreload" href="/inbox-list-render.js?v=20260630_inbox_list_render_split">
-<link rel="modulepreload" href="/inbox-modals-ui.js?v=20260630_inbox_modals_ui_split">
-<link rel="modulepreload" href="/inbox-details.js?v=20260630_inbox_details_split">
-<link rel="modulepreload" href="/inbox-create-form.js?v=20260630_inbox_create_form_split">
-<link rel="modulepreload" href="/inbox-submit.js?v=20260630_inbox_submit_split">
+<link rel="modulepreload" href="/inbox-list-render.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-modals-ui.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-details.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-create-form.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-submit.js?v=20260901_sched_req">
 <link rel="modulepreload" href="/inbox-actions.js?v=20260630_inbox_actions_split">
-<link rel="modulepreload" href="/inbox-listeners.js?v=20260810_owner_inbox_load_v5">
+<link rel="modulepreload" href="/inbox-listeners.js?v=20260901_inbox_iso">
 
 <script>
   // Robust Inbox open: inbox.js wires #inboxBtn.onclick only inside initInbox(), which runs
@@ -36,7 +36,7 @@
       if (typeof window.goToInbox === 'function') { window.goToInbox(); return; }
       if (window.__ffInboxOpening) return;
       window.__ffInboxOpening = true;
-      import('/inbox.js?v=20260810_owner_inbox_load_v5')
+      import('/inbox.js?v=20260901_sched_req')
         .then(function (m) {
           window.__ffInboxOpening = false;
           var fn = (m && typeof m.goToInbox === 'function') ? m.goToInbox : window.goToInbox;
@@ -112,12 +112,13 @@
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
     var cb=document.getElementById('chatBtn');if(cb)cb.classList.add('active');
     var g=document.getElementById('chatSettingsGearBtn');if(g){var cm=typeof ffCurrentUserHasChatManagePermission==='function'?ffCurrentUserHasChatManagePermission():typeof ffHasAdminAccess==='function'&&ffHasAdminAccess();g.style.display=cm?'flex':'none';}
+    var ng=document.getElementById('chatNewGroupBtn');if(ng){var cm2=typeof ffCurrentUserHasChatManagePermission==='function'?ffCurrentUserHasChatManagePermission():typeof ffHasAdminAccess==='function'&&ffHasAdminAccess();ng.style.display=cm2?'flex':'none';}
   };
   window.openChatTemplatesSettings = window.openChatTemplatesSettings || async function() {
     if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
     if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
     try {
-      await import('/chat.js?v=20260701_chat_compose_split');
+      await import('/chat.js?v=20260819_live_group_title');
       if (window.openChatTemplatesSettings && !window.openChatTemplatesSettings.__ffFallback) {
         return window.openChatTemplatesSettings();
       }
@@ -125,6 +126,18 @@
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='flex';
   };
   window.openChatTemplatesSettings.__ffFallback = true;
+  window.openChatNewGroupModal = window.openChatNewGroupModal || async function() {
+    if(typeof ffCurrentUserHasChatManagePermission==='function'&&!ffCurrentUserHasChatManagePermission())return;
+    if(typeof ffCurrentUserHasChatManagePermission!=='function'&&typeof ffHasAdminAccess==='function'&&!ffHasAdminAccess())return;
+    try {
+      await import('/chat.js?v=20260819_live_group_title');
+      if (window.openChatNewGroupModal && !window.openChatNewGroupModal.__ffFallback) {
+        return window.openChatNewGroupModal();
+      }
+    } catch(e) {}
+    var m=document.getElementById('chatNewGroupModal');if(m)m.style.display='flex';
+  };
+  window.openChatNewGroupModal.__ffFallback = true;
   window.closeChatTemplatesModal = window.closeChatTemplatesModal || function() {
     var m=document.getElementById('chatTemplatesModal');if(m)m.style.display='none';
   };
@@ -152,7 +165,7 @@
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260805_queue_boot_dismiss2">
+<link rel="stylesheet" href="/main.css?v=20260827_1258notes2">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -165,7 +178,7 @@
 </style>
 
 <script src="/ff-toast.js?v=20260704_bootstrap_js_extract"></script>
-<script src="/inventory-nav-stub.js?v=20260728_inv_mobile_unstick"></script>
+<script src="/inventory-nav-stub.js?v=20260902_inv_iso"></script>
 
 <meta charset="utf-8"/>
 
@@ -1579,8 +1592,38 @@
         <div id="userProfileCardSharedSetup" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Shared Setup</h3>
           <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Manage shared data across all locations. Changes here affect all locations unless overridden.</p>
+
+          <label id="ffSharedServiceCatalogShareRow" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:12px 14px;border:1px solid #ede9fe;border-radius:10px;background:#faf5ff;cursor:pointer;">
+            <input id="ffSharedServiceCatalogShareToggle" type="checkbox" style="margin-top:2px;accent-color:#7c3aed;width:16px;height:16px;flex-shrink:0;">
+            <span>
+              <span style="display:block;font-size:13px;font-weight:700;color:#5b21b6;">Share Service Catalog</span>
+              <span style="display:block;margin-top:3px;font-size:12px;color:#6b7280;line-height:1.4;">Off: each location has its own services. On: the shared catalog appears in every location.</span>
+            </span>
+          </label>
+          <label id="ffSharedChatShareRow" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:12px 14px;border:1px solid #ede9fe;border-radius:10px;background:#faf5ff;cursor:pointer;">
+            <input id="ffSharedChatShareToggle" type="checkbox" style="margin-top:2px;accent-color:#7c3aed;width:16px;height:16px;flex-shrink:0;">
+            <span>
+              <span style="display:block;font-size:13px;font-weight:700;color:#5b21b6;">Share Chat Templates</span>
+              <span style="display:block;margin-top:3px;font-size:12px;color:#6b7280;line-height:1.4;">Off: each location has its own chat templates and flows. On: the shared catalog appears in every location.</span>
+            </span>
+          </label>
+          <label id="ffSharedInventoryShareRow" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:12px 14px;border:1px solid #ede9fe;border-radius:10px;background:#faf5ff;cursor:pointer;">
+            <input id="ffSharedInventoryShareToggle" type="checkbox" style="margin-top:2px;accent-color:#7c3aed;width:16px;height:16px;flex-shrink:0;">
+            <span>
+              <span style="display:block;font-size:13px;font-weight:700;color:#5b21b6;">Share Inventory Catalog</span>
+              <span style="display:block;margin-top:3px;font-size:12px;color:#6b7280;line-height:1.4;">Off: each location has its own inventory lists. On: the shared catalog appears in every location. Stock stays per location.</span>
+            </span>
+          </label>
+          <label id="ffSharedProductShareRow" style="display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:12px 14px;border:1px solid #ede9fe;border-radius:10px;background:#faf5ff;cursor:pointer;">
+            <input id="ffSharedProductShareToggle" type="checkbox" style="margin-top:2px;accent-color:#7c3aed;width:16px;height:16px;flex-shrink:0;">
+            <span>
+              <span style="display:block;font-size:13px;font-weight:700;color:#5b21b6;">Share Product Catalog</span>
+              <span style="display:block;margin-top:3px;font-size:12px;color:#6b7280;line-height:1.4;">Off: each location has its own products. On: the shared catalog appears in every location. Stock and price overrides stay per location.</span>
+            </span>
+          </label>
           
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+            <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedSetupServiceCatalog && window.ffOpenSharedSetupServiceCatalog()">Manage Service Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedTaskTemplates && window.ffOpenSharedTaskTemplates()">Manage Task Templates</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedInventoryCatalog && window.ffOpenSharedInventoryCatalog()">Manage Inventory Catalog</button>
             <button class="shared-setup-action-btn" type="button" onclick="window.ffOpenSharedChatTemplates && window.ffOpenSharedChatTemplates()">Manage Chat Templates</button>
@@ -1705,7 +1748,7 @@
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px 14px;border-bottom:1px solid #e5e7eb;">
               <div>
                 <h3 style="margin:0;font-size:18px;font-weight:800;color:#111827;">Chat Messages</h3>
-                <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Chat templates and flows created here are available to all locations.</p>
+                <p style="margin:6px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">These templates and flows appear in Chat only when Share Chat Templates is on.</p>
               </div>
               <button type="button" onclick="window.ffCloseSharedChatTemplates && window.ffCloseSharedChatTemplates()" style="border:none;background:none;color:#6b7280;font-size:24px;line-height:1;cursor:pointer;">x</button>
             </div>
@@ -1921,14 +1964,14 @@
         <!-- Onboarding & Documents Settings (Stage A: catalogs only) -->
         <div id="userProfileCardOnboarding" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Onboarding &amp; Documents</h3>
-          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Create items employees need to complete, then group them into packages you can send — for example a “New Employee” package.</p>
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Create items employees need to complete, then group them into packages you can send — for example a “New Employee” package. Applies to this branch only.</p>
           <div id="ffOnboardingSettingsRoot"><div style="padding:16px;color:#6b7280;font-size:13px;">Loading…</div></div>
         </div>
 
         <!-- Preferences Card (typography aligned with Staff Setup) -->
         <div id="userProfileCardPreferences" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Preferences</h3>
-          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Organized into focused sections so location, display, and staff call settings are easier to manage.</p>
+          <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">These settings apply to the branch selected in the header. Switch branches to edit another location.</p>
           <div class="ff-pref-tabs" role="tablist" aria-label="Preference sections">
             <button type="button" class="ff-pref-tab" data-pref-tab="salon-location">Salon Location</button>
             <button type="button" class="ff-pref-tab" data-pref-tab="business-format">Business Format</button>
@@ -2189,7 +2232,7 @@
             <div class="ff-pref-pane" data-pref-pane="tickets">
               <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
                 <h4 style="margin:0 0 4px 0;font-size:13px;font-weight:600;color:#374151;">Tickets</h4>
-                <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Control how staff create and send tickets to the front desk.</p>
+                <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;line-height:1.45;">Control how staff create and send tickets to the front desk at this branch.</p>
                 <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;">
                   <span class="staff-permission-toggle" style="margin-top:2px;flex:0 0 auto;">
                     <input type="checkbox" id="ticketsRequireCustomerName">
@@ -2207,7 +2250,7 @@
             <div id="userProfileStaffCallTemplatesSection" style="display:none;border-top:1px solid var(--border);padding-top:14px;">
               <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:12px;">
                 <h4 style="margin:0;font-size:13px;font-weight:600;color:#374151;">Staff Calls</h4>
-                <div style="font-size:11px;color:#6b7280;line-height:1.45;">What technicians hear when you call them from Available or In Service.</div>
+                <div style="font-size:11px;color:#6b7280;line-height:1.45;">What technicians hear at this branch when you call them from Available or In Service.</div>
               </div>
               <div id="userProfileStaffCallTemplatesBox" style="display:flex;flex-direction:column;gap:10px;"></div>
               <div style="display:flex;justify-content:flex-end;margin-top:10px;">
@@ -2219,7 +2262,7 @@
             <div class="ff-pref-pane" data-pref-pane="staff-setup">
               <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
                 <h4 style="margin:0 0 4px 0;font-size:13px;font-weight:600;color:#374151;">Staff Setup</h4>
-                <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">Set up your service providers.</p>
+                <p style="margin:0 0 4px 0;font-size:12px;color:#6b7280;">Set up service providers for this branch.</p>
                 <p style="margin:0 0 16px 0;font-size:11px;color:#9ca3af;">Drag to reorder. You can add, edit and activate types.</p>
 
                 <div style="margin-top:12px;">
@@ -2238,7 +2281,7 @@
             <div class="ff-pref-pane" data-pref-pane="media-categories">
               <div style="padding:12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;max-width:100%;overflow-x:hidden;box-sizing:border-box;">
                 <h4 style="margin:0 0 6px 0;font-size:13px;font-weight:600;color:#374151;">Media Categories</h4>
-                <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Labels for uploads. Drag to reorder.</p>
+                <p style="margin:0 0 12px 0;font-size:11px;color:#9ca3af;">Labels for uploads at this branch. Drag to reorder.</p>
                 <div style="margin-top:4px;">
                   <h4 style="margin:0 0 8px 0;font-size:13px;font-weight:600;color:#374151;">Categories</h4>
                   <div id="userProfileMediaCategoriesList" style="margin-bottom:16px;"></div>
@@ -2262,7 +2305,7 @@
 
         <div id="userProfileCardSchedule" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);max-width:100%;overflow-x:hidden;box-sizing:border-box;">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Schedule</h3>
-          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Configure salon business hours and daily coverage targets for scheduling.</p>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;">Configure business hours and coverage for this branch. Each location has its own weekly schedule.</p>
           <div style="display:flex;flex-direction:column;gap:18px;">
             <div style="padding:12px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
               <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:10px;">Weekly Schedule</div>
@@ -2290,7 +2333,7 @@
              up to Firestore and the payroll engine. -->
         <div id="userProfileCardTimeClockSettings" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 4px 0;font-size:15px;font-weight:600;color:#111827;">Time Clock</h3>
-          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Configure how working hours and overtime are counted. These rules will feed into staff timesheets and payroll.</p>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Configure how working hours and overtime are counted for this branch. Time Cards from every location stay visible; these rules apply to punches at this branch.</p>
 
           <div style="display:flex;flex-direction:column;gap:14px;">
 
@@ -2449,10 +2492,10 @@
         <!-- Kiosk Devices Card (Owner / Admin only) -->
         <div id="userProfileCardDevices" class="user-profile-card" style="display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
           <h3 style="margin:0 0 6px 0;font-size:15px;font-weight:600;color:#111827;">Devices</h3>
-          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Pair and manage shared kiosk tablets for this salon.</p>
+          <p style="margin:0 0 16px 0;font-size:12px;color:#6b7280;line-height:1.45;">Pair and manage shared kiosk tablets for this branch.</p>
           <div style="padding:14px;border:1px solid #ddd6fe;border-radius:12px;background:#faf5ff;margin-bottom:12px;">
             <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">Kiosk URL</div>
-            <div style="font-size:11px;color:#6b7280;line-height:1.45;margin-bottom:10px;">Open this link on the iPad to pair or resume a shared kiosk for this salon.</div>
+            <div style="font-size:11px;color:#6b7280;line-height:1.45;margin-bottom:10px;">Open this link on the iPad to pair or resume a shared kiosk for this branch.</div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <input id="kioskUrlDisplayInput" type="text" readonly value="/kiosk" style="flex:1;min-width:220px;height:34px;padding:0 10px;border:1px solid #d8b4fe;border-radius:8px;background:#fff;color:#374151;font-size:12px;">
               <button type="button" onclick="window.ffCopyKioskUrl && window.ffCopyKioskUrl()" style="padding:8px 12px;border:1px solid #a78bfa;border-radius:8px;background:#ede9fe;color:#7c3aed;cursor:pointer;font-size:12px;font-weight:700;">Copy URL</button>
@@ -3511,6 +3554,7 @@ async function initFirebaseAuth() {
                   var queueIsActive = queueBtnEl && queueBtnEl.classList.contains('active');
                   if (!queueIsActive) return;
                   if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return;
+                  if (typeof ffIsStaffMembersOpen === 'function' && ffIsStaffMembersOpen()) return;
                   if (typeof ffHasActiveNonQueueScreen === 'function' && ffHasActiveNonQueueScreen()) return;
                   var wrapEl = document.querySelector('.wrap');
                   var wrapHidden = !wrapEl || (window.getComputedStyle(wrapEl).display === 'none') || (window.getComputedStyle(wrapEl).visibility === 'hidden');
@@ -4214,10 +4258,103 @@ function ffGetUsers() {
   }
 }
 
+function ffHistoryActiveLocationId() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window !== 'undefined' && typeof window.__ff_active_location_id === 'string'
+      ? window.__ff_active_location_id.trim()
+      : '';
+    if (raw) return raw;
+  } catch (_) {}
+  return '';
+}
+
+function ffHistoryUserHasMultipleLocations() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== 'undefined' && typeof window.ffGetLocations === 'function') {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function ffHistoryPrimaryLocationId() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffResolveCurrentStaff === 'function' && typeof w.ffEnsureStaffLocationFields === 'function') {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === 'function') {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+function ffHistoryHasActiveLocationForWrite() {
+  if (!ffHistoryUserHasMultipleLocations()) return true;
+  return !!ffHistoryActiveLocationId();
+}
+
+function ffHistoryEntryLocationId(entry) {
+  if (!entry || typeof entry !== 'object') return '';
+  return (typeof entry.locationId === 'string' && entry.locationId.trim()) ? entry.locationId.trim() : '';
+}
+
+function ffHistoryEntryInActiveLoc(entry) {
+  const multi = ffHistoryUserHasMultipleLocations();
+  const active = ffHistoryActiveLocationId();
+  if (!active) return !multi;
+  const stamped = ffHistoryEntryLocationId(entry);
+  if (stamped) return stamped === active;
+  if (!multi) return true;
+  const primary = ffHistoryPrimaryLocationId();
+  return !!primary && active === primary;
+}
+
+function ffHistoryHardResetView() {
+  try {
+    window.__historyWorkerFilter = 'all';
+    window.__historyActionFilters = [];
+  } catch (_) {}
+  try {
+    const tableBody = document.getElementById('historyBody');
+    if (tableBody) tableBody.innerHTML = '';
+  } catch (_) {}
+  try {
+    if (typeof updateHistoryActionFilterButton === 'function') updateHistoryActionFilterButton();
+  } catch (_) {}
+}
+window.ffHistoryActiveLocationId = ffHistoryActiveLocationId;
+window.ffHistoryUserHasMultipleLocations = ffHistoryUserHasMultipleLocations;
+window.ffHistoryPrimaryLocationId = ffHistoryPrimaryLocationId;
+window.ffHistoryHasActiveLocationForWrite = ffHistoryHasActiveLocationForWrite;
+window.ffHistoryEntryInActiveLoc = ffHistoryEntryInActiveLoc;
+window.ffHistoryHardResetView = ffHistoryHardResetView;
+
 function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue', options = {}) {
   console.log('[BUILD MARKER] addHistoryEntry is THIS version', addHistoryEntry.toString().slice(0,120));
   console.log('[ADD_HISTORY_ENTRY CALLED]', { args: Array.from(arguments) });
   try {
+    if (!ffHistoryHasActiveLocationForWrite()) {
+      console.warn('[History] write skipped: choose a location');
+      return null;
+    }
     // Read existing log array from ffv24_log
     const logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]');
     
@@ -4225,17 +4362,7 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     const finalRole = role || 'Unknown';
     const finalPerformedBy = performedBy || 'System';
     
-    // Stamp the active location on every new entry so History can stay
-    // isolated per branch even if the shared localStorage cache ever mixes
-    // entries from more than one location (eg. legacy data that predates
-    // the multi-location rollout).
-    let activeLocId = '';
-    try {
-      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
-      }
-    } catch (_) {}
+    const activeLocId = ffHistoryActiveLocationId();
 
     // Create new entry object with date/time formatted using formatHistoryDate/formatHistoryTime
     const now = new Date();
@@ -4288,19 +4415,15 @@ function addHistoryEntry(actionText, role, performedBy, worker, source = 'queue'
     console.error('[HISTORY WRITE ERROR]', e);
   }
 }
+window.addHistoryEntry = addHistoryEntry;
 
 function ffQueueLogEvent(type, workerName) {
   try {
     const normalizedType = String(type || '').trim().toUpperCase();
     const worker = String(workerName || '').trim();
     if (!/^(JOIN|START|FINISH)$/.test(normalizedType) || !worker) return;
-    let activeLocId = '';
-    try {
-      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
-      }
-    } catch (_) {}
+    if (!ffHistoryHasActiveLocationForWrite()) return;
+    const activeLocId = ffHistoryActiveLocationId();
     const now = new Date();
     const entry = {
       date: formatHistoryDate(now),
@@ -4379,6 +4502,7 @@ function addQueueGeoFenceBlockedHistoryRecord({ action, staffId, staffName, reas
     if (reason === 'outside_radius') detail = `Outside radius (${Math.round(Number(distanceMeters || 0))}m > ${Math.round(Number(allowedRadiusMeters || 0))}m)`;
     else if (reason === 'low_accuracy') detail = `Low accuracy (${Math.round(Number(accuracy || 0))}m)`;
     else if (reason === 'location_denied') detail = 'Location denied';
+    if (!ffHistoryHasActiveLocationForWrite()) return;
     const entry = {
       date: formatHistoryDate(now),
       time: formatHistoryTime(now),
@@ -4387,6 +4511,7 @@ function addQueueGeoFenceBlockedHistoryRecord({ action, staffId, staffName, reas
       performedBy: staffName || 'Technician',
       worker: staffName || '',
       source: 'queue',
+      locationId: ffHistoryActiveLocationId(),
       type,
       staffId: String(staffId || '').trim(),
       staffName: staffName || '',
@@ -4881,25 +5006,8 @@ function getFilteredHistoryEntries(options = {}) {
     return correctionId && !localCorrectionIds.has(correctionId);
   }));
   const normalizedEntries = mergedLogEntries.map(normalizeHistoryEntry);
-  // Location scope: only show rows that belong to the active branch.
-  // Legacy entries without a `locationId` are treated as belonging to the
-  // "default" (primary) location so pre-multi-location history stays
-  // visible in the primary branch and never leaks to a new branch.
-  let activeLocKey = 'default';
-  try {
-    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
-      const v = window.ffGetActiveLocationId();
-      if (typeof v === 'string' && v.trim()) activeLocKey = v.trim();
-    }
-  } catch (_) {}
   const sourceFilter = (window.__historySourceFilter || 'all').toLowerCase();
-  let rows = normalizedEntries.filter((entry) => {
-    if (sourceFilter === 'points') return true;
-    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
-      ? entry.locationId.trim()
-      : 'default';
-    return entryLoc === activeLocKey;
-  });
+  let rows = normalizedEntries.filter((entry) => ffHistoryEntryInActiveLoc(entry));
   if (sourceFilter !== 'all') {
     rows = rows.filter((normalized) => normalized.source.toLowerCase() === sourceFilter);
   }
@@ -5029,6 +5137,7 @@ async function ffSyncPointsCorrectionsToHistory(force = false) {
     snap.docs.forEach(function(docSnap) {
       const event = { id: docSnap.id, ...(docSnap.data() || {}) };
       const entry = ffPointCorrectionHistoryEntryFromEvent(event, docSnap.id);
+      if (!ffHistoryEntryInActiveLoc(entry)) return;
       memoryEntries.push(entry);
       if (existingCorrectionIds.has(docSnap.id)) return;
       logArr.push(entry);
@@ -6177,6 +6286,20 @@ function ffCurrentUserHasTasksUsePermission() {
 }
 window.ffCurrentUserHasTasksUsePermission = ffCurrentUserHasTasksUsePermission;
 
+/** See every task (including other roles). Off = only this person's role + Everyone. Owners/admins always see all. */
+function ffStaffHasTasksViewAllPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tasks_view_all));
+}
+function ffCurrentUserHasTasksViewAllPermission() {
+  if (ffIsKioskAppMode()) return false;
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasTasksViewAllPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksViewAllPermission = ffCurrentUserHasTasksViewAllPermission;
+
 /** Manage task templates / settings modal: tasks_manage === true, or app owner/admin session. */
 function ffStaffHasTasksManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -6984,9 +7107,25 @@ function ffIsAppsPanelOpen() {
 }
 window.ffIsAppsPanelOpen = ffIsAppsPanelOpen;
 
+function ffIsStaffMembersOpen() {
+  try {
+    if (document.body && document.body.classList.contains('ff-staff-members-open')) return true;
+    var el = document.getElementById('staffMembersModal');
+    if (!el) return false;
+    var display = el.style.display || (window.getComputedStyle ? window.getComputedStyle(el).display : '');
+    return !!(display && display !== 'none');
+  } catch (e) {
+    return false;
+  }
+}
+window.ffIsStaffMembersOpen = ffIsStaffMembersOpen;
+
 function ffHasActiveNonQueueScreen() {
   try {
     if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return true;
+    if (typeof ffIsStaffMembersOpen === 'function' && ffIsStaffMembersOpen()) return true;
+    var settingsDlgEl = document.getElementById('settingsDlg');
+    if (settingsDlgEl && settingsDlgEl.open) return true;
     var ids = [
       'liveScreen',
       'floorScreen',
@@ -11219,10 +11358,20 @@ function ffRenderKioskDevicesModal() {
     const locations = ffGetKioskDeviceLocationOptions();
     select.innerHTML = '';
 
-    const noneOption = document.createElement('option');
-    noneOption.value = '';
-    noneOption.textContent = locations.length ? 'No specific location' : 'No locations loaded yet';
-    select.appendChild(noneOption);
+    const multiLoc = (typeof window.ffUserHasMultipleLocations === 'function')
+      ? !!window.ffUserHasMultipleLocations()
+      : locations.length > 1;
+    if (!multiLoc) {
+      const noneOption = document.createElement('option');
+      noneOption.value = '';
+      noneOption.textContent = locations.length ? 'No specific location' : 'No locations loaded yet';
+      select.appendChild(noneOption);
+    } else if (!locations.length) {
+      const noneOption = document.createElement('option');
+      noneOption.value = '';
+      noneOption.textContent = 'No locations loaded yet';
+      select.appendChild(noneOption);
+    }
 
     locations.forEach((loc) => {
       if (!loc || !loc.id) return;
@@ -11408,7 +11557,17 @@ async function ffApproveKioskPairingFromSettings() {
   }
 
   const kioskName = String(nameInput && nameInput.value || '').trim() || 'Kiosk';
-  const locationId = String(locationSelect && locationSelect.value || '').trim() || null;
+  let locationId = String(locationSelect && locationSelect.value || '').trim() || null;
+  const multiLoc = (typeof window.ffUserHasMultipleLocations === 'function')
+    ? !!window.ffUserHasMultipleLocations()
+    : false;
+  if (!locationId && typeof window.ffGetActiveLocationId === 'function') {
+    locationId = String(window.ffGetActiveLocationId() || '').trim() || null;
+  }
+  if (multiLoc && !locationId) {
+    ffSetKioskDevicesStatus('Choose a location for this kiosk. Each tablet belongs to one branch.', 'error');
+    return;
+  }
 
   if (btn) {
     btn.disabled = true;
@@ -12435,7 +12594,7 @@ document.addEventListener('ff-locations-updated', () => {
 });
 
 </script>
-<script src="/navigation-helpers.js?v=20260719_autoreset_timeformat_pref"></script>
+<script src="/navigation-helpers.js?v=20260902_train_iso"></script>
 <script>
 
 function goToUserProfile(section) {
@@ -13775,7 +13934,9 @@ function goBackFromUserProfile() {
 
 // Wire up QUEUE button
 if (queueBtn) {
-  queueBtn.onclick = goToQueue;
+  queueBtn.onclick = function () {
+    if (typeof goToQueue === 'function') goToQueue({ force: true });
+  };
   const ownerView = document.getElementById('owner-view');
   const qn = document.getElementById('queueBtn');
   if (ownerView && ownerView.style.display !== 'none' && qn && typeof ffCurrentUserHasQueueScreenAccess === 'function' && ffCurrentUserHasQueueScreenAccess()) {
@@ -16746,7 +16907,27 @@ window.renderMediaCategoriesSettings = function renderMediaCategoriesSettings() 
   if (!Array.isArray(settings.mediaCategories)) settings.mediaCategories = [];
   settings.mediaCategories = ffNormalizeMediaCategoriesArray(settings.mediaCategories);
   listContainer.querySelectorAll('.technician-type-item, .media-category-item').forEach(function (el) { el.remove(); });
-  var rows = settings.mediaCategories.slice().sort(function (a, b) {
+  var locId = '';
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      var locVal = window.ffGetActiveLocationId();
+      if (typeof locVal === 'string' && locVal.trim()) locId = locVal.trim();
+    }
+  } catch (eLoc) {}
+  var multiLoc = false;
+  try {
+    if (typeof window.ffUserHasMultipleLocations === 'function') multiLoc = !!window.ffUserHasMultipleLocations();
+    else if (typeof window.ffGetLocations === 'function') {
+      var locList = (window.ffGetLocations() || []).filter(function (l) { return l && l.isActive !== false; });
+      multiLoc = locList.length > 1;
+    }
+  } catch (eMulti) {}
+  var rows = settings.mediaCategories.slice().filter(function (cat) {
+    var raw = cat && typeof cat.locationId === 'string' ? cat.locationId.trim() : '';
+    if (!locId) return !multiLoc;
+    if (raw) return raw === locId;
+    return !multiLoc;
+  }).sort(function (a, b) {
     return (a.sortOrder || 0) - (b.sortOrder || 0);
   });
   if (rows.length === 0) {
@@ -17882,29 +18063,15 @@ function clearHistory() {
     return;
   }
   if (!confirm("Clear history for this location?")) return;
-
-  // Determine the currently active branch. "default" stands for no-location
-  // or the primary branch and also covers legacy entries without a
-  // locationId. Clearing history must affect ONLY the active branch so
-  // other locations keep their log intact.
-  let activeLocKey = 'default';
-  try {
-    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
-      const v = window.ffGetActiveLocationId();
-      if (typeof v === 'string' && v.trim()) activeLocKey = v.trim();
-    }
-  } catch (_) {}
+  if (!ffHistoryHasActiveLocationForWrite()) {
+    if (typeof showToast === 'function') showToast('Choose a location before clearing history.', 'error');
+    return;
+  }
 
   // Load, filter out this location's rows, save back.
   let logArr = [];
   try { logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]'); } catch (_) { logArr = []; }
-  const removedCount = logArr.filter((raw) => {
-    const entry = normalizeHistoryEntry(raw);
-    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
-      ? entry.locationId.trim()
-      : 'default';
-    return entryLoc === activeLocKey;
-  }).length;
+  const removedCount = logArr.filter((raw) => ffHistoryEntryInActiveLoc(normalizeHistoryEntry(raw))).length;
   let auditEntry = null;
   if (typeof addHistoryEntry === 'function') {
     const actorRole = window.__ff_actorRole || getCurrentActorRole?.() || 'Unknown';
@@ -17920,11 +18087,10 @@ function clearHistory() {
     try { logArr = JSON.parse(localStorage.getItem('ffv24_log') || '[]'); } catch (_) {}
   }
   const kept = logArr.filter((raw) => {
-    const entry = normalizeHistoryEntry(raw);
-    const entryLoc = (entry && typeof entry.locationId === 'string' && entry.locationId.trim())
-      ? entry.locationId.trim()
-      : 'default';
-    return entryLoc !== activeLocKey || (auditEntry && raw && typeof raw === 'object' && raw.ts === auditEntry.ts && raw.action === auditEntry.action);
+    if (auditEntry && raw && typeof raw === 'object' && raw.ts === auditEntry.ts && raw.action === auditEntry.action) {
+      return true;
+    }
+    return !ffHistoryEntryInActiveLoc(normalizeHistoryEntry(raw));
   });
   localStorage.setItem('ffv24_log', JSON.stringify(kept));
   log = kept;
@@ -22374,7 +22540,9 @@ function renderTasksList(tab, opts) {
       const filterEl = document.getElementById('tasksAdminFilter');
       if (typeof window.ffSyncKioskTasksAudienceFilter === 'function') window.ffSyncKioskTasksAudienceFilter();
       if (filterEl) {
-        if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) {
+        const canSeeAllTasks = (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess())
+          || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
+        if (canSeeAllTasks) {
           if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = 'inline-flex';
           if (!filterEl.__adminFilterPopulated && typeof populateTasksAdminFilter === 'function') {
             filterEl.__adminFilterPopulated = true;
@@ -22566,8 +22734,9 @@ function renderTasksList(tab, opts) {
           }
         }
         
-        // Admin sees everything (admin filter is applied separately in renderTasksList)
+        // Admin / explicit "see all tasks" see everything (filter is applied separately)
         if (currentUserRole === 'admin') return true;
+        if (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission()) return true;
         
         // Check assignTo
         if (assignTo === 'manager') {
@@ -22638,6 +22807,7 @@ function renderTasksList(tab, opts) {
       if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function') {
         doneToday = doneToday.filter((task) => window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab));
       }
+      doneToday = doneToday.filter((task) => isTaskRelevantToUser(task));
       
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
@@ -22684,11 +22854,13 @@ function renderTasksList(tab, opts) {
           return true;
         });
       
-      // Admin filter: when admin selects a filter, further narrow the list
+      // Audience filter: when someone who can see all tasks picks a group
       let filteredForAdmin = myListTasks;
       const isAdmin = window.ff_is_admin_cached === true;
+      const canSeeAllTasks = isAdmin
+        || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
       const adminFilterVal = (document.getElementById('tasksAdminFilter') || {}).value || 'all';
-      if (isAdmin && adminFilterVal !== 'all') {
+      if (canSeeAllTasks && adminFilterVal !== 'all') {
         const catalog = window.ff_tasks_catalog_v1 || {};
         const catalogTabTasks = catalog[mainTab] || [];
         filteredForAdmin = myListTasks.filter(task => {
@@ -23401,15 +23573,9 @@ window.ffCloseGlobalBlockingOverlays = function () {
       if (el) el.style.setProperty('display', 'none', 'important');
     });
   } catch (e) {}
-  try {
-    var bd = document.getElementById('appsOverlayBackdrop');
-    var ap = document.getElementById('appsPanel');
-    if (bd) {
-      bd.style.display = 'none';
-      bd.style.pointerEvents = '';
-    }
-    if (ap) ap.style.display = 'none';
-  } catch (e) {}
+  // Do not close the Apps launcher here. Restore timers call goToQueue →
+  // this helper and were slamming the panel shut after the user opened it.
+  // User Queue tap uses goToQueue({ force: true }); tile clicks close Apps first.
   try {
     if (typeof closeTaskInfoModal === 'function') closeTaskInfoModal();
     else {
@@ -26019,8 +26185,10 @@ function initializeTasksScreenButtons() {
         const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
         const filterEl = document.getElementById('tasksAdminFilter');
         if (filterEl) {
-          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = ffHasAdminAccess() ? 'inline-flex' : 'none';
-          if (ffHasAdminAccess()) populateTasksAdminFilter(filterEl);
+          const canSeeAllTasks = (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess())
+            || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
+          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = canSeeAllTasks ? 'inline-flex' : 'none';
+          if (canSeeAllTasks) populateTasksAdminFilter(filterEl);
         }
       };
       
@@ -26487,7 +26655,7 @@ function initializeNavigationButtons() {
           window.goToChat();
         } else {
           try {
-            const m = await import('/chat.js?v=20260701_chat_compose_split');
+            const m = await import('/chat.js?v=20260819_live_group_title');
             if (m && m.goToChat) { window.goToChat = m.goToChat; m.goToChat(); }
             else console.error('[Navigation] goToChat not exported');
           } catch (e) {
@@ -26831,10 +26999,15 @@ function initializeAppsPanel() {
   // Open panel
   function openAppsPanel() {
     closeProductsScreenForAppsNavigation();
-    _appsIgnoreBackdropUntil = Date.now() + 450;
+    _appsIgnoreBackdropUntil = Date.now() + 800;
     appsOverlayBackdrop.style.display = 'block';
-    appsOverlayBackdrop.style.pointerEvents = 'auto';
+    appsOverlayBackdrop.style.pointerEvents = 'none';
     appsPanel.style.display = 'flex';
+    setTimeout(function () {
+      try {
+        if (appsPanel.style.display === 'flex') appsOverlayBackdrop.style.pointerEvents = 'auto';
+      } catch (_) {}
+    }, 800);
     lockBodyScroll();
     if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
     if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
@@ -27021,7 +27194,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260810_owner_inbox_load_v5')
+              import('/inbox.js?v=20260901_sched_req')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -27051,7 +27224,7 @@ function initializeAppsPanel() {
                 console.error('[Apps Panel] Failed to open Products', err);
               });
             } else {
-              import('/products.js?v=20260702_products_split')
+              import('/products.js?v=20260902_prod_cats')
                 .then(function (m) {
                   if (m && typeof m.goToProducts === 'function') {
                     window.goToProducts = m.goToProducts;
@@ -27085,7 +27258,7 @@ function initializeAppsPanel() {
             if (typeof window.goToSchedule === 'function') {
               window.goToSchedule();
             } else {
-              import('/schedule-ui.js?v=20260816_cell_notes7')
+              import('/schedule-ui.js?v=20260901_sched_req')
                 .then(function (m) {
                   if (m && typeof m.goToSchedule === 'function') {
                     window.goToSchedule = m.goToSchedule;
@@ -27137,7 +27310,7 @@ function initializeAppsPanel() {
             if (typeof window.goToDashboard === 'function') {
               window.goToDashboard();
             } else {
-              import('/dashboard.js?v=20260626_dashboard_split')
+              import('/dashboard.js?v=20260902_dash_iso')
                 .then((m) => {
                   if (m && typeof m.goToDashboard === 'function') {
                     window.goToDashboard = m.goToDashboard;
@@ -28636,39 +28809,45 @@ function initializeAppsPanel() {
     try {
       const staffData = ffGetStaffStore();
       const staffAll = staffData.staff;
-      // STRICT client-side location filter (per product spec "each location is
-      // a separate business"):
-      //   - If an activeLocationId is set, keep only staff whose
-      //     allowedLocationIds explicitly includes it.
-      //   - Owner / Admin / Manager rows are ALWAYS visible regardless of
-      //     location - salon leadership needs to be reachable everywhere.
-      //   - If no activeLocationId (initial load, before locations doc
-      //     resolves), show everything so the UI doesn't blink empty.
-      // NOTE: Firestore query is unchanged; this is purely a display filter.
+      // Each location is a separate business. The Locations tab toggles are
+      // the source of truth for who is visible. Only the salon owner stays
+      // in every branch's list so they can still manage the account.
       const activeLocationIdForFilter =
         (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
         (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
           ? window.__ff_active_location_id
-          : null);
-      const staff = activeLocationIdForFilter
-        ? staffAll.filter(function (s) {
-            if (!s) return false;
-            // Owner / Admin / Manager always visible across locations.
-            if (s.isAdmin === true || s.isManager === true) return true;
-            if (typeof window.ffStaffRowIsSalonOwner === 'function' &&
-                window.ffStaffRowIsSalonOwner(s)) return true;
-            const roleLc = String(s.role || '').toLowerCase().trim();
-            if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') return true;
-            // Everyone else must be explicitly assigned to this location.
-            // Missing / empty allowedLocationIds => NOT assigned to any
-            // branch and therefore hidden from every location's list
-            // until someone assigns them via the Locations tab.
-            if (!Array.isArray(s.allowedLocationIds) || s.allowedLocationIds.length === 0) {
-              return false;
-            }
-            return s.allowedLocationIds.indexOf(activeLocationIdForFilter) !== -1;
-          })
-        : staffAll;
+          : null) ||
+        (function () {
+          try { return String(localStorage.getItem('ff_active_location_id') || '').trim() || null; }
+          catch (_) { return null; }
+        })();
+      function staffAllowedAt(s, locId) {
+        if (!s || !locId) return false;
+        if (typeof window.ffStaffRowIsSalonOwner === 'function' && window.ffStaffRowIsSalonOwner(s)) {
+          return true;
+        }
+        var allowed = [];
+        try {
+          var normalized = (typeof window.ffEnsureStaffLocationFields === 'function')
+            ? window.ffEnsureStaffLocationFields(s)
+            : s;
+          allowed = Array.isArray(normalized.allowedLocationIds) ? normalized.allowedLocationIds : [];
+        } catch (_) {
+          allowed = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds : [];
+        }
+        return allowed.indexOf(locId) !== -1;
+      }
+      var multiLoc = false;
+      try {
+        multiLoc = typeof window.ffUserHasMultipleLocations === 'function' && !!window.ffUserHasMultipleLocations();
+      } catch (_) {}
+      const staff = !activeLocationIdForFilter
+        ? (multiLoc ? [] : staffAll)
+        : staffAll.filter(function (s) { return staffAllowedAt(s, activeLocationIdForFilter); });
+      if (selectedStaffId && !staff.some(function (s) { return s && s.id === selectedStaffId; })) {
+        selectedStaffId = null;
+        try { renderStaffDetails(); } catch (_) {}
+      }
       const adminsList = document.getElementById('staffAdminsList');
       const managersList = document.getElementById('staffManagersList');
       const techniciansList = document.getElementById('staffTechniciansList');
@@ -29166,7 +29345,7 @@ function initializeAppsPanel() {
         resolve(true);
         return;
       }
-      var v = '20260815_od_s7b';
+      var v = '20260825_od_iospdf';
       function inject(src, key) {
         if (document.querySelector('script[data-ff-od-run="' + key + '"]')) return;
         var s = document.createElement('script');
@@ -29175,10 +29354,11 @@ function initializeAppsPanel() {
         s.setAttribute('data-ff-od-run', key);
         document.body.appendChild(s);
       }
-      inject('/employee-onboarding/esign-library-cloud.js?v=' + v, 'artifact');
+      inject('/inapp-pdf-viewer.js?v=20260825_od_iospdf', 'pdfview');
+      inject('/employee-onboarding/esign-library-cloud.js?v=20260825_od_iospdf', 'artifact');
       inject('/employee-onboarding/run-cloud.js?v=' + v, 'cloud');
       inject('/employee-onboarding/run-ui.js?v=' + v, 'ui');
-      inject('/employee-onboarding/portal-manager.js?v=' + v, 'portal');
+      inject('/employee-onboarding/portal-manager.js?v=20260816_od_linkreuse', 'portal');
       var tries = 0;
       var t = setInterval(function() {
         tries += 1;
@@ -29741,7 +29921,14 @@ function initializeAppsPanel() {
         const storedDuration = Number(override.durationMinutes);
         const hasDurationOverride = Number.isInteger(storedDuration) && storedDuration >= 1 && storedDuration <= 1440
           && storedDuration !== serviceDefaultDuration;
-        const durationValue = hasDurationOverride ? String(storedDuration) : '';
+        const durationParts = hasDurationOverride && typeof window.ffSplitServiceDurationParts === 'function'
+          ? window.ffSplitServiceDurationParts(storedDuration)
+          : (hasDurationOverride
+            ? { hours: Math.floor(storedDuration / 60), minutes: storedDuration % 60 }
+            : { hours: '', minutes: '' });
+        const defaultDurationLabel = typeof window.ffFormatServiceDurationLabel === 'function'
+          ? window.ffFormatServiceDurationLabel(serviceDefaultDuration)
+          : (serviceDefaultDuration + ' min');
         const enabled = override.enabled !== false;
         const price = Number.isFinite(Number(override.price)) ? Number(override.price) : basePrice;
         const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
@@ -29777,10 +29964,19 @@ function initializeAppsPanel() {
               <input type="number" min="0" step="0.01" class="ff-staff-services-price" value="${ffStaffServicesHtmlEscape(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
               <span style="font-size:11px;color:#9ca3af;">Default ${ffStaffServicesMoney(basePrice)}</span>
             </div>
-            <div class="ff-staff-svc-row ff-staff-svc-duration-row" style="display:grid;grid-template-columns:110px minmax(120px,180px) auto;gap:8px;align-items:center;margin-bottom:9px;">
-              <div style="font-size:12px;color:#6b7280;">Duration</div>
-              <input type="number" min="1" max="1440" step="1" class="ff-staff-services-duration" value="${ffStaffServicesHtmlEscape(durationValue)}" placeholder="${ffStaffServicesHtmlEscape(String(serviceDefaultDuration))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
-              <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};">${hasDurationOverride ? 'Override' : ('Default ' + serviceDefaultDuration + ' min')}</span>
+            <div class="ff-staff-svc-row ff-staff-svc-duration-row" style="display:grid;grid-template-columns:110px minmax(160px,220px) auto;gap:8px;align-items:end;margin-bottom:9px;">
+              <div style="font-size:12px;color:#6b7280;padding-bottom:8px;">Duration</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;color:#6b7280;">
+                  Hours
+                  <input type="number" min="0" max="24" step="1" inputmode="numeric" class="ff-staff-services-duration-hours" value="${ffStaffServicesHtmlEscape(String(durationParts.hours))}" placeholder="0" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;color:#6b7280;">
+                  Minutes
+                  <input type="number" min="0" max="59" step="1" inputmode="numeric" class="ff-staff-services-duration-minutes" value="${ffStaffServicesHtmlEscape(String(durationParts.minutes))}" placeholder="0" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+                </label>
+              </div>
+              <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};padding-bottom:8px;">${hasDurationOverride ? 'Override' : ('Default ' + defaultDurationLabel)}</span>
             </div>
             <div style="margin-bottom:9px;padding:9px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
@@ -29855,7 +30051,8 @@ function initializeAppsPanel() {
       const serviceId = card.getAttribute('data-service-id');
       const enabledInput = card.querySelector('.ff-staff-services-enabled');
       const priceInput = card.querySelector('.ff-staff-services-price');
-      const durationInput = card.querySelector('.ff-staff-services-duration');
+      const durationHoursInput = card.querySelector('.ff-staff-services-duration-hours');
+      const durationMinutesInput = card.querySelector('.ff-staff-services-duration-minutes');
       const supplyEnabledInput = card.querySelector('.ff-staff-services-supply-enabled');
       const supplyFields = card.querySelector('.ff-staff-services-supply-fields');
       const supplyTypeInput = card.querySelector('.ff-staff-services-supply-type');
@@ -29867,17 +30064,18 @@ function initializeAppsPanel() {
       const save = async function() {
         if (!serviceId || !staffId || typeof window.ffStaffServicesSaveOverrideForStaffMember !== 'function') return;
         const rawPrice = parseFloat(priceInput?.value);
-        const parsedDuration = typeof window.ffParseStaffDurationOverrideInput === 'function'
-          ? window.ffParseStaffDurationOverrideInput(durationInput?.value)
-          : { ok: true, value: (String(durationInput?.value || '').trim() === '' ? null : Number(durationInput?.value)) };
+        const parsedDuration = typeof window.ffParseStaffDurationOverrideFromParts === 'function'
+          ? window.ffParseStaffDurationOverrideFromParts(durationHoursInput?.value, durationMinutesInput?.value)
+          : { ok: true, value: null };
         if (!parsedDuration || parsedDuration.ok === false) {
-          if (durationInput) {
-            const prev = durationInput.style.borderColor;
-            durationInput.style.borderColor = '#ef4444';
-            durationInput.focus();
-            setTimeout(function() { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
-          }
-          if (status) { status.textContent = 'Duration must be 1–1440 min, or empty'; status.style.color = '#dc2626'; }
+          [durationHoursInput, durationMinutesInput].forEach(function(el) {
+            if (!el) return;
+            const prev = el.style.borderColor;
+            el.style.borderColor = '#ef4444';
+            setTimeout(function() { el.style.borderColor = prev || '#e5e7eb'; }, 1400);
+          });
+          if (durationHoursInput) durationHoursInput.focus();
+          if (status) { status.textContent = 'Duration must be hours and minutes, or empty'; status.style.color = '#dc2626'; }
           return;
         }
         const commissionValue = parseFloat(commissionValueInput?.value);
@@ -29962,7 +30160,7 @@ function initializeAppsPanel() {
 
   function ffEnsureStaffProductsApi() {
     if (typeof window.ffStaffProductsLoadForStaffMember === 'function') return Promise.resolve();
-    return import('/products.js?v=20260702_products_split').then(function() {});
+    return import('/products.js?v=20260902_prod_cats').then(function() {});
   }
 
   function renderStaffProductsTab(staff) {
@@ -30409,7 +30607,7 @@ function initializeAppsPanel() {
         groupTitle: 'Tasks',
         parentKey: 'tasks_view',
         parentMode: 'strictTrue',
-        childKeys: ['tasks_use', 'tasks_manage', 'tasks_reset']
+        childKeys: ['tasks_use', 'tasks_view_all', 'tasks_manage', 'tasks_reset']
       },
       {
         groupTitle: 'Chat',
@@ -30611,6 +30809,11 @@ function initializeAppsPanel() {
             desc: 'Controls the Tasks tab in the top bar and access to the Tasks screen. When off, Tasks is hidden in navigation and task-related permissions below are unavailable.'
           },
           { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
+          {
+            key: 'tasks_view_all',
+            label: 'See all tasks',
+            desc: 'See every task, including ones assigned to technicians or other roles. Off = only tasks for this person\'s role, plus Everyone.'
+          },
           { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' },
           { key: 'tasks_reset', label: 'Reset tasks', desc: 'Reset done/pending progress for task tabs (PIN rules unchanged)' }
         ]
@@ -32978,6 +33181,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: false,
       manage: false,
       reset: false
     },
@@ -33049,6 +33253,7 @@ function initializeAppsPanel() {
       products_manage: false,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -33104,6 +33309,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: false,
       manage: false,
       reset: false
     },
@@ -33189,6 +33395,7 @@ function initializeAppsPanel() {
       products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -33249,6 +33456,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: true,
       manage: true,
       reset: true
     },
@@ -33369,6 +33577,7 @@ function initializeAppsPanel() {
       products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -35588,6 +35797,241 @@ function initializeUserProfileMenu() {
     if (typeof showToast === 'function') showToast('Service Catalog is still loading. Try again in a moment.', 'error');
   };
 
+  async function ffSharedServiceCatalogShareRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/serviceCatalog`)
+    };
+  }
+
+  async function ffLoadSharedServiceCatalogShareToggle() {
+    const toggle = document.getElementById('ffSharedServiceCatalogShareToggle');
+    if (!toggle) return;
+    try {
+      if (typeof window.ffLoadSharedServiceCatalogShareFlag === 'function') {
+        toggle.checked = !!(await window.ffLoadSharedServiceCatalogShareFlag());
+        return;
+      }
+      const { api, rootRef } = await ffSharedServiceCatalogShareRefs();
+      const snap = await api.getDoc(rootRef);
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      toggle.checked = data.shareEnabled === true || data.enabled === true;
+    } catch (e) {
+      console.warn('[SharedSetup] service catalog share flag load failed', e);
+      toggle.checked = false;
+    }
+  }
+
+  async function ffSaveSharedServiceCatalogShareToggle(enabled) {
+    const toggle = document.getElementById('ffSharedServiceCatalogShareToggle');
+    if (toggle) toggle.disabled = true;
+    try {
+      if (typeof window.ffSetSharedServiceCatalogEnabled === 'function') {
+        await window.ffSetSharedServiceCatalogEnabled(!!enabled);
+      } else {
+        const { api, rootRef } = await ffSharedServiceCatalogShareRefs();
+        await api.setDoc(rootRef, { shareEnabled: !!enabled, updatedAt: api.serverTimestamp() }, { merge: true });
+      }
+      if (typeof showToast === 'function') {
+        showToast(enabled ? 'Service Catalog is now shared across locations.' : 'Service Catalog is per location.', 'success');
+      }
+    } catch (e) {
+      console.warn('[SharedSetup] service catalog share flag save failed', e);
+      if (toggle) toggle.checked = !enabled;
+      if (typeof showToast === 'function') showToast('Could not update Share Service Catalog.', 'error');
+    } finally {
+      if (toggle) toggle.disabled = false;
+    }
+  }
+
+  (function ffWireSharedServiceCatalogShareToggle() {
+    const toggle = document.getElementById('ffSharedServiceCatalogShareToggle');
+    if (!toggle || toggle.__ffBound) return;
+    toggle.__ffBound = true;
+    toggle.addEventListener('change', function () {
+      ffSaveSharedServiceCatalogShareToggle(!!toggle.checked);
+    });
+  })();
+
+  async function ffSharedChatShareRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/chatTemplates`)
+    };
+  }
+
+  async function ffLoadSharedChatShareToggle() {
+    const toggle = document.getElementById('ffSharedChatShareToggle');
+    if (!toggle) return;
+    try {
+      const { api, rootRef } = await ffSharedChatShareRefs();
+      const snap = await api.getDoc(rootRef);
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      toggle.checked = data.shareEnabled === true || data.enabled === true;
+    } catch (e) {
+      console.warn('[SharedSetup] chat share flag load failed', e);
+      toggle.checked = false;
+    }
+  }
+
+  async function ffSaveSharedChatShareToggle(enabled) {
+    const toggle = document.getElementById('ffSharedChatShareToggle');
+    if (toggle) toggle.disabled = true;
+    try {
+      const { api, rootRef } = await ffSharedChatShareRefs();
+      await api.setDoc(rootRef, { shareEnabled: !!enabled, updatedAt: api.serverTimestamp() }, { merge: true });
+      if (typeof showToast === 'function') {
+        showToast(enabled ? 'Chat templates are now shared across locations.' : 'Chat templates are per location.', 'success');
+      }
+    } catch (e) {
+      console.warn('[SharedSetup] chat share flag save failed', e);
+      if (toggle) toggle.checked = !enabled;
+      if (typeof showToast === 'function') showToast('Could not update Share Chat Templates.', 'error');
+    } finally {
+      if (toggle) toggle.disabled = false;
+    }
+  }
+
+  (function ffWireSharedChatShareToggle() {
+    const toggle = document.getElementById('ffSharedChatShareToggle');
+    if (!toggle || toggle.__ffBound) return;
+    toggle.__ffBound = true;
+    toggle.addEventListener('change', function () {
+      ffSaveSharedChatShareToggle(!!toggle.checked);
+    });
+  })();
+
+  async function ffSharedInventoryShareRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/inventoryCatalog`)
+    };
+  }
+
+  async function ffLoadSharedInventoryShareToggle() {
+    const toggle = document.getElementById('ffSharedInventoryShareToggle');
+    if (!toggle) return;
+    try {
+      const { api, rootRef } = await ffSharedInventoryShareRefs();
+      const snap = await api.getDoc(rootRef);
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      toggle.checked = data.shareEnabled === true || data.enabled === true;
+    } catch (e) {
+      console.warn('[SharedSetup] inventory share flag load failed', e);
+      toggle.checked = false;
+    }
+  }
+
+  async function ffSaveSharedInventoryShareToggle(enabled) {
+    const toggle = document.getElementById('ffSharedInventoryShareToggle');
+    if (toggle) toggle.disabled = true;
+    try {
+      const { api, rootRef } = await ffSharedInventoryShareRefs();
+      await api.setDoc(rootRef, { shareEnabled: !!enabled, updatedAt: api.serverTimestamp() }, { merge: true });
+      try {
+        document.dispatchEvent(new CustomEvent('ff-inventory-share-changed'));
+        window.dispatchEvent(new CustomEvent('ff-inventory-share-changed'));
+      } catch (_) {}
+      if (typeof showToast === 'function') {
+        showToast(enabled ? 'Inventory catalog is now shared across locations.' : 'Inventory catalog is per location.', 'success');
+      }
+    } catch (e) {
+      console.warn('[SharedSetup] inventory share flag save failed', e);
+      if (toggle) toggle.checked = !enabled;
+      if (typeof showToast === 'function') showToast('Could not update Share Inventory Catalog.', 'error');
+    } finally {
+      if (toggle) toggle.disabled = false;
+    }
+  }
+
+  (function ffWireSharedInventoryShareToggle() {
+    const toggle = document.getElementById('ffSharedInventoryShareToggle');
+    if (!toggle || toggle.__ffBound) return;
+    toggle.__ffBound = true;
+    toggle.addEventListener('change', function () {
+      ffSaveSharedInventoryShareToggle(!!toggle.checked);
+    });
+  })();
+
+  async function ffSharedProductShareRefs() {
+    const accountId = ffSharedSetupAccountId();
+    if (!accountId) throw new Error('No account');
+    const db = getTrainingDb();
+    const api = await getTrainingFirestoreApi();
+    return {
+      accountId,
+      api,
+      rootRef: api.doc(db, `accounts/${accountId}/shared/productCatalog`)
+    };
+  }
+
+  async function ffLoadSharedProductShareToggle() {
+    const toggle = document.getElementById('ffSharedProductShareToggle');
+    if (!toggle) return;
+    try {
+      if (typeof window.ffLoadProductCatalogShareEnabled === 'function') {
+        toggle.checked = !!(await window.ffLoadProductCatalogShareEnabled());
+        return;
+      }
+      const { api, rootRef } = await ffSharedProductShareRefs();
+      const snap = await api.getDoc(rootRef);
+      const data = snap.exists() ? (snap.data() || {}) : {};
+      toggle.checked = data.shareEnabled === true || data.enabled === true;
+    } catch (e) {
+      console.warn('[SharedSetup] product share flag load failed', e);
+      toggle.checked = false;
+    }
+  }
+
+  async function ffSaveSharedProductShareToggle(enabled) {
+    const toggle = document.getElementById('ffSharedProductShareToggle');
+    if (toggle) toggle.disabled = true;
+    try {
+      if (typeof window.ffSetProductCatalogShareEnabled === 'function') {
+        await window.ffSetProductCatalogShareEnabled(!!enabled);
+      } else {
+        const { api, rootRef } = await ffSharedProductShareRefs();
+        await api.setDoc(rootRef, { shareEnabled: !!enabled, updatedAt: api.serverTimestamp() }, { merge: true });
+        try {
+          document.dispatchEvent(new CustomEvent('ff-product-share-changed', { detail: { enabled: !!enabled } }));
+        } catch (_) {}
+      }
+      if (typeof showToast === 'function') {
+        showToast(enabled ? 'Product catalog is now shared across locations.' : 'Product catalog is per location.', 'success');
+      }
+    } catch (e) {
+      console.warn('[SharedSetup] product share flag save failed', e);
+      if (toggle) toggle.checked = !enabled;
+      if (typeof showToast === 'function') showToast('Could not update Share Product Catalog.', 'error');
+    } finally {
+      if (toggle) toggle.disabled = false;
+    }
+  }
+
+  (function ffWireSharedProductShareToggle() {
+    const toggle = document.getElementById('ffSharedProductShareToggle');
+    if (!toggle || toggle.__ffBound) return;
+    toggle.__ffBound = true;
+    toggle.addEventListener('change', function () {
+      ffSaveSharedProductShareToggle(!!toggle.checked);
+    });
+  })();
+
   const FF_SHARED_TASK_TABS = [
     ['opening', 'Opening'],
     ['closing', 'Closing'],
@@ -35794,6 +36238,10 @@ function initializeUserProfileMenu() {
       if (typeof showToast === 'function') showToast('You do not have permission to manage Fair Flow Points settings.', 'error');
       return;
     }
+    if (!ffPointsHasActiveLocationForWrite()) {
+      if (typeof showToast === 'function') showToast('Choose a location before opening branch points settings.', 'error');
+      return;
+    }
     const locationId = ffGetPointsActiveLocationId();
     ffPointsSettingsMode = locationId ? 'branch' : 'account';
     ffSetPointsSettingsModalCopy(locationId ? 'branch' : 'account');
@@ -35829,6 +36277,9 @@ function initializeUserProfileMenu() {
       const accountId = ffSharedSetupAccountId();
       if (!accountId) throw new Error('No account');
       const locationId = ffPointsSettingsMode === 'branch' ? ffGetPointsActiveLocationId() : '';
+      if (ffPointsSettingsMode === 'branch' && !ffPointsHasActiveLocationForWrite()) {
+        throw new Error('Choose a location before saving points settings.');
+      }
       await ffGetPointsSettings(accountId, locationId);
       const values = ffReadPointsSettingsForm();
       const db = getTrainingDb();
@@ -35955,19 +36406,35 @@ function initializeUserProfileMenu() {
   function ffGetLocalStaffForPoints() {
     const byId = new Map();
     const activeLocationId = ffGetPointsActiveLocationId();
+    const multi = ffPointsUserHasMultipleLocations();
     function staffMatchesActiveLocation(staff) {
-      if (!activeLocationId || !staff || typeof staff !== 'object') return true;
-      const raw = [
-        staff.locationId,
-        staff.activeLocationId,
-        staff.primaryLocationId,
-        ...(Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : []),
-        ...(Array.isArray(staff.locationIds) ? staff.locationIds : []),
-        ...(Array.isArray(staff.locations) ? staff.locations : []),
-        ...(Array.isArray(staff.assignedLocationIds) ? staff.assignedLocationIds : [])
-      ].filter(function(v) { return v != null && String(v).trim(); }).map(function(v) { return String(v).trim(); });
-      if (!raw.length) return true;
-      return raw.indexOf(activeLocationId) !== -1;
+      if (!staff || typeof staff !== 'object') return false;
+      if (!activeLocationId) return !multi;
+      let allowed = [];
+      let primary = typeof staff.primaryLocationId === 'string' ? staff.primaryLocationId.trim() : '';
+      try {
+        if (typeof window.ffEnsureStaffLocationFields === 'function') {
+          const f = window.ffEnsureStaffLocationFields(staff);
+          if (Array.isArray(f.allowedLocationIds)) {
+            allowed = f.allowedLocationIds.map((id) => String(id || '').trim()).filter(Boolean);
+          }
+          if (typeof f.primaryLocationId === 'string') primary = f.primaryLocationId.trim();
+        }
+      } catch (_) {}
+      if (!allowed.length) {
+        const raw = [
+          staff.locationId,
+          staff.activeLocationId,
+          ...(Array.isArray(staff.allowedLocationIds) ? staff.allowedLocationIds : []),
+          ...(Array.isArray(staff.locationIds) ? staff.locationIds : []),
+          ...(Array.isArray(staff.locations) ? staff.locations : []),
+          ...(Array.isArray(staff.assignedLocationIds) ? staff.assignedLocationIds : [])
+        ].filter(function(v) { return v != null && String(v).trim(); }).map(function(v) { return String(v).trim(); });
+        allowed = raw;
+      }
+      if (allowed.length) return allowed.indexOf(activeLocationId) !== -1;
+      if (!multi) return true;
+      return !!primary && primary === activeLocationId;
     }
     try {
       const store = JSON.parse(localStorage.getItem('ff_staff_v1') || '{}');
@@ -36468,6 +36935,52 @@ function initializeUserProfileMenu() {
     return typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
   }
 
+  function ffPointsUserHasMultipleLocations() {
+    try {
+      if (typeof window.ffUserHasMultipleLocations === 'function' && window.ffUserHasMultipleLocations()) return true;
+      if (typeof window.ffGetLocations === 'function') {
+        const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+        if (locs.length > 1) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function ffPointsPrimaryLocationId() {
+    try {
+      const w = typeof window !== 'undefined' ? window : {};
+      if (typeof w.ffResolveCurrentStaff === 'function' && typeof w.ffEnsureStaffLocationFields === 'function') {
+        const row = w.ffResolveCurrentStaff();
+        if (row) {
+          const f = w.ffEnsureStaffLocationFields(row);
+          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+          if (primary) return primary;
+        }
+      }
+      if (typeof w.ffGetUserAllowedLocations === 'function') {
+        const locs = w.ffGetUserAllowedLocations();
+        if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function ffPointsHasActiveLocationForWrite() {
+    if (!ffPointsUserHasMultipleLocations()) return true;
+    return !!ffGetPointsActiveLocationId();
+  }
+
+  function ffPointsEventInActiveLoc(event) {
+    const multi = ffPointsUserHasMultipleLocations();
+    const active = ffGetPointsActiveLocationId();
+    if (!active) return !multi;
+    const stamped = event && typeof event.locationId === 'string' ? event.locationId.trim() : '';
+    if (stamped) return stamped === active;
+    if (!multi) return true;
+    const primary = ffPointsPrimaryLocationId();
+    return !!primary && active === primary;
+  }
+
   function ffGetPointsCustomWeekKey() {
     const input = document.getElementById('pointsAppCustomWeek');
     const value = String(input?.value || '').trim();
@@ -36587,12 +37100,6 @@ function initializeUserProfileMenu() {
     } else {
       snap = await getDocs(collection(db, `accounts/${accountId}/pointsEvents`));
     }
-    const activeLocationId = ffGetPointsActiveLocationId();
-    // Staff in private mode always see every branch they earned credits in for
-    // their own leaderboard; narrowing by ffGetPointsActiveLocationId() hides
-    // events when daily work used a different __ff_active_location_id.
-    const scopeEventsByActiveLocation =
-      !!activeLocationId && ffPointsVisibilityMode !== 'private';
     const mapped = snap.docs
       .map(function(docSnap) { return { id: docSnap.id, ...(docSnap.data() || {}) }; });
     if (cleanStaffIdFilter && mapped.length === 0 && ffPointsVisibilityMode === 'private') {
@@ -36638,7 +37145,7 @@ function initializeUserProfileMenu() {
     }
     const filtered = mapped.filter(function(event) {
       if (!ffPointEventMatchesPeriod(event, period, weekKey)) return false;
-      if (scopeEventsByActiveLocation && event.locationId && String(event.locationId) !== activeLocationId) return false;
+      if (!ffPointsEventInActiveLoc(event)) return false;
       return true;
     });
     if (cleanStaffIdFilter && typeof console !== 'undefined' && ffPointsVisibilityMode === 'private') {
@@ -36678,7 +37185,6 @@ function initializeUserProfileMenu() {
   }
 
   async function ffLoadPointsFromEvents(accountId, db, api, staffRows, weekKey) {
-    const activeLocationId = ffGetPointsActiveLocationId();
     const staffById = new Map(staffRows.map(function(staff) { return [String(staff.id), staff]; }));
     const pointsByStaff = new Map();
     const { collection, query, where, getDocs } = api;
@@ -36686,7 +37192,7 @@ function initializeUserProfileMenu() {
     snap.docs.forEach(function(docSnap) {
       const event = { id: docSnap.id, ...(docSnap.data() || {}) };
       if (event.voided === true) return;
-      if (activeLocationId && event.locationId && String(event.locationId) !== activeLocationId) return;
+      if (!ffPointsEventInActiveLoc(event)) return;
       const staffId = String(event.staffId || '').trim();
       if (!staffId) return;
       const staff = staffById.get(staffId) || {};
@@ -36934,7 +37440,14 @@ function initializeUserProfileMenu() {
     }
     const period = ffPointsLeaderboardActivePeriod;
     const activeLocationId = ffGetPointsActiveLocationId();
-    const needsEventsForTotals = !!activeLocationId || !ffPointsPeriodUsesSummary(period);
+    if (ffPointsUserHasMultipleLocations() && !activeLocationId) {
+      ffPointsLeaderboardRows = [];
+      ffPointsLeaderboardPrivateRank = null;
+      ffRenderPointsLeaderboard();
+      return;
+    }
+    const isolateByLocation = ffPointsUserHasMultipleLocations() || !!activeLocationId;
+    const needsEventsForTotals = isolateByLocation || !ffPointsPeriodUsesSummary(period);
     // Managers need events for drill-down and corrections. Private staff also
     // need their own events so week/month/all-time and breakdown cards are exact.
     const needsEventsForDetails = ffPointsVisibilityMode === 'full' || ffPointsVisibilityMode === 'private';
@@ -36944,7 +37457,7 @@ function initializeUserProfileMenu() {
     let rows = [];
     try {
       events = shouldLoadEvents ? await ffLoadPointEventsForCurrentPeriod(accountId, db, api, privateStaffIdFilter) : [];
-      rows = activeLocationId || ffPointsVisibilityMode === 'private'
+      rows = isolateByLocation || ffPointsVisibilityMode === 'private'
         ? ffBuildPointsRowsFromPeriodEvents(staffRows, events, period)
         : (ffPointsPeriodUsesSummary(period)
           ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
@@ -36953,7 +37466,7 @@ function initializeUserProfileMenu() {
       if (ffPointsErrorIsPermissionDenied(loadErr) && ffPointsVisibilityMode === 'private') {
         console.warn('[PointsApp] private events load denied; rendering summary-only view', loadErr);
         events = [];
-        rows = ffPointsPeriodUsesSummary(ffPointsLeaderboardActivePeriod)
+        rows = (!isolateByLocation && ffPointsPeriodUsesSummary(ffPointsLeaderboardActivePeriod))
           ? await ffLoadPointsFromSummary(accountId, db, api, staffRows)
           : staffRows.map(function(staff) {
               return {
@@ -36986,10 +37499,21 @@ function initializeUserProfileMenu() {
           }];
         }
         events = [];
-        rows = await ffLoadPointsFromSummary(accountId, db, api, staffRows);
+        rows = isolateByLocation
+          ? staffRows.map(function(staff) {
+              return {
+                staffId: staff.id,
+                staffName: staff.name,
+                weekPoints: 0,
+                monthPoints: 0,
+                allTimePoints: 0,
+                events: []
+              };
+            })
+          : await ffLoadPointsFromSummary(accountId, db, api, staffRows);
       }
     }
-    if (ffPointsVisibilityMode === 'private' && ffPointsPeriodUsesSummary(period)) {
+    if (ffPointsVisibilityMode === 'private' && ffPointsPeriodUsesSummary(period) && !isolateByLocation) {
       try {
         const currentTotal = rows.reduce(function(sum, row) {
           return sum + (Number(ffPointsLeaderboardValue(row, period)) || 0);
@@ -37036,16 +37560,18 @@ function initializeUserProfileMenu() {
   }
 
   async function ffComputePrivateRank(accountId, db, api, period) {
-    // Loads pointsSummary/main for every staff in the local list and computes
-    // the current user's rank for the active period without exposing names or
-    // scores back to the caller. The Firestore rule only permits this read
-    // when the owner has explicitly enabled showRankToPrivate, so a failure
-    // here just means we render the dashboard without the rank card.
     const allStaff = ffGetLocalStaffForPoints();
     if (!Array.isArray(allStaff) || !allStaff.length) return null;
     const myId = String(ffPointsCurrentStaffId || '').trim();
     if (!myId) return null;
-    const summaries = await ffLoadPointsFromSummary(accountId, db, api, allStaff);
+    if (ffPointsUserHasMultipleLocations() && !ffGetPointsActiveLocationId()) return null;
+    let summaries;
+    if (ffPointsUserHasMultipleLocations() || ffGetPointsActiveLocationId()) {
+      const locEvents = await ffLoadPointEventsForCurrentPeriod(accountId, db, api, '');
+      summaries = ffBuildPointsRowsFromPeriodEvents(allStaff, locEvents, period);
+    } else {
+      summaries = await ffLoadPointsFromSummary(accountId, db, api, allStaff);
+    }
     const sortedTotals = summaries
       .map(function(row) {
         const value = ffPointsLeaderboardValue(row, period);
@@ -37324,6 +37850,10 @@ function initializeUserProfileMenu() {
       list.innerHTML = '<div style="padding:14px;border:1px dashed #e5e7eb;border-radius:10px;color:#6b7280;font-size:12px;text-align:center;">Fair Flow Points permission is off for this staff member.</div>';
       return;
     }
+    if (ffPointsUserHasMultipleLocations() && !ffGetPointsActiveLocationId()) {
+      list.innerHTML = '<div style="padding:14px;border:1px dashed #e5e7eb;border-radius:10px;color:#6b7280;font-size:12px;text-align:center;">Choose a location to view Fair Flow Points.</div>';
+      return;
+    }
     const sortedRows = ffPointsLeaderboardRows
       .map(function(row) { return { ...row, points: ffPointsLeaderboardValue(row, ffPointsLeaderboardActivePeriod) }; })
       .sort(function(a, b) {
@@ -37575,6 +38105,10 @@ function initializeUserProfileMenu() {
       if (typeof showToast === 'function') showToast('Only managers can correct point events.', 'error');
       return;
     }
+    if (!ffPointsHasActiveLocationForWrite()) {
+      if (typeof showToast === 'function') showToast('Choose a location before correcting points.', 'error');
+      return;
+    }
     const event = ffFindPointEventById(cleanEventId);
     const modal = ffEnsurePointVoidModal();
     modal.dataset.eventId = cleanEventId;
@@ -37656,6 +38190,10 @@ function initializeUserProfileMenu() {
     if (typeof window.ffCurrentUserIsPointsManager === 'function' && !window.ffCurrentUserIsPointsManager()) {
       console.warn('[FairFlowPoints ManualAdjustment] open: blocked by permission');
       if (typeof showToast === 'function') showToast('You do not have permission to adjust points.', 'error');
+      return;
+    }
+    if (!ffPointsHasActiveLocationForWrite()) {
+      if (typeof showToast === 'function') showToast('Choose a location before adjusting points.', 'error');
       return;
     }
     const modal = ffEnsureStaffPointsAdjustModal();
@@ -37785,7 +38323,15 @@ function initializeUserProfileMenu() {
       return;
     }
 
-    const locationId = ffStaffPointsAdjustResolveLocationId(staffId);
+    if (!ffPointsHasActiveLocationForWrite()) {
+      ffStaffPointsAdjustShowError('Choose a location before adjusting points.');
+      return;
+    }
+    const locationId = ffGetPointsActiveLocationId() || ffStaffPointsAdjustResolveLocationId(staffId);
+    if (!locationId || locationId === 'default') {
+      ffStaffPointsAdjustShowError('Choose a location before adjusting points.');
+      return;
+    }
     const actor = ffStaffPointsAdjustResolveActor();
     // Per-call unique sourceId so each adjustment is its own event (no
     // collision with previous adjustments for the same staff/day) without
@@ -38154,6 +38700,18 @@ function initializeUserProfileMenu() {
   if (typeof document !== 'undefined' && !document.__ffPointsAppLocationListenerBound) {
     document.__ffPointsAppLocationListenerBound = true;
     document.addEventListener('ff-active-location-changed', function() {
+      try {
+        ['pointsSettingsModal', 'ffStaffPointsAdjustModal', 'pointsVoidConfirmModal'].forEach(function(id) {
+          const el = document.getElementById(id);
+          if (el) el.style.display = 'none';
+        });
+      } catch (_) {}
+      try {
+        ffPointsLeaderboardRows = [];
+        ffPointsLeaderboardPrivateRank = null;
+        const list = document.getElementById('pointsAppLeaderboardList');
+        if (list) list.innerHTML = '';
+      } catch (_) {}
       const screen = document.getElementById('pointsAppScreen');
       if (screen && screen.style.display !== 'none' && typeof window.goToPointsApp === 'function') {
         window.goToPointsApp();
@@ -40080,8 +40638,12 @@ function initializeUserProfileMenu() {
       // (up to 60s) instead of silently rendering the HTML defaults with no
       // retry.
       const salonIdNow = window.currentSalonId || null;
+      const locationIdNow = (typeof window.ffGetActiveLocationId === 'function'
+        ? String(window.ffGetActiveLocationId() || '').trim()
+        : '') || '';
       const alreadyHydratedForSalon = !!(card.__ffTCHydratedSalonId && salonIdNow &&
-        card.__ffTCHydratedSalonId === salonIdNow);
+        card.__ffTCHydratedSalonId === salonIdNow &&
+        card.__ffTCHydratedLocationId === locationIdNow);
 
       if (card.__ffTCLoading) {
         // Re-entry while a load is in flight: keep the skeleton expand state;
@@ -40115,7 +40677,8 @@ function initializeUserProfileMenu() {
           return window.ffLoadTimeClockSettings({ force: true });
         }).then(function (settings) {
           if (!settings) return;
-          if (card.__ffTCHydratedSalonId !== salonIdNow) return;
+          if (card.__ffTCHydratedSalonId !== salonIdNow ||
+              card.__ffTCHydratedLocationId !== locationIdNow) return;
           // Don't clobber in-progress edits the owner hasn't saved yet.
           const dirty = card.__ffTCLastSavedSnapshot
             && !settingsEqual(readCurrentSettings(), card.__ffTCLastSavedSnapshot);
@@ -40161,6 +40724,7 @@ function initializeUserProfileMenu() {
           setToggleTransitions(false);
           hydrateUI(settings);
           card.__ffTCHydratedSalonId = salonIdNow;
+          card.__ffTCHydratedLocationId = locationIdNow;
           card.__ffTCLastSavedSnapshot = readCurrentSettings();
           if (typeof window.ffTCRememberExpand === 'function') {
             window.ffTCRememberExpand(settings);
@@ -40184,6 +40748,24 @@ function initializeUserProfileMenu() {
     }
   }
   window.ffInitTimeClockSettingsUI = ffInitTimeClockSettingsUI;
+
+  if (typeof document !== 'undefined' && !document.__ffTCSettingsLocRefreshBound) {
+    document.__ffTCSettingsLocRefreshBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      try {
+        const card = document.getElementById('userProfileCardTimeClockSettings');
+        if (!card || card.style.display === 'none') return;
+        card.__ffTCHydratedSalonId = null;
+        card.__ffTCHydratedLocationId = null;
+        card.__ffTCLastSavedSnapshot = null;
+        if (typeof window.ffInitTimeClockSettingsUI === 'function') {
+          window.ffInitTimeClockSettingsUI();
+        }
+      } catch (e) {
+        console.warn('[Time Clock Settings] refresh on location change failed', e);
+      }
+    });
+  }
 
   /**
    * Last hydrated/saved expand flags for Time Clock settings. Used by the
@@ -40326,7 +40908,7 @@ function initializeUserProfileMenu() {
     confirmOpenEntry: null,    // open entry snapshot (if any) for confirmStaff
     manage: {
       mode: 'cards',           // 'cards' | 'summary'
-      filterLocationId: '',    // '' = all
+      filterLocationId: '',    // '' = all salon locations (never follow the header switcher)
       filterStaffIds: [],      // [] = all, otherwise one-or-more staff ids
       filterPeriod: 'all',     // 'today' | 'week' | 'lastweek' | 'last2weeks' | 'month' | 'all' | 'custom'
       customFrom: null,        // YYYY-MM-DD when filterPeriod === 'custom'
@@ -40405,6 +40987,15 @@ function initializeUserProfileMenu() {
   }
 
   function _ffTCActiveLocations() {
+    // Time Cards is salon-wide: the filter must list every branch so managers
+    // can see what happened at each location. Do not follow the header switcher.
+    try {
+      if (typeof window.ffGetLocations === 'function') {
+        const list = window.ffGetLocations() || [];
+        const all = list.filter((l) => l && l.id && l.isActive !== false);
+        if (all.length) return all;
+      }
+    } catch (_) {}
     try {
       if (typeof window.ffGetActiveLocations === 'function') {
         const list = window.ffGetActiveLocations() || [];
@@ -40655,7 +41246,7 @@ function initializeUserProfileMenu() {
   //      Re-appending the SAME module URL is safe — browsers evaluate a
   //      module URL only once, so this never double-runs the module.
   //   2. The confirm action waits (below) instead of failing immediately.
-  const _FF_TC_ENTRIES_SRC = '/time-clock-entries.js?v=20260512_manage_wait';
+  const _FF_TC_ENTRIES_SRC = '/time-clock-entries.js?v=20260816_dash_time';
   function _ffTCEnsurePunchApiLoading() {
     try {
       if (typeof window.ffCreateTimeEntry === 'function') return;
@@ -40701,6 +41292,19 @@ function initializeUserProfileMenu() {
     }
   }
   window.ffInitTimeClockUI = ffInitTimeClockUI;
+
+  if (!window.__ffTCManageLocListenerBound) {
+    window.__ffTCManageLocListenerBound = true;
+    document.addEventListener('ff-active-location-changed', function () {
+      try {
+        const screen = document.getElementById('timeClockScreen');
+        if (!screen || screen.style.display === 'none') return;
+        if (!window.__ffTCState || window.__ffTCState.view !== 'manage') return;
+        const content = document.getElementById('timeClockScreenContent');
+        if (content) _ffTCRenderManageView(content);
+      } catch (_) {}
+    });
+  }
 
   if (!window.__ffTCLocationsRefreshBound) {
     window.__ffTCLocationsRefreshBound = true;
@@ -42861,8 +43465,9 @@ function initializeUserProfileMenu() {
         const singleStaff = (Array.isArray(st.filterStaffIds) && st.filterStaffIds.length === 1)
           ? st.filterStaffIds[0]
           : undefined;
+        const filterLoc = String(st.filterLocationId || '').trim();
         rows = await window.ffListTimeEntriesForSalon({
-          locationId: st.filterLocationId || undefined,
+          locationId: filterLoc || undefined,
           staffId: singleStaff,
           from,
           to,
@@ -43925,8 +44530,11 @@ function initializeUserProfileMenu() {
       // values and refresh quietly inside ffInitTimeClockSettingsUI.
       if (section === 'time-clock-settings' && typeof window.ffTCSettingsApplyEnterSkeleton === 'function') {
         const sid = window.currentSalonId || null;
+        const locNow = (typeof window.ffGetActiveLocationId === 'function'
+          ? String(window.ffGetActiveLocationId() || '').trim() : '') || '';
         const alreadyHydrated = !!(targetCard.__ffTCHydratedSalonId && sid &&
-          targetCard.__ffTCHydratedSalonId === sid);
+          targetCard.__ffTCHydratedSalonId === sid &&
+          targetCard.__ffTCHydratedLocationId === locNow);
         if (!alreadyHydrated) {
           window.ffTCSettingsApplyEnterSkeleton(targetCard);
         }
@@ -43981,7 +44589,7 @@ function initializeUserProfileMenu() {
             return true;
           }
           if (paint()) return;
-          var v = '20260816_od_open';
+          var v = '20260902_set_iso';
           // Load cloud via <script type=module> (same as safe-loader). Do NOT
           // import() settings-cloud — Safari re-parses app.js ("Parser error").
           if (typeof window.ffEnsureOnboardingSettingsSubscribed !== 'function'
@@ -44080,6 +44688,10 @@ function initializeUserProfileMenu() {
       }
       if (section === 'shared-setup') {
         console.log('[SharedSetup] opened');
+        ffLoadSharedServiceCatalogShareToggle();
+        ffLoadSharedChatShareToggle();
+        ffLoadSharedInventoryShareToggle();
+        ffLoadSharedProductShareToggle();
       }
       // Time Clock Settings - Stage 2 UI init (wire overtime toggle). Safe to
       // call on every open because the init function is idempotent.
@@ -44315,6 +44927,9 @@ function initializeUserProfileMenu() {
         const card = document.getElementById('userProfileCardPreferences');
         if (!card || card.style.display === 'none') return;
         if (typeof loadPreferences === 'function') loadPreferences();
+        if (typeof renderUserProfileStaffCallMessageSettings === 'function') {
+          renderUserProfileStaffCallMessageSettings();
+        }
       } catch (e) {
         console.warn('[Business Format] refresh failed', e);
       }
@@ -49140,7 +49755,10 @@ window.__ffTasksCloudInit = function() {
       var enforceSelectSettings = JSON.parse(localStorage.getItem('ff_tasks_enforce_select_v1') || '{}');
       var autoResetState = JSON.parse(localStorage.getItem('ff_tasks_auto_reset_state_v1') || '{}');
       var resetStamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}');
+      var isolateClearAt = 0;
+      try { isolateClearAt = Number(localStorage.getItem('ff_tasks_isolate_clear_at_v1') || 0) || 0; } catch (_) {}
       var state = { catalog: catalog, tombstone: tombstone, alertWindows: alertWindows, enforceSelectSettings: enforceSelectSettings, autoResetState: autoResetState, resetStamps: resetStamps };
+      if (isolateClearAt > 0) state.isolateClearAt = isolateClearAt;
       TABS.forEach(function(tab) {
         var active = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_active_v1')  || '[]');
         var done = JSON.parse(localStorage.getItem('ff_tasks_' + tab + '_done_v1')    || '[]');
@@ -49167,6 +49785,95 @@ window.__ffTasksCloudInit = function() {
     },
     applyState: function(data) {
       var TABS_FOR_STAMPS = ['opening','closing','weekly','monthly','yearly'];
+      var currentLoc = '';
+      try {
+        currentLoc = (typeof window.ffGetActiveLocationId === 'function' && window.ffGetActiveLocationId())
+          ? String(window.ffGetActiveLocationId()).trim()
+          : '';
+      } catch (_) { currentLoc = ''; }
+      if (!currentLoc) {
+        try { currentLoc = String(localStorage.getItem('ff_active_location_id') || '').trim(); } catch (_) {}
+      }
+      if (data && Number(data.isolateClearAt || 0) > 0) {
+        window.__ffTasksHardReplace = true;
+        try { localStorage.setItem('ff_tasks_isolate_clear_at_v1', String(Number(data.isolateClearAt))); } catch (_) {}
+      }
+      var applyingDoc = '';
+      try { applyingDoc = String(window.__ffTasksApplyingDocId || '').trim(); } catch (_) { applyingDoc = ''; }
+      if (applyingDoc === 'default') applyingDoc = '';
+      var multiLoc = false;
+      try { multiLoc = typeof window.ffUserHasMultipleLocations === 'function' && !!window.ffUserHasMultipleLocations(); } catch (_) {}
+      // Never paint the legacy salon-wide default catalog onto a chosen branch.
+      // Hard-replace empty (location wait / switch flush) is allowed.
+      if (window.__ffTasksHardReplace !== true && multiLoc && currentLoc && !applyingDoc) {
+        console.warn('[TasksCloud] ignored default snapshot while a branch is selected');
+        return;
+      }
+      if (currentLoc && applyingDoc && applyingDoc !== currentLoc) {
+        console.warn('[TasksCloud] ignored snapshot for other location', applyingDoc, currentLoc);
+        return;
+      }
+      var lsLoc = '';
+      try { lsLoc = String(localStorage.getItem('ff_tasks_ls_location_id_v1') || '').trim(); } catch (_) { lsLoc = ''; }
+      // Cached lists are salon-wide. If they belong to another branch, replace
+      // them — do not union Key Biscayne with Brickell.
+      if ((currentLoc && lsLoc && lsLoc !== currentLoc) || (applyingDoc && lsLoc && lsLoc !== applyingDoc)) {
+        window.__ffTasksHardReplace = true;
+      } else if (currentLoc && !lsLoc) {
+        try {
+          var staleCat = JSON.parse(localStorage.getItem('ff_tasks_catalog_v1') || '{}') || {};
+          var staleLists = ['opening','closing','weekly','monthly','yearly'].some(function(tab) {
+            return ['active','pending','done'].some(function(kind) {
+              var raw = localStorage.getItem('ff_tasks_' + tab + '_' + kind + '_v1');
+              if (!raw || raw === '[]') return false;
+              try { var arr = JSON.parse(raw); return Array.isArray(arr) && arr.length > 0; }
+              catch (_) { return false; }
+            });
+          });
+          var staleCatalog = ['opening','closing','weekly','monthly','yearly'].some(function(tab) {
+            return Array.isArray(staleCat[tab]) && staleCat[tab].length > 0;
+          });
+          if (staleLists || staleCatalog) window.__ffTasksHardReplace = true;
+        } catch (_) {}
+      }
+      function stampTasksLsLocation() {
+        try {
+          var stamp = applyingDoc || currentLoc;
+          if (stamp) localStorage.setItem('ff_tasks_ls_location_id_v1', stamp);
+        } catch (_) {}
+      }
+      // Location switch: this branch is a different business. Replace local
+      // lists/catalog/settings outright — never merge Brickell into Key Biscayne.
+      if (window.__ffTasksHardReplace === true) {
+        try {
+          var hardCatalog = (data && data.catalog && typeof data.catalog === 'object') ? data.catalog : {};
+          localStorage.setItem('ff_tasks_catalog_v1', JSON.stringify(hardCatalog));
+          window.ff_tasks_catalog_v1 = hardCatalog;
+          localStorage.setItem('ff_tasks_active_deleted_v1', JSON.stringify((data && data.tombstone) || {}));
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify((data && data.alertWindows) || {}));
+          localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify((data && data.enforceSelectSettings) || {}));
+          localStorage.setItem('ff_tasks_auto_reset_state_v1', JSON.stringify((data && data.autoResetState) || {}));
+          localStorage.setItem('ff_tasks_reset_stamps_v1', JSON.stringify((data && data.resetStamps) || {}));
+          TABS_FOR_STAMPS.forEach(function(tab) {
+            var hardTab = (data && data[tab]) || {};
+            ['active','pending','done'].forEach(function(kind) {
+              localStorage.setItem('ff_tasks_' + tab + '_' + kind + '_v1', JSON.stringify(Array.isArray(hardTab[kind]) ? hardTab[kind] : []));
+            });
+          });
+          try {
+            if (typeof cleanupOrphanTasks === 'function') cleanupOrphanTasks();
+            if (typeof cleanupBlockedTasks === 'function') cleanupBlockedTasks();
+          } catch (cleanupErr) {
+            console.warn('[TasksCloud] cleanup after hard-replace failed', cleanupErr);
+          }
+          stampTasksLsLocation();
+          console.log('[TasksCloud] Applied hard-replace state for location switch');
+          try { document.dispatchEvent(new CustomEvent('ff-tasks-data-changed')); } catch (_) {}
+        } catch (e) {
+          console.warn('[TasksCloud] hard-replace applyState failed', e);
+        }
+        return;
+      }
       // Reset stamps: tabs whose cloud reset is NEWER than anything this device
       // has seen. For those tabs the remote lists win outright — local done rows
       // predate the reset and must NOT be merged back (that bug resurrected
@@ -49334,6 +50041,7 @@ window.__ffTasksCloudInit = function() {
           });
         });
         persistMergedStamps();
+        stampTasksLsLocation();
         try {
           if (typeof cleanupOrphanTasks === 'function') cleanupOrphanTasks();
           if (typeof cleanupBlockedTasks === 'function') cleanupBlockedTasks();
@@ -49341,6 +50049,7 @@ window.__ffTasksCloudInit = function() {
           console.warn('[TasksCloud] cleanup after applyState failed', cleanupErr);
         }
         console.log('[TasksCloud] Applied remote state');
+        try { document.dispatchEvent(new CustomEvent('ff-tasks-data-changed')); } catch (_) {}
       } catch(e) { console.warn('[TasksCloud] applyState error', e); }
     },
     onRefresh: function() {
@@ -49512,7 +50221,9 @@ window.__ffQueueCloudInit = function() {
       return { queue: queue, service: service, log: log, queuesData: getQueuesData() };
     },
     onLogChange: function() {
-      if (Date.now() - window.__ff_lastSaveTime < 6000) return;
+      const hm = document.getElementById('historyScreen');
+      const historyOpen = hm && hm.style.display !== 'none';
+      if (!historyOpen && Date.now() - window.__ff_lastSaveTime < 6000) return;
       if (typeof renderHistory === 'function') renderHistory();
     }
   });
@@ -49530,9 +50241,8 @@ if (!window.__ffQueueLocationListenerBound) {
     } catch (e) {
       console.warn('[Queue] renderSelect on location change failed', e);
     }
-    // If the History modal is open when the user switches locations, make
-    // sure the rows it shows belong to the new branch and not the old one.
     try {
+      if (typeof ffHistoryHardResetView === 'function') ffHistoryHardResetView();
       const hm = document.getElementById('historyScreen');
       if (hm && hm.style.display !== 'none' && typeof renderHistory === 'function') {
         renderHistory();
@@ -53081,7 +53791,26 @@ function hookSettingsGuard_DISABLED(){
         if (h < 24) return h + "h";
         return Math.floor(h / 24) + "d";
       }
-      function setCount(id, n) { var el = document.getElementById(id); if (el) el.textContent = String(n); }
+      function setCount(id, n) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = String(n);
+        var drawer = document.getElementById("ffLiveFloorDrawer");
+        if (!drawer) return;
+        var mirrored = drawer.querySelector('[data-ff-live-count="' + id + '"]');
+        if (mirrored) mirrored.textContent = String(n);
+      }
+      function mirrorLiveList(id) {
+        var src = document.getElementById(id);
+        var drawer = document.getElementById("ffLiveFloorDrawer");
+        if (!src || !drawer) return;
+        var dest = drawer.querySelector('[data-ff-live-list="' + id + '"]');
+        if (dest) dest.innerHTML = src.innerHTML;
+      }
+      function isLivePresentationActive() {
+        var screen = document.getElementById("liveScreen");
+        if (screen && screen.style.display === "flex") return true;
+        return !!(typeof window.ffIsLiveFloorDrawerOpen === "function" && window.ffIsLiveFloorDrawerOpen());
+      }
       function emptyHtml(msg) { return '<div class="live-empty">' + liveEsc(msg) + "</div>"; }
 
       var ffLiveQueueMode = "available"; // "available" | "service"
@@ -53150,20 +53879,23 @@ function hookSettingsGuard_DISABLED(){
         if (!list) return;
         var title = document.getElementById("liveQueueTitle");
         if (title) title.textContent = "Queue";
-        var seg = document.getElementById("liveQueueModeToggle");
-        if (seg) {
-          seg.querySelectorAll(".live-q-seg-opt").forEach(function (b) {
-            var on = b.getAttribute("data-live-q-mode") === ffLiveQueueMode;
-            b.classList.toggle("is-active", on);
-            b.setAttribute("aria-selected", on ? "true" : "false");
-          });
-        }
+        document.querySelectorAll("[data-live-q-mode]").forEach(function (b) {
+          var on = b.getAttribute("data-live-q-mode") === ffLiveQueueMode;
+          b.classList.toggle("is-active", on);
+          b.setAttribute("aria-selected", on ? "true" : "false");
+        });
         if (ffLiveQueueMode === "service") renderQueueService(list);
         else renderQueueAvailable(list);
+        mirrorLiveList("liveQueueList");
       }
+      window.ffSetLiveQueueMode = function (mode) {
+        if (mode !== "available" && mode !== "service") return;
+        if (mode === ffLiveQueueMode) return;
+        ffLiveQueueMode = mode;
+        renderQueue();
+      };
       window.ffLiveRefreshQueueCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderQueue();
+        if (isLivePresentationActive()) renderQueue();
       };
 
       function ticketEmployee(t) {
@@ -53201,25 +53933,27 @@ function hookSettingsGuard_DISABLED(){
           return s === "open" || s === "ready_for_checkout";
         });
         setCount("liveTicketsCount", tickets.length);
-        if (!tickets.length) { list.innerHTML = emptyHtml("No active tickets."); return; }
-        if (typeof window.ffRenderTicketCardHTML === "function") {
+        if (!tickets.length) {
+          list.innerHTML = emptyHtml("No active tickets.");
+        } else if (typeof window.ffRenderTicketCardHTML === "function") {
           // Use the exact same ticket card as the Tickets list so the look matches 1:1.
           list.innerHTML = tickets.map(function (t) {
             return '<div class="live-tk-wrap" data-live-ticket="' + liveEsc(t.id || "") + '">' +
               window.ffRenderTicketCardHTML(t) + '</div>';
           }).join("");
-          return;
+        } else {
+          // Fallback: compact rows if the shared renderer isn't ready yet.
+          list.innerHTML = tickets.map(function (t) {
+            var emp = ticketEmployee(t) || "Unassigned";
+            var client = ticketClient(t) || "No client name";
+            var total = liveMoney(ticketTotalAmount(t));
+            return '<div class="live-item is-clickable" data-live-ticket="' + liveEsc(t.id || "") + '">' +
+              '<div class="live-item-main"><div class="live-item-title">' + liveEsc(emp) + '</div>' +
+              '<div class="live-item-sub">\uD83D\uDC64 ' + liveEsc(client) + '</div></div>' +
+              '<div class="live-item-right"><span class="live-pill live-pill--num">' + total + '</span></div></div>';
+          }).join("");
         }
-        // Fallback: compact rows if the shared renderer isn't ready yet.
-        list.innerHTML = tickets.map(function (t) {
-          var emp = ticketEmployee(t) || "Unassigned";
-          var client = ticketClient(t) || "No client name";
-          var total = liveMoney(ticketTotalAmount(t));
-          return '<div class="live-item is-clickable" data-live-ticket="' + liveEsc(t.id || "") + '">' +
-            '<div class="live-item-main"><div class="live-item-title">' + liveEsc(emp) + '</div>' +
-            '<div class="live-item-sub">\uD83D\uDC64 ' + liveEsc(client) + '</div></div>' +
-            '<div class="live-item-right"><span class="live-pill live-pill--num">' + total + '</span></div></div>';
-        }).join("");
+        mirrorLiveList("liveTicketsList");
       }
 
       function renderFloor() {
@@ -53231,32 +53965,32 @@ function hookSettingsGuard_DISABLED(){
           return String((o && o.status) || "open").toLowerCase() !== "closed";
         });
         setCount("liveFloorCount", orders.length);
-        if (!orders.length) { list.innerHTML = emptyHtml("No open floor requests."); return; }
-        if (typeof window.ffRenderFloorOrderCardHTML === "function") {
+        if (!orders.length) {
+          list.innerHTML = emptyHtml("No open floor requests.");
+        } else if (typeof window.ffRenderFloorOrderCardHTML === "function") {
           // Use the exact same floor card as the Floor module so the look matches 1:1.
           list.innerHTML = orders.map(function (o) {
             return '<div class="live-floor-wrap" data-live-floor="' + liveEsc(o.id || "") + '">' +
               window.ffRenderFloorOrderCardHTML(o) + '</div>';
           }).join("");
-          return;
+        } else {
+          // Fallback: compact rows if the shared renderer isn't ready yet.
+          list.innerHTML = orders.map(function (o) {
+            var who = liveEsc((o && o.createdByName) || "Someone");
+            var req = liveEsc((o && o.requestName) || "Floor request");
+            var client = String((o && o.clientName) || "").trim();
+            var sub = req + (client ? (" \u00B7 \uD83D\uDC64 " + liveEsc(client)) : "");
+            return '<div class="live-item"><div class="live-item-main"><div class="live-item-title">' + who +
+              '</div><div class="live-item-sub">' + sub + '</div></div></div>';
+          }).join("");
         }
-        // Fallback: compact rows if the shared renderer isn't ready yet.
-        list.innerHTML = orders.map(function (o) {
-          var who = liveEsc((o && o.createdByName) || "Someone");
-          var req = liveEsc((o && o.requestName) || "Floor request");
-          var client = String((o && o.clientName) || "").trim();
-          var sub = req + (client ? (" \u00B7 \uD83D\uDC64 " + liveEsc(client)) : "");
-          return '<div class="live-item"><div class="live-item-main"><div class="live-item-title">' + who +
-            '</div><div class="live-item-sub">' + sub + '</div></div></div>';
-        }).join("");
+        mirrorLiveList("liveFloorList");
       }
       window.ffLiveRefreshFloorCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderFloor();
+        if (isLivePresentationActive()) renderFloor();
       };
       window.ffLiveRefreshTicketsCard = function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display === "flex") renderTickets();
+        if (isLivePresentationActive()) renderTickets();
       };
 
       function renderChat() {
@@ -53397,6 +54131,9 @@ function hookSettingsGuard_DISABLED(){
       function openLiveScreen() {
         var screen = document.getElementById("liveScreen");
         if (!screen) return;
+        if (typeof window.ffCloseLiveFloorDrawer === "function") {
+          try { window.ffCloseLiveFloorDrawer(); } catch (_) {}
+        }
         // Live covers Queue; never leave the queue boot skeleton taking layout
         // space underneath (and later pushing Chat when leaving Live).
         try {
@@ -53598,15 +54335,23 @@ function hookSettingsGuard_DISABLED(){
         }, true);
       });
       document.addEventListener("ff-tickets-data-changed", function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display !== "none") renderTickets();
+        if (isLivePresentationActive()) renderTickets();
       });
       document.addEventListener("ff-staff-cloud-updated", function () {
-        var screen = document.getElementById("liveScreen");
-        if (screen && screen.style.display !== "none") renderLiveScreen();
+        if (isLivePresentationActive()) renderLiveScreen();
+      });
+      document.addEventListener("ff-active-location-changed", function () {
+        try {
+          if (typeof window.ffCloseLiveChatThread === "function") window.ffCloseLiveChatThread();
+        } catch (_) {}
+        renderLiveScreen();
+        try {
+          if (typeof window.ffRenderLiveScreen === "function") window.ffRenderLiveScreen();
+        } catch (_) {}
       });
     })();
   </script>
+  <script src="/live-floor-drawer.js?v=20260821_lfd_proto"></script>
   <script>
     (function () {
       var STORAGE_KEY = "ff_live_desk_fab_pos_v1";
@@ -53941,9 +54686,9 @@ function hookSettingsGuard_DISABLED(){
   </div> <!-- End main-app-content -->
 
   <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
-  <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
+  <script src="/analytics-loader.js?v=20260816_tasks_week"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>
-  <script src="/safe-loader.js?v=20260818_staff_dur_ui"></script>
+  <script src="/safe-loader.js?v=20260902_tasks_iso3"></script>
 
   <!-- PIN Modal -->
   <div id="pinModal" class="pin-modal" style="display:none;">
@@ -54226,10 +54971,21 @@ function hookSettingsGuard_DISABLED(){
             <input id="servicesCatalogEditorCategoryText" type="text" placeholder="Category" autocomplete="off" style="display:none;width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
           </div>
           <div id="servicesCatalogEditorPriceWrap" style="display:none;">
+            <label for="servicesCatalogEditorPrice" style="display:block;font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">Price</label>
             <input id="servicesCatalogEditorPrice" type="number" min="0" step="0.01" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
           </div>
           <div id="servicesCatalogEditorDurationWrap" style="display:none;">
-            <input id="servicesCatalogEditorDuration" type="number" min="1" max="1440" step="1" placeholder="Duration (minutes)" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+            <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">Duration</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700;color:#6b7280;">
+                Hours
+                <input id="servicesCatalogEditorDurationHours" type="number" min="0" max="24" step="1" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700;color:#6b7280;">
+                Minutes
+                <input id="servicesCatalogEditorDurationMinutes" type="number" min="0" max="59" step="1" inputmode="numeric" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;">
+              </label>
+            </div>
           </div>
           <label id="servicesCatalogEditorActiveWrap" style="display:none;align-items:center;gap:8px;font-size:13px;color:#374151;cursor:pointer;">
             <input id="servicesCatalogEditorActive" type="checkbox" checked style="accent-color:#7c3aed;">
@@ -54279,6 +55035,12 @@ function hookSettingsGuard_DISABLED(){
         style="display:none;">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
+      <button id="chatNewGroupBtn" type="button" onclick="window.openChatNewGroupModal && window.openChatNewGroupModal()"
+        title="Create a chat group"
+        style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        New Group
+      </button>
       <button id="chatSendBtn" type="button">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         New Message
@@ -54309,8 +55071,21 @@ function hookSettingsGuard_DISABLED(){
           style="display:none;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;border:1px solid #e5e7eb;background:#fff;cursor:pointer;color:#374151;font-weight:800;">
           ‹
         </button>
-        <div id="chatConvHeaderAvatar" style="width:32px;height:32px;border-radius:50%;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">-</div>
-        <span id="chatConvTitle" style="font-size:15px;font-weight:700;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Select a conversation</span>
+        <button type="button" id="chatConvHeaderMain" class="chat-conv-header-main">
+          <div id="chatConvHeaderAvatar" style="width:32px;height:32px;border-radius:50%;background:#ede9fe;color:#7c3aed;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">-</div>
+          <span class="chat-conv-header-text">
+            <span id="chatConvTitle">Select a conversation</span>
+            <span id="chatConvSubtitle"></span>
+          </span>
+        </button>
+        <button type="button" id="chatConvSearchBtn" title="Search messages" aria-label="Search messages" style="display:none;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        </button>
+      </div>
+      <div id="chatConvSearchBar" style="display:none;">
+        <input id="chatConvSearchInput" type="search" placeholder="Search messages" autocomplete="off">
+        <span id="chatConvSearchCount"></span>
+        <button type="button" id="chatConvSearchClose" aria-label="Close search">✕</button>
       </div>
       <!-- Messages area -->
       <div id="chatConvMessages" style="flex:1;overflow-y:auto;padding:16px 16px 8px;display:flex;flex-direction:column;gap:4px;">
@@ -54320,6 +55095,13 @@ function hookSettingsGuard_DISABLED(){
         </div>
       </div>
       <!-- Free-text composer (visibility from chat.js when permission + open thread) -->
+      <div id="chatQuoteBar" style="display:none;" aria-label="Replying to message">
+        <div class="chat-quote-bar-body">
+          <div id="chatQuoteName"></div>
+          <div id="chatQuoteText"></div>
+        </div>
+        <button type="button" id="chatQuoteClear" onclick="window.clearChatQuoteReply && window.clearChatQuoteReply()" aria-label="Cancel reply">✕</button>
+      </div>
       <div id="chatConvFreeTextBar" aria-label="Free text message">
         <label for="chatConvFreeTextInput" style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.04em;">Write a message</label>
         <div class="chat-conv-free-row">
@@ -54338,6 +55120,85 @@ function hookSettingsGuard_DISABLED(){
     </div>
   </div>
 
+</div>
+
+<!-- Chat: New Group Modal -->
+<div id="chatNewGroupModal" class="chat-modal-overlay" style="display:none;">
+  <div class="chat-modal-box">
+    <div class="chat-modal-header">
+      <span class="chat-modal-title">New Group</span>
+      <button type="button" class="chat-modal-close" onclick="window.closeChatNewGroupModal && window.closeChatNewGroupModal()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="chat-modal-body">
+      <div style="text-align:center;margin-bottom:14px;">
+        <button type="button" id="chatGroupPhotoPickBtn" class="chat-group-photo-pick"
+          onclick="window.pickNewChatGroupPhoto && window.pickNewChatGroupPhoto()"
+          title="Add group photo" aria-label="Add group photo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+        </button>
+        <div style="font-size:12px;color:#6b7280;">Add group photo</div>
+      </div>
+      <input id="chatGroupPhotoInput" type="file" accept="image/*" style="display:none;">
+      <div class="chat-section-label">Group name</div>
+      <input id="chatGroupNameInput" type="text" maxlength="80" placeholder="e.g. Managers"
+        style="width:100%;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;box-sizing:border-box;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;">
+        <div class="chat-section-label" style="margin:0;">Members</div>
+        <button type="button" onclick="window._chatGroupSelectManagers && window._chatGroupSelectManagers()"
+          style="padding:6px 10px;border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">
+          All managers
+        </button>
+      </div>
+      <input id="chatGroupMemberSearch" type="text" placeholder="Search staff"
+        style="width:100%;margin-top:8px;padding:9px 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;outline:none;box-sizing:border-box;">
+      <div id="chatGroupMemberList" style="margin-top:8px;max-height:280px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:12px;padding:4px 8px;"></div>
+    </div>
+    <div class="chat-modal-footer">
+      <button type="button" onclick="window.closeChatNewGroupModal && window.closeChatNewGroupModal()"
+        style="padding:9px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;color:#6b7280;">Cancel</button>
+      <button type="button" id="chatGroupCreateBtn" onclick="window.confirmCreateChatGroup && window.confirmCreateChatGroup()"
+        style="padding:9px 16px;border:none;border-radius:8px;background:#7c3aed;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Create Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- Chat: Group info (participants) -->
+<div id="chatGroupInfoModal" class="chat-modal-overlay" style="display:none;">
+  <div class="chat-modal-box">
+    <div class="chat-modal-header">
+      <span class="chat-modal-title">Group info</span>
+      <button type="button" class="chat-modal-close" onclick="window.closeChatGroupInfo && window.closeChatGroupInfo()">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+    <div class="chat-modal-body" style="padding-top:20px;">
+      <div style="text-align:center;margin-bottom:16px;">
+        <button type="button" id="chatGroupInfoPhotoBtn" class="chat-group-photo-pick" title="Group photo" aria-label="Group photo"></button>
+        <div id="chatGroupInfoName" class="chat-group-info-title"></div>
+        <input id="chatGroupInfoNameInput" class="chat-group-info-title-input" type="text" maxlength="80" style="display:none;" placeholder="Group name">
+        <div id="chatGroupInfoCount" style="font-size:13px;color:#6b7280;margin-top:4px;"></div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div class="chat-section-label" style="margin:0;">Participants</div>
+        <button type="button" id="chatGroupInfoAddBtn" class="chat-group-info-add-btn" style="display:none;"
+          onclick="window.openChatGroupAddMembers && window.openChatGroupAddMembers()">Add</button>
+      </div>
+      <div id="chatGroupAddPanel" style="display:none;margin-top:8px;border:1px solid #e5e7eb;border-radius:12px;padding:8px;">
+        <input id="chatGroupAddSearch" type="text" placeholder="Search staff"
+          style="width:100%;padding:9px 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;outline:none;box-sizing:border-box;">
+        <div id="chatGroupAddList" style="max-height:180px;overflow-y:auto;margin-top:6px;"></div>
+        <button type="button" id="chatGroupAddConfirmBtn" onclick="window.confirmChatGroupAddMembers && window.confirmChatGroupAddMembers()"
+          style="width:100%;margin-top:8px;padding:8px 12px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Add selected</button>
+      </div>
+      <div id="chatGroupInfoList" style="margin-top:8px;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;"></div>
+      <div id="chatGroupInfoActions" class="chat-group-info-actions">
+        <button type="button" id="chatGroupLeaveBtn" onclick="window.leaveChatGroup && window.leaveChatGroup()">Leave group</button>
+        <button type="button" id="chatGroupDeleteBtn" onclick="window.deleteChatGroup && window.deleteChatGroup()" style="display:none;">Delete group</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Chat: Send Message Modal -->
@@ -54802,7 +55663,7 @@ function hookSettingsGuard_DISABLED(){
       <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-shrink:0;" aria-live="polite"></div>
       <span style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">Week</span>
       <div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap;">
-        <select id="scheduleWeekFilter" style="height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;cursor:pointer;outline:none;">
+        <select id="scheduleWeekFilter">
           <option value="previous">Previous week</option>
           <option value="current">Current week</option>
           <option value="next" selected>Next week</option>
@@ -54811,16 +55672,20 @@ function hookSettingsGuard_DISABLED(){
           <option value="in4">In 4 weeks</option>
           <option value="custom">Custom week</option>
         </select>
-        <input type="date" id="scheduleCustomWeekDate" style="display:none;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:13px;outline:none;">
+        <input type="date" id="scheduleCustomWeekDate" style="display:none;height:32px;padding:0 10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:13px;outline:none;">
         <button type="button" id="scheduleApplyCustomWeekBtn" class="btn-pill" style="display:none;background:#7c3aed;color:#fff;border-color:#7c3aed;font-size:13px;padding:8px 14px;">Apply</button>
       </div>
-      <button type="button" id="schedulePublishToggleBtn" title="Publish this week for all staff" aria-pressed="false" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">
-        <span id="schedulePublishToggleIcon" aria-hidden="true" style="font-size:14px;line-height:1;">&#128065;&#65039;</span>
-        <span id="schedulePublishToggleLabel">Visible to staff</span>
+      <div class="ff-sched-toolbar-actions">
+      <button type="button" id="schedulePublishToggleBtn" class="ff-sched-visibility is-draft" title="Publish this week so the team can see it." aria-pressed="false">
+        <span class="ff-sched-visibility-dot" id="schedulePublishToggleIcon" aria-hidden="true"></span>
+        <span id="schedulePublishToggleLabel">Publish</span>
       </button>
-      <button type="button" id="scheduleSaveDraftBtn" title="Save this week's draft to the cloud (survives refresh and syncs to your other devices). Not shown to staff until you Publish." style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 14px;border:1px solid #6d28d9;border-radius:999px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Save</button>
-      <button type="button" id="scheduleNotifyChangesBtn" title="After editing shifts, notify only staff whose rows changed" style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #fcd34d;border-radius:999px;background:#fffbeb;color:#b45309;font-size:11px;font-weight:700;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Notify staff of changes</button>
-      <button type="button" id="scheduleDiscardSavedDraftBtn" title="Replace this week-s saved draft (on this device and in the cloud) with a new auto-generated schedule from your coverage rules." style="display:none;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e7eb;border-radius:999px;background:#fff;color:#64748b;font-size:11px;font-weight:600;cursor:pointer;outline:none;flex-shrink:0;white-space:nowrap;">Build schedule</button>
+      <span id="schedulePublishHint" class="ff-sched-publish-hint">Team can't see this yet</span>
+      <button type="button" id="scheduleSaveDraftBtn" class="ff-sched-save-status is-ok" disabled title="Edits save automatically." style="display:none;">Saved</button>
+      <button type="button" id="scheduleUndoBtn" class="ff-sched-ghost" title="Undo the last schedule change" disabled>Undo</button>
+      <button type="button" id="scheduleNotifyChangesBtn" class="ff-sched-ghost" title="Send a notice only to staff whose shifts changed" style="display:none;">Notify team</button>
+      <button type="button" id="scheduleDiscardSavedDraftBtn" class="ff-sched-ghost" title="Replace this week with a new auto-generated schedule from your coverage rules.">Rebuild</button>
+      </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-shrink:0;margin-left:auto;">
       <div id="scheduleModeToggleWrap" style="display:none;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;line-height:0;flex-shrink:0;">
@@ -54841,7 +55706,7 @@ function hookSettingsGuard_DISABLED(){
     </div>
   </div>
   <div id="schedulePreviewContent" style="flex:1;overflow-y:auto;padding:14px 16px 8px 16px;">
-    <div id="schedulePreviewLoading" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #ddd6fe;background:#f5f3ff;border-radius:12px;color:#6d28d9;font-size:13px;">Loading schedule preview...</div>
+    <div id="schedulePreviewLoading" style="display:none;" hidden></div>
     <div id="schedulePreviewError" style="display:none;max-width:1200px;margin:0 auto 16px;padding:14px 16px;border:1px solid #fecaca;background:#fef2f2;border-radius:12px;color:#b91c1c;font-size:13px;"></div>
     <div id="schedulePreviewEmpty" style="display:none;max-width:1200px;margin:0 auto;padding:24px;border:1px dashed #d1d5db;border-radius:16px;background:#fff;color:#6b7280;font-size:14px;text-align:center;">No schedule preview available for this week.</div>
     <div id="scheduleCrossLocConflictBanner" style="display:none;max-width:1400px;margin:0 auto 10px;padding:12px 14px;border:1px solid #fcd34d;background:#fffbeb;border-radius:12px;color:#92400e;font-size:13px;line-height:1.45;"></div>
@@ -55191,7 +56056,7 @@ function hookSettingsGuard_DISABLED(){
             <span>All locations</span>
           </label>
         </div>
-        <div class="ttm-section-hint">Select one or more specific locations, or leave as "All locations" for salon-wide training.</div>
+        <div class="ttm-section-hint">Stays at the selected location. Check "All locations" only to share this training with every branch.</div>
       </div>
 
       <div class="ttm-section">

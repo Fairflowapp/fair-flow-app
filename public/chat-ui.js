@@ -13,12 +13,15 @@ import {
   _chatUserMatchesAllowedSenders,
   timeAgo,
   _otherUidFromParticipants,
+  isChatGroup,
+  chatGroupTitle,
+  chatGroupPhotoUrl,
   _trimStr,
   _memberDisplayNameFromRow,
   _chatDayKey,
   _chatDaySeparatorLabel,
-} from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+} from "./chat-helpers.js?v=20260901_chat_iso";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
 import {
   _readActiveLocationId,
   _chatEffectiveLocKey,
@@ -27,8 +30,8 @@ import {
   loadChatTemplates,
   loadChatFlows,
   loadChatSalonUsers,
-} from "./chat-data.js?v=20260628_chat_data_b0";
-import { initChatUiModal, _openChatModal, _chatGetFlowAccordion, _chatRenderFlowWizard, _updateChatSendBtn, _updateRecipientSummary } from "./chat-ui-modal.js?v=20260701_chat_ui_modal_split";
+} from "./chat-data.js?v=20260901_chat_iso";
+import { initChatUiModal, _openChatModal, _chatGetFlowAccordion, _chatRenderFlowWizard, _updateChatSendBtn, _updateRecipientSummary } from "./chat-ui-modal.js?v=20260901_chat_iso";
 
 // Local copies of trivial predicates also used by chat.js (kept self-contained).
 const CHAT_NAME_LOADING = 'Loading...';
@@ -49,34 +52,94 @@ export function initChatUi(deps) {
   });
 }
 
+function _fixedAvatarImg(url, size) {
+  const src = String(url || '').replace(/"/g, '&quot;');
+  return `<img src="${src}" alt="" width="${size}" height="${size}" decoding="async">`;
+}
+
+function _threadCardPhotoUrl(conv, uid) {
+  if (isChatGroup(conv)) return chatGroupPhotoUrl(conv);
+  const otherUid = _otherUidFromParticipants(conv.participants, uid);
+  return _avatarUrlForUid(otherUid) || '';
+}
+
+function _threadCardAvatarHtml(conv, uid, forLive) {
+  const group = isChatGroup(conv);
+  const name = group ? chatGroupTitle(conv) : (_nameForUid(_otherUidFromParticipants(conv.participants, uid)) || 'Unknown');
+  const initial = (name.charAt(0) || '?').toUpperCase();
+  const photoUrl = _threadCardPhotoUrl(conv, uid);
+  const groupPickAttr = (!forLive && group)
+    ? ` onclick="event.stopPropagation(); window.pickChatGroupPhoto && window.pickChatGroupPhoto('${escHtml(conv.id)}')"`
+    : '';
+  const extraClass = group ? ' ctc-avatar-group' : ' ctc-avatar-single';
+  const title = group ? (photoUrl ? 'Change group photo' : 'Add group photo') : '';
+  const titleAttr = title ? ` title="${escHtml(title)}"` : '';
+  if (photoUrl) {
+    return `<span class="ctc-avatar${extraClass}"${titleAttr}${groupPickAttr}>${_fixedAvatarImg(photoUrl, 40)}</span>`;
+  }
+  return `<span class="ctc-avatar${extraClass}"${titleAttr}${groupPickAttr}>${escHtml(initial)}</span>`;
+}
+
+function _applyThreadCardState(card, conv, uid) {
+  if (!card || !conv) return;
+  const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
+  const group = isChatGroup(conv);
+  const otherUid = group ? '' : _otherUidFromParticipants(conv.participants, uid);
+  const otherName = group ? chatGroupTitle(conv) : (_nameForUid(otherUid) || 'Unknown');
+  card.classList.toggle('is-selected', chatState.currentConvId === conv.id);
+  card.classList.toggle('chat-thread-card-unread', unread > 0);
+  card.setAttribute('data-other-uid', otherUid);
+  card.setAttribute('data-other-name', otherName);
+  card.setAttribute('data-is-group', group ? '1' : '0');
+  const nameEl = card.querySelector('.ctc-name');
+  if (nameEl) nameEl.textContent = otherName;
+  const timeEl = card.querySelector('.ctc-time');
+  if (timeEl) timeEl.textContent = timeAgo(conv?.lastMessageAt);
+  const previewEl = card.querySelector('.ctc-preview');
+  if (previewEl) {
+    const you = conv?.lastSenderUid === uid ? '<span class="ctc-you">You: </span>' : '';
+    previewEl.innerHTML = `${you}${escHtml(conv?.lastTitle || conv?.lastMessage || '')}`;
+  }
+  let badge = card.querySelector('.ctc-badge');
+  if (unread > 0) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'ctc-badge';
+      card.appendChild(badge);
+    }
+    badge.textContent = String(unread);
+  } else if (badge) {
+    badge.remove();
+  }
+  const wrap = card.querySelector('.ctc-avatars');
+  const photoUrl = _threadCardPhotoUrl(conv, uid);
+  const img = wrap && wrap.querySelector('img');
+  if (img && photoUrl) {
+    if (img.getAttribute('src') !== photoUrl) img.setAttribute('src', photoUrl);
+  } else if (wrap) {
+    wrap.innerHTML = _threadCardAvatarHtml(conv, uid, false);
+  }
+}
+
 function ffBuildChatThreadCardHTML(conv, opts) {
   opts = opts || {};
   const forLive = !!opts.forLive;
   const uid = (opts.uid != null && opts.uid !== '') ? opts.uid : (chatState.chatUserProfile?.uid || '');
   const convId = conv.id;
-  const otherUid = _otherUidFromParticipants(conv.participants, uid);
-  const otherName = _nameForUid(otherUid) || 'Unknown';
+  const group = isChatGroup(conv);
+  const otherUid = group ? '' : _otherUidFromParticipants(conv.participants, uid);
+  const otherName = group ? chatGroupTitle(conv) : (_nameForUid(otherUid) || 'Unknown');
   const unread = (conv.unreadFor && conv.unreadFor[uid]) ? Number(conv.unreadFor[uid]) : 0;
-  const myInitial = (_trimStr(chatState.chatUserProfile?.displayName) || _trimStr(chatState.chatUserProfile?.name) || '?').charAt(0).toUpperCase();
-  const otherInitial = otherName.charAt(0).toUpperCase();
-  const myAvatarUrl = _avatarUrlForUid(uid);
-  const otherAvatarUrl = _avatarUrlForUid(otherUid);
-  const myAvatarHtml = myAvatarUrl
-    ? `<span class="ctc-avatar ctc-avatar-me" style="overflow:hidden;"><img src="${String(myAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-    : `<span class="ctc-avatar ctc-avatar-me">${escHtml(myInitial)}</span>`;
-  const otherAvatarHtml = otherAvatarUrl
-    ? `<span class="ctc-avatar ctc-avatar-other" style="overflow:hidden;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
-    : `<span class="ctc-avatar ctc-avatar-other">${escHtml(otherInitial)}</span>`;
   const selected = (!forLive && typeof chatState.currentConvId !== 'undefined' && chatState.currentConvId === convId) ? 'is-selected' : '';
   const onclickAttr = forLive ? '' : ` onclick="window._openThread('${escHtml(convId)}', this)"`;
   return `
       <div class="chat-thread-card ${selected} ${unread > 0 ? 'chat-thread-card-unread' : ''}"
            data-conv-id="${escHtml(convId)}"
            data-other-uid="${escHtml(otherUid)}"
-           data-other-name="${escHtml(otherName)}"${onclickAttr}>
+           data-other-name="${escHtml(otherName)}"
+           data-is-group="${group ? '1' : '0'}"${onclickAttr}>
         <div class="ctc-avatars">
-          ${myAvatarHtml}
-          ${otherAvatarHtml}
+          ${_threadCardAvatarHtml(conv, uid, forLive)}
         </div>
         <div class="ctc-body">
           <div class="ctc-top">
@@ -96,11 +159,14 @@ function ffBuildChatThreadCardHTML(conv, opts) {
 function _userAllowedInActiveLocation(u) {
   if (!u) return false;
   const activeLoc = _readActiveLocationId();
-  if (!activeLoc) return true;
-  const roleLc = String(u.role || '').toLowerCase().trim();
-  if (roleLc === 'owner' || roleLc === 'admin' || roleLc === 'manager') return true;
+  let multi = false;
+  try {
+    multi = typeof window.ffUserHasMultipleLocations === 'function' && !!window.ffUserHasMultipleLocations();
+  } catch (_) {}
+  if (!activeLoc) return !multi;
 
-  // Cross-reference the staff store for primaryLocationId / allowedLocationIds.
+  const roleLc = String(u.role || '').toLowerCase().trim();
+
   let staffRow = null;
   try {
     const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
@@ -113,29 +179,36 @@ function _userAllowedInActiveLocation(u) {
     ) || null;
   } catch (_) {}
 
+  if (staffRow && typeof window.ffEnsureStaffLocationFields === 'function') {
+    try {
+      const f = window.ffEnsureStaffLocationFields(staffRow);
+      const allowed = Array.isArray(f.allowedLocationIds)
+        ? f.allowedLocationIds.map(id => String(id || '').trim()).filter(Boolean)
+        : [];
+      if (allowed.length) return allowed.indexOf(activeLoc) !== -1;
+      const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+      if (primary) return primary === activeLoc;
+    } catch (_) {}
+  }
+
   if (staffRow) {
-    if (staffRow.isAdmin === true || staffRow.isManager === true) return true;
-    const sRole = String(staffRow.role || '').toLowerCase().trim();
-    if (sRole === 'owner' || sRole === 'admin' || sRole === 'manager') return true;
     if (Array.isArray(staffRow.allowedLocationIds) && staffRow.allowedLocationIds.length) {
       return staffRow.allowedLocationIds.indexOf(activeLoc) !== -1;
     }
     if (typeof staffRow.primaryLocationId === 'string' && staffRow.primaryLocationId.trim()) {
       return staffRow.primaryLocationId.trim() === activeLoc;
     }
-    return false;
   }
 
-  // Fallback: member row itself.
   if (Array.isArray(u.allowedLocationIds) && u.allowedLocationIds.length) {
     return u.allowedLocationIds.indexOf(activeLoc) !== -1;
   }
   if (typeof u.primaryLocationId === 'string' && u.primaryLocationId.trim()) {
     return u.primaryLocationId.trim() === activeLoc;
   }
-  // No staff row AND no location hints on the member — treat as unscoped and
-  // allow (prevents hiding the salon owner who may not be in the staff store).
-  return true;
+  // Owner with no staff row can message at every branch they can switch to.
+  if (roleLc === 'owner') return true;
+  return !multi;
 }
 
 function _staffDisplayNameForUid(uid) {
@@ -228,13 +301,14 @@ function fmtTime(ts) {
 }
 
 function renderChatHeaderForRole(role) {
-  const gear = document.getElementById('chatSettingsGearBtn');
-  if (!gear) return;
   const showGear =
     typeof window.ffCurrentUserHasChatManagePermission === 'function'
       ? window.ffCurrentUserHasChatManagePermission()
       : isAdmin(role) || (role == null && window.ff_is_admin_cached === true);
-  gear.style.display = showGear ? 'flex' : 'none';
+  const gear = document.getElementById('chatSettingsGearBtn');
+  if (gear) gear.style.display = showGear ? 'flex' : 'none';
+  const newGroup = document.getElementById('chatNewGroupBtn');
+  if (newGroup) newGroup.style.display = showGear ? 'flex' : 'none';
 }
 
 function _buildFlowRenderedText(flow, answers) {
@@ -266,31 +340,35 @@ function renderThreadList() {
   const lastRenderedForLoc = Array.isArray(chatState.lastRenderedConversations)
     ? chatState.lastRenderedConversations.filter(c => _convMatchesLocation(c, locKey))
     : [];
-  const conversationsToRender = (Array.isArray(chatState.allConversations) && chatState.allConversations.length > 0)
-    ? chatState.allConversations
+  const currentForLoc = Array.isArray(chatState.allConversations)
+    ? chatState.allConversations.filter(c => _convMatchesLocation(c, locKey))
+    : [];
+  const conversationsToRender = currentForLoc.length > 0
+    ? currentForLoc
     : lastNonEmptyForLoc.length > 0
       ? lastNonEmptyForLoc
       : lastRenderedForLoc.length > 0
         ? lastRenderedForLoc
-        : (Array.isArray(chatState.lastNonEmptyConversations) && chatState.lastNonEmptyConversations.length > 0)
-          ? chatState.lastNonEmptyConversations
-          : (Array.isArray(chatState.lastRenderedConversations) && chatState.lastRenderedConversations.length > 0)
-            ? chatState.lastRenderedConversations
-            : [];
+        : [];
 
   if (conversationsToRender.length === 0) {
-    if (chatState.lastRenderedThreadListHtml) {
-      if (empty) empty.style.display = 'none';
-      list.innerHTML = chatState.lastRenderedThreadListHtml;
-    } else {
-      if (empty) empty.style.display = 'block';
-      list.innerHTML = '';
-    }
+    if (empty) empty.style.display = 'block';
+    list.innerHTML = '';
+    chatState.lastRenderedThreadListHtml = '';
     return;
   }
   if (empty) empty.style.display = 'none';
   chatState.lastRenderedConversations = conversationsToRender.slice();
   _cacheConversations(conversationsToRender);
+
+  const existingCards = list.querySelectorAll(':scope > .chat-thread-card');
+  const sameOrder = existingCards.length === conversationsToRender.length
+    && [...existingCards].every((el, i) => el.getAttribute('data-conv-id') === String(conversationsToRender[i].id || ''));
+  if (sameOrder) {
+    conversationsToRender.forEach((conv, i) => _applyThreadCardState(existingCards[i], conv, uid));
+    chatState.lastRenderedThreadListHtml = list.innerHTML;
+    return;
+  }
 
   const nextHtml = conversationsToRender.map(conv => ffBuildChatThreadCardHTML(conv, { uid })).join('');
   chatState.lastRenderedThreadListHtml = nextHtml;
@@ -359,6 +437,120 @@ function ffReactionChipsHtml(ev, uid, mine) {
   return `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:2px;${mine ? 'justify-content:flex-end;' : ''}">${chips}</div>`;
 }
 
+function _quoteSnippet(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
+function _canSeeGroupReads() {
+  return typeof window.ffCurrentUserHasChatManagePermission === 'function'
+    && window.ffCurrentUserHasChatManagePermission();
+}
+
+function _messageSearchText(ev) {
+  return [
+    ev?.senderName,
+    ev?.title,
+    ev?.message,
+    ev?.replyToName,
+    ev?.replyToText,
+  ].filter(Boolean).join(' ');
+}
+
+function _quoteHtml(ev) {
+  const id = String(ev?.replyToId || '').trim();
+  if (!id) return '';
+  const name = String(ev.replyToName || 'Message').trim() || 'Message';
+  const text = _quoteSnippet(ev.replyToText || '');
+  return `<button type="button" class="cb-quote" data-jump-msg="${escHtml(id)}">
+    <span class="cb-quote-name">${escHtml(name)}</span>
+    <span class="cb-quote-text">${escHtml(text)}</span>
+  </button>`;
+}
+
+function _seenByHtml(ev, uid, conv) {
+  if (!_canSeeGroupReads() || !isChatGroup(conv) || ev.senderUid !== uid) return '';
+  const readBy = Array.isArray(ev.readBy) ? ev.readBy.filter(u => u && u !== ev.senderUid) : [];
+  const n = readBy.length;
+  const label = n === 0 ? 'Sent' : (n === 1 ? 'Seen' : `Seen ${n}`);
+  return `<button type="button" class="cb-seen" data-ff-seen="${escHtml(ev.id || '')}">${escHtml(label)}</button>`;
+}
+
+function _syncQuoteBar() {
+  const bar = document.getElementById('chatQuoteBar');
+  if (!bar) return;
+  const q = chatState.quoteReply;
+  const open = !!chatState.currentConvId && q && q.id;
+  bar.style.display = open ? 'flex' : 'none';
+  if (!open) return;
+  const nameEl = document.getElementById('chatQuoteName');
+  const textEl = document.getElementById('chatQuoteText');
+  if (nameEl) nameEl.textContent = q.name || 'Message';
+  if (textEl) textEl.textContent = q.text || '';
+}
+
+function _syncChatSearchUi(openConv) {
+  const btn = document.getElementById('chatConvSearchBtn');
+  const bar = document.getElementById('chatConvSearchBar');
+  if (btn) btn.style.display = openConv ? 'flex' : 'none';
+  if (!openConv && bar) {
+    bar.style.display = 'none';
+    const input = document.getElementById('chatConvSearchInput');
+    if (input) input.value = '';
+    const count = document.getElementById('chatConvSearchCount');
+    if (count) count.textContent = '';
+  }
+}
+
+function applyChatSearch(query) {
+  const needle = String(query || '').trim().toLowerCase();
+  const rows = document.querySelectorAll('#chatConvMessages .cb-row');
+  let shown = 0;
+  rows.forEach(row => {
+    const hay = (row.getAttribute('data-search-text') || '').toLowerCase();
+    const ok = !needle || hay.includes(needle);
+    row.classList.toggle('is-search-hit', !!(ok && needle));
+    row.style.display = ok ? '' : 'none';
+    if (ok && needle) shown += 1;
+  });
+  const count = document.getElementById('chatConvSearchCount');
+  if (count) count.textContent = needle ? (shown ? `${shown}` : '0') : '';
+}
+
+window.setChatQuoteReply = function(msg) {
+  if (!msg || !msg.id) return;
+  const text = _quoteSnippet(msg.message || msg.title || '');
+  chatState.quoteReply = {
+    id: msg.id,
+    name: String(msg.senderName || 'Message').trim() || 'Message',
+    text,
+  };
+  _syncQuoteBar();
+  const ta = document.getElementById('chatConvFreeTextInput');
+  if (ta && _chatFreeTextAllowed()) {
+    ta.focus();
+  }
+};
+
+window.clearChatQuoteReply = function() {
+  chatState.quoteReply = null;
+  _syncQuoteBar();
+};
+
+window.toggleChatConvSearch = function(force) {
+  const bar = document.getElementById('chatConvSearchBar');
+  if (!bar || !chatState.currentConvId) return;
+  const next = force === true || (force !== false && bar.style.display !== 'flex');
+  bar.style.display = next ? 'flex' : 'none';
+  const input = document.getElementById('chatConvSearchInput');
+  if (next && input) {
+    input.focus();
+    applyChatSearch(input.value);
+  } else {
+    if (input) input.value = '';
+    applyChatSearch('');
+  }
+};
+
 function renderConversation(convId) {
   _setConversationHeader(convId);
   const msgs = Array.isArray(chatState.currentMessages) ? chatState.currentMessages.slice() : [];
@@ -373,18 +565,30 @@ function renderConversation(convId) {
   }
 
   const conv = _conversationById(convId);
-  const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (chatState.currentThreadFallback?.convId === convId ? chatState.currentThreadFallback.otherUid : '');
+  const group = isChatGroup(conv);
+  const otherUid = group
+    ? 'group'
+    : (_otherUidFromParticipants(conv?.participants, uid) || (chatState.currentThreadFallback?.convId === convId ? chatState.currentThreadFallback.otherUid : ''));
+  const otherName = group
+    ? chatGroupTitle(conv)
+    : _nameForUidForSend(otherUid);
   const replyBtn = document.getElementById('chatConvReplyBtn');
   if (replyBtn) {
     replyBtn.setAttribute('data-other-uid', otherUid);
-    replyBtn.setAttribute('data-other-name', _nameForUidForSend(otherUid));
+    replyBtn.setAttribute('data-other-name', otherName);
     replyBtn.setAttribute('data-conv-id', convId);
+    replyBtn.setAttribute('data-is-group', group ? '1' : '0');
+  }
+
+  const msgsBelongHere = chatState.currentMessagesConvId === convId;
+  if (chatState.chatMessagesLoading || !msgsBelongHere) {
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading messages...</div>';
+    _syncChatConvFreeTextComposer();
+    return;
   }
 
   if (msgs.length === 0) {
-    container.innerHTML = chatState.chatMessagesLoading
-      ? '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading messages...</div>'
-      : '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">No messages yet.</div>';
     _syncChatConvFreeTextComposer();
     return;
   }
@@ -412,8 +616,9 @@ function renderConversation(convId) {
     const ev = seg.ev;
     const mine = ev.senderUid === uid;
     const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
-    const otherAvatarHtml = !mine && otherAvatarUrl
-      ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
+    const senderPhoto = !mine ? (_avatarUrlForUid(ev.senderUid) || otherAvatarUrl) : null;
+    const otherAvatarHtml = !mine && senderPhoto
+      ? `<span class="cb-avatar">${_fixedAvatarImg(senderPhoto, 28)}</span>`
       : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
     // Free-text messages store title = first line of the message, so showing
     // both prints the text twice. Hide the title when the body repeats it.
@@ -422,16 +627,20 @@ function renderConversation(convId) {
     const titleIsDup = !!titleText && !!bodyText &&
       (bodyText === titleText || (bodyText.split(/\r?\n/)[0] || '').trim() === titleText);
     return `
-      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}" data-ff-msg="${escHtml(ev.id || '')}">
+      <div class="cb-row ${mine ? 'cb-row-mine' : 'cb-row-other'}" data-ff-msg="${escHtml(ev.id || '')}" data-search-text="${escHtml(_messageSearchText(ev))}">
         ${otherAvatarHtml}
         <div class="cb-col">
           ${!mine ? `<span class="cb-sender-name">${escHtml(ev.senderName||'Unknown')} · ${roleLabel(ev.senderRole)}</span>` : ''}
           <div class="cb-bubble ${mine ? 'cb-bubble-mine' : 'cb-bubble-other'}" style="cursor:pointer;">
+            ${_quoteHtml(ev)}
             ${titleText && !titleIsDup ? `<div class="cb-title">${escHtml(titleText)}</div>` : ''}
             ${ev.message ? `<div class="cb-body">${linkifyMessageHtml(ev.message)}</div>` : ''}
           </div>
           ${ffReactionChipsHtml(ev, uid, mine)}
-          <span class="cb-time">${fmtTime(ev.sentAt)}</span>
+          <span class="cb-meta">
+            <span class="cb-time">${fmtTime(ev.sentAt)}</span>
+            ${_seenByHtml(ev, uid, conv)}
+          </span>
         </div>
       </div>
     `;
@@ -441,20 +650,95 @@ function renderConversation(convId) {
   setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
 
   _syncChatConvFreeTextComposer();
+  _syncQuoteBar();
+  const searchInput = document.getElementById('chatConvSearchInput');
+  const searchBar = document.getElementById('chatConvSearchBar');
+  if (searchBar && searchBar.style.display === 'flex') applyChatSearch(searchInput?.value || '');
+}
+
+function _resetHeaderAvatar(av) {
+  if (!av) return;
+  av.classList.remove('chat-group-avatar-btn');
+  av.removeAttribute('role');
+  av.removeAttribute('title');
+  av.onclick = null;
+  av.innerHTML = '';
+  av.textContent = '-';
+}
+
+function _setHeaderMainClick(convId, isGroup) {
+  const main = document.getElementById('chatConvHeaderMain');
+  if (!main) return;
+  main.classList.toggle('is-group', !!isGroup);
+  main.onclick = (isGroup && convId)
+    ? (e) => {
+        e.preventDefault();
+        if (typeof window.openChatGroupInfo === 'function') window.openChatGroupInfo(convId);
+      }
+    : null;
 }
 
 function _setConversationHeader(convId) {
   const title = document.getElementById('chatConvTitle');
   if (!title) return;
+  const av = document.getElementById('chatConvHeaderAvatar');
+  const sub = document.getElementById('chatConvSubtitle');
   if (!convId) {
     title.textContent = 'Select a conversation';
+    if (sub) sub.textContent = '';
+    _resetHeaderAvatar(av);
+    _setHeaderMainClick(null, false);
+    _syncChatSearchUi(false);
     return;
   }
   const uid  = chatState.chatUserProfile?.uid || '';
   const conv = _conversationById(convId);
   const fallbackName = chatState.currentThreadFallback?.convId === convId ? chatState.currentThreadFallback.otherName : '';
+  if (isChatGroup(conv)) {
+    const groupName = chatGroupTitle(conv);
+    const photoUrl = chatGroupPhotoUrl(conv);
+    const count = Array.isArray(conv.participants) ? conv.participants.filter(Boolean).length : 0;
+    title.textContent = groupName;
+    if (sub) sub.textContent = count === 1 ? '1 participant' : `${count} participants`;
+    _setHeaderMainClick(conv.id, true);
+    _syncChatSearchUi(true);
+    if (av) {
+      av.classList.add('chat-group-avatar-btn');
+      if (photoUrl) {
+        const img = av.querySelector('img');
+        if (img && img.getAttribute('src') === photoUrl) {
+          /* keep existing image so it does not reload */
+        } else {
+          av.innerHTML = _fixedAvatarImg(photoUrl, 32);
+        }
+      } else {
+        av.innerHTML = '';
+        av.textContent = (groupName.charAt(0) || 'G').toUpperCase();
+      }
+    }
+    return;
+  }
+  if (sub) sub.textContent = '';
+  _setHeaderMainClick(null, false);
+  _syncChatSearchUi(true);
   const otherUid = _otherUidFromParticipants(conv?.participants, uid) || (chatState.currentThreadFallback?.convId === convId ? chatState.currentThreadFallback.otherUid : '');
   title.textContent = _nameForUid(otherUid) || fallbackName || 'Conversation';
+  const otherPhoto = _avatarUrlForUid(otherUid);
+  if (av) {
+    av.classList.remove('chat-group-avatar-btn');
+    av.removeAttribute('role');
+    av.removeAttribute('title');
+    av.onclick = null;
+    if (otherPhoto) {
+      const img = av.querySelector('img');
+      if (!(img && img.getAttribute('src') === otherPhoto)) {
+        av.innerHTML = _fixedAvatarImg(otherPhoto, 32);
+      }
+    } else {
+      av.innerHTML = '';
+      av.textContent = (title.textContent.charAt(0) || '?').toUpperCase();
+    }
+  }
 }
 
 function _renderEmptyConversation() {
@@ -480,6 +764,7 @@ function _syncChatConvFreeTextComposer() {
     const ta = document.getElementById('chatConvFreeTextInput');
     if (ta) ta.value = '';
   }
+  _syncQuoteBar();
 }
 
 function _bindChatConvFreeTextComposer() {
@@ -492,6 +777,27 @@ function _bindChatConvFreeTextComposer() {
       if (typeof window.sendChatConvFreeText === 'function') window.sendChatConvFreeText();
     }
   });
+  const searchBtn = document.getElementById('chatConvSearchBtn');
+  if (searchBtn && !searchBtn.__ffChatSearchBound) {
+    searchBtn.__ffChatSearchBound = true;
+    searchBtn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof window.toggleChatConvSearch === 'function') window.toggleChatConvSearch();
+    });
+  }
+  const searchClose = document.getElementById('chatConvSearchClose');
+  if (searchClose && !searchClose.__ffChatSearchBound) {
+    searchClose.__ffChatSearchBound = true;
+    searchClose.addEventListener('click', () => {
+      if (typeof window.toggleChatConvSearch === 'function') window.toggleChatConvSearch(false);
+    });
+  }
+  const searchInput = document.getElementById('chatConvSearchInput');
+  if (searchInput && !searchInput.__ffChatSearchBound) {
+    searchInput.__ffChatSearchBound = true;
+    searchInput.addEventListener('input', () => applyChatSearch(searchInput.value));
+  }
 }
 
 export {

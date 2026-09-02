@@ -18,7 +18,8 @@ import {
   inboxCanManageInboxEval,
   inboxCanSendRequestsEval,
   ffInboxRuleString,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+  inboxMemberAllowedAtActiveLocation,
+} from "./inbox-helpers.js?v=20260901_sched_req";
 
 function inboxUserRoleLc() {
   return inboxNormalizeLineStaffRoleLc((inboxState.currentUserProfile && inboxState.currentUserProfile.role) || "");
@@ -117,7 +118,8 @@ function getInboxRecipientsList() {
   if (inboxState._inboxUsersCache && inboxState._inboxUsersCache.length > 0) {
     return inboxState._inboxUsersCache
       .filter(u => ['manager', 'admin', 'owner'].includes(u.role))
-      .map(u => ({ uid: u.uid, id: u.staffId || u.uid, name: u.name }));
+      .filter(u => inboxMemberAllowedAtActiveLocation(u))
+      .map(u => ({ uid: u.uid, id: u.staffId || u.uid, name: u.name, role: u.role }));
   }
   // Fallback: ff_staff_v1 (no uid, just staffId)
   try {
@@ -128,6 +130,13 @@ function getInboxRecipientsList() {
     const currentName = (inboxState.currentUserProfile?.name) || '';
     return staff
       .filter(s => s && !s.isArchived && (s.isAdmin || s.isManager) && s.id !== currentStaffId && s.name !== currentName)
+      .filter(s => inboxMemberAllowedAtActiveLocation({
+        id: s.id,
+        staffId: s.id,
+        role: s.isAdmin ? 'admin' : (s.isManager ? 'manager' : ''),
+        allowedLocationIds: s.allowedLocationIds,
+        primaryLocationId: s.primaryLocationId,
+      }))
       .map(s => ({ uid: '', id: s.id || '', name: (s.name || '').trim() }));
   } catch (e) {
     return [];

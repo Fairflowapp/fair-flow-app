@@ -9,6 +9,7 @@ const {
   admin,
   HttpsError,
   PACKET_URL_TTL_MS,
+  db,
   trimStr,
   sha256Buffer,
   sha256Text,
@@ -20,6 +21,7 @@ const {
   publicFieldSchema,
   publicEsignResult,
   validateEsignSubmission,
+  partitionEsignFieldValues,
 } = require("./onboarding-esign-seal-helpers");
 const {
   downloadSourcePdf,
@@ -42,7 +44,7 @@ async function sealEsignSubmission({
 }) {
   const cfg = esignCfg(task);
   const { documentId, documentVersionId } = documentIds(cfg);
-  const sealId = sealIdFor(taskId, documentVersionId);
+  const sealId = sealIdFor(taskId, documentVersionId, staffId, runId);
   const sealRef = db().doc(`salons/${salonId}/onboardingSealJobs/${sealId}`);
 
   // Atomic claim — prevents concurrent double-seal races.
@@ -58,18 +60,28 @@ async function sealEsignSubmission({
         earlyCompleted = {
           alreadySealed: true,
           sealId,
-          result: sj.resultPublic || {
-            sealId,
-            signedPdfSha256: sj.signedPdfSha256,
-            certificateSha256: sj.certificateSha256,
-            signedDocumentId: sj.signedDocumentId,
-            certificateDocumentId: sj.certificateDocumentId,
-            signatureMethod: sj.signatureMethod,
-            sourceDocumentSha256: sj.sourceDocumentSha256,
-            documentVersionId,
-            signedAt: sj.signedAtIso || null,
-            signerName: sj.signerName || null,
-            auditId: sj.auditId || null,
+          result: {
+            ...(sj.resultPublic || {
+              sealId,
+              signedPdfSha256: sj.signedPdfSha256,
+              certificateSha256: sj.certificateSha256,
+              signedDocumentId: sj.signedDocumentId,
+              certificateDocumentId: sj.certificateDocumentId,
+              signatureMethod: sj.signatureMethod,
+              sourceDocumentSha256: sj.sourceDocumentSha256,
+              documentVersionId,
+              signedAt: sj.signedAtIso || null,
+              signerName: sj.signerName || null,
+              auditId: sj.auditId || null,
+            }),
+            signedStoragePath:
+              sj.signedStoragePath ||
+              (sj.resultPublic && sj.resultPublic.signedStoragePath) ||
+              null,
+            certificateStoragePath:
+              sj.certificateStoragePath ||
+              (sj.resultPublic && sj.resultPublic.certificateStoragePath) ||
+              null,
           },
         };
         return;
@@ -122,7 +134,26 @@ async function sealEsignSubmission({
   });
 
   try {
+    // S4: encrypt sensitive text for Firestore; plaintext only for PDF overlay.
+    let fieldMaps;
+    try {
+      fieldMaps = partitionEsignFieldValues(
+        validated.schema,
+        validated.fieldValues
+      );
+    } catch (encErr) {
+      console.error(
+        "[OnboardingEsign] S4 encrypt failed",
+        encErr && encErr.message
+      );
+      throw new HttpsError(
+        "failed-precondition",
+        "Could not encrypt sensitive fields. Encryption key may be missing."
+      );
+    }
+
     const source = await downloadSourcePdf(salonId, cfg);
+    // Overlay uses full plaintext (W-9 etc. must show real TIN on the form).
     const signedBuf = await overlaySignedPdf(source.buf, validated);
     const signedPdfSha256 = sha256Buffer(signedBuf);
 
@@ -136,6 +167,7 @@ async function sealEsignSubmission({
 
     const signedAtIso = new Date().toISOString();
     const consentHash = sha256Text(validated.consentText);
+    // Hash of what was burned into the PDF (includes sensitive plaintext).
     const fieldValuesHash = sha256Text(
       JSON.stringify(validated.fieldValues || {})
     );
@@ -175,6 +207,13 @@ async function sealEsignSubmission({
     const signedPath = sealedPdfPath(salonId, staffId, runId, taskId, "signed");
     const certPath = sealedPdfPath(salonId, staffId, runId, taskId, "certificate");
 
+    const {
+      retentionYearsForSalon,
+      retainUntilMsFrom,
+    } = require("./onboarding-retention");
+    const retentionYears = await retentionYearsForSalon(salonId);
+    const retainUntilMs = retainUntilMsFrom(Date.now(), retentionYears);
+
     const bucket = await resolveBucket();
     await bucket.file(signedPath).save(signedBuf, {
       contentType: "application/pdf",
@@ -185,6 +224,7 @@ async function sealEsignSubmission({
           sealId,
           immutable: "true",
           via: "portal_esign",
+          retainUntilMs: String(retainUntilMs),
         },
       },
     });
@@ -197,16 +237,19 @@ async function sealEsignSubmission({
           sealId,
           immutable: "true",
           via: "portal_esign_certificate",
+          retainUntilMs: String(retainUntilMs),
         },
       },
     });
 
-    // Ephemeral portal working copies (Admin write; client denied by rules)
+    // Ephemeral portal working copies (Admin write; client denied by rules).
+    // Never persist sensitive plaintext — masked / public maps only.
     try {
       const workBase = portalWorkBase(salonId, staffId, runId, taskId);
       await bucket.file(`${workBase}/fields.json`).save(
         JSON.stringify({
-          fieldValues: validated.fieldValues,
+          fieldValues: fieldMaps.fieldValuesSafe,
+          fieldValuesPublic: fieldMaps.fieldValuesPublic,
           consentHash,
           fieldValuesHash,
           sealedAt: signedAtIso,
@@ -256,6 +299,8 @@ async function sealEsignSubmission({
       sha256: signedPdfSha256,
       uploadedByUid: "onboarding_portal",
       readOnly: true,
+      retainUntilMs,
+      retentionYears,
     });
     await upsertStaffDocument(salonId, staffId, certificateDocumentId, {
       title: `${docTitle} — Signature Certificate`,
@@ -281,6 +326,8 @@ async function sealEsignSubmission({
       sha256: certificateSha256,
       uploadedByUid: "onboarding_portal",
       readOnly: true,
+      retainUntilMs,
+      retentionYears,
     });
 
     const auditId = `seal_completed_${sealId}`;
@@ -301,11 +348,46 @@ async function sealEsignSubmission({
       certificateSha256,
       consentTextVersion: consentHash,
       fieldValuesHash,
+      sensitiveFieldIds: fieldMaps.sensitiveFieldIds,
       signedDocumentId,
       certificateDocumentId,
       signedStoragePath: signedPath,
       certificateStoragePath: certPath,
     });
+
+    // Run-level audit for each encrypted field (Reveal UI + S2 parity).
+    if (fieldMaps.sensitiveFieldIds.length) {
+      const runAuditRef = db().doc(
+        `salons/${salonId}/staff/${staffId}/onboardingRuns/${runId}`
+      );
+      for (const fieldId of fieldMaps.sensitiveFieldIds) {
+        const env = fieldMaps.fieldValuesEncrypted[fieldId] || {};
+        const pub = fieldMaps.fieldValuesPublic[fieldId] || {};
+        try {
+          await runAuditRef
+            .collection("auditEvents")
+            .doc(`sensitive_store_${taskId}_${fieldId}`)
+            .set(
+              {
+                action: "sensitive_store",
+                performedAs: "portal",
+                portalTokenId: tokenId,
+                staffId,
+                runId,
+                taskId,
+                fieldId,
+                sensitiveKind: env.sensitiveKind || pub.sensitiveKind || "other",
+                last4: env.last4 || pub.last4 || null,
+                ip,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+        } catch (_) {
+          /* non-fatal */
+        }
+      }
+    }
 
     const resultPublic = {
       sealId,
@@ -317,9 +399,14 @@ async function sealEsignSubmission({
       signatureMethod: validated.signatureMethod,
       signedDocumentId,
       certificateDocumentId,
+      signedStoragePath: signedPath,
+      certificateStoragePath: certPath,
       documentVersionId,
       auditId,
       via: "portal_esign",
+      // Persisted on task.result for manager Reveal UI; stripped from portal DTO.
+      fieldValuesEncrypted: fieldMaps.fieldValuesEncrypted,
+      fieldValuesPublic: fieldMaps.fieldValuesPublic,
     };
 
     await sealRef.set(
@@ -388,6 +475,7 @@ module.exports = {
   publicFieldSchema,
   publicEsignResult,
   validateEsignSubmission,
+  partitionEsignFieldValues,
   downloadSourcePdf,
   sealEsignSubmission,
   writeAudit,

@@ -1,11 +1,13 @@
 /**
  * Employee Onboarding E-Sign seal — PDF overlay, certificate, audit, staff docs.
  */
+const fs = require("fs");
+const path = require("path");
+const fontkit = require("@pdf-lib/fontkit");
 const {
   admin,
   PDFDocument,
   rgb,
-  StandardFonts,
   HttpsError,
   db,
   trimStr,
@@ -13,6 +15,29 @@ const {
   resolveBucket,
   documentIds,
 } = require("./onboarding-esign-seal-helpers");
+
+const FONT_DIR = path.join(__dirname, "assets", "fonts");
+let _fontRegularBytes = null;
+let _fontBoldBytes = null;
+
+function loadSealFontBytes() {
+  if (!_fontRegularBytes) {
+    _fontRegularBytes = fs.readFileSync(path.join(FONT_DIR, "DejaVuSans.ttf"));
+  }
+  if (!_fontBoldBytes) {
+    _fontBoldBytes = fs.readFileSync(path.join(FONT_DIR, "DejaVuSans-Bold.ttf"));
+  }
+  return { regular: _fontRegularBytes, bold: _fontBoldBytes };
+}
+
+/** Embed Unicode-capable fonts (Hebrew + Latin). Standard Helvetica is WinAnsi-only. */
+async function embedSealFonts(pdf) {
+  pdf.registerFontkit(fontkit);
+  const bytes = loadSealFontBytes();
+  const font = await pdf.embedFont(bytes.regular, { subset: true });
+  const fontBold = await pdf.embedFont(bytes.bold, { subset: true });
+  return { font, fontBold };
+}
 
 async function downloadSourcePdf(salonId, cfg) {
   const { documentId, documentVersionId } = documentIds(cfg);
@@ -67,8 +92,7 @@ async function overlaySignedPdf(sourceBuf, validated) {
     ignoreEncryption: true,
     updateMetadata: false,
   });
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const { font, fontBold } = await embedSealFonts(pdf);
   let sigImage = null;
   if (validated.signaturePng) {
     try {
@@ -146,6 +170,15 @@ async function overlaySignedPdf(sourceBuf, validated) {
     });
   }
 
+  // Lock AcroForm fields so a browser PDF viewer cannot type into the
+  // sealed file. The stored bytes are the record; owner edits are not allowed.
+  try {
+    const form = pdf.getForm();
+    if (form && typeof form.getFields === "function" && form.getFields().length) {
+      form.flatten();
+    }
+  } catch (_) {}
+
   pdf.setTitle("Fair Flow — Electronically Signed");
   pdf.setProducer("Fair Flow Onboarding E-Sign");
   return Buffer.from(await pdf.save());
@@ -153,8 +186,7 @@ async function overlaySignedPdf(sourceBuf, validated) {
 
 async function buildCertificatePdf(meta) {
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const { font, fontBold } = await embedSealFonts(pdf);
   let page = pdf.addPage([612, 792]);
   let y = 750;
   const left = 48;

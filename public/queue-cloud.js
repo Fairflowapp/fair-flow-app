@@ -52,7 +52,7 @@ let _writeChain = Promise.resolve();
 // Version marker + rolling client-side event trace. The trace rides along on
 // every queueState write (payload.debugTrace) so a bad write observed in the
 // cloud can be traced back to the exact client-side sequence that produced it.
-const QUEUE_CLIENT_VER = "20260728_cloud_wins_guard";
+const QUEUE_CLIENT_VER = "20260902_hist_iso";
 function ffQueueTrace(ev, info) {
   try {
     if (typeof window === "undefined") return;
@@ -290,6 +290,22 @@ function ffLogEntryKey(e) {
   return "t:" + ts + "|a:" + String(e.action || "") + "|w:" + String(e.worker || "") + "|p:" + String(e.performedBy || "");
 }
 
+function ffLogEntryLocationId(e) {
+  if (!e || typeof e !== "object") return "";
+  return typeof e.locationId === "string" ? e.locationId.trim() : "";
+}
+
+function ffLogBelongsToLocation(e, locationId) {
+  const stamped = ffLogEntryLocationId(e);
+  const active = String(locationId || "").trim();
+  if (stamped) return stamped === active;
+  return !active;
+}
+
+function ffFilterLogForLocation(list, locationId) {
+  return (Array.isArray(list) ? list : []).filter((e) => ffLogBelongsToLocation(e, locationId));
+}
+
 /**
  * Union the history log: keep the server log (authoritative order) and append
  * any local-only entries (our new history rows) that the server hasn't seen.
@@ -321,6 +337,55 @@ function ffMergeLog(server, local) {
 // count cap. Older history was archived server-side (queueLogArchive).
 const QUEUE_CLOUD_LOG_CAP = 1500;
 const QUEUE_CLOUD_LOG_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 60 days
+const QUEUE_REMOVAL_JUSTIFY_WINDOW_MS = 10 * 60 * 1000;
+function ffLogHasUnknownRows(localLog, knownLog) {
+  const known = new Set((Array.isArray(knownLog) ? knownLog : []).map(ffLogEntryKey));
+  return (Array.isArray(localLog) ? localLog : []).some((e) => !known.has(ffLogEntryKey(e)));
+}
+function ffIsQueueIntentAction(action) {
+  const a = String(action || "").trim();
+  if (/^join blocked/i.test(a)) return false;
+  return /^(start|finish|join|remove|add technician|queue reset|automatic queue reset)/i.test(a);
+}
+function ffJustifiedWorkerNames(localLog, knownLog) {
+  const names = new Set();
+  const known = new Set((Array.isArray(knownLog) ? knownLog : []).map(ffLogEntryKey));
+  const now = Date.now();
+  (Array.isArray(localLog) ? localLog : []).forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    if (known.has(ffLogEntryKey(e))) return;
+    if (!ffIsQueueIntentAction(e.action)) return;
+    const ts = typeof e.ts === "number" ? e.ts : 0;
+    if (!ts || Math.abs(now - ts) > QUEUE_REMOVAL_JUSTIFY_WINDOW_MS) return;
+    const w = ffNormWorkerName(e.worker);
+    if (w) names.add(w);
+  });
+  return names;
+}
+function ffKeepServerPositions(out, server, justified) {
+  const queue = Array.isArray(out.queue) ? out.queue.slice() : [];
+  const service = Array.isArray(out.service) ? out.service.slice() : [];
+  const srvQueue = Array.isArray(server && server.queue) ? server.queue : [];
+  const srvService = Array.isArray(server && server.service) ? server.service : [];
+  srvService.forEach((it) => {
+    const keys = ffQueueItemAllKeys(it);
+    if (ffKeysOverlap(keys, ffCollectAllKeys(service))) return;
+    if (justified.has(ffNormWorkerName(it && it.name))) return;
+    for (let i = queue.length - 1; i >= 0; i -= 1) {
+      if (ffKeysOverlap(ffQueueItemAllKeys(queue[i]), new Set(keys))) queue.splice(i, 1);
+    }
+    service.push(it);
+  });
+  srvQueue.forEach((it) => {
+    const keys = ffQueueItemAllKeys(it);
+    const qKeys = ffCollectAllKeys(queue);
+    const sKeys = ffCollectAllKeys(service);
+    if (ffKeysOverlap(keys, qKeys) || ffKeysOverlap(keys, sKeys)) return;
+    if (justified.has(ffNormWorkerName(it && it.name))) return;
+    queue.push(it);
+  });
+  return { queue, service, log: out.log };
+}
 function ffCapLog(list) {
   if (!Array.isArray(list)) return [];
   const cutoff = Date.now() - QUEUE_CLOUD_LOG_MAX_AGE_MS;
@@ -333,6 +398,17 @@ function ffCapLog(list) {
 }
 
 function ffMerge3(base, local, server) {
+  // Stale device with no new history: adopt the live server lists. The Aug 13
+  // Neo Nails jump-back was a backgrounded phone whose captured q=9/s=0 had no
+  // new log rows; after a snapshot advanced `base` to the live q=2/s=10, merge
+  // treated that as a mass Finish and stripped In Service.
+  if (!ffLogHasUnknownRows(local && local.log, server && server.log)) {
+    return {
+      queue: Array.isArray(server && server.queue) ? server.queue.slice() : [],
+      service: Array.isArray(server && server.service) ? server.service.slice() : [],
+      log: ffCapLog(ffMergeLog(server && server.log, ffFilterLogForLocation(local && local.log, _locationId))),
+    };
+  }
   let queue = ffMergeList(base.queue, local.queue, server.queue);
   let service = ffMergeList(base.service, local.service, server.service);
   // Cross-list move enforcement — ONLY for people THIS device moved since its
@@ -340,15 +416,20 @@ function ffMerge3(base, local, server) {
   // full local lists here was the jump-back bug: a second device whose stale
   // local queue still held the person stripped them out of In Service on its
   // next merged write, undoing the move made on the first device.
+  // Even with a new log row (e.g. one real Start), only strip the other list
+  // for workers named on a fresh justifying row — not everyone in the stale list.
+  const justified = ffJustifiedWorkerNames(local && local.log, server && server.log);
   const baseServiceKeys = ffCollectAllKeys(base && base.service);
   const baseQueueKeys = ffCollectAllKeys(base && base.queue);
   const weMovedToService = ffCollectAllKeys(
     (Array.isArray(local && local.service) ? local.service : [])
       .filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), baseServiceKeys))
+      .filter((it) => justified.has(ffNormWorkerName(it && it.name)))
   );
   const weMovedToQueue = ffCollectAllKeys(
     (Array.isArray(local && local.queue) ? local.queue : [])
       .filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), baseQueueKeys))
+      .filter((it) => justified.has(ffNormWorkerName(it && it.name)))
   );
   if (weMovedToService.size) {
     queue = queue.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), weMovedToService));
@@ -356,11 +437,11 @@ function ffMerge3(base, local, server) {
   if (weMovedToQueue.size) {
     service = service.filter((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), weMovedToQueue));
   }
-  return {
+  return ffKeepServerPositions({
     queue,
     service,
-    log: ffCapLog(ffMergeLog(server.log, local.log)),
-  };
+    log: ffCapLog(ffMergeLog(server.log, ffFilterLogForLocation(local.log, _locationId))),
+  }, server, justified);
 }
 
 // Detect a "resurrection" write: a freshly-opened device whose stale localStorage
@@ -415,7 +496,6 @@ function ffWriteResurrectsRemoved(localState) {
 //      everyone it would have wiped is restored into the write.
 // Explicit replace flows (manual/auto reset, clear-history, retention-prune)
 // skip this guard — those intentionally shrink the doc.
-const QUEUE_REMOVAL_JUSTIFY_WINDOW_MS = 10 * 60 * 1000;
 function ffNormWorkerName(v) {
   return String(v == null ? "" : v).trim().toLowerCase();
 }
@@ -435,18 +515,10 @@ function ffProtectCloudData(body, allowExplicitReplace) {
     });
     // 1. History is append-only relative to the cloud.
     out.log = ffCapLog(ffMergeLog(srvLog, out.log));
-    // 2. Removals must be justified by a fresh new log row naming the worker.
-    const srvLogKeys = new Set(srvLog.map(ffLogEntryKey));
-    const now = Date.now();
-    const justified = new Set();
-    (Array.isArray(body.log) ? body.log : []).forEach((e) => {
-      if (!e || typeof e !== "object") return;
-      if (srvLogKeys.has(ffLogEntryKey(e))) return;
-      const ts = typeof e.ts === "number" ? e.ts : 0;
-      if (!ts || Math.abs(now - ts) > QUEUE_REMOVAL_JUSTIFY_WINDOW_MS) return;
-      const w = ffNormWorkerName(e.worker);
-      if (w) justified.add(w);
-    });
+    // 2. Removals / cross-list moves must be justified by a fresh queue action
+    // (Start / Finish / Join / Remove). Task Completed and similar noise must
+    // not count — that was enough to strip In Service in the extra sync tests.
+    const justified = ffJustifiedWorkerNames(body.log, srvLog);
     const presentKeys = ffCollectAllKeys(out.queue.concat(out.service));
     const restored = [];
     const restoreMissing = (srvList, outList, tag) => {
@@ -460,10 +532,34 @@ function ffProtectCloudData(body, allowExplicitReplace) {
     };
     restoreMissing(srvQueue, out.queue, "q");
     restoreMissing(srvService, out.service, "s");
+    // 3. Cross-list moves need the same fresh justifying row. Being "present"
+    // in either list is not enough: a stale Available snapshot can keep people
+    // who are In Service on the server (Aug 13 Neo Nails: 10 in service → 2).
+    const bounce = [];
+    const bounceUnjustified = (srvList, fromKey, toKey) => {
+      srvList.forEach((it) => {
+        const keys = ffQueueItemAllKeys(it);
+        const fromKeys = ffCollectAllKeys(out[fromKey]);
+        const toKeys = ffCollectAllKeys(out[toKey]);
+        if (ffKeysOverlap(keys, toKeys)) return;
+        if (!ffKeysOverlap(keys, fromKeys)) return;
+        if (justified.has(ffNormWorkerName(it && it.name))) return;
+        out[fromKey] = out[fromKey].filter((x) => !ffKeysOverlap(ffQueueItemAllKeys(x), new Set(keys)));
+        out[toKey].push(it);
+        bounce.push(toKey + "<-" + fromKey + ":" + ((it && it.name) || "?"));
+      });
+    };
+    bounceUnjustified(srvService, "queue", "service");
+    bounceUnjustified(srvQueue, "service", "queue");
     if (restored.length) {
       ffQueueTrace("write:guard-restored", { n: restored.length });
       console.warn("[QueueCloud] write would drop people present in cloud — restored them", restored);
       writeQueueDiag("guard-restored", { restored: restored.slice(0, 12) });
+    }
+    if (bounce.length) {
+      ffQueueTrace("write:guard-bounced-move", { n: bounce.length });
+      console.warn("[QueueCloud] write would move people without a fresh action — bounced them", bounce);
+      writeQueueDiag("guard-bounced-move", { bounced: bounce.slice(0, 12) });
     }
     return out;
   } catch (e) {
@@ -931,7 +1027,7 @@ function writeState(capturedState) {
   const payload = {
     queue: state.queue || [],
     service: state.service || [],
-    log: ffCapLog(state.log || []),
+    log: ffCapLog(ffFilterLogForLocation(state.log || [], _locationId)),
     updatedAt: serverTimestamp(),
     lastUpdateReason: reason,
     lastUpdatedByUid: auth.currentUser?.uid || null,

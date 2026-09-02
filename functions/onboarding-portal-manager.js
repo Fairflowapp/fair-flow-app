@@ -26,6 +26,7 @@ const {
   formatDueForEmail,
   buildOnboardingPortalEmailHtml,
   ensureActivePortalLink,
+  firstEmailSentMs,
 } = require("./onboarding-portal-email");
 
 // ─── Manager callables ───────────────────────────────────────────────────────
@@ -125,7 +126,11 @@ exports.revokeOnboardingPortalToken = onCall(
               `salons/${salonId}/staff/${t.staffId}/onboardingRuns/${t.runId}`
             ),
             {
-              portal: { activeTokenId: null, revokedAt: now },
+              portal: {
+                activeTokenId: null,
+                revokedAt: now,
+                bootstrappedAt: admin.firestore.FieldValue.delete(),
+              },
               updatedAt: now,
             },
             { merge: true }
@@ -177,13 +182,32 @@ exports.getOnboardingPortalActiveLink = onCall(
       .limit(1)
       .get();
     if (q.empty) {
-      return { active: false, url: null, tokenId: null, expiresAt: null };
+      return {
+        active: false,
+        url: null,
+        tokenId: null,
+        expiresAt: null,
+        opened: false,
+        openedAt: null,
+      };
     }
     const doc = q.docs[0];
     const t = doc.data() || {};
+    const opened = !!t.bootstrappedAt;
+    const openedAt =
+      t.bootstrappedAt && t.bootstrappedAt.toDate
+        ? t.bootstrappedAt.toDate().toISOString()
+        : null;
     const exp = t.expiresAt && t.expiresAt.toMillis ? t.expiresAt.toMillis() : 0;
     if (!exp || exp < Date.now()) {
-      return { active: false, url: null, tokenId: doc.id, expiresAt: null };
+      return {
+        active: false,
+        url: null,
+        tokenId: doc.id,
+        expiresAt: null,
+        opened,
+        openedAt,
+      };
     }
     const raw = unsealRawToken(t.sealedToken);
     if (!raw) {
@@ -194,6 +218,8 @@ exports.getOnboardingPortalActiveLink = onCall(
         tokenId: doc.id,
         expiresAt: t.expiresAt.toDate().toISOString(),
         needsReissue: true,
+        opened,
+        openedAt,
       };
     }
     logPortal("get_active_link", { salonId, staffId, runId, tokenId: doc.id });
@@ -203,6 +229,8 @@ exports.getOnboardingPortalActiveLink = onCall(
       tokenId: doc.id,
       expiresAt: t.expiresAt.toDate().toISOString(),
       needsReissue: false,
+      opened,
+      openedAt,
     };
   }
 );

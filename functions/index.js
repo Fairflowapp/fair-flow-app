@@ -71,6 +71,13 @@ exports.onOnboardingTaskWrite = _onboardingProgress.onOnboardingTaskWrite;
 // Deploy by name only — see functions/onboarding-portal.js header.
 Object.assign(exports, require("./onboarding-portal"));
 Object.assign(exports, require("./onboarding-esign-library"));
+Object.assign(exports, require("./onboarding-writes"));
+// S2 — sensitive field encrypt / Reveal (AES-256-GCM + audit)
+Object.assign(exports, require("./onboarding-sensitive"));
+const _onboardingRetention = require("./onboarding-retention");
+exports.setOnboardingRetentionYears = _onboardingRetention.setOnboardingRetentionYears;
+exports.runOnboardingRetentionPurge = _onboardingRetention.runOnboardingRetentionPurge;
+exports.onboardingRetentionDaily = _onboardingRetention.onboardingRetentionDaily;
 
 
 /**

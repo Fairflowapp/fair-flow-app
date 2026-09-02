@@ -12,21 +12,20 @@ import {
   doc,
   getDocs,
   getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  serverTimestamp,
   onSnapshot,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
-import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
   ffNormalizeOnboardingTaskConfig,
   ffValidateOnboardingTaskConfig,
   ffOnboardingV1TaskTypes,
   ffOnboardingEsignAllowsInternalSign,
-} from "./task-registry.js?v=20260809_esign_e2";
+} from "./task-registry.js?v=20260816_od_link";
 import { ffNormalizeOnboardingAudience } from "./audience.js?v=20260808_onboarding_hardening";
+import {
+  ffOnboardingCall,
+  ffOnboardingCallError,
+} from "./onboarding-cf.js?v=20260815_od_fast";
 
 let _salonId = null;
 let _unsubCategories = null;
@@ -38,6 +37,22 @@ let _cacheReady = false;
 let _cacheCategories = [];
 let _cacheTemplates = [];
 let _cachePackages = [];
+
+function getDb() {
+  try {
+    return (typeof window !== "undefined" && (window.ffDb || window.db)) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getAuthInst() {
+  try {
+    return (typeof window !== "undefined" && window.auth) || null;
+  } catch (_) {
+    return null;
+  }
+}
 
 async function getSalonId() {
   try {
@@ -68,22 +83,19 @@ function nameToId(name) {
 }
 
 function categoriesRef(salonId) {
-  return collection(db, `salons/${salonId}/onboardingCategories`);
+  return collection(getDb(), `salons/${salonId}/onboardingCategories`);
 }
 function categoryDoc(salonId, id) {
-  return doc(db, `salons/${salonId}/onboardingCategories`, id);
+  return doc(getDb(), `salons/${salonId}/onboardingCategories`, id);
 }
 function templatesRef(salonId) {
-  return collection(db, `salons/${salonId}/onboardingTaskTemplates`);
+  return collection(getDb(), `salons/${salonId}/onboardingTaskTemplates`);
 }
 function templateDoc(salonId, id) {
-  return doc(db, `salons/${salonId}/onboardingTaskTemplates`, id);
+  return doc(getDb(), `salons/${salonId}/onboardingTaskTemplates`, id);
 }
 function packagesRef(salonId) {
-  return collection(db, `salons/${salonId}/onboardingPackages`);
-}
-function packageDoc(salonId, id) {
-  return doc(db, `salons/${salonId}/onboardingPackages`, id);
+  return collection(getDb(), `salons/${salonId}/onboardingPackages`);
 }
 
 function _sortByOrderThenName(arr) {
@@ -106,6 +118,70 @@ function _clearCaches() {
   _cacheTemplates = [];
   _cachePackages = [];
   _cacheReady = false;
+}
+
+function _ffOnboardingUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _ffOnboardingPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+function _ffActiveLocationIdForOnboarding() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  } catch (_) {}
+  try {
+    const raw = typeof window !== "undefined" && typeof window.__ff_active_location_id === "string"
+      ? window.__ff_active_location_id.trim()
+      : "";
+    return raw || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+function _ffFilterOnboardingByLocation(items) {
+  if (!Array.isArray(items)) return [];
+  const multi = _ffOnboardingUserHasMultipleLocations();
+  const active = _ffActiveLocationIdForOnboarding();
+  if (!active) return multi ? [] : items.slice();
+  const primary = _ffOnboardingPrimaryLocationId();
+  return items.filter((row) => {
+    if (!row || typeof row !== "object") return false;
+    const lid = row.locationId != null && row.locationId !== "" ? String(row.locationId).trim() : "";
+    if (lid) return lid === active;
+    if (!multi) return true;
+    return !!primary && active === primary;
+  });
 }
 
 function _stopSnapshots() {
@@ -133,7 +209,7 @@ function _subscribeAll(salonId) {
         snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       );
       _cacheReady = true;
-      _emit("ff-onboarding-categories-updated", _cacheCategories);
+      _emit("ff-onboarding-categories-updated", _ffFilterOnboardingByLocation(_cacheCategories));
     },
     (err) => console.warn("[OnboardingSettings] categories subscribe error", err)
   );
@@ -145,7 +221,7 @@ function _subscribeAll(salonId) {
         snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       );
       _cacheReady = true;
-      _emit("ff-onboarding-templates-updated", _cacheTemplates);
+      _emit("ff-onboarding-templates-updated", _ffFilterOnboardingByLocation(_cacheTemplates));
     },
     (err) => console.warn("[OnboardingSettings] templates subscribe error", err)
   );
@@ -157,7 +233,7 @@ function _subscribeAll(salonId) {
         snap.docs.map((d) => ({ ...d.data(), id: d.id }))
       );
       _cacheReady = true;
-      _emit("ff-onboarding-packages-updated", _cachePackages);
+      _emit("ff-onboarding-packages-updated", _ffFilterOnboardingByLocation(_cachePackages));
     },
     (err) => console.warn("[OnboardingSettings] packages subscribe error", err)
   );
@@ -165,6 +241,7 @@ function _subscribeAll(salonId) {
 
 /** Lazy: start/retain Settings catalog listeners (ref-counted). */
 export async function ffEnsureOnboardingSettingsSubscribed() {
+  if (!getDb()) return false;
   const sid = await getSalonId();
   if (!sid) return false;
   if (sid !== _salonId) {
@@ -212,10 +289,31 @@ function tryConnect() {
   });
 }
 
-onAuthStateChanged(auth, () => {
-  tryConnect();
-});
-tryConnect();
+function bindAuth() {
+  const a = getAuthInst();
+  if (a) {
+    try {
+      onAuthStateChanged(a, () => tryConnect());
+    } catch (_) {}
+    tryConnect();
+    return;
+  }
+  let n = 0;
+  const t = setInterval(() => {
+    n += 1;
+    const inst = getAuthInst();
+    if (inst || n > 40) {
+      clearInterval(t);
+      if (inst) {
+        try {
+          onAuthStateChanged(inst, () => tryConnect());
+        } catch (_) {}
+      }
+      tryConnect();
+    }
+  }, 250);
+}
+bindAuth();
 
 try {
   if (typeof window !== "undefined") {
@@ -230,13 +328,13 @@ export async function ffGetOnboardingCategories() {
     _salonId = await getSalonId();
   }
   if (!_salonId) return [];
-  if (_unsubCategories) return _cacheCategories.slice();
+  if (_unsubCategories) return _ffFilterOnboardingByLocation(_cacheCategories);
   try {
     const snap = await getDocs(categoriesRef(_salonId));
     _cacheCategories = _sortByOrderThenName(
       snap.docs.map((d) => ({ ...d.data(), id: d.id }))
     );
-    return _cacheCategories.slice();
+    return _ffFilterOnboardingByLocation(_cacheCategories);
   } catch (e) {
     console.warn("[OnboardingSettings] get categories failed", e);
     return [];
@@ -247,61 +345,44 @@ export async function ffCreateOnboardingCategory(payload) {
   if (!_salonId) throw new Error("No salon selected");
   const name = String((payload && payload.name) || "").trim();
   if (!name) throw new Error("Name is required");
-  const baseId = nameToId(name) || `cat_${Date.now()}`;
-  let id = baseId;
-  let n = 1;
-  while ((await getDoc(categoryDoc(_salonId, id))).exists()) {
-    n += 1;
-    id = `${baseId}_${n}`;
+  try {
+    const out = await ffOnboardingCall("createOnboardingCategory", {
+      salonId: _salonId,
+      name,
+      active: payload && payload.active === false ? false : true,
+      sortOrder: payload && payload.sortOrder,
+      locationId: _ffActiveLocationIdForOnboarding() || null,
+    });
+    return { ...(out && out.category), id: out && out.id };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not create category"));
   }
-  const existing = await ffGetOnboardingCategories();
-  const maxSort =
-    existing.length > 0
-      ? Math.max(...existing.map((c) => c.sortOrder || 0))
-      : -1;
-  const row = {
-    id,
-    name,
-    active: payload && payload.active === false ? false : true,
-    sortOrder:
-      payload && Number.isFinite(Number(payload.sortOrder))
-        ? Number(payload.sortOrder)
-        : maxSort + 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  await setDoc(categoryDoc(_salonId, id), row);
-  return { ...row, id };
 }
 
 export async function ffUpdateOnboardingCategory(categoryId, updates) {
   if (!_salonId || !categoryId) throw new Error("Category ID is required");
-  const updateData = { updatedAt: serverTimestamp() };
-  if (updates && updates.name !== undefined) {
-    const name = String(updates.name || "").trim();
-    if (!name) throw new Error("Name cannot be empty");
-    updateData.name = name;
+  try {
+    await ffOnboardingCall("updateOnboardingCategory", {
+      salonId: _salonId,
+      categoryId,
+      updates: updates || {},
+    });
+    return { id: categoryId, ...(updates || {}) };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not update category"));
   }
-  if (updates && updates.active !== undefined) {
-    updateData.active = updates.active === true;
-  }
-  if (updates && updates.sortOrder !== undefined) {
-    updateData.sortOrder = Number(updates.sortOrder) || 0;
-  }
-  await updateDoc(categoryDoc(_salonId, categoryId), updateData);
-  return { id: categoryId, ...updateData };
 }
 
 export async function ffDeleteOnboardingCategory(categoryId) {
   if (!_salonId || !categoryId) throw new Error("Category ID is required");
-  const templates = await ffGetOnboardingTaskTemplates();
-  const inUse = templates.some((t) => t.categoryId === categoryId);
-  if (inUse) {
-    throw new Error(
-      "Cannot delete: one or more task templates still use this category. Reassign or deactivate them first."
-    );
+  try {
+    await ffOnboardingCall("deleteOnboardingCategory", {
+      salonId: _salonId,
+      categoryId,
+    });
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not delete category"));
   }
-  await deleteDoc(categoryDoc(_salonId, categoryId));
 }
 
 // ─── Task Templates ──────────────────────────────────────────────────────────
@@ -311,13 +392,13 @@ export async function ffGetOnboardingTaskTemplates() {
     _salonId = await getSalonId();
   }
   if (!_salonId) return [];
-  if (_unsubTemplates) return _cacheTemplates.slice();
+  if (_unsubTemplates && _cacheTemplates.length) return _ffFilterOnboardingByLocation(_cacheTemplates);
   try {
     const snap = await getDocs(templatesRef(_salonId));
     _cacheTemplates = _sortByOrderThenName(
       snap.docs.map((d) => ({ ...d.data(), id: d.id }))
     );
-    return _cacheTemplates.slice();
+    return _ffFilterOnboardingByLocation(_cacheTemplates);
   } catch (e) {
     console.warn("[OnboardingSettings] get templates failed", e);
     return [];
@@ -371,32 +452,23 @@ function _normalizeTemplatePayload(payload, { isCreate }) {
 export async function ffCreateOnboardingTaskTemplate(payload) {
   if (!_salonId) throw new Error("No salon selected");
   const normalized = _normalizeTemplatePayload(payload, { isCreate: true });
-  const baseId = nameToId(normalized.name) || `tmpl_${Date.now()}`;
-  let id = baseId;
-  let n = 1;
-  while ((await getDoc(templateDoc(_salonId, id))).exists()) {
-    n += 1;
-    id = `${baseId}_${n}`;
+  try {
+    const locationId = _ffActiveLocationIdForOnboarding();
+    if (_ffOnboardingUserHasMultipleLocations() && !locationId) {
+      throw new Error("Choose a location before adding an onboarding item.");
+    }
+    const out = await ffOnboardingCall("createOnboardingTaskTemplate", {
+      salonId: _salonId,
+      payload: { ...normalized, locationId: locationId || null },
+    });
+    const created = { ...(out && out.template), id: out && out.id };
+    const without = _cacheTemplates.filter((t) => String(t.id) !== created.id);
+    _cacheTemplates = _sortByOrderThenName([...without, created]);
+    _emit("ff-onboarding-templates-updated", _ffFilterOnboardingByLocation(_cacheTemplates));
+    return created;
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not create item"));
   }
-  const existing = await ffGetOnboardingTaskTemplates();
-  const maxSort =
-    existing.length > 0
-      ? Math.max(...existing.map((t) => t.sortOrder || 0))
-      : -1;
-  const row = {
-    id,
-    ...normalized,
-    sortOrder:
-      normalized.sortOrder !== undefined ? normalized.sortOrder : maxSort + 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  await setDoc(templateDoc(_salonId, id), row);
-  const created = { ...row, id };
-  const without = _cacheTemplates.filter((t) => String(t.id) !== id);
-  _cacheTemplates = _sortByOrderThenName([...without, created]);
-  _emit("ff-onboarding-templates-updated", _cacheTemplates.slice());
-  return created;
 }
 
 export async function ffUpdateOnboardingTaskTemplate(templateId, updates) {
@@ -434,32 +506,32 @@ export async function ffUpdateOnboardingTaskTemplate(templateId, updates) {
   };
 
   const normalized = _normalizeTemplatePayload(merged, { isCreate: false });
-  const updateData = {
-    ...normalized,
-    updatedAt: serverTimestamp(),
-  };
-  await updateDoc(templateDoc(_salonId, templateId), updateData);
-  return { id: templateId, ...updateData };
+  try {
+    await ffOnboardingCall("updateOnboardingTaskTemplate", {
+      salonId: _salonId,
+      templateId,
+      updates: normalized,
+    });
+    return { id: templateId, ...normalized };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not update item"));
+  }
 }
 
 export async function ffDeleteOnboardingTaskTemplate(templateId) {
   if (!_salonId || !templateId) throw new Error("Template ID is required");
-  const packages = await ffGetOnboardingPackages();
-  const inUse = packages.some(
-    (p) =>
-      Array.isArray(p.items) &&
-      p.items.some((it) => it && it.templateId === templateId)
-  );
-  if (inUse) {
-    throw new Error(
-      "Cannot delete: this template is used in one or more packages. Remove it from packages first."
-    );
-  }
   const id = String(templateId);
-  await deleteDoc(templateDoc(_salonId, id));
+  try {
+    await ffOnboardingCall("deleteOnboardingTaskTemplate", {
+      salonId: _salonId,
+      templateId: id,
+    });
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not delete item"));
+  }
   // Optimistic cache: UI re-render can run before onSnapshot arrives.
   _cacheTemplates = _cacheTemplates.filter((t) => String(t.id) !== id);
-  _emit("ff-onboarding-templates-updated", _cacheTemplates.slice());
+  _emit("ff-onboarding-templates-updated", _ffFilterOnboardingByLocation(_cacheTemplates));
 }
 
 // ─── Packages ────────────────────────────────────────────────────────────────
@@ -521,13 +593,13 @@ export async function ffGetOnboardingPackages() {
     _salonId = await getSalonId();
   }
   if (!_salonId) return [];
-  if (_unsubPackages) return _cachePackages.slice();
+  if (_unsubPackages) return _ffFilterOnboardingByLocation(_cachePackages);
   try {
     const snap = await getDocs(packagesRef(_salonId));
     _cachePackages = _sortByOrderThenName(
       snap.docs.map((d) => ({ ...d.data(), id: d.id }))
     );
-    return _cachePackages.slice();
+    return _ffFilterOnboardingByLocation(_cachePackages);
   } catch (e) {
     console.warn("[OnboardingSettings] get packages failed", e);
     return [];
@@ -538,49 +610,35 @@ export async function ffCreateOnboardingPackage(payload) {
   if (!_salonId) throw new Error("No salon selected");
   const name = String((payload && payload.name) || "").trim();
   if (!name) throw new Error("Name is required");
-
-  const baseId = nameToId(name) || `pkg_${Date.now()}`;
-  let id = baseId;
-  let n = 1;
-  while ((await getDoc(packageDoc(_salonId, id))).exists()) {
-    n += 1;
-    id = `${baseId}_${n}`;
-  }
-
-  const existing = await ffGetOnboardingPackages();
-  const maxSort =
-    existing.length > 0
-      ? Math.max(...existing.map((p) => p.sortOrder || 0))
-      : -1;
-
   const items = _normalizePackageItems(payload && payload.items);
   await _assertPackageItemsEsignAllowed(items);
-
-  const row = {
-    id,
-    name,
-    description: String((payload && payload.description) || "").trim(),
-    active: payload && payload.active === false ? false : true,
-    audience: ffNormalizeOnboardingAudience(payload && payload.audience),
-    items,
-    sortOrder:
-      payload && Number.isFinite(Number(payload.sortOrder))
-        ? Number(payload.sortOrder)
-        : maxSort + 1,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  };
-  await setDoc(packageDoc(_salonId, id), row);
-  return { ...row, id };
+  try {
+    const locationId = _ffActiveLocationIdForOnboarding();
+    if (_ffOnboardingUserHasMultipleLocations() && !locationId) {
+      throw new Error("Choose a location before adding an onboarding package.");
+    }
+    const out = await ffOnboardingCall("createOnboardingPackage", {
+      salonId: _salonId,
+      payload: {
+        name,
+        description: String((payload && payload.description) || "").trim(),
+        active: payload && payload.active === false ? false : true,
+        audience: ffNormalizeOnboardingAudience(payload && payload.audience),
+        items,
+        sortOrder: payload && payload.sortOrder,
+        locationId: locationId || null,
+      },
+    });
+    return { ...(out && out.package), id: out && out.id };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not create package"));
+  }
 }
 
 export async function ffUpdateOnboardingPackage(packageId, updates) {
   if (!_salonId || !packageId) throw new Error("Package ID is required");
-  const currentSnap = await getDoc(packageDoc(_salonId, packageId));
-  if (!currentSnap.exists()) throw new Error("Package not found");
-  const current = currentSnap.data() || {};
 
-  const updateData = { updatedAt: serverTimestamp() };
+  const updateData = {};
   if (updates && updates.name !== undefined) {
     const name = String(updates.name || "").trim();
     if (!name) throw new Error("Name cannot be empty");
@@ -604,19 +662,41 @@ export async function ffUpdateOnboardingPackage(packageId, updates) {
     updateData.sortOrder = Number(updates.sortOrder) || 0;
   }
 
-  // Keep unused vars lint-free; current reserved for future merge validation
-  void current;
-
-  await updateDoc(packageDoc(_salonId, packageId), updateData);
-  return { id: packageId, ...updateData };
+  try {
+    await ffOnboardingCall("updateOnboardingPackage", {
+      salonId: _salonId,
+      packageId,
+      updates: updateData,
+    });
+    return { id: packageId, ...updateData };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not update package"));
+  }
 }
 
 export async function ffDeleteOnboardingPackage(packageId) {
   if (!_salonId || !packageId) throw new Error("Package ID is required");
   const id = String(packageId);
-  await deleteDoc(packageDoc(_salonId, id));
+  try {
+    await ffOnboardingCall("deleteOnboardingPackage", {
+      salonId: _salonId,
+      packageId: id,
+    });
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not delete package"));
+  }
   _cachePackages = _cachePackages.filter((p) => String(p.id) !== id);
-  _emit("ff-onboarding-packages-updated", _cachePackages.slice());
+  _emit("ff-onboarding-packages-updated", _ffFilterOnboardingByLocation(_cachePackages));
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("ff-active-location-changed", () => {
+    try {
+      _emit("ff-onboarding-categories-updated", _ffFilterOnboardingByLocation(_cacheCategories));
+      _emit("ff-onboarding-templates-updated", _ffFilterOnboardingByLocation(_cacheTemplates));
+      _emit("ff-onboarding-packages-updated", _ffFilterOnboardingByLocation(_cachePackages));
+    } catch (_) {}
+  });
 }
 
 if (typeof window !== "undefined") {
@@ -636,4 +716,5 @@ if (typeof window !== "undefined") {
   window.ffCreateOnboardingPackage = ffCreateOnboardingPackage;
   window.ffUpdateOnboardingPackage = ffUpdateOnboardingPackage;
   window.ffDeleteOnboardingPackage = ffDeleteOnboardingPackage;
+  window.ffFilterOnboardingByLocation = _ffFilterOnboardingByLocation;
 }

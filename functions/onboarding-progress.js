@@ -35,6 +35,8 @@ function computeProgress(tasks, currentStatus) {
   if (status !== "cancelled") {
     if (required.length > 0 && missing === 0) {
       status = "completed";
+    } else if (missing > 0 && status === "completed") {
+      status = "in_progress";
     } else if (
       list.some((t) =>
         [
@@ -87,6 +89,9 @@ async function recomputeRun(salonId, staffId, runId) {
     };
     if (status === "completed" && run.status !== "completed") {
       patch.completedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+    if (status !== "completed" && run.status === "completed") {
+      patch.completedAt = admin.firestore.FieldValue.delete();
     }
     tx.update(runRef, patch);
   });

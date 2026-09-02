@@ -7,7 +7,7 @@ import {
   ffNormalizeOnboardingEsignFieldSchema,
   ffValidateOnboardingEsignFieldSchema,
   ffOnboardingEsignFieldTypes,
-} from "./task-registry.js?v=20260809_esign_e2";
+} from "./task-registry.js?v=20260811_od_s3_sensitive";
 
 const PDFJS_VERSION = "4.8.69";
 const PDFJS_MOD =
@@ -76,6 +76,7 @@ function _newField(type, page, x, y) {
     required: type === "signature" || type === "typed_name",
     label: TYPE_LABEL[type] || type,
     signerRole: "employee",
+    // sensitive only applies to text (set in props panel)
   };
 }
 
@@ -90,7 +91,11 @@ export async function ffOpenOnboardingEsignFieldEditor({
   readOnly,
   saveLabel,
 } = {}) {
-  if (_open) return null;
+  const existing = typeof document !== "undefined"
+    ? document.getElementById("ffEsignFieldEditorOverlay")
+    : null;
+  if (_open && existing) return null;
+  _open = false;
   const did = String(documentId || "").trim();
   const vid = String(versionId || "").trim();
   if (!did || !vid) throw new Error("documentId and versionId required");
@@ -104,29 +109,76 @@ export async function ffOpenOnboardingEsignFieldEditor({
     resolveDone = r;
   });
 
-  const meta = await window.ffGetOnboardingSignatureDocumentVersionReadUrl({
-    documentId: did,
-    versionId: vid,
+  const overlay = document.createElement("div");
+  overlay.id = "ffEsignFieldEditorOverlay";
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,0.55);display:flex;align-items:center;justify-content:center;padding:max(8px,env(safe-area-inset-top,0px)) 12px max(8px,env(safe-area-inset-bottom,0px));overflow:hidden;box-sizing:border-box;";
+  overlay.innerHTML =
+    '<div style="background:#fff;border-radius:12px;width:min(520px,100%);padding:20px;box-shadow:0 20px 50px rgba(0,0,0,.25);">' +
+    '<div style="font-size:14px;font-weight:800;color:#111827;margin-bottom:8px;">Mark where to sign</div>' +
+    '<div style="font-size:13px;color:#6b7280;margin-bottom:14px;">Loading PDF…</div>' +
+    '<button type="button" data-fe-close style="padding:9px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Close</button>' +
+    "</div>";
+  document.body.appendChild(overlay);
+  try {
+    document.body.style.overflow = "hidden";
+  } catch (_) {}
+
+  let cancelled = false;
+  overlay.querySelector("[data-fe-close]").addEventListener("click", () => {
+    cancelled = true;
+    try {
+      overlay.remove();
+      document.body.style.overflow = "";
+    } catch (_) {}
+    _open = false;
+    resolveDone({ saved: false });
   });
+
+  let meta;
+  try {
+    meta = await window.ffGetOnboardingSignatureDocumentVersionReadUrl({
+      documentId: did,
+      versionId: vid,
+    });
+    if (!meta || !meta.readUrl) {
+      throw new Error("Could not open the PDF preview. Try uploading again.");
+    }
+  } catch (e) {
+    if (!cancelled) {
+      try {
+        overlay.remove();
+        document.body.style.overflow = "";
+      } catch (_) {}
+      _open = false;
+    }
+    throw e;
+  }
+  if (cancelled) return donePromise;
+
   const frozen = meta.schemaFrozen === true || readOnly === true;
   let fields = ffNormalizeOnboardingEsignFieldSchema(meta.fieldSchema || []);
   let selectedId = null;
   let placeType = null;
   let dirty = false;
 
-  const overlay = document.createElement("div");
-  overlay.id = "ffEsignFieldEditorOverlay";
-  // Lock overlay scroll so only the PDF pane scrolls; keep Save pinned in the header.
-  overlay.style.cssText =
-    "position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,0.55);display:flex;align-items:stretch;justify-content:center;padding:12px;overflow:hidden;box-sizing:border-box;";
   const saveText = String(saveLabel || "Save").trim() || "Save";
   const saveBtnHtml = frozen
     ? ""
-    : `<button type="button" data-fe-save style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">${_esc(saveText)}</button>`;
+    : '<button type="button" data-fe-save style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;">' +
+      _esc(saveText) +
+      "</button>";
+  const floatBarHtml = frozen
+    ? ""
+    : '<div data-fe-float-bar style="flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e5e7eb;background:#fff;z-index:6;">' +
+      '<span data-fe-dirty style="font-size:11px;color:#6b7280;margin-right:auto;"></span>' +
+      '<button type="button" data-fe-save-bottom style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">' +
+      _esc(saveText) +
+      "</button></div>";
   overlay.innerHTML = `
-    <div style="background:#fff;border-radius:12px;width:min(1100px,100%);height:100%;max-height:calc(100dvh - 24px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.25);">
-      <div data-fe-toolbar style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;flex-shrink:0;background:#fff;position:sticky;top:0;z-index:5;">
-        <div style="min-width:0;">
+    <div style="background:#fff;border-radius:12px;width:min(1100px,100%);height:calc(100dvh - 24px);max-height:calc(100dvh - 24px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.25);box-sizing:border-box;">
+      <div data-fe-toolbar style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid #e5e7eb;flex-shrink:0;background:#fff;z-index:6;">
+        <div style="min-width:0;flex:1;">
           <div style="font-size:14px;font-weight:800;color:#111827;">Mark where to sign</div>
           <div style="font-size:11px;color:#6b7280;margin-top:2px;">
             ${_esc(documentTitle || meta.documentTitle || did)}
@@ -134,12 +186,12 @@ export async function ffOpenOnboardingEsignFieldEditor({
             ${frozen ? " · <span style='color:#b45309;font-weight:700;'>locked (already in use)</span>" : ""}
           </div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div style="display:flex;gap:8px;flex-wrap:nowrap;align-items:center;flex-shrink:0;">
           ${saveBtnHtml}
           <button type="button" data-fe-close style="padding:9px 14px;border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#374151;font-size:13px;font-weight:600;cursor:pointer;">Close</button>
         </div>
       </div>
-      <div style="display:flex;flex:1;min-height:0;overflow:hidden;">
+      <div style="display:flex;flex:1 1 auto;min-height:0;overflow:hidden;">
         <aside style="width:200px;border-right:1px solid #e5e7eb;padding:10px;overflow:auto;background:#fafafa;flex-shrink:0;">
           <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:8px;">ADD FIELD</div>
           <div id="ffFeTypes" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -149,24 +201,13 @@ export async function ffOpenOnboardingEsignFieldEditor({
           </div>
           <div id="ffFeProps" style="margin-top:14px;"></div>
         </aside>
-        <div style="flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative;">
-          <div id="ffFePages" style="flex:1;min-height:0;overflow:auto;padding:16px;background:#e5e7eb;-webkit-overflow-scrolling:touch;"></div>
-          ${
-            frozen
-              ? ""
-              : `<div data-fe-float-bar style="flex-shrink:0;display:flex;justify-content:flex-end;gap:8px;align-items:center;padding:10px 14px;border-top:1px solid #e5e7eb;background:#fff;">
-                  <span data-fe-dirty style="font-size:11px;color:#6b7280;margin-right:auto;"></span>
-                  <button type="button" data-fe-save-bottom style="padding:9px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:13px;font-weight:700;cursor:pointer;">${_esc(saveText)}</button>
-                </div>`
-          }
+        <div style="flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;position:relative;overflow:hidden;">
+          <div id="ffFePages" style="flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px;background:#e5e7eb;-webkit-overflow-scrolling:touch;"></div>
+          ${floatBarHtml}
         </div>
       </div>
     </div>
   `;
-  document.body.appendChild(overlay);
-  try {
-    document.body.style.overflow = "hidden";
-  } catch (_) {}
 
   const typesEl = overlay.querySelector("#ffFeTypes");
   const pagesEl = overlay.querySelector("#ffFePages");
@@ -249,12 +290,14 @@ export async function ffOpenOnboardingEsignFieldEditor({
       saveBtns.forEach((b) => {
         b.disabled = true;
       });
+      // Re-normalize so non-text never carries sensitive to the server.
+      const payloadFields = ffNormalizeOnboardingEsignFieldSchema(fields);
       const res = await window.ffSetOnboardingSignatureDocumentVersionFieldSchema({
         documentId: did,
         versionId: vid,
-        fieldSchema: fields,
+        fieldSchema: payloadFields,
       });
-      fields = ffNormalizeOnboardingEsignFieldSchema(res.fieldSchema || fields);
+      fields = ffNormalizeOnboardingEsignFieldSchema(res.fieldSchema || payloadFields);
       _setDirty(false);
       _toast("Saved", "success");
       close({ saved: true, fieldSchema: fields, meta: res });
@@ -294,6 +337,34 @@ export async function ffOpenOnboardingEsignFieldEditor({
         '<div style="font-size:11px;color:#9ca3af;">Select a field to edit properties.</div>';
       return;
     }
+    // S3: Sensitive UI only for text fields; strip if type is not text.
+    if (f.type !== "text" && (f.sensitive || f.sensitiveKind)) {
+      delete f.sensitive;
+      delete f.sensitiveKind;
+    }
+    const kind = f.sensitiveKind || "other";
+    const sensitiveBlock =
+      f.type === "text"
+        ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#92400e;margin-bottom:6px;font-weight:600;">' +
+          '<input data-fe-sensitive type="checkbox"' +
+          (f.sensitive ? " checked" : "") +
+          (frozen ? " disabled" : "") +
+          " /> Sensitive (encrypted at rest)</label>" +
+          '<div data-fe-sensitive-kind-wrap style="margin-bottom:8px;' +
+          (f.sensitive ? "" : "display:none;") +
+          '"><label style="display:block;font-size:11px;font-weight:600;color:#374151;margin-bottom:4px;">Sensitive kind</label>' +
+          '<select data-fe-sensitive-kind' +
+          (frozen ? " disabled" : "") +
+          ' style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;box-sizing:border-box;">' +
+          '<option value="ssn"' + (kind === "ssn" ? " selected" : "") + ">SSN</option>" +
+          '<option value="bank_account"' + (kind === "bank_account" ? " selected" : "") + ">Bank account</option>" +
+          '<option value="other"' + (kind === "other" ? " selected" : "") + ">Other</option>" +
+          "</select>" +
+          '<div style="font-size:10px;color:#9ca3af;margin-top:4px;line-height:1.35;">Only text fields. Stored encrypted; managers see mask + audited Reveal.</div></div>'
+        : '<div style="font-size:10px;color:#9ca3af;margin-bottom:8px;line-height:1.35;">Sensitive flag applies to text fields only.</div>';
+    const delBtn = frozen
+      ? ""
+      : '<button type="button" data-fe-del style="padding:6px 8px;border:1px solid #fecaca;border-radius:6px;background:#fff;color:#b91c1c;font-size:11px;font-weight:600;cursor:pointer;width:100%;">Delete field</button>';
     propsEl.innerHTML = `
       <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px;">SELECTED</div>
       <div style="font-size:12px;font-weight:700;color:#111827;margin-bottom:6px;">${_esc(TYPE_LABEL[f.type] || f.type)}</div>
@@ -303,15 +374,15 @@ export async function ffOpenOnboardingEsignFieldEditor({
         <input data-fe-req type="checkbox" ${f.required ? "checked" : ""} ${frozen ? "disabled" : ""} />
         Required
       </label>
+      ${sensitiveBlock}
       <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">Page ${f.page}</div>
-      ${
-        frozen
-          ? ""
-          : `<button type="button" data-fe-del style="padding:6px 8px;border:1px solid #fecaca;border-radius:6px;background:#fff;color:#b91c1c;font-size:11px;font-weight:600;cursor:pointer;width:100%;">Delete field</button>`
-      }
+      ${delBtn}
     `;
     const labelEl = propsEl.querySelector("[data-fe-label]");
     const reqEl = propsEl.querySelector("[data-fe-req]");
+    const sensEl = propsEl.querySelector("[data-fe-sensitive]");
+    const kindEl = propsEl.querySelector("[data-fe-sensitive-kind]");
+    const kindWrap = propsEl.querySelector("[data-fe-sensitive-kind-wrap]");
     const delEl = propsEl.querySelector("[data-fe-del]");
     if (labelEl) {
       labelEl.addEventListener("input", () => {
@@ -325,6 +396,34 @@ export async function ffOpenOnboardingEsignFieldEditor({
         f.required = !!reqEl.checked;
         _setDirty(true);
         renderFields();
+      });
+    }
+    if (sensEl) {
+      sensEl.addEventListener("change", () => {
+        if (f.type !== "text") {
+          sensEl.checked = false;
+          delete f.sensitive;
+          delete f.sensitiveKind;
+          _toast("Sensitive is only allowed on text fields.", "error");
+          return;
+        }
+        if (sensEl.checked) {
+          f.sensitive = true;
+          f.sensitiveKind = (kindEl && kindEl.value) || "other";
+        } else {
+          delete f.sensitive;
+          delete f.sensitiveKind;
+        }
+        if (kindWrap) kindWrap.style.display = sensEl.checked ? "" : "none";
+        _setDirty(true);
+        renderFields();
+      });
+    }
+    if (kindEl) {
+      kindEl.addEventListener("change", () => {
+        if (!f.sensitive || f.type !== "text") return;
+        f.sensitiveKind = kindEl.value || "other";
+        _setDirty(true);
       });
     }
     if (delEl) {
@@ -356,18 +455,28 @@ export async function ffOpenOnboardingEsignFieldEditor({
             width:${f.width * 100}%;
             height:${f.height * 100}%;
             box-sizing:border-box;
-            border:2px solid ${selectedId === f.id ? "#7c3aed" : "#2563eb"};
-            background:rgba(37,99,235,0.12);
+            border:2px solid ${
+              selectedId === f.id
+                ? "#7c3aed"
+                : f.sensitive
+                  ? "#b45309"
+                  : "#2563eb"
+            };
+            background:${
+              f.sensitive ? "rgba(245,158,11,0.16)" : "rgba(37,99,235,0.12)"
+            };
             border-radius:4px;
             cursor:${frozen ? "default" : "move"};
             font-size:10px;
-            color:#1e3a8a;
+            color:${f.sensitive ? "#92400e" : "#1e3a8a"};
             font-weight:700;
             padding:2px 4px;
             overflow:hidden;
             user-select:none;
           `;
-          el.innerHTML = `${_esc(f.label || f.type)}${f.required ? " *" : ""}
+          el.innerHTML = `${_esc(f.label || f.type)}${f.required ? " *" : ""}${
+            f.sensitive ? " · sens" : ""
+          }
             ${
               frozen
                 ? ""
@@ -456,7 +565,9 @@ export async function ffOpenOnboardingEsignFieldEditor({
 
   try {
     const pdfjs = await _loadPdfJs();
-    const pdf = await pdfjs.getDocument({ url: meta.readUrl }).promise;
+    const pdf = meta.pdfData
+      ? await pdfjs.getDocument({ data: meta.pdfData }).promise
+      : await pdfjs.getDocument({ url: meta.readUrl }).promise;
     pagesEl.innerHTML = "";
     const targetWidth = Math.min(820, pagesEl.clientWidth - 24 || 720);
 

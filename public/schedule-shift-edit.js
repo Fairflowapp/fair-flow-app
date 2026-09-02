@@ -7,9 +7,9 @@
 // injected via initScheduleShiftEdit() (function declarations there are
 // hoisted, so wiring at module-eval time is safe).
 
-import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260615_default_schedule_source";
+import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { ffScheduleAppToast } from "./schedule-ack.js?v=20260702_schedule_ack";
+import { ffScheduleAppToast } from "./schedule-ack.js?v=20260902_sched_dual";
 
 // ── injected via initScheduleShiftEdit() (wired in schedule-ui.js) ──
 let renderScheduleBoard;

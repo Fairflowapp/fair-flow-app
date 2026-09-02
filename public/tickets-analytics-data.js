@@ -79,7 +79,26 @@ export function readStaffNames() {
   return byId;
 }
 
-export async function readCandidateArrays() {
+export async function readCandidateArrays(range) {
+  try {
+    if (typeof window.ffLoadTicketsForAnalytics === "function") {
+      const loaded = await window.ffLoadTicketsForAnalytics({
+        fromMs: range?.fromMs,
+        toMs: range?.toMs,
+      });
+      if (Array.isArray(loaded) && loaded.length) {
+        console.log(LOG, "data source detected", "window.ffLoadTicketsForAnalytics()", {
+          fromMs: range?.fromMs || null,
+          toMs: range?.toMs || null,
+          count: loaded.length,
+        });
+        return { name: "window.ffLoadTicketsForAnalytics()", list: loaded };
+      }
+    }
+  } catch (err) {
+    console.warn(LOG, "analytics ticket loader failed", err);
+  }
+
   const candidates = [];
   const addCandidate = (name, value) => {
     try {
@@ -111,20 +130,7 @@ export async function readCandidateArrays() {
     }
   });
 
-  let selected = candidates.find((c) => c.list.length) || candidates[0] || null;
-  if (!selected || !selected.list.length) {
-    try {
-      if (typeof window.ffLoadTicketsForAnalytics === "function") {
-        const loaded = await window.ffLoadTicketsForAnalytics();
-        if (Array.isArray(loaded)) {
-          candidates.push({ name: "window.ffLoadTicketsForAnalytics()", list: loaded });
-          selected = { name: "window.ffLoadTicketsForAnalytics()", list: loaded };
-        }
-      }
-    } catch (err) {
-      console.warn(LOG, "analytics ticket loader failed", err);
-    }
-  }
+  const selected = candidates.find((c) => c.list.length) || candidates[0] || null;
   console.log(LOG, "data source detected", selected ? selected.name : "none");
   return selected || { name: "none", list: [] };
 }

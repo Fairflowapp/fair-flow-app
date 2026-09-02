@@ -15,21 +15,21 @@ import {
   where,
   deleteDoc,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   parseNum,
   sanitizeManualItemForDraft,
   renderDraftsPickerRowHtml,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
-import { getCategoryTree } from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
-import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
+import { getCategoryTree } from "./inventory-catalog.js?v=20260902_prod_cats";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260902_inv_iso";
+import { INVENTORY_LEGACY_DRAFT_DOC_ID } from "./inventory-spine.js?v=20260902_inv_iso";
 
 // ── injected by initOrdersDrafts() (orchestrator spine + builder back-edges) ──
-let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync;
+let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, _ffInvHasActiveLocationForWrite, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync;
 export function initOrdersDrafts(deps) {
-  ({ getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync } = deps);
+  ({ getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, _ffInvHasActiveLocationForWrite, findCategoryAndSubForSubId, refreshOrderBuilderPreviewAsync } = deps);
 }
 
 
@@ -108,6 +108,10 @@ export async function saveInventoryOrderDraft() {
   const salonId = await getSalonId();
   if (!salonId) {
     inventoryOrderDraftToast("Could not resolve salon. Try again.", "error");
+    return;
+  }
+  if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) {
+    inventoryOrderDraftToast("Choose a location before saving an order.", "error");
     return;
   }
   const src = buildInventoryOrderDraftSourcePayload();
@@ -355,6 +359,7 @@ export async function flushInventoryOrderDraftSave() {
   try {
     const salonId = await getSalonId();
     if (!salonId) return;
+    if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) return;
     const uid = auth.currentUser && auth.currentUser.uid ? String(auth.currentUser.uid) : null;
     const manualItems = invState._invOrderBuilderManualLines
       .map(sanitizeManualItemForDraft)

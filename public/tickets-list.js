@@ -20,9 +20,9 @@
 import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffTicketsPatchLocalTicket, _rebuildCurrentTicketsMerged, updateTicketsLoadMoreUi, deleteTicketPermanently } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { ffTicketsPatchLocalTicket, _rebuildCurrentTicketsMerged, updateTicketsLoadMoreUi, deleteTicketPermanently } from "./tickets-crud.js?v=20260901_loc_isolate2";
 import { ffTicketMoney, formatDate, passesTicketsDateFilter, ticketMatchesEmployeeFilter } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
-import { canSeeTicket, updateTicketsTabsVisibility, canViewTicketsSummaryTab, canViewTicketsArchivedTab, ffTicketsSetTimePeriodFiltersVisible, updateTicketsEmployeeFilterVisibility, ffTicketsHideFrontDeskFiltersOnThisView, isTicketsTechnicianRestrictedRole, isStaffRecordManagerOrAdmin, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { canSeeTicket, updateTicketsTabsVisibility, canViewTicketsSummaryTab, canViewTicketsArchivedTab, ffTicketsSetTimePeriodFiltersVisible, updateTicketsEmployeeFilterVisibility, ffTicketsHideFrontDeskFiltersOnThisView, isTicketsTechnicianRestrictedRole, isStaffRecordManagerOrAdmin, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician } from "./tickets-permissions.js?v=20260901_loc_isolate";
 
 let getTicketTechnicianAvatarUrl, ticketHasRealPostSendEdit, ffFormatReviewedAt, openTicketModal, showToast, ticketConfirm, getActiveTicketsSalonId, loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod;
 export function initTicketsList(deps) {

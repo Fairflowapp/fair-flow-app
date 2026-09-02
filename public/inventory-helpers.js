@@ -65,6 +65,47 @@ export function productSubcategoryIdFromProductsSub(sub) {
   return idx >= 0 ? id.slice(idx + INV_PRODUCTS_SUB_SUFFIX.length) : INV_PRODUCTS_GENERAL_SUB;
 }
 
+function _invHelperUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _invHelperPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+/** Unstamped/global product stock is only visible on single-location or the primary branch. */
+function _invHelperCanUseUnstampedProductInventory(activeLoc) {
+  if (!_invHelperUserHasMultipleLocations()) return true;
+  const loc = typeof activeLoc === "string" ? activeLoc.trim() : "";
+  if (!loc) return false;
+  const primary = _invHelperPrimaryLocationId();
+  return !!primary && loc === primary;
+}
+
 export function getProductStockForInventoryRow(product, activeLoc) {
   const inv = product.inventory && typeof product.inventory === "object" ? product.inventory : {};
   const locO =
@@ -72,7 +113,7 @@ export function getProductStockForInventoryRow(product, activeLoc) {
       ? product.locationOverrides[activeLoc]
       : null;
   if (locO && Number.isFinite(Number(locO.stock))) return Number(locO.stock);
-  if (Number.isFinite(Number(inv.stock))) return Number(inv.stock);
+  if (_invHelperCanUseUnstampedProductInventory(activeLoc) && Number.isFinite(Number(inv.stock))) return Number(inv.stock);
   return 0;
 }
 
@@ -83,7 +124,7 @@ export function getProductTargetStockForInventoryRow(product, activeLoc) {
       ? product.locationOverrides[activeLoc]
       : null;
   if (locO && Number.isFinite(Number(locO.targetStock))) return Number(locO.targetStock);
-  if (Number.isFinite(Number(inv.targetStock))) return Number(inv.targetStock);
+  if (_invHelperCanUseUnstampedProductInventory(activeLoc) && Number.isFinite(Number(inv.targetStock))) return Number(inv.targetStock);
   // No target set yet → fall back to on-hand so Order shows 0 (no false demand).
   return getProductStockForInventoryRow(product, activeLoc);
 }
@@ -94,6 +135,7 @@ export function getProductPriceForInventoryRow(product, activeLoc) {
       ? product.locationOverrides[activeLoc]
       : null;
   if (locO && Number.isFinite(Number(locO.price))) return Number(locO.price);
+  if (!_invHelperCanUseUnstampedProductInventory(activeLoc)) return 0;
   return Number.isFinite(Number(product.retailPrice)) ? Number(product.retailPrice) : 0;
 }
 

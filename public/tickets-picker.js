@@ -9,12 +9,12 @@
 
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
-import { _ticketsCurrentStaffRow, updateTicketsTabsVisibility } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { _ticketsCurrentStaffRow, updateTicketsTabsVisibility } from "./tickets-permissions.js?v=20260901_loc_isolate";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { subscribeTickets } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { subscribeTickets } from "./tickets-crud.js?v=20260901_loc_isolate2";
 import { addProductToTicket } from "./tickets-modal.js?v=20260818_staff_dur_ui";
-import { canStaffSendNewTicket } from "./tickets-catalog-ui.js?v=20260818_staff_dur_ui";
-import { subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { canStaffSendNewTicket } from "./tickets-catalog-ui.js?v=20260901_dur_hm";
+import { subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260902_prod_cats";
 
 let doServiceSelect, getActiveTicketsSalonId, getProductsGroupedByCategory, getServicesGroupedByCategory, getTicketPriceForProductAndActiveLocation, isTicketPickerServiceAvailableForActiveLocation;
 

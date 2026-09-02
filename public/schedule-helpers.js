@@ -4,7 +4,7 @@
 // schedule-helpers-core.js; staff/coverage logic in schedule-helpers-staff.js.
 
 import * as core from "./schedule-helpers-core.js?v=20260816_sat_open";
-import * as staff from "./schedule-helpers-staff.js?v=20260704_schedule_helpers_split";
+import * as staff from "./schedule-helpers-staff.js?v=20260902_sched_dual";
 
 const scheduleHelpers = { ...core, ...staff };
 
@@ -75,4 +75,4 @@ export {
   canWorkAlone,
   hasRequiredManager,
   validateStaffConstraints,
-} from "./schedule-helpers-staff.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers-staff.js?v=20260902_sched_dual";

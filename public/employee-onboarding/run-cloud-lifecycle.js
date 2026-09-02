@@ -3,31 +3,21 @@
  */
 
 import {
-  doc,
-  getDoc,
   getDocs,
-  updateDoc,
-  serverTimestamp,
-  writeBatch,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   _createLocks,
   _actionLocks,
   _salonId,
-  _uid,
   _trim,
-  _stripUndefined,
   runsCol,
-  runDoc,
   tasksCol,
-  taskDoc,
-  _readRunWithProgress,
-  _txUpdateTask,
-  ffComputeOnboardingRunProgress,
   ffCanManageOnboardingRunsClient,
-  ffBuildOnboardingRunSnapshotAsync,
-} from "./run-cloud-shared.js?v=20260810_od_split_v1";
+} from "./run-cloud-shared.js?v=20260812_od_s5";
+import {
+  ffOnboardingCall,
+  ffOnboardingCallError,
+} from "./onboarding-cf.js?v=20260812_od_s5";
 
 export async function ffGetOnboardingRuns(staffId) {
   const salonId = _salonId();
@@ -75,6 +65,8 @@ export async function ffCreateOnboardingRunFromPackage({
   categories,
   pkg,
 } = {}) {
+  void templates;
+  void categories;
   const salonId = _salonId();
   const sid = _trim(staffId);
   const pid = _trim(packageId);
@@ -89,92 +81,16 @@ export async function ffCreateOnboardingRunFromPackage({
     if (!packageRow || packageRow.id !== pid) {
       throw new Error("Package snapshot required");
     }
-    const templatesById = {};
-    (templates || []).forEach((t) => {
-      if (t && t.id) templatesById[t.id] = t;
-    });
-    const categoriesById = {};
-    (categories || []).forEach((c) => {
-      if (c && c.id) categoriesById[c.id] = c;
-    });
-
-    const taskRows = await ffBuildOnboardingRunSnapshotAsync(
-      packageRow,
-      templatesById,
-      categoriesById,
-      salonId
-    );
-    if (!taskRows.length) {
-      throw new Error("Package has no active v1 tasks to assign");
-    }
-
-    const { progress, status } = ffComputeOnboardingRunProgress(taskRows, "draft");
-    const runRef = doc(runsCol(salonId, sid));
-    const runId = runRef.id;
-    const uid = _uid();
-    const runPayload = _stripUndefined({
-      id: runId,
-      schemaVersion: 1,
+    const out = await ffOnboardingCall("createOnboardingRunFromPackage", {
+      salonId,
+      staffId: sid,
       packageId: pid,
-      packageNameSnapshot: String(packageRow.name || pid),
-      packageDescriptionSnapshot: String(packageRow.description || ""),
-      audienceSnapshot: packageRow.audience || {
-        workerClassifications: [],
-        technicianTypeIds: [],
-      },
-      status, // draft
-      progress,
       dueDate: dueDate || null,
-      createdBy: uid,
-      createdAt: serverTimestamp(),
-      createdAtMs: Date.now(),
-      sentAt: null,
-      completedAt: null,
-      cancelledAt: null,
-      updatedAt: serverTimestamp(),
     });
-
-    const batch = writeBatch(db);
-    batch.set(runRef, runPayload);
-    for (const t of taskRows) {
-      batch.set(
-        taskDoc(salonId, sid, runId, t.id),
-        _stripUndefined({
-          ...t,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        })
-      );
-    }
-    await batch.commit();
-
-    // Freeze library versions that were snapshotted into this run (immutable layout).
-    const bindings = taskRows
-      .filter((t) => t.taskType === "electronic_signature")
-      .map((t) => ({
-        documentId:
-          t.configSnapshot &&
-          (t.configSnapshot.signatureDocumentId || t.configSnapshot.documentId),
-        versionId:
-          t.configSnapshot &&
-          (t.configSnapshot.signatureDocumentVersionId ||
-            t.configSnapshot.documentVersionId),
-        runId,
-      }))
-      .filter((b) => b.documentId && b.versionId);
-    if (
-      bindings.length &&
-      typeof window !== "undefined" &&
-      typeof window.ffBindOnboardingSignatureDocumentVersions === "function"
-    ) {
-      try {
-        await window.ffBindOnboardingSignatureDocumentVersions(bindings);
-      } catch (e) {
-        console.warn("[OnboardingRun] bind e-sign versions failed", e);
-      }
-    }
-
-    return { runId, run: { ...runPayload, id: runId }, tasks: taskRows };
+    const runId = out && out.runId;
+    return { runId, run: { id: runId }, tasks: [] };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not start onboarding"));
   } finally {
     _createLocks.delete(lockKey);
   }
@@ -185,21 +101,16 @@ export async function ffActivateOnboardingRun(staffId, runId) {
   const salonId = _salonId();
   const sid = _trim(staffId);
   const rid = _trim(runId);
-  const rref = runDoc(salonId, sid, rid);
-  const snap = await getDoc(rref);
-  if (!snap.exists()) throw new Error("Run not found");
-  const run = snap.data() || {};
-  if (run.status === "cancelled" || run.status === "completed") {
-    return { ...run, id: rid };
-  }
-  if (run.status === "draft") {
-    await updateDoc(rref, {
-      status: "sent",
-      sentAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+  try {
+    const out = await ffOnboardingCall("activateOnboardingRun", {
+      salonId,
+      staffId: sid,
+      runId: rid,
     });
+    return { id: rid, status: out && out.status };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not activate onboarding"));
   }
-  return _readRunWithProgress(salonId, sid, rid);
 }
 
 export async function ffCancelOnboardingRun(staffId, runId) {
@@ -207,19 +118,16 @@ export async function ffCancelOnboardingRun(staffId, runId) {
   const salonId = _salonId();
   const sid = _trim(staffId);
   const rid = _trim(runId);
-  const rref = runDoc(salonId, sid, rid);
-  const snap = await getDoc(rref);
-  if (!snap.exists()) throw new Error("Run not found");
-  const run = snap.data() || {};
-  if (run.status === "completed" || run.status === "cancelled") {
-    return { ...run, id: rid };
+  try {
+    await ffOnboardingCall("cancelOnboardingRun", {
+      salonId,
+      staffId: sid,
+      runId: rid,
+    });
+    return { id: rid, status: "cancelled" };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Could not cancel onboarding"));
   }
-  await updateDoc(rref, {
-    status: "cancelled",
-    cancelledAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  return { ...run, id: rid, status: "cancelled" };
 }
 
 export async function ffSkipOnboardingTask(staffId, runId, taskId) {
@@ -232,16 +140,15 @@ export async function ffSkipOnboardingTask(staffId, runId, taskId) {
   if (_actionLocks.has(lock)) return null;
   _actionLocks.add(lock);
   try {
-    return await _txUpdateTask(salonId, sid, rid, tid, (task) => {
-      if (task.required !== false) throw new Error("Cannot skip a required task");
-      if (task.status === "skipped" || task.status === "completed") return null;
-      return {
-        status: "skipped",
-        updatedAt: serverTimestamp(),
-        completedAt: serverTimestamp(),
-        completedBy: _uid(),
-      };
+    await ffOnboardingCall("skipOnboardingTask", {
+      salonId,
+      staffId: sid,
+      runId: rid,
+      taskId: tid,
     });
+    return { ok: true };
+  } catch (e) {
+    throw new Error(ffOnboardingCallError(e, "Skip failed"));
   } finally {
     _actionLocks.delete(lock);
   }

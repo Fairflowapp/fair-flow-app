@@ -4,8 +4,8 @@
 
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { getDocs, collection, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
-import { getSalonId, _ffInvActiveLocId } from "./inventory-spine.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
+import { getSalonId, _ffInvActiveLocId } from "./inventory-spine.js?v=20260902_inv_iso";
 
 if (typeof window !== "undefined") {
   // Lightweight diagnostic helper — run `ffInventoryDumpLocations()` from the

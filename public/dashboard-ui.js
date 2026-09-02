@@ -12,18 +12,35 @@
 import {
   getDashboardLocationScope,
   LOG,
-} from "./dashboard-data.js?v=20260626_dashboard_split";
+} from "./dashboard-data.js?v=20260902_dash_iso";
 import {
   fmtNumber,
   fmtMinutes,
   fmtHourRange,
   fmtCurrency,
   buildInsights,
-} from "./dashboard-compute.js?v=20260626_dashboard_split";
+} from "./dashboard-compute.js?v=20260816_dash_time";
 
 export function renderDashboardLocation(scope = getDashboardLocationScope()) {
   const el = document.getElementById("ffDashLocationLabel");
   if (el) el.textContent = scope.label;
+}
+
+export function hardClearDashboardView() {
+  ["ffDashKpis", "ffDashGrid", "ffDashInsights"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+}
+
+export function renderDashboardNeedLocation() {
+  const msg = `<div class="dash-card"><p class="dash-need-location">Choose a location to view the dashboard.</p></div>`;
+  const kpis = document.getElementById("ffDashKpis");
+  if (kpis) kpis.innerHTML = msg;
+  const grid = document.getElementById("ffDashGrid");
+  if (grid) grid.innerHTML = "";
+  const insights = document.getElementById("ffDashInsights");
+  if (insights) insights.innerHTML = "";
 }
 
 export function renderKpis(snap, range) {
@@ -147,10 +164,10 @@ export function renderModuleCards(snap, range) {
     "tasks-analytics": "goToTasksAnalytics",
   };
   const ANALYTICS_MODULES = {
-    "queue-analytics": { src: "/queue-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToQueueAnalytics" },
-    "tickets-analytics": { src: "/tickets-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTicketsAnalytics" },
+    "queue-analytics": { src: "/queue-analytics.js?v=20260816_dash_live", exportName: "goToQueueAnalytics" },
+    "tickets-analytics": { src: "/tickets-analytics.js?v=20260816_dash_range", exportName: "goToTicketsAnalytics" },
     "time-analytics": { src: "/time-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTimeAnalytics" },
-    "tasks-analytics": { src: "/tasks-analytics.js?v=20260514_mobile_analytics_ready", exportName: "goToTasksAnalytics" },
+    "tasks-analytics": { src: "/tasks-analytics.js?v=20260816_tasks_week", exportName: "goToTasksAnalytics" },
   };
   root.querySelectorAll("[data-dash-action]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {

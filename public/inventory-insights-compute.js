@@ -3,7 +3,7 @@
 // data load + compute pass. Extracted verbatim from inventory-insights.js.
 // Results are written to invState._invInsights* for the UI module to render.
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   parseNum,
   ffParseDateInputStart,
@@ -11,7 +11,7 @@ import {
   ffResolveItemEventDate,
   getEffectiveInventoryOrderStatus,
   parseSubcategoryDocToTable,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   getDocs,

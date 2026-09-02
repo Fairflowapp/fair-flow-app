@@ -14,7 +14,7 @@ import {
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 
 import {
   newRowId,
@@ -30,17 +30,17 @@ import {
   productToInvRow,
   SHARED_INV_DEFAULT_GROUP_ID,
   INV_PRODUCTS_GENERAL_SUB,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 
 import {
   sharedInvCategoriesRef,
   sharedInvSubcategoriesRef,
   getCategoryTree,
-} from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-catalog.js?v=20260902_prod_cats";
 
-import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
+import { inventoryOrderDraftToast } from "./inventory-orders.js?v=20260902_inv_iso";
 
-import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260728_inv_mobile_unstick";
+import { scanProductReorderAlertsOnce } from "./inventory-insights.js?v=20260902_prod_cats";
 
 let _ffInvActiveLocId,
   ffCanManageInventory,
@@ -115,6 +115,8 @@ async function flushProductsInventoryTableToFirestore(meta) {
     if (activeLoc) {
       updates[`locationOverrides.${activeLoc}.stock`] = onHand;
       updates[`locationOverrides.${activeLoc}.targetStock`] = target;
+    } else if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function" && window.ffUserHasMultipleLocations()) {
+      continue;
     } else {
       updates["inventory.stock"] = onHand;
       updates["inventory.targetStock"] = target;
@@ -496,7 +498,9 @@ async function flushInventoryTableToFirestore() {
   const salonId = await getSalonId();
   if (!salonId) return;
   if (invState._invUsingSharedCatalog) {
-    const ref = sharedInvStateDocRef(salonId, getInventoryLocationStateId(), meta.sub.id);
+    const locId = getInventoryLocationStateId();
+    if (!locId) return;
+    const ref = sharedInvStateDocRef(salonId, locId, meta.sub.id);
     await setDoc(ref, {
       categoryId: meta.category.id,
       subcategoryId: meta.sub.id,
@@ -547,6 +551,13 @@ async function loadInventoryTableForSub(catId, subId, seq, key) {
       if (seq !== invState._invTableLoadSeq) return;
       invState._groups = [{ id: SHARED_INV_DEFAULT_GROUP_ID, label: "Inventory" }];
       const activeLoc = _ffInvActiveLocId();
+      if (!activeLoc && typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function" && window.ffUserHasMultipleLocations()) {
+        invState._rows = [];
+        invState._invColWidths = null;
+        invState._invTableLoadedForSubId = key;
+        ensureGroupCellsForRows();
+        return;
+      }
       const prods = meta
         ? productsForInventorySub(
             productCategoryIdFromProductsSub(meta.sub),

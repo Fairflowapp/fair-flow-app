@@ -10,13 +10,13 @@ import {
   getAuthedStaffIdForSchedule,
   teardownScheduleChangePingListener,
   updateScheduleWeekAckStrip,
-} from "./schedule-ack.js?v=20260702_schedule_ack";
+} from "./schedule-ack.js?v=20260902_sched_dual";
 import {
   canViewScheduleBoardForCurrentWeek,
   isAuthedUserMultiLocationForWeek,
   renderScheduleUnpublishedPlaceholder,
   updateSchedulePublishToggleUi,
-} from "./schedule-cloud.js?v=20260702_schedule_cloud";
+} from "./schedule-cloud.js?v=20260902_sched_dual";
 import {
   _ffDebugLogAuthedUserWeeklyHours,
   buildMyShiftsIcsForCurrentWeek,
@@ -27,12 +27,12 @@ import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
-import { initScheduleRenderModals } from "./schedule-render-modals.js?v=20260703_schedule_render_split";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
+import { initScheduleRenderModals } from "./schedule-render-modals.js?v=20260827_1258notes";
 import {
   initScheduleRenderBoard,
   renderScheduleBoard,
-} from "./schedule-render-board.js?v=20260816_cell_notes7";
+} from "./schedule-render-board.js?v=20260827_1258notes";
 
 // -- injected via initScheduleRender() (wired in schedule-nav-runtime.js) --
 let renderScheduleViewTabs;
@@ -152,11 +152,11 @@ export {
   renderScheduleStandByRowHtml,
   renderStandBySlotNamesHtml,
   shortenCoverageWarningForModal,
-} from "./schedule-render-modals.js?v=20260703_schedule_render_split";
+} from "./schedule-render-modals.js?v=20260827_1258notes";
 export {
   bindScheduleStaffProfileLinks,
   setScheduleLoadingState,
-} from "./schedule-render-board.js?v=20260816_cell_notes7";
+} from "./schedule-render-board.js?v=20260827_1258notes";
 export { renderScheduleBoard };
 export {
   renderScheduleSummary,

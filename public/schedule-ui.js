@@ -7,4 +7,4 @@ export {
   goToSchedule,
   refreshSchedulePreview,
   hideScheduleScreen,
-} from "./schedule-nav.js?v=20260816_cell_notes7";
+} from "./schedule-nav.js?v=20260902_sched_dual";

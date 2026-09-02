@@ -137,6 +137,32 @@ export function _otherUidFromParticipants(parts, myUid) {
   return parts.find(u => u && u !== myUid) || '';
 }
 
+export function isChatGroup(conv) {
+  if (!conv) return false;
+  if (String(conv.kind || "").toLowerCase() === "group") return true;
+  if (String(conv.groupName || "").trim()) return true;
+  return Array.isArray(conv.participants) && conv.participants.length > 2;
+}
+
+export function chatGroupTitle(conv) {
+  const name = String((conv && conv.groupName) || "").trim();
+  return name || "Group";
+}
+
+export function chatGroupPhotoUrl(conv) {
+  if (!conv) return '';
+  const url = String(conv.groupPhotoUrl || '').trim();
+  if (!url) return '';
+  const at = conv.groupPhotoUpdatedAtMs != null ? String(conv.groupPhotoUpdatedAtMs) : '';
+  if (!at) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}v=${encodeURIComponent(at)}`;
+}
+
+export function isManagerLikeRole(role) {
+  return isMgrPlus(role);
+}
+
 export function timeAgo(ts) {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);

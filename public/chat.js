@@ -52,11 +52,14 @@ import {
   _trimStr,
   _memberDisplayNameFromRow,
   _otherUidFromParticipants,
+  isChatGroup,
+  chatGroupTitle,
+  chatGroupPhotoUrl,
   timeAgo,
   _chatDayKey,
   _chatDaySeparatorLabel,
-} from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+} from "./chat-helpers.js?v=20260901_chat_iso";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
 
 // ─── Data layer (Firestore reads + location scoping) — extracted to chat-data.js
 import {
@@ -69,7 +72,7 @@ import {
   loadChatSalonUsers,
   loadChatTemplates,
   loadChatFlows,
-} from "./chat-data.js?v=20260628_chat_data_b0";
+} from "./chat-data.js?v=20260901_chat_iso";
 
 // ─── UI module (presentation helpers + small renderers) — extracted to chat-ui.js
 import {
@@ -99,7 +102,7 @@ import {
   _chatRenderFlowWizard,
   _updateChatSendBtn,
   _updateRecipientSummary,
-} from "./chat-ui.js?v=20260728_reactions";
+} from "./chat-ui.js?v=20260901_chat_iso";
 initChatUi({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
 
 // ─── Subscriptions module (realtime listeners) — extracted to chat-subscriptions.js
@@ -110,9 +113,10 @@ import {
   _unreadCountForUid,
   _computeChatNavUnreadFromSnapDocs,
   _paintChatNavBadge,
+  _applyChatNavBadgeFromConversationSnap,
   subscribeToChatBadge,
   subscribeToChatToastNotifications,
-} from "./chat-subscriptions.js?v=20260628_chat_subs_split";
+} from "./chat-subscriptions.js?v=20260901_chat_iso";
 export { subscribeToChatBadge, subscribeToChatToastNotifications };
 initChatSubscriptions({
   renderThreadList,
@@ -123,7 +127,7 @@ initChatSubscriptions({
 });
 
 // ─── Admin module (templates + flows) — extracted to chat-admin.js ──────────────
-import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260701_chat_admin_flows_split";
+import { initChatAdmin, _renderTmplList, _renderFlowsAdminList } from "./chat-admin.js?v=20260901_chat_iso";
 initChatAdmin({
   _chatManageAllowed,
   _chatWaitForManagePermission,
@@ -135,8 +139,10 @@ initChatAdmin({
 });
 
 // ─── Compose module (conversation view + send/reply/confirm flow) — extracted to chat-compose.js
-import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260728_reactions";
+import { initChatCompose, _sendFreeTextDirect, markThreadRead } from "./chat-compose.js?v=20260901_chat_iso";
 initChatCompose({ _chatFreeTextAllowed, _getChatFreeTextTrimmed });
+import { initChatGroups } from "./chat-groups.js?v=20260901_chat_iso";
+initChatGroups();
 
 // Delegated click binding — belt-and-suspenders with _bindChatSendBtn. Runs at
 // window level in capture phase to beat any other handler that might
@@ -176,6 +182,10 @@ if (typeof window !== 'undefined') {
   window.ffGetRecentConversations = function (limitN) {
     var n = Number(limitN) > 0 ? Number(limitN) : 8;
     var arr = Array.isArray(chatState.allConversations) ? chatState.allConversations.slice() : [];
+    try {
+      var locKey = _chatEffectiveLocKey();
+      arr = arr.filter(function (c) { return _convMatchesLocation(c, locKey); });
+    } catch (_) {}
     arr.sort(function (a, b) {
       var am = (a && (a.lastMessageAtMs || (a.lastMessageAt && a.lastMessageAt.toMillis && a.lastMessageAt.toMillis()))) || 0;
       var bm = (b && (b.lastMessageAtMs || (b.lastMessageAt && b.lastMessageAt.toMillis && b.lastMessageAt.toMillis()))) || 0;
@@ -305,10 +315,27 @@ function _ffEnsureReactPop() {
   const pop = document.createElement('div');
   pop.id = 'ffChatReactPop';
   pop.style.cssText = 'display:none;position:fixed;z-index:100210;background:#fff;border:1px solid #e5e7eb;border-radius:999px;box-shadow:0 10px 28px rgba(15,23,42,0.25);padding:5px 8px;gap:2px;align-items:center;';
-  pop.innerHTML = FF_QUICK_REACTIONS.map(e =>
+  pop.innerHTML = `<button type="button" data-ff-reply-msg class="ff-chat-pop-reply">Reply</button>` + FF_QUICK_REACTIONS.map(e =>
     `<button type="button" data-ff-react="${e}" style="border:none;background:none;font-size:22px;line-height:1;padding:4px 5px;cursor:pointer;border-radius:50%;">${e}</button>`
   ).join('');
   pop.addEventListener('click', ev => {
+    const replyBtn = ev.target && ev.target.closest ? ev.target.closest('[data-ff-reply-msg]') : null;
+    if (replyBtn && _ffReactTarget) {
+      const t = _ffReactTarget;
+      _ffCloseReactPop();
+      const msg = (chatState.currentMessages || []).find(m => m && m.id === t.msgId)
+        || (_livePopupMsgs || []).find(m => m && m.id === t.msgId);
+      if (msg && typeof window.setChatQuoteReply === 'function') window.setChatQuoteReply(msg);
+      const freeOk = typeof window.ffCurrentUserHasChatFreeTextPermission === 'function'
+        && window.ffCurrentUserHasChatFreeTextPermission();
+      if (freeOk) {
+        const ta = document.getElementById('chatConvFreeTextInput');
+        if (ta) ta.focus();
+      } else if (typeof window.openThreadReply === 'function') {
+        window.openThreadReply();
+      }
+      return;
+    }
     const b = ev.target && ev.target.closest ? ev.target.closest('[data-ff-react]') : null;
     if (!b || !_ffReactTarget) return;
     const t = _ffReactTarget;
@@ -344,6 +371,37 @@ function _ffMsgContextFor(row) {
   return null;
 }
 
+window.openChatSeenBy = function(msgId, anchorEl) {
+  const msg = (chatState.currentMessages || []).find(m => m && m.id === msgId);
+  if (!msg) return;
+  const readBy = (Array.isArray(msg.readBy) ? msg.readBy : []).filter(u => u && u !== msg.senderUid);
+  let pop = document.getElementById('ffChatSeenPop');
+  if (!pop) {
+    pop = document.createElement('div');
+    pop.id = 'ffChatSeenPop';
+    pop.className = 'ff-chat-seen-pop';
+    document.body.appendChild(pop);
+  }
+  if (!readBy.length) {
+    pop.innerHTML = '<div class="ff-chat-seen-empty">No one has seen this yet.</div>';
+  } else {
+    pop.innerHTML = `<div class="ff-chat-seen-title">Seen by</div>` + readBy.map(uid => {
+      const name = _nameForUid(uid) || 'Someone';
+      return `<div class="ff-chat-seen-row">${escHtml(name)}</div>`;
+    }).join('');
+  }
+  pop.style.display = 'block';
+  const r = anchorEl && anchorEl.getBoundingClientRect ? anchorEl.getBoundingClientRect() : { left: 16, bottom: 80 };
+  const w = pop.offsetWidth || 220;
+  pop.style.left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - w - 8)) + 'px';
+  pop.style.top = Math.min(window.innerHeight - 12, r.bottom + 6) + 'px';
+};
+
+function _ffCloseSeenPop() {
+  const pop = document.getElementById('ffChatSeenPop');
+  if (pop) pop.style.display = 'none';
+}
+
 async function ffReactToChatMessage(convId, msgId, emoji) {
   try {
     const salonId = chatState.chatUserProfile?.salonId;
@@ -371,6 +429,26 @@ if (typeof document !== 'undefined' && !window.__ff_chatReactionsBound) {
     // just move/reopen it on the new message).
     if (_ffReactPopEl && _ffReactPopEl.style.display !== 'none' && !t.closest('#ffChatReactPop')) {
       _ffCloseReactPop();
+    }
+    if (!t.closest('#ffChatSeenPop') && !t.closest('.cb-seen')) _ffCloseSeenPop();
+    const quote = t.closest('.cb-quote');
+    if (quote) {
+      ev.preventDefault();
+      const jumpId = quote.getAttribute('data-jump-msg');
+      const row = jumpId && document.querySelector(`#chatConvMessages [data-ff-msg="${CSS.escape(jumpId)}"]`);
+      if (row) {
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        row.classList.add('is-jump-flash');
+        setTimeout(() => row.classList.remove('is-jump-flash'), 1200);
+      }
+      return;
+    }
+    const seenBtn = t.closest('.cb-seen');
+    if (seenBtn) {
+      ev.preventDefault();
+      const msgId = seenBtn.getAttribute('data-ff-seen');
+      if (msgId && typeof window.openChatSeenBy === 'function') window.openChatSeenBy(msgId, seenBtn);
+      return;
     }
     // Chip click → toggle that reaction directly.
     const chip = t.closest('[data-ff-react-chip]');
@@ -414,7 +492,10 @@ function _renderLivePopupMessages() {
     return;
   }
   const uid = chatState.chatUserProfile?.uid || '';
-  const otherAvatarUrl = _avatarUrlForUid(_livePopupOtherUid());
+  // In a group every message can have a different sender, so resolve the
+  // avatar per message; in a 1:1 thread the other side is fixed.
+  const group = isChatGroup(_conversationById(_livePopupConvId));
+  const fixedOtherAvatarUrl = group ? '' : _avatarUrlForUid(_livePopupOtherUid());
   // Bubble markup mirrors renderConversation() in chat-ui.js so the popup
   // looks identical to the full Chat thread view.
   let lastDayKey = '';
@@ -429,6 +510,7 @@ function _renderLivePopupMessages() {
     }
     const mine = ev.senderUid === uid;
     const senderInitial = (ev.senderName || '?').charAt(0).toUpperCase();
+    const otherAvatarUrl = group ? _avatarUrlForUid(ev.senderUid) : fixedOtherAvatarUrl;
     const otherAvatarHtml = !mine && otherAvatarUrl
       ? `<span class="cb-avatar" style="overflow:hidden;padding:0;"><img src="${String(otherAvatarUrl).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></span>`
       : (!mine ? `<span class="cb-avatar">${escHtml(senderInitial)}</span>` : '');
@@ -462,12 +544,17 @@ async function _livePopupSend() {
   const ta = document.getElementById('liveChatPopupInput');
   const body = String(ta?.value || '').trim();
   if (!body) return;
-  const otherUid = _livePopupOtherUid();
+  // Groups have no single "other" uid — mirror sendChatConvFreeText, which
+  // passes 'group' and lets _sendFreeTextDirect resolve the conversation.
+  const conv = _conversationById(_livePopupConvId);
+  const group = isChatGroup(conv);
+  const otherUid = group ? 'group' : _livePopupOtherUid();
   if (!otherUid) return;
   const btn = document.getElementById('liveChatPopupSend');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   try {
-    await _sendFreeTextDirect(otherUid, _nameForUidForSend(otherUid), _livePopupConvId, body);
+    const otherName = group ? chatGroupTitle(conv) : _nameForUidForSend(otherUid);
+    await _sendFreeTextDirect(otherUid, otherName, _livePopupConvId, body);
     if (ta) { ta.value = ''; ta.focus(); }
   } catch (e) {
     if (e && e.message === 'message_too_long') alert('Message is too long (max 8000 characters).');
@@ -532,15 +619,20 @@ window.ffOpenLiveChatThread = async function (convId) {
     _livePopupMsgs = [];
     _livePopupLoading = true;
 
-    const otherUid = _livePopupOtherUid();
+    // Group conversations must show the GROUP name/photo, not the first
+    // non-me participant (that showed e.g. "Dahis" for the "Front Desk" group).
+    const conv = _conversationById(convId);
+    const group = isChatGroup(conv);
+    const otherUid = group ? '' : _livePopupOtherUid();
+    const headerName = group ? chatGroupTitle(conv) : (_nameForUid(otherUid) || 'Conversation');
     const nameEl = document.getElementById('liveChatPopupName');
-    if (nameEl) nameEl.textContent = _nameForUid(otherUid) || 'Conversation';
+    if (nameEl) nameEl.textContent = headerName;
     const avatarEl = document.getElementById('liveChatPopupAvatar');
     if (avatarEl) {
-      const url = _avatarUrlForUid(otherUid);
+      const url = group ? chatGroupPhotoUrl(conv) : _avatarUrlForUid(otherUid);
       avatarEl.innerHTML = url
         ? `<img src="${String(url).replace(/"/g, '&quot;')}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
-        : escHtml((_nameForUid(otherUid) || '?').charAt(0).toUpperCase());
+        : escHtml((headerName || '?').charAt(0).toUpperCase());
     }
     const composer = document.getElementById('liveChatPopupComposer');
     const noPerm = document.getElementById('liveChatPopupNoPerm');
@@ -823,6 +915,12 @@ async function initChatScreen() {
 
 // ─── Open / Close Thread ───────────────────────────────────────────────────────
 window._openThread = async function(convId, sourceEl) {
+  const locKey = _chatEffectiveLocKey();
+  const probe = _conversationById(convId) || { id: convId };
+  if (!_convMatchesLocation(probe, locKey)) {
+    console.warn('[Chat] blocked openThread for another location', convId, 'loc=', locKey);
+    return;
+  }
   _cacheVisibleThreadListHtml();
   if (Array.isArray(chatState.allConversations) && chatState.allConversations.length > 0) {
     chatState.lastNonEmptyConversations = chatState.allConversations.slice();
@@ -841,19 +939,24 @@ window._openThread = async function(convId, sourceEl) {
     otherName: sourceOtherName || '',
   };
   chatState.currentConvId = convId;
+  chatState.quoteReply = null;
+  chatState.currentMessages = [];
+  chatState.currentMessagesConvId = null;
+  chatState.chatMessagesLoading = true;
+  const pane = document.getElementById('chatConvMessages');
+  if (pane) {
+    pane.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;font-size:14px;">Loading messages...</div>';
+  }
   // On narrow mobile screens, show the conversation view with a back button.
   // Desktop/tablet keeps the left conversation list visible.
   const shouldUseMobileChatView = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(max-width: 860px)').matches;
   document.getElementById('chatScreen')?.classList.toggle('chat-mobile-open', shouldUseMobileChatView);
-  // Update header title
   _setConversationHeader(convId);
-  renderThreadList();
-  chatState.currentMessages = [];
-  chatState.chatMessagesLoading = true;
   _subscribeToMessages(convId);
   renderConversation(convId);
+  renderThreadList();
   markThreadRead(convId)
     .catch(() => {})
     .finally(() => {
@@ -864,7 +967,9 @@ window._openThread = async function(convId, sourceEl) {
 window.closeConversation = function() {
   if (chatState.chatMsgsUnsub) { chatState.chatMsgsUnsub(); chatState.chatMsgsUnsub = null; }
   chatState.currentMessages = [];
+  chatState.currentMessagesConvId = null;
   chatState.currentConvId = null;
+  chatState.quoteReply = null;
   chatState.currentThreadFallback = null;
   chatState.chatMessagesLoading = false;
   document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
@@ -946,10 +1051,9 @@ onAuthStateChanged(auth, async user => {
 });
 
 // ─── Location-change Listener (per-location chat isolation) ────────────────────
-// When the active location changes, reset thread UI and re-attach listeners that
-// depend on location filtering. The nav chat badge subscription is intentionally
-// NOT restarted: it already sums unread for the whole salon participant set, and
-// tearing it down + clearing the DOM produced a flash-then-empty badge after load.
+// Hard-reset thread UI, templates, toasts, and the nav badge so the other
+// branch cannot leak into Chat. The badge listener stays salon-wide (one
+// snapshot) but unread is recomputed for the new location only.
 if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
   window.__ff_chatLocationListener = true;
   document.addEventListener('ff-active-location-changed', () => {
@@ -962,24 +1066,41 @@ if (typeof document !== 'undefined' && !window.__ff_chatLocationListener) {
 
       chatState.allConversations = [];
       chatState.lastNonEmptyConversations = [];
+      chatState.lastRenderedConversations = [];
+      chatState.lastRenderedThreadListHtml = '';
+      chatState.cachedConversationsById = {};
       chatState.currentMessages  = [];
+      chatState.currentMessagesConvId = null;
       chatState.currentConvId    = null;
+      chatState.currentThreadFallback = null;
+      chatState.quoteReply = null;
+      chatState.chatReplyContext = null;
+      chatState.chatTemplates = [];
+      chatState.chatFlows = [];
+      chatState._chatTemplatesLoadKey = '';
+      chatState._chatFlowsLoadKey = '';
+      document.getElementById('chatScreen')?.classList.remove('chat-mobile-open');
+      try { if (typeof window.closeSendMessageModal === 'function') window.closeSendMessageModal(); } catch (_) {}
+      try { if (typeof window.closeChatNewGroupModal === 'function') window.closeChatNewGroupModal(); } catch (_) {}
+      try { if (typeof window.closeChatTemplatesModal === 'function') window.closeChatTemplatesModal(); } catch (_) {}
+      try { if (typeof window.closeChatGroupInfo === 'function') window.closeChatGroupInfo(); } catch (_) {}
 
       try { renderThreadList(); } catch (_) {}
       try { _renderEmptyConversation(); } catch (_) {}
+
+      if (chatState._chatAuthUid && chatState._chatLastConvSnap) {
+        try { _applyChatNavBadgeFromConversationSnap(chatState._chatLastConvSnap, chatState._chatAuthUid); } catch (_) {}
+      }
 
       if (chatState._chatAuthUid && chatState._chatAuthSalonId) {
         subscribeToChatToastNotifications(chatState._chatAuthUid, chatState._chatAuthSalonId);
       }
       if (chatState.chatUserProfile?.salonId) {
         subscribeToConversationList();
-        // Also reload per-location salon data (templates, flows) so the
-        // settings modal and the "New Message" picker show only what the
-        // currently active location has configured.
         (async () => {
           try {
-            await loadChatTemplates();
-            await loadChatFlows();
+            await loadChatTemplates({ force: true });
+            await loadChatFlows({ force: true });
             try { if (typeof _renderTmplList === 'function') _renderTmplList(); } catch (_) {}
             try { if (typeof _renderFlowsAdminList === 'function') _renderFlowsAdminList(); } catch (_) {}
           } catch (err) {

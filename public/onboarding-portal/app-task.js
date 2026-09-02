@@ -2,7 +2,7 @@
  * Onboarding portal UI — task detail (policy / upload / e-sign).
  */
 
-import { mountEsignSigner } from "./esign-signer.js?v=20260810_od_split_v1";
+import { mountEsignSigner } from "./esign-signer.js?v=20260812_od_portal_sameorigin";
 import {
   state,
   CF_NAMES,
@@ -13,8 +13,8 @@ import {
   setErrorFromException,
   requestRender,
   destroyEsign,
-} from "./app-shared.js?v=20260810_od_split_v1";
-import { goHome } from "./app-home.js?v=20260810_od_split_v1";
+} from "./app-shared.js?v=20260812_od_portal_sameorigin";
+import { goHome } from "./app-home.js?v=20260812_od_portal_sameorigin";
 
 export function renderTaskDetail(dto, task) {
   const readOnly = !!(dto.readOnly || dto.run.status === "completed");
@@ -118,9 +118,9 @@ export function renderUpload(task, readOnly) {
       : "";
 
   let statusBlock = "";
-  if (done) statusBlock = `<div class="alert alert-ok">Document approved.</div>`;
+  if (done) statusBlock = `<div class="alert alert-ok">Document received.</div>`;
   else if (waiting)
-    statusBlock = `<div class="alert alert-warn">Uploaded — waiting for manager approval.</div>`;
+    statusBlock = `<div class="alert alert-ok">Document received.</div>`;
   else if (rejected)
     statusBlock = `<div class="alert alert-danger">Rejected${
       reason ? ": " + esc(reason) : ""
@@ -365,6 +365,31 @@ export function putWithProgress(uploadUrl, file, contentType, onProgress) {
   });
 }
 
+function fileToBase64(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onprogress = (ev) => {
+      if (!ev.lengthComputable || typeof onProgress !== "function") return;
+      onProgress(Math.round((ev.loaded / ev.total) * 30));
+    };
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("Could not read the file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function friendlyUploadError(e) {
+  const msg = String((e && e.message) || "Upload failed.");
+  if (/signBlob|iam\.serviceAccounts|Permission ['"]?iam\./i.test(msg)) {
+    return "Could not upload the file. Please try again.";
+  }
+  return msg;
+}
+
 export async function submitUpload(task, file) {
   if (state.busy || !file) return;
   const cfg = task.config || {};
@@ -405,17 +430,25 @@ export async function submitUpload(task, file) {
   try {
     const contentType =
       file.type || extMimeGuess(file.name) || "application/octet-stream";
+    const fileBase64 = await fileToBase64(file, (pct) => {
+      state.uploadPct = pct;
+      if (fill) fill.style.width = `${pct}%`;
+    });
+    if (fill) fill.style.width = "40%";
     const created = await portalHttp(CF_NAMES.createUpload, {
       sessionToken: state.sessionToken,
       taskId: task.id,
       fileName: file.name,
       contentType,
       size: file.size,
+      fileBase64,
     });
-    await putWithProgress(created.uploadUrl, file, contentType, (pct) => {
-      state.uploadPct = pct;
-      if (fill) fill.style.width = `${pct}%`;
-    });
+    if (created && created.uploadUrl && !created.uploaded) {
+      await putWithProgress(created.uploadUrl, file, contentType, (pct) => {
+        state.uploadPct = pct;
+        if (fill) fill.style.width = `${pct}%`;
+      });
+    }
     if (fill) fill.style.width = "100%";
     if (btn) btn.textContent = "Finalizing…";
     const fin = await portalHttp(CF_NAMES.finalize, {
@@ -434,7 +467,7 @@ export async function submitUpload(task, file) {
     state.error = "";
     requestRender();
   } catch (e) {
-    state.error = (e && e.message) || "Upload failed.";
+    state.error = friendlyUploadError(e);
     const err = document.getElementById("ffPortalTaskErr");
     if (err) err.textContent = state.error;
     if (btn) {

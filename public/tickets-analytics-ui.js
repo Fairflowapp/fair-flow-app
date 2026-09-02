@@ -7,8 +7,8 @@
  * tickets-analytics.js. Writes into fixed element IDs; owns no module state.
  */
 
-import { fmtNumber, fmtCurrency, fmtHourRange, buildInsights } from "./tickets-analytics-compute.js?v=20260626_tickets_analytics_split";
-import { getLocationScope } from "./tickets-analytics-data.js?v=20260626_tickets_analytics_split";
+import { fmtNumber, fmtCurrency, fmtHourRange, buildInsights } from "./tickets-analytics-compute.js?v=20260816_dash_range";
+import { getLocationScope } from "./tickets-analytics-data.js?v=20260816_dash_range";
 
 function escapeHtml(value) {
   return String(value == null ? "" : value)

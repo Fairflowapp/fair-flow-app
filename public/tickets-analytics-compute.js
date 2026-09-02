@@ -15,7 +15,7 @@ import {
   readStaffNames,
   readCandidateArrays,
   readSettingsBusinessHours,
-} from "./tickets-analytics-data.js?v=20260626_tickets_analytics_split";
+} from "./tickets-analytics-data.js?v=20260816_dash_range";
 
 export const LOC_LOG = "[TicketsAnalytics LocationScope]";
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -106,6 +106,25 @@ function logLocationScope(source, scope, before, after, skippedNoLocation) {
   });
 }
 
+function viewerIsMultiBranch() {
+  try {
+    return typeof window.ffUserHasMultipleLocations === "function" && !!window.ffUserHasMultipleLocations();
+  } catch (_) {
+    return false;
+  }
+}
+
+function ticketMatchesAnalyticsLocation(ticket, scope) {
+  if (!scope?.hasLocation) return false;
+  if (ticket.locationId) return ticket.locationId === scope.id;
+  return !viewerIsMultiBranch();
+}
+
+function isCompletedTicketStatus(status) {
+  const s = String(status || "").toUpperCase();
+  return !s || s === "CLOSED" || s === "ARCHIVED";
+}
+
 function readTicketLineItems(raw) {
   const candidates = [
     raw?.performedLines,
@@ -151,8 +170,8 @@ function readTicketLineItems(raw) {
 function parseTicket(raw, staffNames, missingFields) {
   if (!raw || typeof raw !== "object") return null;
   const timestamp =
-    parseTimestamp(raw.closedAt ?? raw.createdAt ?? raw.timestamp) ??
-    parseTimestamp(raw.closedAtMs ?? raw.createdAtMs ?? raw.timestampMs);
+    parseTimestamp(raw.createdAt ?? raw.closedAt ?? raw.timestamp) ??
+    parseTimestamp(raw.createdAtMs ?? raw.closedAtMs ?? raw.timestampMs);
   const amount = parseAmount(raw);
   const employeeId = cleanString(
     raw.staffId ??
@@ -261,7 +280,7 @@ function avgAmount(bucket) {
 }
 
 export async function computeTicketsAnalytics(range) {
-  const source = await readCandidateArrays();
+  const source = await readCandidateArrays(range);
   const scope = getLocationScope();
   const activeLocationId = scope.id;
   const staffNames = readStaffNames();
@@ -271,13 +290,15 @@ export async function computeTicketsAnalytics(range) {
 
   source.list.forEach((raw) => {
     try {
+      if (raw && raw.deleted === true) return;
+      if (!isCompletedTicketStatus(raw?.status)) return;
       const ticket = parseTicket(raw, staffNames, missingFields);
       if (!ticket) return;
-      if (!ticket.locationId) {
-        skippedNoLocation += 1;
+      if (!ticketMatchesAnalyticsLocation(ticket, scope)) {
+        if (!ticket.locationId) skippedNoLocation += 1;
         return;
       }
-      if (!scope.hasLocation || ticket.locationId !== activeLocationId) return;
+      if (!ticket.locationId) skippedNoLocation += 1;
       if (!Number.isFinite(ticket.timestamp) || ticket.timestamp < range.fromMs || ticket.timestamp > range.toMs) return;
       parsed.push(ticket);
     } catch (err) {

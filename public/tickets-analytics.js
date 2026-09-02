@@ -14,14 +14,14 @@ import {
   readStaffNames,
   readCandidateArrays,
   readSettingsBusinessHours,
-} from "./tickets-analytics-data.js?v=20260626_tickets_analytics_split";
+} from "./tickets-analytics-data.js?v=20260816_dash_range";
 import {
   LOC_LOG,
   fmtCurrency,
   fmtHourRange,
   computeTicketsAnalytics,
   buildInsights,
-} from "./tickets-analytics-compute.js?v=20260626_tickets_analytics_split";
+} from "./tickets-analytics-compute.js?v=20260816_dash_range";
 import {
   renderLocationScope,
   renderEmpty,

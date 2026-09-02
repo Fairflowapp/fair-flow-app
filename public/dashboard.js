@@ -18,7 +18,7 @@
  * Logging prefix: [Dashboard]
  */
 
-import { injectStyles } from "./dashboard-styles.js?v=20260626_dashboard_split";
+import { injectStyles } from "./dashboard-styles.js?v=20260902_dash_iso";
 import {
   LOG,
   LOC_LOG,
@@ -29,17 +29,20 @@ import {
   parseLocalDateStartMs,
   parseLocalDateEndMs,
   getDashboardLocationScope,
+  dashboardUserHasMultipleLocations,
   readTicketsSnapshot,
   readQueueSnapshot,
   readTasksSnapshot,
   readTimeClockSnapshot,
-} from "./dashboard-data.js?v=20260626_dashboard_split";
+} from "./dashboard-data.js?v=20260902_dash_iso";
 import {
   renderDashboardLocation,
+  hardClearDashboardView,
+  renderDashboardNeedLocation,
   renderKpis,
   renderModuleCards,
   renderInsights,
-} from "./dashboard-ui.js?v=20260626_dashboard_split";
+} from "./dashboard-ui.js?v=20260902_dash_iso";
 
 const SCREEN_ID = "dashboardScreen";
 const STYLE_ID = "ffDashboardStyles";
@@ -61,6 +64,7 @@ const OTHER_NAV_IDS = [
 
 let _injected = false;
 let _refreshTimer = null;
+let _queueRefreshTimer = null;
 let _dashboardRangeMode = (() => {
   try { return localStorage.getItem("ff_dashboard_range_mode_v1") || "thisWeek"; } catch (_) { return "thisWeek"; }
 })();
@@ -231,10 +235,14 @@ async function refresh() {
   console.log(LOC_LOG, "active location", { activeLocationId: scope.id || "", label: scope.label });
   renderDashboardLocation(scope);
   renderDashboardRangeControls(range);
+  if (dashboardUserHasMultipleLocations() && !scope.hasLocation) {
+    renderDashboardNeedLocation();
+    return;
+  }
   const snap = {
     tickets: await readTicketsSnapshot(range),
     queue: readQueueSnapshot(range),
-    tasks: readTasksSnapshot(range),
+    tasks: await readTasksSnapshot(range),
     time: { totalHours: 0, overtimeHours: 0, topStaffName: null, hasData: false },
   };
   try {
@@ -391,12 +399,25 @@ function init() {
   if (!window.__ffDashLocationListenerBound) {
     window.__ffDashLocationListenerBound = true;
     document.addEventListener("ff-active-location-changed", () => {
-      console.log(LOG, "active location changed → refresh");
+      console.log(LOG, "active location changed → hard-clear + refresh");
+      hardClearDashboardView();
       refresh();
     });
     document.addEventListener("ff-tickets-data-changed", () => {
       console.log(LOG, "tickets data changed → refresh");
       refresh();
+    });
+    document.addEventListener("ff-tasks-data-changed", () => {
+      console.log(LOG, "tasks data changed → refresh");
+      refresh();
+    });
+    document.addEventListener("ff-queue-settings-changed", () => {
+      if (_queueRefreshTimer) return;
+      _queueRefreshTimer = setTimeout(() => {
+        _queueRefreshTimer = null;
+        console.log(LOG, "queue state changed → refresh");
+        refresh();
+      }, 750);
     });
   }
 

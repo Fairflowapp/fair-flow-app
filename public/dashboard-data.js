@@ -49,10 +49,102 @@ export function getDashboardLocationScope() {
   };
 }
 
-function recordMatchesDashboardLocation(record, scope) {
-  if (!scope?.hasLocation) return false;
-  const loc = String(record?.locationId || record?.locId || record?.branchId || "").trim();
-  return !!loc && loc === scope.id;
+/** Salon has more than one branch — same gate as History / Points. */
+export function dashboardUserHasMultipleLocations() {
+  try {
+    if (typeof window.ffUserHasMultipleLocations === "function" && window.ffUserHasMultipleLocations()) return true;
+    if (typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function dashboardPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+function dashboardRecordLocationId(record) {
+  if (!record || typeof record !== "object") return "";
+  return String(record.locationId || record.locId || record.branchId || "").trim();
+}
+
+/**
+ * Canonical branch gate for every Dashboard record.
+ * Stamped id must equal the active location. Unstamped / legacy rows are
+ * visible only on a single-location account, or on the primary location
+ * when the salon has multiple branches. No active location + multi = hide.
+ */
+export function dashboardRecordInActiveLoc(record, scope = getDashboardLocationScope()) {
+  const multi = dashboardUserHasMultipleLocations();
+  const active = String(scope?.id || "").trim();
+  if (!active) return !multi;
+  const stamped = dashboardRecordLocationId(record);
+  if (stamped) return stamped === active;
+  if (!multi) return true;
+  const primary = dashboardPrimaryLocationId();
+  return !!primary && active === primary;
+}
+
+/** Drop unstamped leftovers when a snapshot still holds another branch. */
+function filterRowsToActiveLocation(rows, scope) {
+  const list = safeArr(rows);
+  const active = String(scope?.id || "").trim();
+  const hasForeignStamp = list.some((row) => {
+    const loc = dashboardRecordLocationId(row);
+    return loc && loc !== active;
+  });
+  return list.filter((row) => {
+    const loc = dashboardRecordLocationId(row);
+    if (loc) return loc === active;
+    if (hasForeignStamp) return false;
+    return dashboardRecordInActiveLoc(row, scope);
+  });
+}
+
+function isCompletedTicketStatus(status) {
+  const s = String(status || "").toUpperCase();
+  return !s || s === "CLOSED" || s === "ARCHIVED";
+}
+
+function ticketEventMillis(ticket) {
+  return toMillis(
+    ticket && (
+      ticket.createdAtMs ??
+      ticket.createdAt ??
+      ticket.created ??
+      ticket.closedAt ??
+      ticket.closedAtMs ??
+      ticket.timestamp
+    )
+  );
+}
+
+function readLocalJsonArray(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 function logDashboardScope(source, scope, before, after, skippedNoLocation) {
@@ -118,10 +210,29 @@ function eventMillis(v) {
 export async function readTicketsSnapshot(range) {
   const out = { rangeCount: 0, todayCount: 0, weekCount: 0, totalCount: 0, totalAmount: 0, hasData: false };
   const scope = getDashboardLocationScope();
+  if (dashboardUserHasMultipleLocations() && !scope.hasLocation) {
+    logDashboardScope("tickets", scope, 0, 0, 0);
+    return out;
+  }
   let list = [];
-  if (Array.isArray(window.currentTickets)) list = window.currentTickets;
-  else if (Array.isArray(window.allTickets)) list = window.allTickets;
-  else if (Array.isArray(window.ticketsCache)) list = window.ticketsCache;
+  // Date-bounded Firestore load (same path as Tickets Summary). No 500 cap —
+  // pages through every CLOSED/ARCHIVED ticket in the selected range.
+  if (typeof window.ffLoadTicketsForAnalytics === "function") {
+    try {
+      const loadedTickets = await window.ffLoadTicketsForAnalytics({
+        startMs: range?.startMs,
+        endMs: range?.endMs,
+      });
+      if (Array.isArray(loadedTickets)) list = loadedTickets;
+    } catch (err) {
+      console.warn(LOG, "ffLoadTicketsForAnalytics failed", err);
+    }
+  }
+  if (!list.length) {
+    if (Array.isArray(window.currentTickets)) list = window.currentTickets;
+    else if (Array.isArray(window.allTickets)) list = window.allTickets;
+    else if (Array.isArray(window.ticketsCache)) list = window.ticketsCache;
+  }
   if (!list.length && typeof window.ffGetCurrentTickets === "function") {
     try {
       const visibleTickets = window.ffGetCurrentTickets();
@@ -130,52 +241,36 @@ export async function readTicketsSnapshot(range) {
       console.warn(LOG, "ffGetCurrentTickets failed", err);
     }
   }
-  if (!list.length && typeof window.ffLoadTicketsForAnalytics === "function") {
-    try {
-      const loadedTickets = await window.ffLoadTicketsForAnalytics();
-      if (Array.isArray(loadedTickets)) list = loadedTickets;
-    } catch (err) {
-      console.warn(LOG, "ffLoadTicketsForAnalytics failed", err);
-    }
-  }
   if (!list.length) return out;
   const before = list.length;
   let skippedNoLocation = 0;
-  list = list.filter((ticket) => {
-    const loc = String(ticket?.locationId || "").trim();
-    if (!loc) {
-      skippedNoLocation += 1;
-      return false;
+  const completed = [];
+  list.forEach((ticket) => {
+    if (!ticket || ticket.deleted === true) return;
+    if (!isCompletedTicketStatus(ticket.status)) return;
+    const loc = dashboardRecordLocationId(ticket);
+    if (!dashboardRecordInActiveLoc(ticket, scope)) {
+      if (!loc) skippedNoLocation += 1;
+      return;
     }
-    return scope.hasLocation && loc === scope.id;
+    if (!loc) skippedNoLocation += 1;
+    const ms = ticketEventMillis(ticket);
+    if (ms == null) return;
+    completed.push({ ticket, ms });
   });
-  logDashboardScope("tickets", scope, before, list.length, skippedNoLocation);
-  if (!scope.hasLocation || !list.length) return out;
+  logDashboardScope("tickets", scope, before, completed.length, skippedNoLocation);
+  if (!scope.hasLocation || !completed.length) return out;
 
   out.hasData = true;
-  out.totalCount = list.length;
   const todayMs = todayStartMs();
   const weekMs = weekStartMs();
-  list.forEach((t) => {
-    const created = t && (t.createdAtMs || t.createdAt || t.created || t.timestamp);
-    let ms = null;
-    if (typeof created === "number") ms = created;
-    else if (created && typeof created.toMillis === "function") {
-      try { ms = created.toMillis(); } catch (_) {}
-    } else if (created && typeof created.seconds === "number") {
-      ms = created.seconds * 1000;
-    } else if (typeof created === "string") {
-      const p = Date.parse(created);
-      if (!Number.isNaN(p)) ms = p;
-    }
-    if (ms != null) {
-      if (ms >= todayMs) out.todayCount += 1;
-      if (ms >= weekMs) out.weekCount += 1;
-      if (!range || inDashboardRange(ms, range)) {
-        out.rangeCount += 1;
-        const amt = Number(t && (t.totalAmount ?? t.total ?? t.amount));
-        if (Number.isFinite(amt)) out.totalAmount += amt;
-      }
+  completed.forEach(({ ticket, ms }) => {
+    if (ms >= todayMs) out.todayCount += 1;
+    if (ms >= weekMs) out.weekCount += 1;
+    if (!range || inDashboardRange(ms, range)) {
+      out.rangeCount += 1;
+      const amt = Number(ticket && (ticket.totalAmount ?? ticket.total ?? ticket.amount));
+      if (Number.isFinite(amt)) out.totalAmount += amt;
     }
   });
   out.totalCount = out.rangeCount;
@@ -183,17 +278,22 @@ export async function readTicketsSnapshot(range) {
 }
 
 function _qmReadRawLog() {
+  // queue-cloud applyState writes localStorage; window.log is often stale.
+  const stored = readLocalJsonArray("ffv24_log");
+  if (stored && stored.length) return stored;
   try {
     if (Array.isArray(window.log) && window.log.length) return window.log;
   } catch (_) {}
+  return stored;
+}
+
+function _qmReadLiveList(storageKey, windowKey) {
+  const stored = readLocalJsonArray(storageKey);
+  if (stored && stored.length) return stored;
   try {
-    const raw = localStorage.getItem("ffv24_log");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    if (Array.isArray(window[windowKey]) && window[windowKey].length) return window[windowKey];
   } catch (_) {}
-  return null;
+  return stored || [];
 }
 
 function _qmParseEntry(entry) {
@@ -248,6 +348,17 @@ function _qmActionKind(action) {
 
 function computeQueueMetrics(fromMs, endMs = Date.now()) {
   const scope = getDashboardLocationScope();
+  if (dashboardUserHasMultipleLocations() && !scope.hasLocation) {
+    return {
+      avgWaitMin: null,
+      longestWaitMin: null,
+      busiestDay: null,
+      peakHour: null,
+      waitCount: 0,
+      activityCount: 0,
+      sourceFound: false,
+    };
+  }
   const result = {
     avgWaitMin: null,
     longestWaitMin: null,
@@ -277,14 +388,23 @@ function computeQueueMetrics(fromMs, endMs = Date.now()) {
   // correctly regardless of write path.
   const parsed = [];
   let skippedNoLocation = 0;
+  const hasForeignStamp = raw.some((entry) => {
+    const loc = String(entry?.locationId || entry?.locId || "").trim();
+    return loc && loc !== scope.id;
+  });
   for (let i = 0; i < raw.length; i += 1) {
     const p = _qmParseEntry(raw[i]);
     if (!p || p.ts < fromMs || p.ts > endMs) continue;
-    if (!p.locationId) {
+    if (!p.locationId && hasForeignStamp) {
       skippedNoLocation += 1;
       continue;
     }
-    if (scope.hasLocation && p.locationId === scope.id) parsed.push(p);
+    if (!dashboardRecordInActiveLoc(p, scope)) {
+      if (!p.locationId) skippedNoLocation += 1;
+      continue;
+    }
+    if (!p.locationId) skippedNoLocation += 1;
+    parsed.push(p);
   }
   logDashboardScope("queue-events", scope, raw.length, parsed.length, skippedNoLocation);
   parsed.sort((a, b) => a.ts - b.ts);
@@ -425,20 +545,23 @@ function computeQueueMetrics(fromMs, endMs = Date.now()) {
 
 export function readQueueSnapshot(range) {
   const scope = getDashboardLocationScope();
-  const rawQ = safeArr(window.queue);
-  const rawService = safeArr(window.service);
-  let skippedNoLocation = 0;
-  const filterQueueRows = (rows) => rows.filter((row) => {
-    const loc = String(row?.locationId || row?.locId || "").trim();
-    if (!loc) {
-      // queue-cloud already subscribes to salons/{salonId}/queueState/{activeLocationId};
-      // legacy rows from that scoped document may not carry locationId.
-      return scope.hasLocation;
-    }
-    return scope.hasLocation && loc === scope.id;
-  });
-  const q = filterQueueRows(rawQ);
-  const service = filterQueueRows(rawService);
+  if (dashboardUserHasMultipleLocations() && !scope.hasLocation) {
+    logDashboardScope("queue-live", scope, 0, 0, 0);
+    return {
+      inQueue: 0,
+      inService: 0,
+      held: 0,
+      avgWaitMin: null,
+      longestWaitMin: null,
+      busiestDay: null,
+      peakHour: null,
+    };
+  }
+  const rawQ = safeArr(_qmReadLiveList("ffv24_queue", "queue"));
+  const rawService = safeArr(_qmReadLiveList("ffv24_service", "service"));
+  const q = filterRowsToActiveLocation(rawQ, scope);
+  const service = filterRowsToActiveLocation(rawService, scope);
+  const skippedNoLocation = rawQ.concat(rawService).filter((row) => !dashboardRecordLocationId(row)).length;
   logDashboardScope("queue-live", scope, rawQ.length + rawService.length, q.length + service.length, skippedNoLocation);
   const out = {
     inQueue: q.length,
@@ -461,81 +584,122 @@ export function readQueueSnapshot(range) {
   return out;
 }
 
-export function readTasksSnapshot(range) {
-  const scope = getDashboardLocationScope();
-  const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
+function collectTasksFromState(state) {
   const tabs = ["opening", "closing", "weekly", "monthly", "yearly"];
+  const kinds = ["active", "pending", "done"];
   const rows = [];
-  const pushRows = (tab, kind, list, scopedByStorage = false) => {
-    if (!Array.isArray(list)) return;
-    list.forEach((task) => {
-      if (!task || typeof task !== "object") return;
-      rows.push({ ...task, __tab: tab, __kind: kind, __scopedByStorage: scopedByStorage });
-    });
-  };
-  const cache = window.tasksCache;
-  if (cache && typeof cache === "object") {
-    tabs.forEach((tab) => {
-      const v = cache[tab];
-      if (Array.isArray(v)) {
-        pushRows(tab, "active", v, false);
-      } else if (v && typeof v === "object") {
-        pushRows(tab, "active", Array.isArray(v.active) ? v.active : v.items, false);
-        pushRows(tab, "pending", v.pending, false);
-        pushRows(tab, "done", v.done, false);
-      }
-    });
-  }
-  // Current Tasks storage is already location-scoped by tasks-cloud.js, so rows
-  // generally do not carry locationId. Use it as the primary fallback/source.
-  try {
-    tabs.forEach((tab) => {
-      ["active", "pending", "done"].forEach((kind) => {
-        const raw = localStorage.getItem(`ff_tasks_${tab}_${kind}_v1`);
-        const list = raw ? JSON.parse(raw) : [];
-        pushRows(tab, kind, Array.isArray(list) ? list : [], true);
+  if (!state || typeof state !== "object") return rows;
+  tabs.forEach((tab) => {
+    const block = state[tab];
+    if (Array.isArray(block)) {
+      block.forEach((task) => {
+        if (task && typeof task === "object") rows.push({ ...task, __tab: tab, __kind: "active" });
+      });
+      return;
+    }
+    if (!block || typeof block !== "object") return;
+    kinds.forEach((kind) => {
+      const list = Array.isArray(block[kind]) ? block[kind] : (kind === "active" ? block.items : null);
+      if (!Array.isArray(list)) return;
+      list.forEach((task) => {
+        if (task && typeof task === "object") rows.push({ ...task, __tab: tab, __kind: kind });
       });
     });
-  } catch (e) {
-    console.warn(LOG, "tasks localStorage read failed", e);
-  }
-  if (!rows.length) return out;
-  let before = 0;
-  let skippedNoLocation = 0;
-  let scopedCount = 0;
-  let totalDone = 0;
-  let totalOpen = 0;
-  const seen = new Map();
-  rows.forEach((task, index) => {
-    before += 1;
-    const loc = String(task.locationId || task.locId || "").trim();
-    if (!task.__scopedByStorage) {
-      if (!loc) {
-        skippedNoLocation += 1;
-        return;
+  });
+  return rows;
+}
+
+function readTasksStateFromLocalStorage() {
+  const state = {};
+  ["opening", "closing", "weekly", "monthly", "yearly"].forEach((tab) => {
+    state[tab] = {};
+    ["active", "pending", "done"].forEach((kind) => {
+      try {
+        const raw = localStorage.getItem(`ff_tasks_${tab}_${kind}_v1`);
+        const list = raw ? JSON.parse(raw) : [];
+        state[tab][kind] = Array.isArray(list) ? list : [];
+      } catch (_) {
+        state[tab][kind] = [];
       }
-      if (!scope.hasLocation || loc !== scope.id) return;
+    });
+  });
+  return state;
+}
+
+export async function readTasksSnapshot(range) {
+  const scope = getDashboardLocationScope();
+  const out = { opened: 0, completed: 0, openCount: 0, completionRate: null, hasData: false };
+  if (dashboardUserHasMultipleLocations() && !scope.hasLocation) {
+    logDashboardScope("tasks", scope, 0, 0, 0);
+    return out;
+  }
+  let state = null;
+  let source = "none";
+  if (typeof window.ffLoadTasksStateForDashboard === "function") {
+    try {
+      const loaded = await window.ffLoadTasksStateForDashboard();
+      if (loaded && loaded.state && typeof loaded.state === "object") {
+        state = loaded.state;
+        source = loaded.source || "firestore";
+      }
+    } catch (err) {
+      console.warn(LOG, "ffLoadTasksStateForDashboard failed", err);
     }
+  }
+  // Cache / salon-wide localStorage can still hold another branch after a
+  // location switch. Only fall back on single-location accounts.
+  if (!state && !dashboardUserHasMultipleLocations()) {
+    if (window.tasksCache && typeof window.tasksCache === "object") {
+      state = window.tasksCache;
+      source = "window.tasksCache";
+    }
+    if (!state) {
+      state = readTasksStateFromLocalStorage();
+      source = "localStorage";
+    }
+  }
+  const rows = collectTasksFromState(state);
+  const cloudScoped = source === "firestore" || source === "tasks-cloud-memory";
+  const scopedRows = rows.filter((task) => {
+    const stamped = dashboardRecordLocationId(task);
+    if (stamped) return stamped === scope.id;
+    if (cloudScoped) return !!scope.id || !dashboardUserHasMultipleLocations();
+    return dashboardRecordInActiveLoc(task, scope);
+  });
+  const skippedNoLocation = rows.length - scopedRows.length;
+  if (!scopedRows.length) {
+    logDashboardScope("tasks", scope, rows.length, 0, skippedNoLocation);
+    return out;
+  }
+  const rangeIncludesNow = !range || (Date.now() >= range.startMs && Date.now() <= range.endMs);
+  const seen = new Map();
+  scopedRows.forEach((task, index) => {
     const id = String(task.taskId || task.id || `${task.__tab}:${task.__kind}:${task.title || index}`).trim();
     const key = `${task.__tab || "task"}:${id}`;
     const status = String(task.status || task.state || "").toLowerCase();
+    const isDone = task.__kind === "done" || status === "done" || status === "completed" || task.completed === true || !!task.completedAt || !!task.doneAt;
     const taskMs = eventMillis(
       task.completedAt || task.doneAt || task.updatedAt || task.createdAt || task.createdAtMs || task.ts || task.timestamp
     );
-    if (taskMs && range && !inDashboardRange(taskMs, range)) return;
-    const isDone = task.__kind === "done" || status === "done" || status === "completed" || task.completed === true || !!task.completedAt || !!task.doneAt;
-    const isPending = task.__kind === "pending" || status === "pending" || !!task.assignedTo;
-    const current = seen.get(key) || { done: false, pending: false };
+    // Live Tasks lists are the source of truth. Keep current open/done when
+    // the selected range includes now. For a past custom range, only keep
+    // rows that actually have a timestamp in that range.
+    if (!rangeIncludesNow) {
+      if (!taskMs || !inDashboardRange(taskMs, range)) return;
+    }
+    const current = seen.get(key) || { done: false };
     current.done = current.done || isDone;
-    current.pending = current.pending || isPending;
     seen.set(key, current);
   });
+  let totalDone = 0;
+  let totalOpen = 0;
   seen.forEach((task) => {
-    scopedCount += 1;
     if (task.done) totalDone += 1;
     else totalOpen += 1;
   });
-  logDashboardScope("tasks", scope, before, scopedCount, skippedNoLocation);
+  const scopedCount = totalDone + totalOpen;
+  logDashboardScope("tasks", scope, rows.length, scopedCount, skippedNoLocation);
+  console.log(LOG, "tasks source", source, { opened: scopedCount, completed: totalDone, open: totalOpen });
   if (!scopedCount) return out;
   out.hasData = true;
   out.opened = scopedCount;
@@ -555,19 +719,23 @@ export async function readTimeClockSnapshot(range) {
   if (typeof window.ffListTimeEntriesForSalon !== "function") return out;
   try {
     const fromDate = new Date(range?.startMs || weekStartMs());
+    const toDate = new Date((range?.endMs || endOfTodayMs()) + 1);
     const entries = await window.ffListTimeEntriesForSalon({
       from: fromDate,
+      to: toDate,
       locationId: scope.id,
       statuses: ["open", "closed"],
+      pageAll: true,
       maxResults: 500,
     });
     if (!Array.isArray(entries) || !entries.length) return out;
-    const skippedNoLocation = entries.filter((entry) => !String(entry?.locationId || "").trim()).length;
-    const scopedEntries = entries.filter((entry) => recordMatchesDashboardLocation(entry, scope));
+    const skippedNoLocation = entries.filter((entry) => !dashboardRecordLocationId(entry)).length;
+    const scopedEntries = entries.filter((entry) => dashboardRecordInActiveLoc(entry, scope));
     logDashboardScope("time-clock", scope, entries.length, scopedEntries.length, skippedNoLocation);
     if (!scopedEntries.length) return out;
     out.hasData = true;
     const byStaff = new Map();
+    const byStaffWeek = new Map();
     scopedEntries.forEach((e) => {
       const inAt = e && (e.clockInAt || e.clockIn || e.startAt);
       const outAt = e && (e.clockOutAt || e.clockOut || e.endAt);
@@ -582,9 +750,9 @@ export async function readTimeClockSnapshot(range) {
       const sid = String(e.staffId || e.staffMemberId || e.uid || "unknown");
       const sname = resolveDashboardStaffName(sid, e.staffName || e.name || "");
       byStaff.set(sid, { name: sname, hours: (byStaff.get(sid)?.hours || 0) + hours });
+      addDashboardHoursByWeek(byStaffWeek, sid, sname, startMs, endMs);
     });
-    // Naive overtime: hours over 40/week per staff.
-    byStaff.forEach((v) => {
+    byStaffWeek.forEach((v) => {
       if (v.hours > 40) out.overtimeHours += v.hours - 40;
     });
     let top = null;
@@ -594,6 +762,29 @@ export async function readTimeClockSnapshot(range) {
     console.warn(LOG, "time-clock snapshot failed", e);
   }
   return out;
+}
+
+function dashboardWeekStartMs(ms) {
+  const d = new Date(ms);
+  const day = d.getDay();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - day);
+  return d.getTime();
+}
+
+function addDashboardHoursByWeek(byStaffWeek, staffId, staffName, startMs, endMs) {
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const weekStart = dashboardWeekStartMs(cursor);
+    const weekEnd = weekStart + (7 * 24 * 60 * 60 * 1000);
+    const sliceEnd = Math.min(endMs, weekEnd);
+    const hours = (sliceEnd - cursor) / 3600000;
+    const key = `${staffId}|${weekStart}`;
+    const prev = byStaffWeek.get(key) || { name: staffName, hours: 0 };
+    prev.hours += hours;
+    byStaffWeek.set(key, prev);
+    cursor = sliceEnd;
+  }
 }
 
 function resolveDashboardStaffName(staffId, fallback = "") {
@@ -629,8 +820,21 @@ function resolveDashboardStaffName(staffId, fallback = "") {
 function toMillis(v) {
   if (!v) return null;
   if (typeof v === "number") return v;
+  if (v instanceof Date) {
+    const ms = v.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
   if (typeof v.toMillis === "function") {
     try { return v.toMillis(); } catch (_) { return null; }
+  }
+  if (typeof v.toDate === "function") {
+    try {
+      const d = v.toDate();
+      const ms = d && typeof d.getTime === "function" ? d.getTime() : NaN;
+      return Number.isFinite(ms) ? ms : null;
+    } catch (_) {
+      return null;
+    }
   }
   if (typeof v.seconds === "number") return v.seconds * 1000;
   if (typeof v === "string") {

@@ -11,13 +11,13 @@ import {
   collection, query, where, orderBy, limit, getDocs, onSnapshot
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
-import { roleLabel, escHtml, _convLocKey } from "./chat-helpers.js?v=20260626_chat_helpers_split";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
+import { roleLabel, escHtml, _convLocKey } from "./chat-helpers.js?v=20260901_chat_iso";
 import {
   _chatEffectiveLocKey,
   _convMatchesLocation,
   _cacheConversations,
-} from "./chat-data.js?v=20260628_chat_data_b0";
+} from "./chat-data.js?v=20260901_chat_iso";
 
 // ─── Injected core dependencies (set by initChatSubscriptions) ──────────────────
 let renderThreadList = () => {};
@@ -59,21 +59,14 @@ function subscribeToConversationList() {
       const locKey = _chatEffectiveLocKey();
       const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const nextConversations = allDocs.filter(c => _convMatchesLocation(c, locKey));
+      chatState.allConversations = nextConversations;
       if (nextConversations.length > 0) {
-        chatState.allConversations = nextConversations;
         chatState.lastNonEmptyConversations = nextConversations;
-      } else if (allDocs.length > 0) {
-        // If location metadata is stale/missing, do not show an empty chat list.
-        chatState.allConversations = allDocs;
-        chatState.lastNonEmptyConversations = allDocs;
-      } else if (chatState.lastNonEmptyConversations.length > 0) {
-        const staleForLoc = chatState.lastNonEmptyConversations.filter(c => _convMatchesLocation(c, locKey));
-        chatState.allConversations = staleForLoc.length > 0 ? staleForLoc : [];
       } else {
-        chatState.allConversations = nextConversations;
+        chatState.lastNonEmptyConversations = [];
       }
-      _cacheConversations(allDocs);
-      _cacheConversations(chatState.allConversations);
+      chatState._chatLastConvSnap = snap;
+      _cacheConversations(nextConversations);
       console.log(
         '[Chat] threads snapshot: locKey=', locKey,
         'totalDocs=', allDocs.length,
@@ -109,8 +102,7 @@ function subscribeToConversationList() {
         chatState._chatBadgePerfRenderLogged = true;
         console.log('[ChatBadgePerf] render-done', performance.now(), Date.now());
       }
-      if (chatState.currentConvId) renderConversation(chatState.currentConvId);
-      else _renderEmptyConversation();
+      if (!chatState.currentConvId) _renderEmptyConversation();
     },
     err => console.error('[Chat] conversations snapshot error', err)
   );
@@ -127,16 +119,16 @@ function _unreadCountForUid(data, uid) {
 }
 
 /**
- * Total unread for the bottom/top nav badge.
- * Intentionally does NOT filter by active location: that filter is for the in-chat
- * thread list only. Including location here caused the badge to flash then drop to
- * 0 after staff + location hydration (~1s) even though unreadFor was unchanged.
- * Scope is already limited by Firestore: this salon’s conversations + participant uid.
+ * Unread for the nav Chat badge — active location only.
+ * Each branch is a separate business; unread from another location must not leak.
  */
 function _computeChatNavUnreadFromSnapDocs(snapDocs, uid) {
   if (!uid || !snapDocs || !snapDocs.length) return 0;
+  const locKey = _chatEffectiveLocKey();
   return snapDocs.reduce((sum, d) => {
-    const data = d.data() || {};
+    const raw = d && typeof d.data === 'function' ? (d.data() || {}) : (d || {});
+    const data = { ...raw, id: (d && d.id) || raw.id };
+    if (!_convMatchesLocation(data, locKey)) return sum;
     return sum + _unreadCountForUid(data, uid);
   }, 0);
 }
@@ -183,6 +175,7 @@ export function subscribeToChatBadge(uid, salonId) {
       where('participants', 'array-contains', uid)
     ),
     snap => {
+      chatState._chatLastConvSnap = snap;
       if (!chatState._chatNavBadgeFirstSnapLogged) {
         chatState._chatNavBadgeFirstSnapLogged = true;
         console.log('[ChatBadgePerf] first-snapshot nav-badge', performance.now(), Date.now());
@@ -291,17 +284,18 @@ function _subscribeToMessages(convId) {
   chatState.chatMsgsUnsub = onSnapshot(
     msgQuery,
     snap => {
+      if (chatState.currentConvId !== convId) return;
       chatState.currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      chatState.currentMessagesConvId = convId;
       chatState.chatMessagesLoading = false;
-      if (chatState.currentConvId === convId) {
-        renderConversation(convId);
-        if (isChatScreenVisible()) markThreadRead(convId);
-      }
+      renderConversation(convId);
+      if (isChatScreenVisible()) markThreadRead(convId);
     },
     err => {
+      if (chatState.currentConvId !== convId) return;
       chatState.chatMessagesLoading = false;
       console.error('[Chat] messages snapshot error', err);
-      if (chatState.currentConvId === convId) renderConversation(convId);
+      renderConversation(convId);
     }
   );
 
@@ -311,6 +305,7 @@ function _subscribeToMessages(convId) {
       const snap = await getDocs(msgQuery);
       if (chatState.currentConvId !== convId) return;
       chatState.currentMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      chatState.currentMessagesConvId = convId;
       chatState.chatMessagesLoading = false;
       renderConversation(convId);
       if (isChatScreenVisible()) markThreadRead(convId);
@@ -329,4 +324,5 @@ export {
   _unreadCountForUid,
   _computeChatNavUnreadFromSnapDocs,
   _paintChatNavBadge,
+  _applyChatNavBadgeFromConversationSnap,
 };

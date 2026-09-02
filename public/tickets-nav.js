@@ -14,10 +14,10 @@
  *   loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { subscribeTickets, updateTicketsNavBadge } from "./tickets-crud.js?v=20260901_loc_isolate2";
 import { renderTicketsList } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, seedSharedServiceCatalogFromLocationCatalogIfEmpty, loadLocationCatalogForManager } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
-import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260818_staff_dur_ui";
+import { ffCanViewServices, loadServiceCategories, loadServices, loadSharedCatalogForManager, loadLocationCatalogForManager, isSharedServiceCatalogEnabled, loadSharedServiceCatalogShareFlag } from "./tickets-catalog-data.js?v=20260902_prod_cats";
+import { _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, renderServicesCatalogV2 } from "./tickets-catalog-ui.js?v=20260901_dur_hm";
 
 let showToast, loadCurrentUserProfile, enrichTicketsProfileFromMemberDoc, loadTicketsMembersForAvatars, setupTicketsUI, updateNewTicketButtonVisibility;
 export function initTicketsNav(deps) {
@@ -210,7 +210,7 @@ export async function goToServices() {
   servicesScreen.style.pointerEvents = 'auto';
   _ffEnsureCatalogEditorPortal();
   ticketsState._ffCatalogRenderRootId = 'servicesScreen';
-  ticketsState._ffCatalogModalMode = 'shared';
+  ticketsState._ffCatalogModalMode = 'location';
   ticketsState._ffOpenCats.clear();
   ticketsState._ffCatalogRenderedOnce = false;
   // Mobile: always open at the top level (the services list).
@@ -225,13 +225,11 @@ export async function goToServices() {
   try {
     await loadCurrentUserProfile();
     await enrichTicketsProfileFromMemberDoc();
-    let sharedCatalog = await loadSharedCatalogForManager();
-    const backfillResult = await seedSharedServiceCatalogFromLocationCatalogIfEmpty();
-    if (backfillResult && backfillResult.seeded) {
-      sharedCatalog = await loadSharedCatalogForManager();
+    await loadSharedServiceCatalogShareFlag();
+    if (isSharedServiceCatalogEnabled()) {
       ticketsState._ffCatalogModalMode = 'shared';
-    }
-    if (!sharedCatalog || ((sharedCatalog.services || []).length === 0 && (sharedCatalog.categories || []).length === 0)) {
+      await loadSharedCatalogForManager();
+    } else {
       ticketsState._ffCatalogModalMode = 'location';
       await loadLocationCatalogForManager();
     }

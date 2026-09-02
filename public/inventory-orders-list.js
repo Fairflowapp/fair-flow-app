@@ -15,7 +15,7 @@ import {
   where,
   deleteDoc,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   orderHasAppliedInventoryImpact,
@@ -26,13 +26,13 @@ import {
   getInventoryOrderStatusKey,
   getOrderSearchHaystack,
   clonePlainForFirestoreOrderPayload,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260902_inv_iso";
 
 // ── injected by initOrdersList() (orchestrator spine + builder back-edges) ──
-let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, isInvMobileNarrow, renderOrderBuilderSourceHtml;
+let getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, _ffInvHasActiveLocationForWrite, isInvMobileNarrow, renderOrderBuilderSourceHtml;
 export function initOrdersList(deps) {
-  ({ getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, isInvMobileNarrow, renderOrderBuilderSourceHtml } = deps);
+  ({ getSalonId, mountOrRefreshMockUi, _ffInvActiveLocId, _ffInvDocInActiveLoc, _ffInvHasActiveLocationForWrite, isInvMobileNarrow, renderOrderBuilderSourceHtml } = deps);
 }
 
 
@@ -237,6 +237,10 @@ export async function duplicateInventoryOrderDraft(orderId) {
   try {
     const salonId = await getSalonId();
     if (!salonId) throw new Error("No salon");
+    if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) {
+      inventoryOrderDraftToast("Choose a location before duplicating an order.", "error");
+      return;
+    }
     const uid = auth.currentUser?.uid ? String(auth.currentUser.uid) : "";
     const rawItems = Array.isArray(o.items) ? o.items : [];
     const items = rawItems.map((it) => {

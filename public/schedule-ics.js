@@ -8,7 +8,7 @@ import {
   _ffSchedActiveLocId,
   ffScheduleAppToast,
   getAuthedStaffIdForSchedule,
-} from "./schedule-ack.js?v=20260702_schedule_ack";
+} from "./schedule-ack.js?v=20260902_sched_dual";
 import {
   formatScheduleTimeRangeDisplay,
   getScheduleStaffKey,

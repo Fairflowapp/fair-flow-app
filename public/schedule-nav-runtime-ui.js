@@ -2,26 +2,27 @@
 // Schedule UI runtime — week filter, navigation, event binding, window hooks.
 // Extracted verbatim from schedule-nav-runtime.js (nav-runtime split T2).
 
-import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260816_cell_notes7";
+import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
   renderScheduleSummary,
   setSchedulePreviewMode,
   setSchedulePreviewView,
-} from "./schedule-render.js?v=20260816_cell_notes7";
+} from "./schedule-render.js?v=20260827_1258notes";
 import {
   discardSavedScheduleWeekDraftAndReload,
   notifyStaffScheduleChanges,
   saveScheduleWeekDraftToCloud,
-} from "./schedule-draft.js?v=20260816_cell_notes7";
+  undoScheduleLastEdit,
+} from "./schedule-draft.js?v=20260902_sched_dual";
 import {
   canViewScheduleBoardForCurrentWeek,
   ensureSchedulePublishListener,
   teardownSchedulePublishListener,
   toggleScheduleWeekPublished,
   updateSchedulePublishToggleUi,
-} from "./schedule-cloud.js?v=20260702_schedule_cloud";
+} from "./schedule-cloud.js?v=20260902_sched_dual";
 import {
   addDays,
   getScheduleStaffKey,
@@ -34,13 +35,13 @@ import {
   submitScheduleWeekAck,
   teardownScheduleAckListener,
   teardownScheduleChangePingListener,
-} from "./schedule-ack.js?v=20260702_schedule_ack";
-import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-ack.js?v=20260902_sched_dual";
+import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260817_build_hours";
 import {
   renderScheduleCrossLocationConflictBanner,
   renderScheduleViewTabs,
   scheduleInboxUserIsFirestoreManager,
-} from "./schedule-nav-core.js?v=20260703_schedule_nav_wiring_fix";
+} from "./schedule-nav-core.js?v=20260902_sched_dual";
 
 function applyScheduleWeekFilter() {
   const filterSelect = document.getElementById("scheduleWeekFilter");
@@ -259,6 +260,28 @@ function bindScheduleUi() {
     });
   }
 
+  const scheduleUndoBtn = document.getElementById("scheduleUndoBtn");
+  if (scheduleUndoBtn && !scheduleUndoBtn.__ffScheduleUndoBound) {
+    scheduleUndoBtn.__ffScheduleUndoBound = true;
+    scheduleUndoBtn.addEventListener("click", () => {
+      undoScheduleLastEdit();
+    });
+  }
+  if (typeof window !== "undefined" && !window.__ffScheduleUndoKeyBound) {
+    window.__ffScheduleUndoKeyBound = true;
+    window.addEventListener("keydown", (e) => {
+      const screen = document.getElementById("scheduleScreen");
+      if (!screen || screen.style.display === "none") return;
+      const key = String(e.key || "").toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === "z" && !e.shiftKey) {
+        const tag = String(e.target?.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || e.target?.isContentEditable) return;
+        e.preventDefault();
+        undoScheduleLastEdit();
+      }
+    });
+  }
+
   const scheduleDiscardSavedDraftBtn = document.getElementById("scheduleDiscardSavedDraftBtn");
   if (scheduleDiscardSavedDraftBtn && !scheduleDiscardSavedDraftBtn.__ffScheduleDiscardSavedDraftBound) {
     scheduleDiscardSavedDraftBtn.__ffScheduleDiscardSavedDraftBound = true;
@@ -319,10 +342,33 @@ function bindScheduleUi() {
         if (typeof window !== "undefined") {
           window.ffSchedulePreviewState = scheduleState.schedulePreviewState;
         }
+        [
+          "scheduleShiftEditBackdrop",
+          "scheduleDnDOffConfirmBackdrop",
+          "scheduleRebuildConfirmBackdrop",
+          "scheduleStandByModalBackdrop",
+          "scheduleDayCoverageModalBackdrop",
+          "scheduleApprovedTimeConflictBackdrop",
+          "scheduleCrossLocationConflictBackdrop",
+          "scheduleCellNoteBackdrop",
+          "scheduleCellNotePeek",
+        ].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.remove();
+        });
+        const board = document.getElementById("scheduleBoard");
+        if (board) board.innerHTML = "";
+        const summaryBar = document.getElementById("scheduleSummaryBar");
+        if (summaryBar) summaryBar.innerHTML = "";
+        const banner = document.getElementById("scheduleCrossLocConflictBanner");
+        if (banner) {
+          banner.style.display = "none";
+          banner.innerHTML = "";
+        }
         ensureSchedulePublishListener();
         const screen = document.getElementById("scheduleScreen");
         if (screen && screen.style.display !== "none" && typeof refreshSchedulePreview === "function") {
-          void refreshSchedulePreview();
+          void refreshSchedulePreview({ resetUndo: true });
         }
       } catch (e) {
         console.warn("[ScheduleUI] location change handler failed", e);
@@ -330,22 +376,25 @@ function bindScheduleUi() {
     };
     document.addEventListener("ff-active-location-changed", handler);
     window.addEventListener("ff-active-location-changed", handler);
-    const settingsUpdatedHandler = () => {
+    let _scheduleBackgroundRefreshTimer = null;
+    const queueQuietScheduleRefresh = () => {
       const screen = document.getElementById("scheduleScreen");
-      if (screen && screen.style.display !== "none") {
-        renderScheduleCrossLocationConflictBanner();
-        renderScheduleBoard(scheduleState.schedulePreviewState.draft, scheduleState.schedulePreviewState.validation, scheduleState.schedulePreviewState.staffList);
-      }
+      if (!screen || screen.style.display === "none" || typeof refreshSchedulePreview !== "function") return;
+      if (_scheduleBackgroundRefreshTimer) clearTimeout(_scheduleBackgroundRefreshTimer);
+      _scheduleBackgroundRefreshTimer = setTimeout(() => {
+        _scheduleBackgroundRefreshTimer = null;
+        void refreshSchedulePreview();
+      }, 900);
+    };
+    const settingsUpdatedHandler = () => {
+      queueQuietScheduleRefresh();
     };
     document.addEventListener("ff-schedule-settings-changed", settingsUpdatedHandler);
     window.addEventListener("ff-schedule-settings-changed", settingsUpdatedHandler);
     // When the owner edits a staff member's Locations tab we also need to
     // re-evaluate who belongs in the current branch's grid.
     const staffUpdatedHandler = () => {
-      const screen = document.getElementById("scheduleScreen");
-      if (screen && screen.style.display !== "none" && typeof refreshSchedulePreview === "function") {
-        void refreshSchedulePreview();
-      }
+      queueQuietScheduleRefresh();
     };
     document.addEventListener("ff-staff-cloud-updated", staffUpdatedHandler);
     window.addEventListener("ff-staff-cloud-updated", staffUpdatedHandler);

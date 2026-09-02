@@ -14,7 +14,7 @@ import {
   ffResyncStaffDocumentFromInbox,
   ffSyncStaffDocumentOnInboxApprove,
   ffSyncStaffDocumentOnInboxReject,
-} from "./staff-documents-inbox-sync.js?v=20260808_onboarding_stage_d";
+} from "./staff-documents-inbox-sync.js?v=20260816_od_link";
 export {
   ffResolveLinkedStaffDocumentId,
   ffResolveStaffDocumentOwnerStaffId,
@@ -37,8 +37,8 @@ import {
   ffToast,
   ffHandleStaffDocumentActionClick,
   initStaffDocumentsUi,
-} from "./staff-documents-ui.js?v=20260809_esign_e5";
-export { ffUpdateStaffDocumentMetadata } from "./staff-documents-ui.js?v=20260809_esign_e5";
+} from "./staff-documents-ui.js?v=20260825_od_iospdf";
+export { ffUpdateStaffDocumentMetadata } from "./staff-documents-ui.js?v=20260825_od_iospdf";
 import { ffRunExpiryChatNotify, ffSendExpiryChatReminderForStaffDocContext } from "./staff-documents-expiry-chat.js?v=20260701_staffdoc_expiry_split";
 export { ffSendExpiryChatReminderForStaffDocContext };
 import { ensureStaffDocSearchListeners, renderListIntoContainer, ensureSubscription } from "./staff-documents-render.js?v=20260809_esign_e5";

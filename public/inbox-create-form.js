@@ -9,7 +9,7 @@
 
 import { auth } from "/app.js?v=20260610_force_lp_ios";
 import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
-import { inboxNormalizeLineStaffRoleLc } from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+import { inboxNormalizeLineStaffRoleLc, inboxMemberAllowedAtActiveLocation, inboxHasActiveLocationForWrite } from "./inbox-helpers.js?v=20260901_sched_req";
 import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml, showToast } from "./inbox-utils.js?v=20260630_inbox_utils_split";
 import {
@@ -17,7 +17,7 @@ import {
   loadSalonUsersForRecipients,
   getInboxRecipientsList,
   getCreateRequestSelectedRecipients,
-} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-data.js?v=20260901_inbox_iso";
 import {
   SUPPLIES_ITEM_ROW_INNER_HTML,
   wireSuppliesItemRow,
@@ -36,6 +36,10 @@ window.selectRequestType = async function(type) {
 
   if (!inboxCanSendRequests()) {
     if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
+  if (!inboxHasActiveLocationForWrite()) {
+    if (typeof showToast === "function") showToast("Choose a location before creating a request.", "error");
     return;
   }
 
@@ -105,7 +109,7 @@ function createRequestForm(type) {
     : '';
   const isRenewal = type === 'document_renewal_request';
   const technicians = isRenewal
-    ? (inboxState._inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician')
+    ? (inboxState._inboxUsersCache || []).filter((u) => inboxNormalizeLineStaffRoleLc(u.role) === 'technician' && inboxMemberAllowedAtActiveLocation(u))
     : [];
   const renewalStaffHtml =
     technicians.length === 0
@@ -383,7 +387,8 @@ function createRequestForm(type) {
       </div>
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">Expiration date</label>
-        <input type="date" id="doc_up_expiry" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+        <input type="date" id="doc_up_expiry" required style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;">
+        <p style="margin:6px 0 0;font-size:12px;color:#6b7280;">Required. 30 days before this date, Inbox reminds management.</p>
       </div>
       <div>
         <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500;color:#374151;">File (PDF, JPG or PNG)</label>

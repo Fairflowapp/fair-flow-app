@@ -2,7 +2,7 @@
  * Portal e-sign — PDF paint, field overlays, missing-field UI.
  */
 
-import { esc, loadPdfJs } from "./esign-signer-helpers.js?v=20260810_od_split_v1";
+import { esc, loadPdfJs, pdfJsSourceFromPacket } from "./esign-signer-helpers.js?v=20260816_od_pdfb64";
 
 export function attachEsignPaint(s) {
   s.schedulePaint = function schedulePaint() {
@@ -15,7 +15,7 @@ export function attachEsignPaint(s) {
 
   s.loadAndPaintPdf = async function loadAndPaintPdf() {
     const pdfjs = await loadPdfJs();
-    s.pdfDoc = await pdfjs.getDocument({ url: s.packet.pdfReadUrl }).promise;
+    s.pdfDoc = await pdfjs.getDocument(pdfJsSourceFromPacket(s.packet)).promise;
     s.pageNum = 1;
     await s.paintCurrentPage();
   }

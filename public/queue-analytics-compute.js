@@ -13,7 +13,7 @@ import {
   _qaReadSettingsBusinessHours,
   _qaReadRawLog,
   _qaReadStaffList,
-} from "./queue-analytics-data.js?v=20260625_queue_analytics_split";
+} from "./queue-analytics-data.js?v=20260816_dash_live";
 
 export const LOG = "[QueueAnalytics]";
 const BH_LOG = "[QueueAnalytics BusinessHours]";
@@ -257,6 +257,7 @@ export function computeQueueAnalytics(fromMs, toMs = Date.now()) {
     if (!p || p.ts > toMs) continue;
     if (!p.locationId) {
       skippedNoLocation += 1;
+      if (scope.hasLocation) parsed.push(p);
       continue;
     }
     if (scope.hasLocation && p.locationId === scope.id) parsed.push(p);

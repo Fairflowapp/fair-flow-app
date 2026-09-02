@@ -41,6 +41,11 @@ export function injectStyles(screenId, styleId) {
     #${screenId} .dash-sub {
       display: none;
     }
+    #${screenId} .dash-need-location {
+      margin: 16px;
+      color: #6b7280;
+      font-size: 14px;
+    }
     #${screenId} .dash-location {
       display: inline-flex;
       align-items: center;

@@ -26,7 +26,7 @@ import {
   normalizeSpecialBusinessDays,
   normalizeRolesHierarchy,
   normalizeScheduleRules,
-} from "./schedule-helpers.js?v=20260816_sat_open";
+} from "./schedule-helpers.js?v=20260902_sched_dual";
 
 let _salonId = null;
 let _unsubUi = null;
@@ -41,6 +41,38 @@ let _lastMainSnapshot = null;
 // use when a location has no per-location salonTimeZone.
 let _salonRootTimezone = null;
 
+function _ffSettingsUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _ffSettingsPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
 function _ffActiveLocationIdForSettings() {
   try {
     if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
@@ -54,6 +86,16 @@ function _ffActiveLocationIdForSettings() {
       : "";
     return raw || null;
   } catch (_) { return null; }
+}
+
+/** Salon-wide leftovers apply only on a single-location account, or on the primary branch. */
+function _ffSettingsAllowSalonWideFallback(locationId) {
+  const multi = _ffSettingsUserHasMultipleLocations();
+  if (!multi) return true;
+  const active = typeof locationId === "string" ? locationId.trim() : "";
+  if (!active) return false;
+  const primary = _ffSettingsPrimaryLocationId();
+  return !!primary && active === primary;
 }
 
 async function getSalonId() {
@@ -230,6 +272,7 @@ function _applyMainSnapshot(data) {
     // The legacy salon-wide fields are kept as the fallback until each
     // location saves its own, so existing data still shows.
     const _prefsActiveLoc = _ffActiveLocationIdForSettings();
+    const _prefsAllowFallback = _ffSettingsAllowSalonWideFallback(_prefsActiveLoc);
     const _prefsLocBucket = _prefsActiveLoc
       && data.locationPreferences
       && typeof data.locationPreferences === 'object'
@@ -237,22 +280,25 @@ function _applyMainSnapshot(data) {
       : null;
     const _locPrefs = _prefsLocBucket && typeof _prefsLocBucket === 'object' ? _prefsLocBucket : {};
 
-    // Staff Calls templates — prefer per-location bucket, fallback to legacy
-    // salon-wide top-level fields so existing data keeps working.
+    // Staff Calls templates — prefer per-location bucket. Salon-wide leftovers
+    // stay on the primary / single-location account only.
     {
       const locTpls = _locPrefs && _locPrefs.staffCallTemplates;
       if (locTpls && typeof locTpls === 'object') {
         window.settings.staffCallTemplates = normalizeStaffCallTemplates(locTpls);
         changed = true;
-      } else if (data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
+      } else if (_prefsAllowFallback && data.staffCallTemplates && typeof data.staffCallTemplates === 'object') {
         window.settings.staffCallTemplates = normalizeStaffCallTemplates(data.staffCallTemplates);
+        changed = true;
+      } else if (!locTpls) {
+        window.settings.staffCallTemplates = normalizeStaffCallTemplates(null);
         changed = true;
       }
       const locTimeout = _locPrefs ? _locPrefs.staffCallTimeoutSeconds : undefined;
       if (locTimeout !== undefined) {
         window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(locTimeout);
         changed = true;
-      } else if (data.staffCallTimeoutSeconds !== undefined) {
+      } else if (_prefsAllowFallback && data.staffCallTimeoutSeconds !== undefined) {
         window.settings.staffCallTimeoutSeconds = normalizeStaffCallTimeoutSeconds(data.staffCallTimeoutSeconds);
         changed = true;
       }
@@ -260,17 +306,17 @@ function _applyMainSnapshot(data) {
 
     const _pickWeekStartsOn = Object.prototype.hasOwnProperty.call(_locPrefs, 'weekStartsOn')
       ? _locPrefs.weekStartsOn
-      : (data.preferences ? data.preferences.weekStartsOn : undefined);
+      : (_prefsAllowFallback && data.preferences ? data.preferences.weekStartsOn : undefined);
 
     const nextPreferences = {
       ...(window.settings.preferences && typeof window.settings.preferences === 'object' ? window.settings.preferences : {}),
       weekStartsOn: normalizeWeekStartsOn(_pickWeekStartsOn)
     };
 
-    // salonTimeZone — prefer per-location, fallback to legacy top-level.
+    // salonTimeZone — prefer per-location. Salon-wide leftovers stay on primary only.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'salonTimeZone');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'salonTimeZone');
+      const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'salonTimeZone');
       const raw = hasLoc ? _locPrefs.salonTimeZone : (hasLegacy ? data.preferences.salonTimeZone : undefined);
       if (raw != null && String(raw).trim() !== '') {
         nextPreferences.salonTimeZone = String(raw).trim();
@@ -279,10 +325,10 @@ function _applyMainSnapshot(data) {
       }
     }
 
-    // currency — prefer per-location, fallback to legacy top-level.
+    // currency — prefer per-location. Salon-wide leftovers stay on primary only.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'currency');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'currency');
+      const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'currency');
       const raw = hasLoc ? _locPrefs.currency : (hasLegacy ? data.preferences.currency : undefined);
       const cur = normalizeSalonCurrency(raw);
       if (cur) {
@@ -295,7 +341,7 @@ function _applyMainSnapshot(data) {
     // taxRate — sales tax % applied to taxable products, per-location first.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'taxRate');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'taxRate');
+      const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'taxRate');
       const raw = hasLoc ? _locPrefs.taxRate : (hasLegacy ? data.preferences.taxRate : undefined);
       const n = normalizeSalonTaxRate(raw);
       if (n != null) {
@@ -310,7 +356,7 @@ function _applyMainSnapshot(data) {
     {
       const readPref = (key) => {
         const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, key);
-        const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, key);
+        const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, key);
         return hasLoc ? _locPrefs[key] : (hasLegacy ? data.preferences[key] : undefined);
       };
       const legacyTax = (nextPreferences.taxRate != null) ? Number(nextPreferences.taxRate) : NaN;
@@ -339,10 +385,10 @@ function _applyMainSnapshot(data) {
       nextPreferences.serviceTaxEnabled = (typeof stEnabled === 'boolean') ? stEnabled : false;
     }
 
-    // timeFormat — '12h' or '24h', per-location first, fallback to legacy.
+    // timeFormat — '12h' or '24h', per-location first.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'timeFormat');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'timeFormat');
+      const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'timeFormat');
       const raw = hasLoc ? _locPrefs.timeFormat : (hasLegacy ? data.preferences.timeFormat : undefined);
       const tf = (raw === '24h' || raw === '24hour' || raw === 24) ? '24h'
                : (raw === '12h' || raw === '12hour' || raw === 12) ? '12h'
@@ -357,7 +403,7 @@ function _applyMainSnapshot(data) {
     // defaultScreen — which screen the user lands on, per-location first.
     {
       const hasLoc = Object.prototype.hasOwnProperty.call(_locPrefs, 'defaultScreen');
-      const hasLegacy = data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'defaultScreen');
+      const hasLegacy = _prefsAllowFallback && data.preferences && Object.prototype.hasOwnProperty.call(data.preferences, 'defaultScreen');
       const raw = hasLoc ? _locPrefs.defaultScreen : (hasLegacy ? data.preferences.defaultScreen : undefined);
       const s = typeof raw === 'string' ? raw.trim() : '';
       if (s) {
@@ -393,7 +439,7 @@ function _applyMainSnapshot(data) {
         : undefined;
       const pick = (typeof locVal === 'number' && Number.isFinite(locVal))
         ? locVal
-        : (typeof legacyVal === 'number' && Number.isFinite(legacyVal) ? legacyVal : undefined);
+        : (_prefsAllowFallback && typeof legacyVal === 'number' && Number.isFinite(legacyVal) ? legacyVal : undefined);
       if (pick !== undefined) {
         nextPreferences.birthdayReminderDaysBefore = Math.max(0, Math.min(90, Math.round(pick)));
       } else {
@@ -445,6 +491,10 @@ function _applyMainSnapshot(data) {
       if (Object.prototype.hasOwnProperty.call(_locBucket, key) &&
           _locBucket[key] && typeof _locBucket[key] === 'object') {
         return _locBucket[key];
+      }
+      const multi = _ffSettingsUserHasMultipleLocations();
+      if (multi && _activeLoc && _activeLoc !== _ffSettingsPrimaryLocationId()) {
+        return undefined;
       }
       return data[key];
     };
@@ -556,6 +606,19 @@ if (typeof document !== "undefined") {
       if (_lastMainSnapshot) _applyMainSnapshot(_lastMainSnapshot);
     } catch (e) {
       console.warn("[SettingsCloud] re-apply on location change failed", e);
+    }
+    try {
+      if (_timeClockRawDoc && _timeClockCachedSalonId) {
+        const loc = _ffActiveLocationIdForSettings() || "";
+        _ffRememberTimeClockPick(_ffPickTimeClockFromDoc(_timeClockRawDoc, loc));
+        const card = document.getElementById("userProfileCardTimeClockSettings");
+        if (card) {
+          card.__ffTCHydratedSalonId = null;
+          card.__ffTCHydratedLocationId = null;
+        }
+      }
+    } catch (e) {
+      console.warn("[SettingsCloud] timeClock re-pick on location change failed", e);
     }
   });
 }
@@ -771,13 +834,10 @@ function _resolveRequireCustomerNameOnTicket(data, locationId) {
   if (activePrefs && Object.prototype.hasOwnProperty.call(activePrefs, "requireCustomerNameOnTicket")) {
     return activePrefs.requireCustomerNameOnTicket === true;
   }
+  // Active branch with no own setting: do not inherit another location.
+  if (loc) return false;
   if (snap.preferences && Object.prototype.hasOwnProperty.call(snap.preferences, "requireCustomerNameOnTicket")) {
     return snap.preferences.requireCustomerNameOnTicket === true;
-  }
-  if (Object.values(locationPreferences).some((prefs) => (
-    prefs && typeof prefs === "object" && prefs.requireCustomerNameOnTicket === true
-  ))) {
-    return true;
   }
   try {
     if (typeof window !== "undefined" && window.settings && window.settings.preferences
@@ -1061,19 +1121,39 @@ function settingsTimeClockRef(salonId) {
   return doc(db, `salons/${salonId}/settings`, "timeClock");
 }
 
-// Single-flight + session cache: concurrent callers share one promise, and
-// the resolved value is kept until salon switch / explicit force refresh /
-// successful save (which updates the cache in place).
+// Single-flight + session cache of the raw timeClock doc. We pick the
+// active location's bucket on each read so a branch switch does not
+// refetch Firestore.
+let _timeClockRawDoc = null;
 let _timeClockLoadPromise = null;
 let _timeClockCachedSalonId = null;
-// Tracks whether we've already created the default doc this session. Saves a
-// redundant getDoc → setDoc round-trip if the user re-opens the tab after
-// the initial seed.
 let _timeClockSeeded = false;
+
+function _ffPickTimeClockFromDoc(raw, locationId) {
+  const locMap = raw && raw.locationTimeClock && typeof raw.locationTimeClock === "object"
+    ? raw.locationTimeClock
+    : {};
+  const loc = typeof locationId === "string" ? locationId.trim() : "";
+  if (loc && locMap[loc] && typeof locMap[loc] === "object") {
+    return ffNormalizeTimeClockSettings(locMap[loc]);
+  }
+  if (_ffSettingsAllowSalonWideFallback(loc)) {
+    return ffNormalizeTimeClockSettings(raw);
+  }
+  return ffCloneTimeClockDefaults();
+}
+
+function _ffRememberTimeClockPick(picked) {
+  try {
+    if (typeof window !== "undefined") window.__ffTCCachedSettings = picked;
+  } catch (_) {}
+  return picked;
+}
 
 function ffInvalidateTimeClockSettingsCache() {
   _timeClockLoadPromise = null;
   _timeClockCachedSalonId = null;
+  _timeClockRawDoc = null;
   _timeClockSeeded = false;
   try {
     if (typeof window !== "undefined") {
@@ -1082,21 +1162,22 @@ function ffInvalidateTimeClockSettingsCache() {
       const card = typeof document !== "undefined"
         ? document.getElementById("userProfileCardTimeClockSettings")
         : null;
-      if (card) card.__ffTCHydratedSalonId = null;
+      if (card) {
+        card.__ffTCHydratedSalonId = null;
+        card.__ffTCHydratedLocationId = null;
+      }
     }
   } catch (_) {}
 }
 
-async function _ffFetchTimeClockSettings(salonId) {
+async function _ffFetchTimeClockRawDoc(salonId) {
   const ref = settingsTimeClockRef(salonId);
   const snap = await getDoc(ref);
   if (snap.exists()) {
     _timeClockSeeded = true;
-    return ffNormalizeTimeClockSettings(snap.data());
+    _timeClockRawDoc = snap.data() || {};
+    return _timeClockRawDoc;
   }
-  // First-time seed. Use setDoc (no merge) since we're creating the doc
-  // from scratch with a clean default shape. If two tabs race here both
-  // writes will produce identical content, so the race is harmless.
   if (!_timeClockSeeded) {
     _timeClockSeeded = true;
     const defaults = ffCloneTimeClockDefaults();
@@ -1109,39 +1190,47 @@ async function _ffFetchTimeClockSettings(salonId) {
     } catch (seedErr) {
       console.warn("[SettingsCloud] timeClock seed failed (non-fatal)", seedErr);
     }
+    _timeClockRawDoc = defaults;
     return defaults;
   }
-  return ffCloneTimeClockDefaults();
+  _timeClockRawDoc = {};
+  return {};
 }
 
 /**
- * Load Time Clock Settings from Firestore.
- * - If the doc doesn't exist, seed it ONCE with defaults (and stamp
- *   updatedAt + updatedBy), then return those defaults.
- * - If it does exist, return the normalized data.
- * Safe to call repeatedly — concurrent calls share a single promise, and the
- * result stays cached for the salon until invalidate / force / save.
- * opts.force: bypass cache and re-read (quiet background refresh).
+ * Load Time Clock Settings for the active branch (or opts.locationId).
+ * New saves live under locationTimeClock.{locationId}. Unstamped salon-wide
+ * leftovers stay visible on a single-location account or the primary branch.
+ * opts.force: bypass cache and re-read.
  */
 async function ffLoadTimeClockSettings(opts) {
   const force = !!(opts && opts.force);
   const salonId = _salonId || await getSalonId();
   if (!salonId) return ffCloneTimeClockDefaults();
+  const locationId = (opts && typeof opts.locationId === "string" && opts.locationId.trim())
+    ? opts.locationId.trim()
+    : (_ffActiveLocationIdForSettings() || "");
 
   if (_timeClockCachedSalonId && _timeClockCachedSalonId !== salonId) {
     ffInvalidateTimeClockSettingsCache();
   }
 
-  if (!force && _timeClockLoadPromise) {
-    return _timeClockLoadPromise;
+  if (!force && _timeClockRawDoc && _timeClockCachedSalonId === salonId) {
+    return _ffRememberTimeClockPick(_ffPickTimeClockFromDoc(_timeClockRawDoc, locationId));
+  }
+
+  if (!force && _timeClockLoadPromise && _timeClockCachedSalonId === salonId) {
+    return _timeClockLoadPromise.then((raw) =>
+      _ffRememberTimeClockPick(_ffPickTimeClockFromDoc(raw, locationId))
+    );
   }
 
   const p = (async () => {
     try {
-      return await _ffFetchTimeClockSettings(salonId);
+      return await _ffFetchTimeClockRawDoc(salonId);
     } catch (e) {
       console.warn("[SettingsCloud] ffLoadTimeClockSettings failed", e);
-      return ffCloneTimeClockDefaults();
+      return {};
     }
   })();
 
@@ -1149,37 +1238,56 @@ async function ffLoadTimeClockSettings(opts) {
     _timeClockLoadPromise = p;
     _timeClockCachedSalonId = salonId;
   } else {
-    p.then((result) => {
-      _timeClockLoadPromise = Promise.resolve(result);
+    p.then((raw) => {
+      _timeClockRawDoc = raw || {};
+      _timeClockLoadPromise = Promise.resolve(_timeClockRawDoc);
       _timeClockCachedSalonId = salonId;
-      try {
-        if (typeof window !== "undefined") window.__ffTCCachedSettings = result;
-      } catch (_) {}
     }).catch(() => {});
   }
-  return p;
+
+  return p.then((raw) =>
+    _ffRememberTimeClockPick(_ffPickTimeClockFromDoc(raw, locationId))
+  );
 }
 
 /**
- * Save Time Clock Settings. Accepts a full settings object; we normalize it
- * and write with { merge: true } so other fields on the doc (future additions)
- * are not clobbered. Returns true/false for UI feedback.
+ * Save Time Clock Settings for the active branch. Writes
+ * locationTimeClock.{locationId} so Soso and Lolo keep separate rules.
+ * Primary / single-location also updates the legacy top-level fields so
+ * punch callables keep working until they read the per-location bucket.
  */
 async function ffSaveTimeClockSettings(settings) {
   try {
     const salonId = _salonId || await getSalonId();
     if (!salonId) return false;
+    const locationId = _ffActiveLocationIdForSettings();
     const normalized = ffNormalizeTimeClockSettings(settings);
     const uid = (auth && auth.currentUser && auth.currentUser.uid) || null;
-    await setDoc(settingsTimeClockRef(salonId), Object.assign({}, normalized, {
+    const payload = {
       updatedAt: serverTimestamp(),
       updatedBy: uid,
-    }), { merge: true });
-    _timeClockLoadPromise = Promise.resolve(normalized);
+    };
+    if (locationId) {
+      payload[`locationTimeClock.${locationId}`] = normalized;
+      if (_ffSettingsAllowSalonWideFallback(locationId)) {
+        Object.assign(payload, normalized);
+      }
+    } else {
+      Object.assign(payload, normalized);
+    }
+    await setDoc(settingsTimeClockRef(salonId), payload, { merge: true });
+    if (!_timeClockRawDoc || typeof _timeClockRawDoc !== "object") _timeClockRawDoc = {};
+    if (locationId) {
+      if (!_timeClockRawDoc.locationTimeClock || typeof _timeClockRawDoc.locationTimeClock !== "object") {
+        _timeClockRawDoc.locationTimeClock = {};
+      }
+      _timeClockRawDoc.locationTimeClock[locationId] = normalized;
+    }
+    if (!locationId || _ffSettingsAllowSalonWideFallback(locationId)) {
+      Object.assign(_timeClockRawDoc, normalized);
+    }
     _timeClockCachedSalonId = salonId;
-    try {
-      if (typeof window !== "undefined") window.__ffTCCachedSettings = normalized;
-    } catch (_) {}
+    _ffRememberTimeClockPick(normalized);
     return true;
   } catch (e) {
     console.warn("[SettingsCloud] ffSaveTimeClockSettings failed", e);
@@ -1213,9 +1321,6 @@ function ffSaveScheduleSettings(rolesHierarchy, scheduleRules, businessHours, co
   if (businessHours && typeof businessHours === "object") {
     const normalizedHours = normalizeBusinessHours(businessHours);
     payload[joinPath('businessHours')] = normalizedHours;
-    // Also write salon-wide hours so a refresh before the active location
-    // is ready does not fall back to Mon–Fri defaults (Sat/Sun closed).
-    if (basePath) payload.businessHours = normalizedHours;
   }
   if (coverageRules && typeof coverageRules === "object") payload[joinPath('coverageRules')] = normalizeCoverageRules(coverageRules);
   if (specialBusinessDays && typeof specialBusinessDays === "object") payload[joinPath('specialBusinessDays')] = normalizeSpecialBusinessDays(specialBusinessDays);
@@ -1310,12 +1415,16 @@ function _ffActiveLocationIdForTypes() {
 
 function _ffFilterTypesByLocation(types, locationId) {
   if (!Array.isArray(types)) return [];
-  if (!locationId) return types.slice();
+  const multi = _ffSettingsUserHasMultipleLocations();
+  const active = typeof locationId === "string" ? locationId.trim() : "";
+  if (!active) return multi ? [] : types.slice();
+  const primary = _ffSettingsPrimaryLocationId();
   return types.filter((t) => {
     if (!t || typeof t !== "object") return false;
-    // Legacy: no locationId field => visible in every location.
-    if (t.locationId == null || t.locationId === "") return true;
-    return String(t.locationId) === String(locationId);
+    const lid = t.locationId != null && t.locationId !== "" ? String(t.locationId).trim() : "";
+    if (lid) return lid === active;
+    if (!multi) return true;
+    return !!primary && active === primary;
   });
 }
 
@@ -1412,10 +1521,9 @@ async function ffCreateTechnicianType(name) {
   }
 
   const locationId = _ffActiveLocationIdForTypes();
-  // If we have an active location, namespace the doc id so the same name
-  // can coexist in multiple branches (types are per-location by product
-  // spec). If no active location is set, fall back to the salon-wide id
-  // so legacy flows keep working.
+  if (_ffSettingsUserHasMultipleLocations() && !locationId) {
+    throw new Error("Choose a location before adding a technician type.");
+  }
   const docId = locationId ? `${rawId}--${locationId}` : rawId;
 
   // Check for duplicates within this location (ffCheckTechnicianTypeExists
@@ -1554,4 +1662,5 @@ if (typeof window !== "undefined") {
   window.ffLoadTimeClockSettings = ffLoadTimeClockSettings;
   window.ffSaveTimeClockSettings = ffSaveTimeClockSettings;
   window.ffInvalidateTimeClockSettingsCache = ffInvalidateTimeClockSettingsCache;
+  window.ffPickTimeClockFromDoc = _ffPickTimeClockFromDoc;
 }

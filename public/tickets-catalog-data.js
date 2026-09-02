@@ -12,7 +12,8 @@
 import { collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc, deleteField, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260901_loc_isolate";
+import { productDocInActiveLoc } from "./products-location.js?v=20260902_prod_cats";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {
@@ -121,6 +122,44 @@ function parseStaffDurationOverrideInput(raw) {
   return { ok: true, value: n };
 }
 
+function splitServiceDurationParts(totalMinutes) {
+  const n = isValidServiceDurationMinutes(Number(totalMinutes))
+    ? Number(totalMinutes)
+    : DEFAULT_SERVICE_DURATION_MINUTES;
+  return { hours: Math.floor(n / 60), minutes: n % 60 };
+}
+
+function combineServiceDurationParts(hoursRaw, minutesRaw) {
+  const hoursEmpty = hoursRaw == null || String(hoursRaw).trim() === '';
+  const minutesEmpty = minutesRaw == null || String(minutesRaw).trim() === '';
+  const h = hoursEmpty ? 0 : Number(hoursRaw);
+  const m = minutesEmpty ? 0 : Number(minutesRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || !Number.isInteger(h) || !Number.isInteger(m)) return null;
+  if (h < 0 || h > 24 || m < 0 || m > 59) return null;
+  const total = h * 60 + m;
+  return isValidServiceDurationMinutes(total) ? total : null;
+}
+
+function formatServiceDurationLabel(totalMinutes) {
+  const n = isValidServiceDurationMinutes(Number(totalMinutes))
+    ? Number(totalMinutes)
+    : DEFAULT_SERVICE_DURATION_MINUTES;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h && m) return `${h} hr ${m} min`;
+  if (h) return h === 1 ? '1 hr' : `${h} hr`;
+  return `${m} min`;
+}
+
+function parseStaffDurationOverrideFromParts(hoursRaw, minutesRaw) {
+  const hoursEmpty = hoursRaw == null || String(hoursRaw).trim() === '';
+  const minutesEmpty = minutesRaw == null || String(minutesRaw).trim() === '';
+  if (hoursEmpty && minutesEmpty) return { ok: true, value: null };
+  const total = combineServiceDurationParts(hoursRaw, minutesRaw);
+  if (total == null) return { ok: false, value: null };
+  return { ok: true, value: total };
+}
+
 function resolveServiceDurationForStaff(service, staffId) {
   const id = String(staffId || '').trim();
   const overrides = service && service.staffOverrides && typeof service.staffOverrides === 'object'
@@ -169,6 +208,68 @@ async function ensureSharedServiceCatalogDoc(accountId) {
 async function ensureSharedServiceCategoriesDoc(accountId) {
   if (!accountId) return;
   await setDoc(sharedServiceCategoriesDocRef(accountId), {}, { merge: true });
+}
+
+function isSharedServiceCatalogEnabled() {
+  return ticketsState._sharedServiceCatalogEnabled === true;
+}
+
+function clearSharedCatalogCaches() {
+  ticketsState._rawSharedServices = [];
+  ticketsState._rawSharedCategories = [];
+  ticketsState._rawServiceOverrides = {};
+}
+
+async function loadSharedServiceCatalogShareFlag() {
+  const accountId = getTicketsAccountId();
+  ticketsState._sharedServiceCatalogEnabled = false;
+  if (!accountId) return false;
+  try {
+    const snap = await getDoc(sharedServiceCatalogDocRef(accountId));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    ticketsState._sharedServiceCatalogEnabled = data.shareEnabled === true || data.enabled === true;
+  } catch (e) {
+    console.warn('[SharedServices] share flag load failed', e);
+    ticketsState._sharedServiceCatalogEnabled = false;
+  }
+  return ticketsState._sharedServiceCatalogEnabled;
+}
+
+async function setSharedServiceCatalogEnabled(enabled) {
+  const accountId = getTicketsAccountId();
+  if (!accountId) throw new Error('No account');
+  const next = !!enabled;
+  await setDoc(sharedServiceCatalogDocRef(accountId), {
+    shareEnabled: next,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+  ticketsState._sharedServiceCatalogEnabled = next;
+  if (!next) {
+    ticketsState._catalogSource = 'location';
+    ticketsState._ffCatalogModalMode = 'location';
+    clearSharedCatalogCaches();
+    _applyCatalogFilter();
+  } else {
+    ticketsState._catalogSource = 'unknown';
+    await loadServices();
+    ticketsState._ffCatalogModalMode = 'shared';
+  }
+  try { setupTicketsUI(); } catch (_) {}
+  try {
+    const modal = document.getElementById('servicesModal');
+    const servicesScreen = document.getElementById('servicesScreen');
+    const modalOpen = modal && modal.style.display !== 'none' && modal.style.display !== '';
+    const screenOpen = servicesScreen && servicesScreen.style.display !== 'none' && servicesScreen.style.display !== '';
+    if (modalOpen || screenOpen) {
+      ticketsState._ffOpenCats.clear();
+      ticketsState._ffCatalogRenderedOnce = false;
+      if (typeof renderServicesCatalogV2 === 'function') renderServicesCatalogV2();
+    }
+  } catch (_) {}
+  try {
+    document.dispatchEvent(new CustomEvent('ff-shared-service-catalog-changed', { detail: { enabled: next } }));
+  } catch (_) {}
+  return next;
 }
 
 async function loadSharedServiceOverrides(accountId, locationId) {
@@ -652,6 +753,10 @@ async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
 async function tryLoadSharedServiceCatalog() {
   const accountId = getTicketsAccountId();
   if (!accountId) return false;
+  if (!isSharedServiceCatalogEnabled()) {
+    ticketsState._catalogSource = 'location';
+    return false;
+  }
   try {
     const [serviceSnap, categorySnap] = await Promise.all([
       getDocs(sharedServiceCatalogItemsRef(accountId)),
@@ -724,7 +829,7 @@ function _ffServiceMatchesActiveLocation(s) {
  *  current active branch. Safe to call from any event (snapshot arrival,
  *  location change, manual refresh). */
 function _applyCatalogFilter() {
-  if (ticketsState._catalogSource === 'shared') {
+  if (ticketsState._catalogSource === 'shared' && isSharedServiceCatalogEnabled()) {
     applySharedServiceCatalog();
     return;
   }
@@ -780,10 +885,16 @@ function subscribeServiceCatalog() {
   });
 }
 
-/** Live subscribe to products + productCategories for the current salon so the
- *  ticket picker can offer retail products. Products are salon-wide; per-location
- *  availability/price and per-staff availability are resolved at render time.
- *  Idempotent; switching salon auto-rebinds. */
+function applyProductsCatalogFilter() {
+  const raw = Array.isArray(ticketsState._rawSalonProducts) ? ticketsState._rawSalonProducts : [];
+  const rawCats = Array.isArray(ticketsState._rawProductCategories) ? ticketsState._rawProductCategories : [];
+  ticketsState.salonProducts = raw.filter(productDocInActiveLoc);
+  ticketsState.productCategories = rawCats.slice();
+}
+
+/** Live subscribe to products + productCategories. Each branch sees only its
+ *  own catalog unless Share Product Catalog is on. Idempotent; switching salon
+ *  auto-rebinds. Location switch re-filters the cached raw lists. */
 function subscribeProductsCatalog() {
   const salonId = ticketsState.currentUserProfile?.salonId;
   if (!salonId) return;
@@ -791,13 +902,17 @@ function subscribeProductsCatalog() {
   if (ticketsState._productsUnsub) { try { ticketsState._productsUnsub(); } catch (_) {} ticketsState._productsUnsub = null; }
   if (ticketsState._productCatsUnsub) { try { ticketsState._productCatsUnsub(); } catch (_) {} ticketsState._productCatsUnsub = null; }
   ticketsState._productsSubSalonId = salonId;
+  if (typeof window.ffLoadProductCatalogShareEnabled === "function") {
+    window.ffLoadProductCatalogShareEnabled().catch(() => {});
+  }
   try {
     ticketsState._productsUnsub = onSnapshot(
       collection(db, `salons/${salonId}/products`),
       (snap) => {
-        ticketsState.salonProducts = snap.docs
+        ticketsState._rawSalonProducts = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        applyProductsCatalogFilter();
         try { setupTicketsUI(); } catch (_) {}
       },
       (err) => console.warn('[Tickets] products subscription error', err)
@@ -807,9 +922,10 @@ function subscribeProductsCatalog() {
     ticketsState._productCatsUnsub = onSnapshot(
       collection(db, `salons/${salonId}/productCategories`),
       (snap) => {
-        ticketsState.productCategories = snap.docs
+        ticketsState._rawProductCategories = snap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        applyProductsCatalogFilter();
         try { setupTicketsUI(); } catch (_) {}
       },
       (err) => console.warn('[Tickets] product categories subscription error', err)
@@ -820,7 +936,10 @@ function subscribeProductsCatalog() {
 async function loadServices() {
   if (!ticketsState.currentUserProfile?.salonId) return [];
   if (ticketsState._catalogSource !== 'location') {
-    const sharedLoaded = await tryLoadSharedServiceCatalog();
+    await loadSharedServiceCatalogShareFlag();
+    const sharedLoaded = isSharedServiceCatalogEnabled()
+      ? await tryLoadSharedServiceCatalog()
+      : false;
     if (sharedLoaded) {
       subscribeServiceCatalog();
       try {
@@ -840,6 +959,7 @@ async function loadServices() {
       return ticketsState.salonServices;
     }
     ticketsState._catalogSource = 'location';
+    clearSharedCatalogCaches();
   }
   // Make sure live subscriptions are running; they will refresh the UI the
   // moment new data arrives.
@@ -904,7 +1024,7 @@ async function loadServiceCategories() {
     await loadServices();
     return ticketsState.serviceCategories;
   }
-  if (ticketsState._catalogSource === 'shared') {
+  if (ticketsState._catalogSource === 'shared' && isSharedServiceCatalogEnabled()) {
     applySharedServiceCatalog();
     return ticketsState.serviceCategories;
   }
@@ -962,6 +1082,10 @@ export {
   resolveServiceDurationMinutes,
   parseServiceDurationMinutesInput,
   parseStaffDurationOverrideInput,
+  splitServiceDurationParts,
+  combineServiceDurationParts,
+  formatServiceDurationLabel,
+  parseStaffDurationOverrideFromParts,
   resolveServiceDurationForStaff,
   serviceCatalogStableKey,
   serviceCategoryDisplayId,
@@ -971,6 +1095,9 @@ export {
   sharedServiceCategoryItemsRef,
   ensureSharedServiceCatalogDoc,
   ensureSharedServiceCategoriesDoc,
+  isSharedServiceCatalogEnabled,
+  loadSharedServiceCatalogShareFlag,
+  setSharedServiceCatalogEnabled,
   loadSharedServiceOverrides,
   applySharedServiceCatalog,
   getSharedServicesForCatalogManager,
@@ -993,6 +1120,7 @@ export {
   _onCatalogSnapshot,
   subscribeServiceCatalog,
   subscribeProductsCatalog,
+  applyProductsCatalogFilter,
   loadServices,
   saveService,
   deleteService,

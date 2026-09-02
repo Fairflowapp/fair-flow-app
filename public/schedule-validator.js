@@ -11,7 +11,7 @@ import {
   isFullManagerAssignmentForCoverage,
   isAssistantManagerAssignmentForCoverage,
   countAssignmentsOverlappingMinuteRange,
-} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers.js?v=20260902_sched_dual";
 import {
   buildAvailabilityDirectory,
   getAvailabilityForStaffDate,
@@ -20,7 +20,7 @@ import {
   getStaffUid,
   getStaffDisplayName,
   generateWeeklySchedule,
-} from "./schedule-generator.js?v=20260420_cross_loc_busy";
+} from "./schedule-generator.js?v=20260817_build_hours";
 
 const WARNING_SEVERITY = Object.freeze({
   no_staff_assigned: "high",

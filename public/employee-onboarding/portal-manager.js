@@ -166,6 +166,58 @@ export async function ffReissueAndCopyOnboardingPortalLink({
   return result;
 }
 
+/** Resolve a working portal URL. Does not email. Reissues if the current link was already opened. */
+export async function ffResolveOnboardingPortalUrl({
+  staffId,
+  runId,
+  salonId,
+} = {}) {
+  const active = await ffGetOnboardingPortalActiveLink({ staffId, runId, salonId });
+  if (active && active.active && active.url && !active.needsReissue) {
+    return String(active.url);
+  }
+  const issued =
+    active && active.active
+      ? await ffReissueOnboardingPortalToken({ staffId, runId, salonId })
+      : await ffIssueOnboardingPortalToken({ staffId, runId, salonId });
+  return issued && issued.url ? String(issued.url) : "";
+}
+
+/** Open employee portal in a new tab (manager preview / recovery). */
+export async function ffOpenOnboardingPortalLink({
+  staffId,
+  runId,
+  salonId,
+  taskId,
+  skipConfirm,
+} = {}) {
+  const active = await ffGetOnboardingPortalActiveLink({ staffId, runId, salonId });
+  if (!skipConfirm) {
+    const ok = window.confirm("Open this employee’s onboarding link now?");
+    if (!ok) return { cancelled: true };
+  }
+  let url;
+  if (active && active.active && active.url && !active.needsReissue) {
+    url = String(active.url);
+  } else {
+    const issued = await ffReissueOnboardingPortalToken({ staffId, runId, salonId });
+    url = issued && issued.url ? String(issued.url) : "";
+    if (typeof window.showToast === "function") {
+      window.showToast("New portal link created.", "success");
+    }
+  }
+  if (!url) throw new Error("No portal URL available");
+  const tid = String(taskId || "").trim();
+  if (tid) {
+    url = `${url.replace(/#.*$/, "")}#/task/${encodeURIComponent(tid)}`;
+  }
+  const tab = window.open(url, "_blank", "noopener,noreferrer");
+  if (!tab) {
+    window.location.assign(url);
+  }
+  return { url };
+}
+
 /**
  * Send / Resend portal email (manager-explicit).
  * Reuses active token when valid; issues one only if needed.
@@ -246,6 +298,8 @@ if (typeof window !== "undefined") {
   window.ffGetOnboardingPortalActiveLink = ffGetOnboardingPortalActiveLink;
   window.ffCopyOnboardingPortalLink = ffCopyOnboardingPortalLink;
   window.ffReissueAndCopyOnboardingPortalLink = ffReissueAndCopyOnboardingPortalLink;
+  window.ffResolveOnboardingPortalUrl = ffResolveOnboardingPortalUrl;
+  window.ffOpenOnboardingPortalLink = ffOpenOnboardingPortalLink;
   window.ffSendOnboardingPortalEmail = ffSendOnboardingPortalEmail;
   window.ffSendOnboardingPortalReminder = ffSendOnboardingPortalReminder;
   window.ffRunOnboardingRemindersSweep = ffRunOnboardingRemindersSweep;

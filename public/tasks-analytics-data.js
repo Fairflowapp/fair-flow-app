@@ -101,19 +101,16 @@ function stateHasRows(state) {
 }
 
 export async function readTasksState() {
-  const candidates = [];
-  try {
-    if (window.tasksCache && typeof window.tasksCache === "object") {
-      candidates.push({ source: "window.tasksCache", state: window.tasksCache });
+  if (typeof window.ffLoadTasksStateForDashboard === "function") {
+    try {
+      const loaded = await window.ffLoadTasksStateForDashboard();
+      if (loaded && loaded.state && stateHasRows(loaded.state)) {
+        console.log(LOG, "data source detected", loaded.source || "Firestore tasksState");
+        return { source: loaded.source || "Firestore tasksState", state: loaded.state };
+      }
+    } catch (err) {
+      console.warn(LOG, "dashboard tasks loader failed", err);
     }
-  } catch (_) {}
-
-  candidates.push({ source: "localStorage", state: stateFromLocalStorage() });
-
-  const cached = candidates.find((item) => stateHasRows(item.state));
-  if (cached) {
-    console.log(LOG, "data source detected", cached.source);
-    return cached;
   }
 
   const salonId = await getSalonId();
@@ -129,6 +126,19 @@ export async function readTasksState() {
     } catch (err) {
       console.warn(LOG, "tasksState fallback failed", err);
     }
+  }
+
+  const candidates = [];
+  try {
+    if (window.tasksCache && typeof window.tasksCache === "object") {
+      candidates.push({ source: "window.tasksCache", state: window.tasksCache });
+    }
+  } catch (_) {}
+  candidates.push({ source: "localStorage", state: stateFromLocalStorage() });
+  const cached = candidates.find((item) => stateHasRows(item.state));
+  if (cached) {
+    console.log(LOG, "data source detected", cached.source);
+    return cached;
   }
 
   console.log(LOG, "no task data source found");

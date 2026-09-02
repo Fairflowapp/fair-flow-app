@@ -14,11 +14,11 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, resolveServiceDurationMinutes, parseServiceDurationMinutesInput, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { ffCanManageServices, resolveServiceDurationMinutes, splitServiceDurationParts, combineServiceDurationParts, formatServiceDurationLabel, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260902_prod_cats";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260818_staff_dur_ui";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260818_staff_dur_ui";
+import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260901_dur_hm";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover } from "./tickets-catalog-edit.js?v=20260901_dur_hm";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -590,7 +590,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
 
   const selected = selectedService;
   const durationMinutes = resolveServiceDurationMinutes(selected);
-  const durationText = `${durationMinutes} min`;
+  const durationParts = splitServiceDurationParts(durationMinutes);
+  const durationText = formatServiceDurationLabel(durationMinutes);
   const isInlineEditingService = String(ticketsState._ffServicesInlineEditServiceId || '') === String(selected.id || '');
   const activeServiceTab = ticketsState._ffServicesDetailTab || 'details';
   const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
@@ -646,9 +647,15 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         </label>
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Duration</span>
-          <span style="display:flex;align-items:center;gap:8px;">
-            <input id="servicesInlineEditDuration" type="number" min="1" max="1440" step="1" value="${escapeHtml(String(durationMinutes))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
-            <span style="font-size:11px;color:#9ca3af;">min</span>
+          <span style="display:grid;grid-template-columns:1fr 1fr;gap:8px;max-width:260px;">
+            <span style="display:flex;flex-direction:column;gap:4px;">
+              <span style="font-size:11px;font-weight:700;color:#6b7280;">Hours</span>
+              <input id="servicesInlineEditDurationHours" type="number" min="0" max="24" step="1" inputmode="numeric" value="${escapeHtml(String(durationParts.hours))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            </span>
+            <span style="display:flex;flex-direction:column;gap:4px;">
+              <span style="font-size:11px;font-weight:700;color:#6b7280;">Minutes</span>
+              <input id="servicesInlineEditDurationMinutes" type="number" min="0" max="59" step="1" inputmode="numeric" value="${escapeHtml(String(durationParts.minutes))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            </span>
           </span>
         </label>
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
@@ -741,22 +748,24 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       const nameInput = root.querySelector('#servicesInlineEditName');
       const categoryInput = root.querySelector('#servicesInlineEditCategory');
       const priceInput = root.querySelector('#servicesInlineEditPrice');
-      const durationInput = root.querySelector('#servicesInlineEditDuration');
+      const durationHoursInput = root.querySelector('#servicesInlineEditDurationHours');
+      const durationMinutesInput = root.querySelector('#servicesInlineEditDurationMinutes');
       const name = String(nameInput?.value || '').trim();
       if (!name) {
         if (nameInput) nameInput.focus();
         showToast('Service name is required', 'error');
         return;
       }
-      const durationMinutes = parseServiceDurationMinutesInput(durationInput?.value);
+      const durationMinutes = combineServiceDurationParts(durationHoursInput?.value, durationMinutesInput?.value);
       if (durationMinutes == null) {
-        if (durationInput) {
-          const prev = durationInput.style.borderColor;
-          durationInput.style.borderColor = '#ef4444';
-          durationInput.focus();
-          setTimeout(() => { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
-        }
-        showToast('Duration must be a whole number of minutes (1–1440).', 'error');
+        [durationHoursInput, durationMinutesInput].forEach((el) => {
+          if (!el) return;
+          const prev = el.style.borderColor;
+          el.style.borderColor = '#ef4444';
+          setTimeout(() => { el.style.borderColor = prev || '#e5e7eb'; }, 1400);
+        });
+        if (durationHoursInput) durationHoursInput.focus();
+        showToast('Enter duration as hours and minutes (1 minute to 24 hours).', 'error');
         return;
       }
       const categoryId = categoryInput?.value || null;

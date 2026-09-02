@@ -82,6 +82,8 @@ export function ffComputeOnboardingRunProgress(tasks, currentStatus) {
   if (status !== "cancelled") {
     if (required.length > 0 && missing === 0) {
       status = "completed";
+    } else if (missing > 0 && status === "completed") {
+      status = "in_progress";
     } else if (
       list.some((t) =>
         ["in_progress", "waiting_approval", "completed", "rejected", "skipped"].includes(t.status)

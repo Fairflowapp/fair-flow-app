@@ -14,7 +14,13 @@ import {
   getFunctions,
   httpsCallable,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
-import { db } from "/app.js?v=20260610_force_lp_ios";
+import { db, storage } from "/app.js?v=20260610_force_lp_ios";
+import {
+  ffOpenInAppDocumentOverlay,
+  ffShouldUseInAppPdf,
+} from "/inapp-pdf-viewer.js?v=20260825_od_iospdf";
+import { ref as storageRef, uploadBytes } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024;
 const MAX_PAGES = 50;
@@ -30,7 +36,25 @@ function _fns() {
 
 function _call(name, data) {
   const fn = httpsCallable(_fns(), name);
-  return fn(data).then((res) => res && res.data);
+  return fn(data)
+    .then((res) => res && res.data)
+    .catch((e) => {
+      const details =
+        (e && e.details && (e.details.message || e.details)) ||
+        (e && e.customData && e.customData.message) ||
+        null;
+      let msg = String(
+        details || (e && e.message) || (e && e.code) || `${name} failed`
+      );
+      msg = msg.replace(/^Firebase:\s*/i, "").trim();
+      // Callable often surfaces only "INTERNAL" — give a usable hint.
+      if (!msg || /^internal$/i.test(msg) || msg === "functions/internal") {
+        msg =
+          "Server error while processing the PDF. Try again — if it keeps failing, use a smaller or simpler PDF.";
+      }
+      console.error("[EsignLibrary]", name, e);
+      throw new Error(msg || `${name} failed`);
+    });
 }
 
 async function getSalonId() {
@@ -58,6 +82,33 @@ function _emit(name, detail) {
   try {
     document.dispatchEvent(new CustomEvent(name, { detail }));
   } catch (_) {}
+}
+
+function _bytesFromBase64(b64) {
+  const raw = String(b64 || "");
+  if (!raw) return null;
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function _fileMetaToObjectUrl(meta) {
+  if (!meta) return meta;
+  const b64 = meta.fileBase64 || meta.pdfBase64 || "";
+  if (b64) {
+    const bytes = _bytesFromBase64(b64);
+    const type =
+      String(meta.contentType || "").trim() ||
+      (meta.pdfBase64 ? "application/pdf" : "application/octet-stream");
+    const blob = new Blob([bytes], { type });
+    return {
+      ...meta,
+      pdfData: type === "application/pdf" ? bytes : meta.pdfData,
+      readUrl: URL.createObjectURL(blob),
+    };
+  }
+  return meta;
 }
 
 function _sortDocs(arr) {
@@ -180,10 +231,15 @@ export async function ffUpdateOnboardingSignatureDocument(documentId, updates) {
   });
   // Keep local cache in sync until the snapshot arrives.
   if (res && res.document) {
-    const idx = _cacheDocs.findIndex((d) => d.id === did);
-    if (idx >= 0) _cacheDocs[idx] = { ..._cacheDocs[idx], ...res.document, id: did };
-    else _cacheDocs.push({ ...res.document, id: did });
-    _cacheDocs = _sortDocs(_cacheDocs);
+    const archived = res.document.archived === true || res.document.active === false;
+    if (archived) {
+      _cacheDocs = _cacheDocs.filter((d) => d.id !== did);
+    } else {
+      const idx = _cacheDocs.findIndex((d) => d.id === did);
+      if (idx >= 0) _cacheDocs[idx] = { ..._cacheDocs[idx], ...res.document, id: did };
+      else _cacheDocs.push({ ...res.document, id: did });
+      _cacheDocs = _sortDocs(_cacheDocs);
+    }
     _emit("ff-onboarding-esign-docs-updated", _cacheDocs);
   }
   return res;
@@ -229,19 +285,39 @@ export async function ffUploadOnboardingSignatureDocumentVersion({
     notes: String(notes || "").trim(),
   });
 
-  const putRes = await fetch(reserved.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": "application/pdf" },
-    body: file,
-  });
-  if (!putRes.ok) {
-    throw new Error(`Upload failed (${putRes.status})`);
+  if (!reserved || !reserved.versionId) {
+    throw new Error("Could not reserve upload slot");
+  }
+  let usedStaging = false;
+  if (reserved.uploadUrl) {
+    try {
+      const putRes = await fetch(reserved.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: file,
+      });
+      if (!putRes.ok) throw new Error(`signed PUT ${putRes.status}`);
+    } catch (putErr) {
+      console.warn("[EsignLibrary] signed PUT failed, using staging upload", putErr);
+      usedStaging = true;
+    }
+  } else {
+    usedStaging = true;
+  }
+  const stagingPath =
+    reserved.stagingPath ||
+    `onboardingUploads/${salonId}/${(getAuth().currentUser && getAuth().currentUser.uid) || "user"}/${reserved.versionId}.pdf`;
+  if (usedStaging) {
+    await uploadBytes(storageRef(storage, stagingPath), file, {
+      contentType: "application/pdf",
+    });
   }
 
   const finalized = await _call("finalizeOnboardingSignatureDocumentVersion", {
     salonId,
     documentId: did,
     versionId: reserved.versionId,
+    ...(usedStaging ? { stagingPath } : {}),
   });
 
   return { ...reserved, ...finalized };
@@ -258,11 +334,29 @@ export async function ffGetOnboardingSignatureDocumentVersionReadUrl({
   if (!salonId || !did || !vid) {
     throw new Error("documentId and versionId are required");
   }
-  return _call("getOnboardingSignatureDocumentVersionReadUrl", {
-    salonId,
-    documentId: did,
-    versionId: vid,
-  });
+  const meta = await Promise.race([
+    _call("getOnboardingSignatureDocumentVersionReadUrl", {
+      salonId,
+      documentId: did,
+      versionId: vid,
+    }),
+    new Promise((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error("Could not open the PDF to mark signatures. Try again.")
+          ),
+        20000
+      )
+    ),
+  ]);
+  const opened = _fileMetaToObjectUrl(meta);
+  if (opened && opened.readUrl) {
+    return opened.pdfData
+      ? opened
+      : { ...opened, pdfData: _bytesFromBase64(opened.pdfBase64 || opened.fileBase64) };
+  }
+  throw new Error("Could not open the PDF to mark signatures. Try uploading again.");
 }
 
 /**
@@ -285,14 +379,24 @@ export async function ffGetOnboardingArtifactReadUrl({
   if (runId) payload.runId = String(runId).trim();
   if (taskId) payload.taskId = String(taskId).trim();
   if (kind) payload.kind = String(kind).trim();
-  return _call("getOnboardingArtifactReadUrl", payload);
+  const meta = await _call("getOnboardingArtifactReadUrl", payload);
+  const opened = _fileMetaToObjectUrl(meta);
+  if (opened && opened.readUrl) return opened;
+  throw new Error("Could not open the file.");
 }
+ffGetOnboardingArtifactReadUrl._ffFileB64 = true;
 
 /** Open inbox / run-panel artifact via signed URL (never getDownloadURL). */
 export async function ffOpenOnboardingArtifact(opts = {}) {
   const meta = await ffGetOnboardingArtifactReadUrl(opts);
   const url = meta && meta.readUrl;
   if (!url) throw new Error("Could not get download link");
+  const title = String((opts && opts.title) || "Onboarding document");
+  const contentType = String((meta && meta.contentType) || "");
+  if (ffShouldUseInAppPdf(url, title, contentType)) {
+    ffOpenInAppDocumentOverlay(url, title, { contentType });
+    return meta;
+  }
   const tab = window.open(url, "_blank", "noopener,noreferrer");
   if (!tab) {
     window.location.assign(url);
@@ -362,6 +466,48 @@ export async function ffBindOnboardingSignatureDocumentVersions(bindings) {
   });
 }
 
+/** S2 — store encrypted sensitive value on a run task (manager). */
+export async function ffStoreOnboardingSensitiveField({
+  staffId,
+  runId,
+  taskId,
+  fieldId,
+  plaintext,
+  sensitiveKind,
+  label,
+} = {}) {
+  const salonId = (await getSalonId()) || _salonId;
+  if (!salonId) throw new Error("Salon not loaded");
+  return _call("storeOnboardingSensitiveField", {
+    salonId,
+    staffId: String(staffId || "").trim(),
+    runId: String(runId || "").trim(),
+    taskId: String(taskId || "").trim(),
+    fieldId: String(fieldId || "").trim(),
+    plaintext,
+    sensitiveKind: sensitiveKind || "other",
+    label: label || "",
+  });
+}
+
+/** S2 — Reveal plaintext (owner/admin or onboarding_reveal_sensitive). Audited. */
+export async function ffRevealOnboardingSensitiveField({
+  staffId,
+  runId,
+  taskId,
+  fieldId,
+} = {}) {
+  const salonId = (await getSalonId()) || _salonId;
+  if (!salonId) throw new Error("Salon not loaded");
+  return _call("revealOnboardingSensitiveField", {
+    salonId,
+    staffId: String(staffId || "").trim(),
+    runId: String(runId || "").trim(),
+    taskId: String(taskId || "").trim(),
+    fieldId: String(fieldId || "").trim(),
+  });
+}
+
 /**
  * Build template/run bind payload from a ready library version.
  */
@@ -417,6 +563,8 @@ if (typeof window !== "undefined") {
   window.ffGetOnboardingArtifactReadUrl = ffGetOnboardingArtifactReadUrl;
   window.ffOpenOnboardingArtifact = ffOpenOnboardingArtifact;
   window.ffInboxOpenOnboardingArtifact = ffInboxOpenOnboardingArtifact;
+  window.ffStoreOnboardingSensitiveField = ffStoreOnboardingSensitiveField;
+  window.ffRevealOnboardingSensitiveField = ffRevealOnboardingSensitiveField;
   window.ffSetOnboardingSignatureDocumentVersionFieldSchema =
     ffSetOnboardingSignatureDocumentVersionFieldSchema;
   window.ffBindOnboardingSignatureDocumentVersions =

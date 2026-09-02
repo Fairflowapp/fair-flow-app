@@ -11,13 +11,13 @@
  * chat.js imports _sendFreeTextDirect + markThreadRead back (training reminder /
  * thread-open / subscriptions injection). The window.* handlers self-register.
  */
-import { collection, doc, setDoc, updateDoc, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+import { collection, doc, setDoc, updateDoc, writeBatch, increment, serverTimestamp, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
-import { isMgrPlus, buildConvId, _trimStr, _memberDisplayNameFromRow, _otherUidFromParticipants } from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { _chatEffectiveLocKey, loadChatUserProfile } from "./chat-data.js?v=20260628_chat_data_b0";
-import { renderThreadList, renderConversation, _conversationById, _nameForUid, _nameForUidForSend, _staffDisplayNameForUid, _rememberConversationForList, _openChatModal, _chatRenderFlowWizard, _updateChatSendBtn, _buildFlowRenderedText } from "./chat-ui.js?v=20260728_reactions";
-import { _unreadCountForUid, _computeChatNavUnreadFromSnapDocs, _paintChatNavBadge } from "./chat-subscriptions.js?v=20260628_chat_subs_split";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
+import { isMgrPlus, buildConvId, _trimStr, _memberDisplayNameFromRow, _otherUidFromParticipants, isChatGroup, chatGroupTitle } from "./chat-helpers.js?v=20260901_chat_iso";
+import { _chatEffectiveLocKey, _chatHasActiveLocationForWrite, loadChatUserProfile } from "./chat-data.js?v=20260901_chat_iso";
+import { renderThreadList, renderConversation, _conversationById, _nameForUid, _nameForUidForSend, _staffDisplayNameForUid, _rememberConversationForList, _openChatModal, _chatRenderFlowWizard, _updateChatSendBtn, _buildFlowRenderedText, _userAllowedInActiveLocation } from "./chat-ui.js?v=20260901_chat_iso";
+import { _unreadCountForUid, _computeChatNavUnreadFromSnapDocs, _paintChatNavBadge } from "./chat-subscriptions.js?v=20260901_chat_iso";
 
 let _chatFreeTextAllowed, _getChatFreeTextTrimmed;
 export function initChatCompose(deps) {
@@ -36,8 +36,31 @@ export function initChatCompose(deps) {
  * Send one free-text chat message (title + message only). Used by inline composer and modal.
  * @param {string|null} conversationIdOverride - when set (reply), use this conv id instead of deriving from uids.
  */
+function _quoteFieldsFromState() {
+  const q = chatState.quoteReply;
+  if (!q || !q.id) return {};
+  return {
+    replyToId: String(q.id).slice(0, 80),
+    replyToName: String(q.name || 'Message').slice(0, 80),
+    replyToText: String(q.text || '').slice(0, 140),
+  };
+}
+
+function _unreadIncrementsForSend(conv, senderUid, fallbackRecipientUid) {
+  if (isChatGroup(conv) && Array.isArray(conv.participants)) {
+    const unreadFor = {};
+    conv.participants.forEach(u => {
+      if (u && u !== senderUid) unreadFor[u] = increment(1);
+    });
+    return unreadFor;
+  }
+  return fallbackRecipientUid ? { [fallbackRecipientUid]: increment(1) } : {};
+}
+
 async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOverride, bodyTrimmed) {
-  if (!chatState.chatUserProfile?.salonId || !recipientUid) throw new Error('missing_context');
+  const existing = conversationIdOverride ? _conversationById(conversationIdOverride) : null;
+  const isGroup = isChatGroup(existing);
+  if (!chatState.chatUserProfile?.salonId || (!isGroup && !recipientUid)) throw new Error('missing_context');
   const trimmed = String(bodyTrimmed || '').trim();
   if (!trimmed) throw new Error('empty_message');
   const maxFree = 8000;
@@ -55,17 +78,22 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
     (auth.currentUser && (_trimStr(auth.currentUser.displayName) || _trimStr(auth.currentUser.email))) ||
     '';
   const senderRole = chatState.chatUserProfile.role || '';
-  const rUid = recipientUid;
-  const rName = recipientName || _nameForUidForSend(rUid);
+  const rUid = isGroup ? 'group' : recipientUid;
+  const rName = isGroup ? chatGroupTitle(existing) : (recipientName || _nameForUidForSend(rUid));
   const locKey = _chatEffectiveLocKey();
+  if (!conversationIdOverride && !_chatHasActiveLocationForWrite()) {
+    throw new Error('no_active_location');
+  }
   const convId = conversationIdOverride || buildConvId(senderUid, rUid, locKey);
 
   const convRef = doc(db, `salons/${salonId}/conversations`, convId);
-  await setDoc(
-    convRef,
-    { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
-    { merge: true }
-  );
+  if (!isGroup) {
+    await setDoc(
+      convRef,
+      { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+      { merge: true }
+    );
+  }
 
   const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
   const batch = writeBatch(db);
@@ -78,7 +106,8 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
     sentAt: serverTimestamp(),
     readBy: [senderUid],
     title,
-    message
+    message,
+    ..._quoteFieldsFromState()
   };
   batch.set(msgRef, msgData);
   batch.set(
@@ -93,7 +122,7 @@ async function _sendFreeTextDirect(recipientUid, recipientName, conversationIdOv
       lastSenderRole: senderRole,
       updatedAt: serverTimestamp(),
       updatedAtMs: Date.now(),
-      unreadFor: { [rUid]: increment(1) }
+      unreadFor: _unreadIncrementsForSend(existing, senderUid, rUid)
     },
     { merge: true }
   );
@@ -114,12 +143,16 @@ window.sendChatConvFreeText = async function() {
     return;
   }
   const replyBtn = document.getElementById('chatConvReplyBtn');
-  const otherUid = replyBtn?.getAttribute('data-other-uid') || '';
-  if (!otherUid) {
+  const openConv = _conversationById(chatState.currentConvId);
+  const isGroup = isChatGroup(openConv);
+  const otherUid = isGroup ? 'group' : (replyBtn?.getAttribute('data-other-uid') || '');
+  if (!isGroup && !otherUid) {
     alert('Select a conversation first.');
     return;
   }
-  const otherName = replyBtn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
+  const otherName = isGroup
+    ? chatGroupTitle(openConv)
+    : (replyBtn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid));
   const sendBtn = document.getElementById('chatConvFreeTextSendBtn');
   if (sendBtn) {
     sendBtn.disabled = true;
@@ -128,6 +161,7 @@ window.sendChatConvFreeText = async function() {
   try {
     await _sendFreeTextDirect(otherUid, otherName, chatState.currentConvId, body);
     if (ta) ta.value = '';
+    if (typeof window.clearChatQuoteReply === 'function') window.clearChatQuoteReply();
     renderConversation(chatState.currentConvId);
   } catch (e) {
     if (e && e.message === 'message_too_long') {
@@ -150,9 +184,10 @@ window.openThreadReply = async function() {
   const btn = document.getElementById('chatConvReplyBtn');
   let otherUid = btn?.getAttribute('data-other-uid') || '';
   const convId = btn?.getAttribute('data-conv-id') || chatState.currentConvId;
-  if (!otherUid && convId && chatState.chatUserProfile?.uid) {
-    const conv = _conversationById(convId);
-    otherUid = _otherUidFromParticipants(conv?.participants, chatState.chatUserProfile.uid) || '';
+  const openConv = convId ? _conversationById(convId) : null;
+  const isGroup = isChatGroup(openConv) || btn?.getAttribute('data-is-group') === '1';
+  if (!otherUid && !isGroup && convId && chatState.chatUserProfile?.uid) {
+    otherUid = _otherUidFromParticipants(openConv?.participants, chatState.chatUserProfile.uid) || '';
   }
   if (btn) {
     btn.disabled = true;
@@ -164,18 +199,27 @@ window.openThreadReply = async function() {
     if (!chatState.chatUserProfile) {
       await loadChatUserProfile();
     }
-    if (!otherUid && convId && chatState.chatUserProfile?.uid) {
+    if (!otherUid && !isGroup && convId && chatState.chatUserProfile?.uid) {
       const conv = _conversationById(convId);
       otherUid = _otherUidFromParticipants(conv?.participants, chatState.chatUserProfile.uid) || '';
     }
-    if (!otherUid || !chatState.chatUserProfile) {
-      console.warn('[Chat] openThreadReply: missing profile or recipient after load', { otherUid, convId });
+    if ((!otherUid && !isGroup) || !chatState.chatUserProfile) {
+      console.warn('[Chat] openThreadReply: missing profile or recipient after load', { otherUid, convId, isGroup });
       return;
     }
-    const resolvedOtherName = btn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid);
-    chatState.chatReplyContext = { uid: otherUid, name: resolvedOtherName, conversationId: convId };
+    const replyConv = convId ? _conversationById(convId) : openConv;
+    const groupReply = isGroup || isChatGroup(replyConv);
+    const resolvedOtherName = groupReply
+      ? chatGroupTitle(replyConv)
+      : (btn?.getAttribute('data-other-name') || _nameForUidForSend(otherUid));
+    chatState.chatReplyContext = {
+      uid: groupReply ? 'group' : otherUid,
+      name: resolvedOtherName,
+      conversationId: convId,
+      isGroup: groupReply
+    };
     await _openChatModal({
-      title: `↩ Reply to ${_nameForUid(otherUid) || 'Someone'}`,
+      title: `↩ Reply to ${groupReply ? resolvedOtherName : (_nameForUid(otherUid) || 'Someone')}`,
       showSendTo: false
     });
   } finally {
@@ -188,23 +232,46 @@ window.openThreadReply = async function() {
 };
 
 // ─── Mark Thread Read ──────────────────────────────────────────────────────────
+async function markVisibleMessagesRead(convId) {
+  const salonId = chatState.chatUserProfile?.salonId;
+  const uid = chatState.chatUserProfile?.uid;
+  if (!salonId || !uid || !convId) return;
+  const pending = (chatState.currentMessages || [])
+    .filter(m => m && m.id && m.senderUid !== uid && !(Array.isArray(m.readBy) && m.readBy.includes(uid)))
+    .slice(-30);
+  if (!pending.length) return;
+  try {
+    const batch = writeBatch(db);
+    pending.forEach(m => {
+      batch.update(doc(db, `salons/${salonId}/conversations/${convId}/messages`, m.id), {
+        readBy: arrayUnion(uid)
+      });
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('[Chat] markVisibleMessagesRead failed', err);
+  }
+}
+
 async function markThreadRead(convId) {
   if (!chatState.chatUserProfile?.salonId || !chatState.chatUserProfile?.uid || !convId) return;
   const conv = chatState.cachedConversationsById[convId] || chatState.allConversations.find(c => c.id === convId) || null;
   if (conv && Array.isArray(conv.participants) && !conv.participants.includes(chatState.chatUserProfile.uid)) return;
   const currentUnread = _unreadCountForUid(conv || {}, chatState.chatUserProfile.uid);
-  if (currentUnread <= 0) return;
   try {
-    await updateDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/conversations`, convId), {
-      [`unreadFor.${chatState.chatUserProfile.uid}`]: 0
-    });
-    if (conv) {
-      conv.unreadFor = { ...(conv.unreadFor || {}), [chatState.chatUserProfile.uid]: 0 };
-      _paintChatNavBadge(_computeChatNavUnreadFromSnapDocs(chatState.allConversations.map(c => ({ data: () => c })), chatState.chatUserProfile.uid));
+    if (currentUnread > 0) {
+      await updateDoc(doc(db, `salons/${chatState.chatUserProfile.salonId}/conversations`, convId), {
+        [`unreadFor.${chatState.chatUserProfile.uid}`]: 0
+      });
+      if (conv) {
+        conv.unreadFor = { ...(conv.unreadFor || {}), [chatState.chatUserProfile.uid]: 0 };
+        _paintChatNavBadge(_computeChatNavUnreadFromSnapDocs(chatState.allConversations.map(c => ({ data: () => c })), chatState.chatUserProfile.uid));
+      }
     }
   } catch (err) {
     console.warn('[Chat] markThreadRead failed', err);
   }
+  void markVisibleMessagesRead(convId);
 }
 
 // ─── Send Modal (new message from main screen) ────────────────────────────────
@@ -341,9 +408,10 @@ window.confirmSendChatMessage = async function() {
   } else {
     const allChecked = document.getElementById('chatRecipientAll')?.checked;
     if (allChecked) {
-      const pool = isMgrPlus(chatState.chatUserProfile.role)
+      const rolePool = isMgrPlus(chatState.chatUserProfile.role)
         ? chatState.chatSalonUsers
         : chatState.chatSalonUsers.filter(u => isMgrPlus(u.role));
+      const pool = rolePool.filter(_userAllowedInActiveLocation);
       recipientUids  = pool.map(u => u.uid);
       recipientNames = pool.map(
         u =>
@@ -370,6 +438,15 @@ window.confirmSendChatMessage = async function() {
   }
 
   const btn = document.getElementById('chatSendConfirmBtn');
+  if (!chatState.chatReplyContext && !_chatHasActiveLocationForWrite()) {
+    const msg = 'Choose a location before sending a chat.';
+    if (typeof window.ffStyledAlert === 'function') {
+      await window.ffStyledAlert(msg, 'Location required');
+    } else {
+      alert(msg);
+    }
+    return;
+  }
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   let firstSentConvId = null;
 
@@ -397,15 +474,19 @@ window.confirmSendChatMessage = async function() {
         const rUid = recipientUids[i];
         const rName = recipientNames[i] || _nameForUidForSend(rUid);
         const convId = chatState.chatReplyContext?.conversationId || buildConvId(senderUid, rUid, locKey);
+        const existingConv = convId ? _conversationById(convId) : null;
+        const isGroup = isChatGroup(existingConv) || chatState.chatReplyContext?.isGroup;
         if (!firstSentConvId) firstSentConvId = convId;
         console.log('[Chat] send → locKey=', locKey, ' convId=', convId);
 
         const convRef = doc(db, `salons/${salonId}/conversations`, convId);
-        await setDoc(
-          convRef,
-          { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
-          { merge: true }
-        );
+        if (!isGroup) {
+          await setDoc(
+            convRef,
+            { participants: [senderUid, rUid].sort(), createdAt: serverTimestamp(), locationId: locKey },
+            { merge: true }
+          );
+        }
 
         const msgRef = doc(collection(db, `salons/${salonId}/conversations/${convId}/messages`));
         const batch = writeBatch(db);
@@ -414,10 +495,11 @@ window.confirmSendChatMessage = async function() {
           senderUid,
           senderName,
           senderRole,
-          recipientUid: rUid,
-          recipientName: rName,
+          recipientUid: isGroup ? 'group' : rUid,
+          recipientName: isGroup ? chatGroupTitle(existingConv) : rName,
           sentAt: serverTimestamp(),
-          readBy: [senderUid]
+          readBy: [senderUid],
+          ..._quoteFieldsFromState()
         };
         if (flowId) {
           msgData.flowId = flowId;
@@ -445,7 +527,7 @@ window.confirmSendChatMessage = async function() {
             lastSenderRole: senderRole,
             updatedAt: serverTimestamp(),
             updatedAtMs: Date.now(),
-            unreadFor: { [rUid]: increment(1) }
+            unreadFor: _unreadIncrementsForSend(existingConv, senderUid, isGroup ? '' : rUid)
           },
           { merge: true }
         );
@@ -454,6 +536,7 @@ window.confirmSendChatMessage = async function() {
       }
     }
 
+    if (typeof window.clearChatQuoteReply === 'function') window.clearChatQuoteReply();
     const replyConvId = chatState.chatReplyContext?.conversationId || null;
     window.closeSendMessageModal();
     if (replyConvId && chatState.currentConvId === replyConvId) {

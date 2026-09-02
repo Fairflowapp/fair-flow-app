@@ -7,7 +7,7 @@
  * element IDs; owns no module state. Pure metric math lives in compute.
  */
 
-import { fmtRate, buildInsights } from "./tasks-analytics-compute.js?v=20260625_tasks_analytics_split";
+import { fmtRate, buildInsights } from "./tasks-analytics-compute.js?v=20260816_tasks_week";
 
 function escapeHtml(value) {
   return String(value == null ? "" : value)

@@ -29,6 +29,7 @@ export const chatState = {
   chatEditingFlowId: null,
   chatFlowDraft: null,   // { title, allowedSenders, steps } for builder
   chatReplyContext: null,   // { uid, name, conversationId }
+  quoteReply: null,         // { id, name, text } — reply to a specific message
   allConversations: [],   // kept in sync by onSnapshot
   lastNonEmptyConversations: [],
   lastRenderedConversations: [],
@@ -37,6 +38,7 @@ export const chatState = {
   currentThreadFallback: null,
   chatMessagesLoading: false,
   currentMessages: [],   // kept in sync by onSnapshot for open conversation
+  currentMessagesConvId: null, // conversation id that currentMessages belong to
   currentConvId: null,   // currently open thread
   chatSendMode: 'template',   // 'template' | 'flow' (free text uses textarea, not this flag)
   chatSelectedFlow: null,
@@ -44,4 +46,5 @@ export const chatState = {
   _chatAuthUid: null,
   _chatAuthSalonId: null,
   _lastChatToastLastMsgMsByConv: new Map(),
+  _chatLastConvSnap: null,
 };

@@ -64,14 +64,14 @@ export function _qaReadSettingsBusinessHours() {
 
 export function _qaReadRawLog() {
   try {
-    if (Array.isArray(window.log) && window.log.length) return window.log;
-  } catch (_) {}
-  try {
     const raw = localStorage.getItem("ffv24_log");
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
     }
+  } catch (_) {}
+  try {
+    if (Array.isArray(window.log) && window.log.length) return window.log;
   } catch (_) {}
   return null;
 }

@@ -4,10 +4,10 @@
 
 import {
   ffNormalizeOnboardingAudience,
-  ffDescribeOnboardingAudience,
 } from "./audience.js?v=20260808_onboarding_hardening";
 import {
   STYLE,
+  _obBtn,
   state,
   requestRender,
   _esc,
@@ -18,14 +18,70 @@ import {
   _loadTechTypes,
   _resetItemDraft,
   _resetPkgDraft,
-} from "./settings-ui-shared.js?v=20260810_od_split_v1";
+} from "./settings-ui-shared.js?v=20260816_od_open";
+
+async function _callOnboardingFn(name, data) {
+  const { getFunctions, httpsCallable } = await import(
+    "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js"
+  );
+  const fn = httpsCallable(getFunctions(undefined, "us-central1"), name);
+  const res = await fn(data || {});
+  return res && res.data;
+}
+
+function _salonId() {
+  try {
+    return String((typeof window !== "undefined" && window.currentSalonId) || "").trim();
+  } catch (_) {
+    return "";
+  }
+}
+
+async function _savePackageViaCallable(packageId, payload) {
+  const salonId = _salonId();
+  if (!salonId) throw new Error("No salon selected");
+  const items = (payload.items || []).map((it, i) => ({
+    templateId: it.templateId,
+    required: it.required !== false,
+    sortOrder: i,
+  }));
+  if (packageId) {
+    await _callOnboardingFn("updateOnboardingPackage", {
+      salonId,
+      packageId,
+      updates: {
+        name: payload.name,
+        description: payload.description || "",
+        active: payload.active !== false,
+        audience: payload.audience || {
+          workerClassifications: [],
+          technicianTypeIds: [],
+        },
+        items,
+      },
+    });
+    return { id: packageId };
+  }
+  return _callOnboardingFn("createOnboardingPackage", {
+    salonId,
+    payload: {
+      name: payload.name,
+      description: payload.description || "",
+      active: payload.active !== false,
+      audience: payload.audience || {
+        workerClassifications: [],
+        technicianTypeIds: [],
+      },
+      items,
+    },
+  });
+}
 
 export async function _renderPackagesList() {
-  const pane = _pane();
-  if (!pane) return;
+  if (!_pane()) return;
   const canEdit = _canManage();
   await _loadTechTypes();
-  const [packages, templates] = await Promise.all([
+  const [packagesRaw, templatesRaw] = await Promise.all([
     typeof window.ffGetOnboardingPackages === "function"
       ? window.ffGetOnboardingPackages()
       : [],
@@ -33,9 +89,14 @@ export async function _renderPackagesList() {
       ? window.ffGetOnboardingTaskTemplates()
       : [],
   ]);
+  const pane = _pane();
+  // Concurrent re-render replaces #ffOnboardingSettingsPane — never write to a detached node.
+  if (!pane || !pane.isConnected) return;
+  const packages = Array.isArray(packagesRaw) ? packagesRaw : [];
+  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
   const tmplMap = {};
   templates.forEach((t) => {
-    tmplMap[t.id] = t;
+    if (t && t.id) tmplMap[t.id] = t;
   });
 
   const header = `
@@ -48,7 +109,7 @@ export async function _renderPackagesList() {
       </div>
       ${
         canEdit
-          ? `<button type="button" id="obCreatePkg" style="${STYLE.btnPrimary}">+ Create Package</button>`
+          ? _obBtn({ id: "obCreatePkg", label: "+ Create Package", style: STYLE.btnPrimary })
           : ""
       }
     </div>
@@ -58,14 +119,9 @@ export async function _renderPackagesList() {
     packages.length === 0
       ? `<div style="${STYLE.empty}">
           <div style="font-size:15px;font-weight:700;color:#111827;margin-bottom:6px;">Create your first package</div>
-          <div style="font-size:13px;color:#6b7280;line-height:1.5;max-width:380px;margin:0 auto 14px;">
+          <div style="font-size:13px;color:#6b7280;line-height:1.5;max-width:380px;margin:0 auto;">
             Packages are sets of items you send to staff. Name one (like “New Employee”), choose the items, then pick who gets it when you start onboarding.
           </div>
-          ${
-            canEdit
-              ? `<button type="button" id="obCreatePkgEmpty" style="${STYLE.btnPrimary}">+ Create Package</button>`
-              : ""
-          }
         </div>`
       : packages
           .map((p) => {
@@ -88,16 +144,16 @@ export async function _renderPackagesList() {
                 </div>
                 ${
                   names.length
-                    ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px;">${names
-                        .map((n) => _esc(n))
-                        .join(" · ")}</div>`
+                    ? '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">' +
+                      names.map((n) => _esc(n)).join(" · ") +
+                      "</div>"
                     : ""
                 }
               </div>
               ${
                 canEdit
-                  ? `<button type="button" data-ob-pkg-edit="${_esc(p.id)}" style="${STYLE.btnSmall}">Edit</button>
-                     <button type="button" data-ob-pkg-del="${_esc(p.id)}" style="${STYLE.btnDanger}">Delete</button>`
+                  ? _obBtn({ attrs: 'data-ob-pkg-edit="' + _esc(p.id) + '"', label: "Edit", style: STYLE.btnSmall }) +
+                    _obBtn({ attrs: 'data-ob-pkg-del="' + _esc(p.id) + '"', label: "Delete", style: STYLE.btnDanger })
                   : ""
               }
             </div>
@@ -114,7 +170,6 @@ export async function _renderPackagesList() {
     requestRender();
   };
   document.getElementById("obCreatePkg")?.addEventListener("click", startCreate);
-  document.getElementById("obCreatePkgEmpty")?.addEventListener("click", startCreate);
 
   pane.querySelectorAll("[data-ob-pkg-edit]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -129,7 +184,19 @@ export async function _renderPackagesList() {
       const id = btn.getAttribute("data-ob-pkg-del");
       if (!window.confirm("Delete this package?")) return;
       try {
-        await window.ffDeleteOnboardingPackage(id);
+        if (typeof window.ffDeleteOnboardingPackage === "function") {
+          await window.ffDeleteOnboardingPackage(id);
+        } else {
+          const salonId = _salonId();
+          if (!salonId) throw new Error("No salon selected");
+          await _callOnboardingFn("deleteOnboardingPackage", {
+            salonId,
+            packageId: id,
+          });
+        }
+        if (typeof window.ffInvalidateOnboardingCatalogCache === "function") {
+          window.ffInvalidateOnboardingCatalogCache();
+        }
         _toast("Package deleted", "success");
         requestRender();
       } catch (e) {
@@ -200,10 +267,9 @@ export function _syncPkgItemsFromForm(pane) {
 }
 
 export async function _renderPackageWizard() {
-  const pane = _pane();
-  if (!pane) return;
+  if (!_pane()) return;
   await _loadTechTypes();
-  const [packages, templates] = await Promise.all([
+  const [packagesRaw, templatesRaw] = await Promise.all([
     typeof window.ffGetOnboardingPackages === "function"
       ? window.ffGetOnboardingPackages()
       : [],
@@ -211,6 +277,10 @@ export async function _renderPackageWizard() {
       ? window.ffGetOnboardingTaskTemplates()
       : [],
   ]);
+  const pane = _pane();
+  if (!pane || !pane.isConnected) return;
+  const packages = Array.isArray(packagesRaw) ? packagesRaw : [];
+  const templates = Array.isArray(templatesRaw) ? templatesRaw : [];
 
   if (state.view === "pkg_edit" && !state.pkgDraft) {
     const existing = packages.find((p) => p.id === state.editingPackageId);
@@ -226,180 +296,94 @@ export async function _renderPackageWizard() {
   if (!state.pkgDraft) _resetPkgDraft(null);
 
   const d = state.pkgDraft;
-  const step = d.step || "basics";
-  const steps = ["basics", "items", "review"];
-  const stepIdx = Math.max(0, steps.indexOf(step));
-  const stepLabel =
-    step === "basics"
-      ? "1 · Name"
-      : step === "items"
-        ? "2 · Choose items"
-        : "3 · Review";
+  const activeTemplates = (templates || []).filter((t) => t.active !== false);
+  const byId = {};
+  (d.items || []).forEach((it) => {
+    if (it && it.templateId) byId[it.templateId] = it;
+  });
+  const selectedCount = (d.items || []).length;
 
-  let body = "";
-  if (step === "basics") {
-    body = `
+  const itemsBlock =
+    activeTemplates.length === 0
+      ? `<div style="${STYLE.empty};margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:6px;">No items yet</div>
+          <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">Create an item first — like a driver’s license upload or an NDA.</div>
+              <button type="button" id="obPkgNewItemEmpty" onclick="window.ffOnboardingAddItem&&window.ffOnboardingAddItem()" style="${STYLE.btnPrimary}">+ Create New Item</button>
+        </div>`
+      : `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:4px;">
+          ${activeTemplates
+            .map((t) => {
+              const it = byId[t.id];
+              const checked = !!it || d.preselectTemplateId === t.id;
+              const required = it ? it.required !== false : t.defaultRequired !== false;
+              return `
+              <div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid ${checked ? "#ddd6fe" : "#e5e7eb"};border-radius:8px;background:${checked ? "#f5f3ff" : "#fff"};">
+                <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;font-size:12px;color:#111827;">
+                  <input type="checkbox" data-ob-pkg-item="${_esc(t.id)}" ${checked ? "checked" : ""} />
+                  <span style="min-width:0;">
+                    <span style="font-weight:600;">${_esc(t.name)}</span>
+                    <span style="color:#6b7280;"> · ${_esc(_itemKindLabel(t.taskType))}</span>
+                  </span>
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;">
+                  <input type="checkbox" data-ob-pkg-req="${_esc(t.id)}" ${required ? "checked" : ""} />
+                  Required
+                </label>
+              </div>`;
+            })
+            .join("")}
+        </div>`;
+
+  pane.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <button type="button" id="obPkgCancel" style="${STYLE.btnGhost}">← Back</button>
+    </div>
+    <div style="${STYLE.formBox}" id="obPkgForm">
+      <div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:4px;">
+        ${state.view === "pkg_edit" ? "Edit package" : "Create package"}
+      </div>
+      <p style="margin:0 0 14px;font-size:12px;color:#6b7280;line-height:1.45;">
+        Check items to include them. Uncheck to remove. You can also create a new item here.
+      </p>
       <label style="${STYLE.label}">Package name</label>
       <input id="obPkgName" type="text" value="${_esc(d.name)}" placeholder="e.g. New Employee" style="${STYLE.input};margin-bottom:10px;" />
       <label style="${STYLE.label}">Short description (optional)</label>
-      <textarea id="obPkgDesc" rows="2" style="${STYLE.input};margin-bottom:10px;">${_esc(d.description)}</textarea>
-      <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.45;">
-        You’ll choose who receives this package when you start onboarding for each employee.
-      </p>
-    `;
-  } else if (step === "items") {
-    const activeTemplates = (templates || []).filter((t) => t.active !== false);
-    const byId = {};
-    (d.items || []).forEach((it) => {
-      if (it && it.templateId) byId[it.templateId] = it;
-    });
-    body = `
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-        <div style="font-size:12px;color:#6b7280;">Select what employees in this package need to complete.</div>
-        <button type="button" id="obPkgNewItem" style="${STYLE.btnSmall}">+ Create New Item</button>
+      <textarea id="obPkgDesc" rows="2" style="${STYLE.input};margin-bottom:14px;">${_esc(d.description)}</textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <div style="font-size:13px;font-weight:700;color:#111827;">Items in this package (${selectedCount})</div>
+        <button type="button" id="obPkgNewItem" onclick="window.ffOnboardingAddItem&&window.ffOnboardingAddItem()" style="${STYLE.btnSmall}">+ Add item</button>
       </div>
-      ${
-        activeTemplates.length === 0
-          ? `<div style="${STYLE.empty};margin-bottom:10px;">
-              <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:6px;">No items yet</div>
-              <div style="font-size:12px;color:#6b7280;margin-bottom:12px;">Create an item first — like a driver’s license upload or an NDA.</div>
-              <button type="button" id="obPkgNewItemEmpty" style="${STYLE.btnPrimary}">+ Create New Item</button>
-            </div>`
-          : `<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
-              ${activeTemplates
-                .map((t) => {
-                  const it = byId[t.id];
-                  const checked = !!it || d.preselectTemplateId === t.id;
-                  const required = it ? it.required !== false : t.defaultRequired !== false;
-                  return `
-                  <div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;">
-                    <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;font-size:12px;color:#111827;">
-                      <input type="checkbox" data-ob-pkg-item="${_esc(t.id)}" ${checked ? "checked" : ""} />
-                      <span style="min-width:0;">
-                        <span style="font-weight:600;">${_esc(t.name)}</span>
-                        <span style="color:#6b7280;"> · ${_esc(_itemKindLabel(t.taskType))}</span>
-                      </span>
-                    </label>
-                    <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6b7280;white-space:nowrap;">
-                      <input type="checkbox" data-ob-pkg-req="${_esc(t.id)}" ${required ? "checked" : ""} />
-                      Required
-                    </label>
-                  </div>`;
-                })
-                .join("")}
-            </div>`
-      }
-    `;
-  } else {
-    const chosen = (d.items || [])
-      .map((it) => {
-        const t = templates.find((x) => x.id === it.templateId);
-        return t
-          ? { name: t.name, kind: _itemKindLabel(t.taskType), required: it.required !== false }
-          : null;
-      })
-      .filter(Boolean);
-    body = `
-      <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:8px;">Review</div>
-      <div style="${STYLE.card};margin-bottom:10px;">
-        <div style="font-size:14px;font-weight:700;">${_esc(d.name || "Untitled")}</div>
-        ${d.description ? `<div style="font-size:12px;color:#6b7280;margin-top:4px;">${_esc(d.description)}</div>` : ""}
-        <div style="font-size:12px;color:#6b7280;margin-top:8px;">You pick who gets this when you start onboarding.</div>
-      </div>
-      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">Items (${chosen.length})</div>
-      ${
-        chosen.length
-          ? chosen
-              .map(
-                (c) =>
-                  `<div style="font-size:12px;color:#111827;padding:6px 0;border-bottom:1px solid #f3f4f6;">
-                    ${_esc(c.name)}
-                    <span style="color:#6b7280;"> · ${_esc(c.kind)} · ${c.required ? "Required" : "Optional"}</span>
-                  </div>`
-              )
-              .join("")
-          : `<div style="font-size:12px;color:#b91c1c;">No items selected — go back and choose at least one.</div>`
-      }
-    `;
-  }
-
-  pane.innerHTML = `
-    <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-      <button type="button" id="obPkgCancel" style="${STYLE.btnGhost}">← Cancel</button>
-      <div style="font-size:11px;font-weight:700;color:#7c3aed;">${_esc(stepLabel)}</div>
-    </div>
-    <div style="${STYLE.formBox}" id="obPkgForm">
-      <div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:12px;">
-        ${state.view === "pkg_edit" ? "Edit package" : "Create package"}
-      </div>
-      ${body}
+      ${itemsBlock}
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap;">
-        ${
-          stepIdx > 0
-            ? `<button type="button" id="obPkgPrev" style="${STYLE.btnGhost}">Back</button>`
-            : ""
-        }
-        ${
-          step !== "review"
-            ? `<button type="button" id="obPkgNext" style="${STYLE.btnPrimary}">Continue</button>`
-            : `<button type="button" id="obPkgSave" style="${STYLE.btnPrimary}">${
-                state.view === "pkg_edit" ? "Save Package" : "Create Package"
-              }</button>`
-        }
+        <button type="button" id="obPkgCancel2" style="${STYLE.btnGhost}">Cancel</button>
+        <button type="button" id="obPkgSave" style="${STYLE.btnPrimary}">${
+          state.view === "pkg_edit" ? "Save Package" : "Create Package"
+        }</button>
       </div>
     </div>
   `;
 
   const form = document.getElementById("obPkgForm") || pane;
 
-  const persistBasics = () => {
+  const persistForm = () => {
     d.name = String((document.getElementById("obPkgName") || {}).value || "").trim();
     d.description = String((document.getElementById("obPkgDesc") || {}).value || "").trim();
-    // Owner chooses the recipient when starting onboarding — packages stay universal.
     d.audience = ffNormalizeOnboardingAudience({});
+    _syncPkgItemsFromForm(form);
   };
 
-  document.getElementById("obPkgCancel")?.addEventListener("click", () => {
+  const leaveWizard = () => {
     if (!window.confirm("Leave package setup? Unsaved changes will be lost.")) return;
     state.view = null;
     state.editingPackageId = null;
     state.pkgDraft = null;
     requestRender();
-  });
-
-  document.getElementById("obPkgPrev")?.addEventListener("click", () => {
-    if (step === "items") _syncPkgItemsFromForm(form);
-    if (step === "review") {
-      /* no-op */
-    }
-    if (step === "basics") persistBasics();
-    d.step = steps[Math.max(0, stepIdx - 1)];
-    requestRender();
-  });
-
-  document.getElementById("obPkgNext")?.addEventListener("click", () => {
-    if (step === "basics") {
-      persistBasics();
-      if (!d.name) {
-        _toast("Please enter a package name", "error");
-        return;
-      }
-      d.step = "items";
-    } else if (step === "items") {
-      _syncPkgItemsFromForm(form);
-      if (!d.items.length) {
-        _toast("Choose at least one item, or create a new one", "error");
-        return;
-      }
-      d.preselectTemplateId = null;
-      d.step = "review";
-    }
-    requestRender();
-  });
+  };
+  document.getElementById("obPkgCancel")?.addEventListener("click", leaveWizard);
+  document.getElementById("obPkgCancel2")?.addEventListener("click", leaveWizard);
 
   const startInlineItem = () => {
-    if (step === "basics") persistBasics();
-    if (step === "items") _syncPkgItemsFromForm(form);
+    persistForm();
     state.returnToPackage = true;
     state.view = "item_create";
     state.editingItemId = null;
@@ -410,6 +394,7 @@ export async function _renderPackageWizard() {
   document.getElementById("obPkgNewItemEmpty")?.addEventListener("click", startInlineItem);
 
   document.getElementById("obPkgSave")?.addEventListener("click", async () => {
+    persistForm();
     if (!d.name) {
       _toast("Please enter a package name", "error");
       return;
@@ -431,11 +416,21 @@ export async function _renderPackageWizard() {
     };
     try {
       if (state.view === "pkg_edit" && state.editingPackageId) {
-        await window.ffUpdateOnboardingPackage(state.editingPackageId, payload);
+        if (typeof window.ffUpdateOnboardingPackage === "function") {
+          await window.ffUpdateOnboardingPackage(state.editingPackageId, payload);
+        } else {
+          await _savePackageViaCallable(state.editingPackageId, payload);
+        }
         _toast("Package updated", "success");
-      } else {
+      } else if (typeof window.ffCreateOnboardingPackage === "function") {
         await window.ffCreateOnboardingPackage(payload);
         _toast("Package created", "success");
+      } else {
+        await _savePackageViaCallable(null, payload);
+        _toast("Package created", "success");
+      }
+      if (typeof window.ffInvalidateOnboardingCatalogCache === "function") {
+        window.ffInvalidateOnboardingCatalogCache();
       }
       state.view = null;
       state.editingPackageId = null;

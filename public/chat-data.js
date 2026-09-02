@@ -12,10 +12,9 @@ import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import {
   CHAT_DEFAULT_LOC_KEY,
   _chatSortByOrder,
-  _itemMatchesLocation,
   _convLocKey,
-} from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+} from "./chat-helpers.js?v=20260901_chat_iso";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
 
 // ─── Location helpers (per-location chat isolation) ────────────────────────────
 /**
@@ -43,21 +42,57 @@ function _activeLocKey() {
 
 /**
  * Branch key for filtering conversations, badge, and toasts.
- * When Queue shows "not linked to a staff profile" (staff_unresolved), the
- * location switcher may still hold a stale `ff_active_location_id` — then
- * scoping chat to that id hides all legacy/default-branch DMs.
+ * Always follows the header location switcher — never fall back to "default"
+ * while staff is hydrating, or default-location threads leak into every branch.
  */
 function _chatEffectiveLocKey() {
+  return _activeLocKey();
+}
+
+function _chatUserHasMultipleLocations() {
   try {
-    const w = typeof window !== 'undefined' ? window : {};
-    if (typeof w.ffCurrentUserSalonOwnerPermissionBypass === 'function' && w.ffCurrentUserSalonOwnerPermissionBypass()) {
-      return _activeLocKey();
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      if (window.ffUserHasMultipleLocations()) return true;
     }
-    if (typeof w.ffStaffPermissionLoadState === 'function' && w.ffStaffPermissionLoadState() === 'staff_unresolved') {
-      return CHAT_DEFAULT_LOC_KEY;
+    if (typeof window !== 'undefined' && typeof window.ffGetLocations === 'function') {
+      const locs = (window.ffGetLocations() || []).filter(l => l && l.isActive !== false);
+      if (locs.length > 1) return true;
     }
   } catch (_) {}
-  return _activeLocKey();
+  return false;
+}
+
+function _chatHasActiveLocationForWrite() {
+  if (!_chatUserHasMultipleLocations()) return true;
+  return !!_readActiveLocationId();
+}
+
+function _chatPrimaryLocationId() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffResolveCurrentStaff === 'function' && typeof w.ffEnsureStaffLocationFields === 'function') {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === 'function') {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+/** Unstamped / salon-default items stay on the primary branch only. */
+function _legacyDefaultVisibleAt(locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  if (!_chatUserHasMultipleLocations()) return true;
+  if (k === CHAT_DEFAULT_LOC_KEY) return true;
+  const primary = _chatPrimaryLocationId();
+  return !!primary && k === primary;
 }
 
 function getChatAccountId() {
@@ -76,9 +111,23 @@ function getChatAccountId() {
   return null;
 }
 
+async function loadSharedChatShareEnabled() {
+  const accountId = getChatAccountId();
+  if (!accountId) return false;
+  try {
+    const snap = await getDoc(doc(db, `accounts/${accountId}/shared/chatTemplates`));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    return data.shareEnabled === true || data.enabled === true;
+  } catch (e) {
+    console.warn('[SharedChat] share flag load failed', e);
+    return false;
+  }
+}
+
 async function loadSharedChatTemplates() {
   const accountId = getChatAccountId();
   if (!accountId) return [];
+  if (!(await loadSharedChatShareEnabled())) return [];
   try {
     const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatTemplates/items`));
     return snap.docs
@@ -94,6 +143,7 @@ async function loadSharedChatTemplates() {
 async function loadSharedChatFlows() {
   const accountId = getChatAccountId();
   if (!accountId) return [];
+  if (!(await loadSharedChatShareEnabled())) return [];
   try {
     const snap = await getDocs(collection(db, `accounts/${accountId}/shared/chatFlows/items`));
     return snap.docs
@@ -222,7 +272,7 @@ async function loadChatTemplates(options = {}) {
       ));
       const localTemplates = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(t => _itemMatchesLocation(t, locKey));
+        .filter(t => _itemVisibleAtLocation(t, locKey));
       chatState.chatTemplates = [...sharedTemplates, ...localTemplates];
     } catch (e) {
       console.warn('[Chat] loadChatTemplates orderBy failed, retrying without order', e?.code, e?.message);
@@ -230,7 +280,7 @@ async function loadChatTemplates(options = {}) {
         const snap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatTemplates`));
         const localTemplates = snap.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter(t => _itemMatchesLocation(t, locKey))
+          .filter(t => _itemVisibleAtLocation(t, locKey))
           .sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
         chatState.chatTemplates = [...sharedTemplates, ...localTemplates];
       } catch (e2) {
@@ -257,7 +307,7 @@ async function loadChatFlows(options = {}) {
       const flowsSnap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows`));
       const flows = (await Promise.all(flowsSnap.docs.map(async (fd) => {
         const flowData = { id: fd.id, ...fd.data() };
-        if (!_itemMatchesLocation(flowData, locKey)) return null;
+        if (!_itemVisibleAtLocation(flowData, locKey)) return null;
         try {
           const stepsSnap = await getDocs(collection(db, `salons/${chatState.chatUserProfile.salonId}/chatFlows/${fd.id}/steps`));
           flowData.steps = await Promise.all(stepsSnap.docs.map(async (sd) => {
@@ -302,36 +352,22 @@ async function loadChatFlows(options = {}) {
 }
 
 // ─── Conversation location scoping + cache (shared by core + subscriptions) ─────
-/** True when a conversation doc belongs to the given location key. */
+function _itemVisibleAtLocation(item, locKey) {
+  const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
+  if (!item || typeof item !== 'object') return _legacyDefaultVisibleAt(k);
+  const v = typeof item.locationId === 'string' ? item.locationId.trim() : '';
+  const itemKey = v || CHAT_DEFAULT_LOC_KEY;
+  if (itemKey === k) return true;
+  if (itemKey === CHAT_DEFAULT_LOC_KEY) return _legacyDefaultVisibleAt(k);
+  return false;
+}
+
+/** True when a conversation belongs to the given location. Never mix branches. */
 function _convMatchesLocation(conv, locKey) {
   const k = typeof locKey === 'string' && locKey.trim() ? locKey.trim() : CHAT_DEFAULT_LOC_KEY;
   const convKey = _convLocKey(conv);
   if (convKey === k) return true;
-  // Legacy / salon-default DMs (branch "default") stay visible at any location the
-  // user is allowed to work in — not only primary. Otherwise after staff + location
-  // hydrate (~1s after load) the nav badge recomputes with a concrete location id
-  // and incorrectly drops to 0 while the thread list still shows unread.
-  if (convKey === CHAT_DEFAULT_LOC_KEY && k !== CHAT_DEFAULT_LOC_KEY) {
-    try {
-      const w = typeof window !== 'undefined' ? window : {};
-      if (typeof w.ffGetUserAllowedLocations === 'function') {
-        const locs = w.ffGetUserAllowedLocations();
-        if (Array.isArray(locs) && locs.some((loc) => loc && String(loc.id || '').trim() === k)) {
-          return true;
-        }
-      }
-      if (typeof w.ffResolveCurrentStaffRowFromFfStaffV1 === 'function') {
-        const row = w.ffResolveCurrentStaffRowFromFfStaffV1();
-        if (row && typeof w.ffEnsureStaffLocationFields === 'function') {
-          const f = w.ffEnsureStaffLocationFields(row);
-          const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
-          if (primary && primary === k) return true;
-          const allowed = Array.isArray(f.allowedLocationIds) ? f.allowedLocationIds : [];
-          if (allowed.some((id) => String(id || '').trim() === k)) return true;
-        }
-      }
-    } catch (_) {}
-  }
+  if (convKey === CHAT_DEFAULT_LOC_KEY) return _legacyDefaultVisibleAt(k);
   return false;
 }
 
@@ -346,6 +382,7 @@ export {
   _readActiveLocationId,
   _activeLocKey,
   _chatEffectiveLocKey,
+  _chatHasActiveLocationForWrite,
   _convMatchesLocation,
   _cacheConversations,
   getChatAccountId,

@@ -19,12 +19,13 @@ import {
   formatMoney,
   ffStaffProductsGetOverrideForStaffMember,
   ffStaffProductsDefaultsForStaffMember,
-} from "./products-helpers.js?v=20260626_products_split";
-import { pstate } from "./products-state.js?v=20260626_products_split";
+} from "./products-helpers.js?v=20260902_prod_cats";
+import { pstate } from "./products-state.js?v=20260902_prod_cats";
 import {
   getSalonId,
   ffCanManageProducts,
   ffProductsManageError,
+  ffProductsActiveLocId,
   findCategory,
   getCategorySubcategories,
   genSubId,
@@ -34,11 +35,11 @@ import {
   saveProductInventory,
   ffStaffProductsLoadForStaffMember,
   ffStaffProductsSaveOverrideForStaffMember,
-} from "./products-data.js?v=20260626_products_split";
+} from "./products-data.js?v=20260902_prod_cats";
 import {
   ffWireProductToggles,
   subcategoryOptionsHtml,
-} from "./products-ui.js?v=20260626_products_split";
+} from "./products-ui.js?v=20260902_prod_cats";
 
 // ── injected via initProductsEditor() (wired in the products.js barrel) ──
 let renderProducts;
@@ -205,7 +206,12 @@ function renderProductsEditor() {
       console.warn("[Products] Unable to create catalog item", error);
       const target = document.getElementById("productsEditorError");
       if (target) {
-        target.textContent = "Unable to save this product setup right now.";
+        const msg = String((error && error.message) || "");
+        target.textContent = /choose a location/i.test(msg)
+          ? "Choose a location to add products."
+          : /permission/i.test(msg)
+            ? "You do not have permission to save products."
+            : (msg || "Unable to save this product setup right now.");
         target.style.display = "block";
       }
     }
@@ -419,6 +425,7 @@ async function createProduct(payload) {
   if (!ffCanManageProducts()) throw ffProductsManageError();
   const salonId = getSalonId();
   if (!salonId) throw new Error("No salon selected");
+  const loc = ffProductsActiveLocId();
   const retailPrice = Number(payload?.retailPrice);
   const costPrice = Number(payload?.costPrice);
   const ref = await addDoc(collection(db, `salons/${salonId}/products`), {
@@ -432,6 +439,7 @@ async function createProduct(payload) {
     taxable: payload?.taxable === true,
     active: payload?.active !== false,
     sortOrder: pstate.products.length,
+    ...(loc ? { locationId: loc } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -570,7 +578,12 @@ function wireNewProductForm() {
       console.warn("[Products] Unable to create product", error);
       const target = document.getElementById("productsNewProductError");
       if (target) {
-        target.textContent = "Unable to save this product setup right now.";
+        const msg = String((error && error.message) || "");
+        target.textContent = /choose a location/i.test(msg)
+          ? "Choose a location to add products."
+          : /permission/i.test(msg)
+            ? "You do not have permission to save products."
+            : (msg || "Unable to save this product setup right now.");
         target.style.display = "block";
       }
     }

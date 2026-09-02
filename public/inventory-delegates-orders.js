@@ -2,8 +2,8 @@
 // Orders tab + Order Detail click/keydown/focusout delegates extracted verbatim from
 // ensureInventoryScreenDelegates in inventory.js (Phase 13).
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
-import { removeApprovedContributionForCell, bindInventoryOrderCellLongPressOnce } from "./inventory-table.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
+import { removeApprovedContributionForCell, bindInventoryOrderCellLongPressOnce } from "./inventory-table.js?v=20260902_inv_iso";
 import {
   bindOrderDetailRowLongPressOnce,
   toggleShoppingRowQty,
@@ -19,7 +19,7 @@ import {
   commitOrderLineInventoryPrice,
   deleteInventoryOrderReceipt,
   inventoryOrderDraftToast,
-} from "./inventory-orders.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders.js?v=20260902_inv_iso";
 
 let mountOrRefreshMockUi;
 

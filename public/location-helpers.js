@@ -437,10 +437,10 @@
       } catch (e) {}
     }
 
+    // pickActiveId already prefers the stored/active branch when it is still
+    // allowed. Do not snap owners back to primary on staff/locations refresh —
+    // that made Brickell reappear after a manual switch to Key Biscayne.
     var nextId = pickActiveId(allowedIdsForActive, primaryIdForActive);
-    if (isOwnerBypass() && primaryIdForActive && reason !== "manual") {
-      nextId = primaryIdForActive;
-    }
     setActive(nextId, { reason: reason || "recompute" });
 
     // Some modules may load after the location event already fired during boot.

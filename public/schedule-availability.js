@@ -5,7 +5,16 @@ import {
   getEffectiveShiftSegmentsForDay,
   clipTimeWindowToBestShiftSegment,
   clipTimeWindowToUnionOfShiftSegments,
-} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers.js?v=20260902_sched_dual";
+import { inboxItemMatchesActiveLocation, inboxGetActiveLocationId } from "./inbox-helpers.js?v=20260901_sched_req";
+
+function requestBelongsToActiveScheduleLocation(request) {
+  try {
+    return inboxItemMatchesActiveLocation(request, inboxGetActiveLocationId());
+  } catch (_) {
+    return false;
+  }
+}
 
 function normalizeDateKey(value) {
   if (!value) return "";
@@ -344,7 +353,7 @@ function getApprovedAvailabilityOverrides(staff, requests, dateRange) {
   const overridesByDate = {};
 
   (Array.isArray(requests) ? requests : []).forEach((request) => {
-    if (!isApprovedRequest(request) || !requestMatchesStaff(request, staff)) return;
+    if (!isApprovedRequest(request) || !requestBelongsToActiveScheduleLocation(request) || !requestMatchesStaff(request, staff)) return;
     const requestDates = buildRequestDateKeys(request).filter((dateKey) => dateKeys.has(dateKey));
     requestDates.forEach((dateKey) => {
       const override = getRequestOverrideInfo(request, dateKey);
@@ -536,7 +545,7 @@ function getInboxApprovalDisplayForDate(staff, requests, dateKey) {
   let earlyLeave = null;
 
   (Array.isArray(requests) ? requests : []).forEach((req) => {
-    if (!isApprovedRequest(req) || !requestMatchesStaff(req, staff)) return;
+    if (!isApprovedRequest(req) || !requestBelongsToActiveScheduleLocation(req) || !requestMatchesStaff(req, staff)) return;
     const keys = buildRequestDateKeys(req);
     if (!keys.includes(normalized)) return;
 

@@ -68,10 +68,31 @@ export function classifyEsignError(e) {
       msg,
     };
   }
+  if (/signBlob|iam\.serviceAccounts|Permission ['"]?iam\./i.test(msg)) {
+    return {
+      kind: "generic",
+      title: "Couldn’t open the document",
+      body: "Please try again. If it still fails, ask your manager to send the form again.",
+      msg,
+    };
+  }
   return {
     kind: "generic",
-    title: "Couldn’t submit signature",
+    title: "Couldn’t open the form",
     body: msg,
     msg,
   };
+}
+
+export function pdfJsSourceFromPacket(packet) {
+  if (packet && packet.pdfBase64) {
+    const bin = atob(String(packet.pdfBase64));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return { data: bytes };
+  }
+  if (packet && packet.pdfReadUrl) {
+    return { url: packet.pdfReadUrl };
+  }
+  throw new Error("Document is missing. Ask your manager to send the form again.");
 }

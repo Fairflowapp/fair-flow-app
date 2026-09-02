@@ -8,11 +8,12 @@
 import { collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { getTicketsSelfEmployeeFilterId, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { getTicketsSelfEmployeeFilterId, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole, getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260901_loc_isolate";
 import { getTicketTaxConfig } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
 import { fetchClosedTicketsForSummary, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, formatSummaryMoney, formatSummaryInt, getSummaryFilterDateRangeFromDom, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { loadServices, subscribeProductsCatalog } from "./tickets-catalog-data.js?v=20260902_prod_cats";
+import { productDocInActiveLoc } from "./products-location.js?v=20260902_prod_cats";
 
 function paintTicketsSummaryTable(wrap, tbody, tfoot, emptyMsg, summaryRows, totals) {
   // Mobile drill-down: tapping a summary row toggles its detail breakdown.
@@ -145,10 +146,14 @@ async function loadAndRenderTicketsSummary() {
     if (!ticketsState.salonProducts.length) {
       try {
         subscribeProductsCatalog();
+        if (typeof window.ffLoadProductCatalogShareEnabled === "function") {
+          try { await window.ffLoadProductCatalogShareEnabled(); } catch (_) {}
+        }
         const prodSnap = await getDocs(collection(db, `salons/${salonId}/products`));
-        ticketsState.salonProducts = prodSnap.docs
+        ticketsState._rawSalonProducts = prodSnap.docs
           .map((d) => ({ id: d.id, ...d.data() }))
           .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+        ticketsState.salonProducts = ticketsState._rawSalonProducts.filter(productDocInActiveLoc);
       } catch (catalogErr) {
         console.warn('[Tickets] Summary products catalog load failed', catalogErr);
       }
@@ -216,8 +221,15 @@ function populateTicketsEmployeeSelect() {
   optAll.value = 'all';
   optAll.textContent = 'ALL EMPLOYEES';
   sel.appendChild(optAll);
+  const activeLoc = (() => {
+    try { return String(getActiveLocationIdForTickets() || '').trim(); } catch (_) { return ''; }
+  })();
   for (const s of staffList) {
     if (!s || s.id == null || s.id === '') continue;
+    if (activeLoc) {
+      const allowed = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds : [];
+      if (allowed.length && allowed.indexOf(activeLoc) === -1) continue;
+    }
     const o = document.createElement('option');
     o.value = String(s.id);
     o.textContent = (s.name || s.email || 'Staff').trim();

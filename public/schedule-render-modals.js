@@ -6,8 +6,9 @@ import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   findDraftDay,
   persistScheduleDraftOverrideFromState,
+  pushScheduleUndoSnapshot,
   syncPublishedWeekStandByToCloud,
-} from "./schedule-draft.js?v=20260816_cell_notes7";
+} from "./schedule-draft.js?v=20260902_sched_dual";
 import {
   filterCoverageWarnings,
   formatBoardDayLabel,
@@ -22,11 +23,17 @@ import {
   escapeScheduleAttr,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
 
 // -- injected via initScheduleRenderModals() (wired in schedule-render.js) --
 let STAND_BY_SLOTS;
-let cloneStandByByDateMap;
+let cloneStandByByDateMap = function cloneStandByByDateMap(map) {
+  try {
+    return JSON.parse(JSON.stringify(map && typeof map === "object" ? map : {}));
+  } catch (_) {
+    return {};
+  }
+};
 let getBusinessStatusForDate;
 let parseStandByDayEntry;
 let renderScheduleBoard;
@@ -36,13 +43,15 @@ let standByDayEntryHasAny;
 export function initScheduleRenderModals(deps) {
   ({
     STAND_BY_SLOTS,
-    cloneStandByByDateMap,
     getBusinessStatusForDate,
     parseStandByDayEntry,
     renderScheduleBoard,
     resolveStandByStaffMember,
     standByDayEntryHasAny,
   } = deps);
+  if (typeof deps.cloneStandByByDateMap === "function") {
+    cloneStandByByDateMap = deps.cloneStandByByDateMap;
+  }
 }
 
 function renderStandBySlotNamesHtml(slotIds, staffList, draftForNames, standbyTextStyle) {
@@ -164,16 +173,25 @@ function ensureScheduleStandByModal() {
     const id2 = String(sel2?.value || "").trim();
     const viewKey = scheduleState.schedulePreviewView === "technicians" ? "technicians" : "management";
     const dk = scheduleState.scheduleStandByModalDateKey;
-    const prevMap =
-      scheduleState.schedulePreviewState.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
-        ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
-        : {};
+    let prevMap = {};
+    try {
+      prevMap = JSON.parse(
+        JSON.stringify(
+          scheduleState.schedulePreviewState.standByByDate && typeof scheduleState.schedulePreviewState.standByByDate === "object"
+            ? scheduleState.schedulePreviewState.standByByDate
+            : {},
+        ),
+      );
+    } catch (_) {
+      prevMap = {};
+    }
     const base = parseStandByDayEntry(prevMap[dk]);
     prevMap[dk] = {
       ...base,
       [viewKey]: [id1, id2],
     };
     if (!standByDayEntryHasAny(prevMap[dk])) delete prevMap[dk];
+    pushScheduleUndoSnapshot();
     scheduleState.schedulePreviewState.standByByDate = prevMap;
     if (typeof window !== "undefined") {
       window.ffSchedulePreviewState = scheduleState.schedulePreviewState;

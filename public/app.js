@@ -349,7 +349,7 @@ onAuthStateChanged(auth, async user => {
       __ffChatBadgeEarlyGen++;
       const gen = __ffChatBadgeEarlyGen;
       if (sid && uid) {
-        import("/chat.js?v=20260505_chat_flow_desktop_mobile")
+        import("/chat.js?v=20260819_live_group_title")
           .then((m) => {
             if (gen !== __ffChatBadgeEarlyGen) return;
             if (m.subscribeToChatBadge) m.subscribeToChatBadge(uid, sid);
@@ -1824,6 +1824,7 @@ function _ffOwnerDefaultPermissions() {
     tickets_manage: true,
     tasks_view: true,
     tasks_use: true,
+    tasks_view_all: true,
     tasks_manage: true,
     tasks_reset: true,
     chat_view: true,
@@ -2718,7 +2719,7 @@ function ffApplyActiveMembership(membership, legacyUserData) {
       // we kick it off explicitly here using the chosen salonId.
       if (salonId && typeof user !== "undefined") {
         try {
-          import("/chat.js?v=20260505_chat_flow_desktop_mobile")
+          import("/chat.js?v=20260819_live_group_title")
             .then((m) => {
               try {
                 if (m && typeof m.subscribeToChatBadge === "function") m.subscribeToChatBadge(window.ffAuth?.currentUser?.uid, salonId);
@@ -4288,8 +4289,8 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
       extra: extra || null,
     };
     // Call addHistoryEntry if available (defined in index.html), then extend the entry
-    if (typeof addHistoryEntry === 'function') {
-      addHistoryEntry(entry.action, entry.role, entry.performedBy, entry.worker, entry.source);
+    if (typeof window.addHistoryEntry === 'function') {
+      window.addHistoryEntry(entry.action, entry.role, entry.performedBy, entry.worker, entry.source);
       // Extend the last entry with task-specific fields
       const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       if (logArr.length > 0) {
@@ -4305,6 +4306,15 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
       enforceHistoryRetention();
     } else {
       // Fallback: write directly to ffv24_log
+      if (typeof window.ffHistoryHasActiveLocationForWrite === 'function' && !window.ffHistoryHasActiveLocationForWrite()) {
+        console.warn('[TASKS HISTORY] write skipped: choose a location');
+        return;
+      }
+      let activeLocId = '';
+      try {
+        if (typeof window.ffHistoryActiveLocationId === 'function') activeLocId = window.ffHistoryActiveLocationId();
+        else if (typeof window.ffGetActiveLocationId === 'function') activeLocId = String(window.ffGetActiveLocationId() || '').trim();
+      } catch (_) {}
       const logArr = ffSafeParseJSON(localStorage.getItem('ffv24_log'), []);
       const historyEntry = {
         date: now.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' }),
@@ -4314,6 +4324,7 @@ function addTasksHistoryEntry({ action, taskId, taskTitle, worker, role, perform
         performedBy: entry.performedBy || '',
         worker: entry.worker || '',
         source: entry.source || 'tasks',
+        locationId: activeLocId,
         ts: entry.ts,
         dateTime: entry.dateTime,
         taskId: entry.taskId,

@@ -3,23 +3,21 @@
 // and loading state. Extracted verbatim from schedule-render.js
 // (schedule-render split T2).
 
-import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260615_default_schedule_source";
+import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260902_sched_dual";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260702_schedule_ack";
-import { bindScheduleBoardDnD } from "./schedule-dnd.js?v=20260702_schedule_dnd";
+import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260902_sched_dual";
+import { bindScheduleBoardDnD } from "./schedule-dnd.js?v=20260827_1258notes";
 import {
   buildAssignmentLookup,
   dayHasManualOff,
   getAssignmentId,
   getCellNoteForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260816_cell_notes7";
+} from "./schedule-draft.js?v=20260902_sched_dual";
 import { _ffActiveLocationNameForIcs } from "./schedule-ics.js?v=20260702_schedule_ics";
 import {
   cellShowsScheduleWarningDot,
   compareScheduleHHMM,
-  filterCoverageWarnings,
-  filterNonCoverageWarnings,
   formatBoardDayLabel,
   formatScheduleTimeRangeDisplay,
   formatScheduleTimeShortAmPm,
@@ -39,13 +37,13 @@ import {
   formatLunchBreakCellSubtitle,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260816_cell_notes7";
+} from "./schedule-shift-edit.js?v=20260817_build_hours";
 import {
   bindScheduleCoverageDayClick,
   bindScheduleStandByPen,
   renderScheduleStandByRowHtml,
   renderStandBySlotNamesHtml,
-} from "./schedule-render-modals.js?v=20260703_schedule_render_split";
+} from "./schedule-render-modals.js?v=20260827_1258notes";
 
 // -- injected via initScheduleRenderBoard() (wired in schedule-render.js) --
 let computeStaffWeeklyScheduledMinutes;
@@ -104,34 +102,21 @@ function renderScheduleBoard(draft, validation, staffList) {
   const firstColW = showStaffAck ? (canBuild ? 288 : 258) : canBuild ? 252 : 220;
   const gridTemplate = `${firstColW}px repeat(${draftDays.length}, minmax(104px, 1fr))`;
   const headerCells = draftDays.map((day) => {
-    const allWarnings = Array.isArray(validationByDate.get(day.date)?.warnings) ? validationByDate.get(day.date).warnings : [];
-    const other = filterNonCoverageWarnings(allWarnings);
-    const coverageWarnings = filterCoverageWarnings(allWarnings);
     const dayLabel = formatBoardDayLabel(day.date);
     const businessStatus = day.businessStatus || { isOpen: true, source: "business_hours" };
-    let issueHtml = "";
-    if (businessStatus.isOpen !== false) {
-      if (other.length > 0) {
-        issueHtml = `<div style="margin-top:6px;font-size:11px;color:#94a3b8;">${other.length} note${other.length === 1 ? "" : "s"}</div>`;
-      }
-    }
-    const coverageStarHtml = "";
     const specialNoteRaw = String(businessStatus.note || "").trim();
     const specialNoteHtml = specialNoteRaw
       ? `<div style="margin-top:5px;font-size:10px;color:#6d28d9;line-height:1.35;font-weight:500;">* ${escapeScheduleHtml(specialNoteRaw)}</div>`
       : "";
     return `
       <div style="padding:7px 6px;border-bottom:1px solid #e5e7eb;background:#f8fafc;min-width:0;">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:4px;">
-          <div style="min-width:0;flex:1;">
-            <div style="font-size:12px;font-weight:700;color:#111827;">${dayLabel.title}</div>
-            <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${dayLabel.subtitle}</div>
-          </div>
-          ${coverageStarHtml}
+        <div style="min-width:0;">
+          <div style="font-size:12px;font-weight:700;color:#111827;">${dayLabel.title}</div>
+          <div style="font-size:10px;color:#9ca3af;margin-top:1px;">${dayLabel.subtitle}</div>
         </div>
         ${businessStatus.isOpen === false
           ? `<div style="margin-top:6px;font-size:11px;color:#9ca3af;">Closed</div>`
-          : issueHtml}
+          : ""}
         ${specialNoteHtml}
       </div>
     `;
@@ -466,7 +451,7 @@ function renderScheduleBoard(draft, validation, staffList) {
       const inboxDisp = getInboxApprovalDisplayForDate(staff, requestsList, day.date);
       const inboxApprovedOff = Boolean(!assignment && !manualOff && staffDayBlockedByApprovedInbox(staff, day.date));
       const businessStatus = day.businessStatus || getBusinessStatusForDate(day.date);
-      const dayIsClosed = businessStatus?.isOpen === false || getBusinessStatusForDate(day.date).isOpen === false;
+      const dayIsClosed = businessStatus?.isOpen === false;
       const assignmentId = assignment ? getAssignmentId(assignment, day.date) : "";
       const canEditShift = Boolean(assignment && !dayIsClosed && canManual);
       const editBtn = canEditShift
@@ -485,7 +470,7 @@ function renderScheduleBoard(draft, validation, staffList) {
         ? `<div style="margin-top:5px;font-size:11px;font-weight:700;color:#64748b;line-height:1.35;">${noteParts.map(escapeScheduleHtml).join("<br/>")}</div>`
         : "";
       const managerNoteHtml = renderManagerCellNoteHtml(day, staffKey, staff.name);
-      const statusHtml = dayIsClosed
+      const statusHtml = dayIsClosed && !assignment
         ? `<span style="color:#9ca3af;font-size:13px;font-weight:700;">Closed</span>`
         : assignment
           ? `<span ${canManual ? `data-schedule-shift="true" draggable="true" data-shift-id="${assignmentId}" data-staff-id="${staffKey}" data-date="${day.date}" style="cursor:grab;user-select:none;"` : `style="user-select:none;"`}>${escapeScheduleHtml(formatScheduleTimeRangeDisplay(assignment.startTime, assignment.endTime, { fallback: "--:-- - --:--" }))}</span>`
@@ -561,7 +546,7 @@ function renderScheduleBoard(draft, validation, staffList) {
     const dayCards = draftDays.map((day) => {
       const dayLabel = formatBoardDayLabel(day.date);
       const bs = day.businessStatus || getBusinessStatusForDate(day.date);
-      const dayIsClosed = bs.isOpen === false || getBusinessStatusForDate(day.date).isOpen === false;
+      const dayIsClosed = bs.isOpen === false;
       const entry = parseStandByDayEntry(map[day.date]);
       const slotIds = entry[viewKey] || ["", ""];
       const names = dayIsClosed
@@ -634,11 +619,14 @@ function bindScheduleStaffProfileLinks() {
 function setScheduleLoadingState({ loading = false, error = "" } = {}) {
   const loadingEl = document.getElementById("schedulePreviewLoading");
   const errorEl = document.getElementById("schedulePreviewError");
-  if (loadingEl) loadingEl.style.display = loading ? "block" : "none";
+  // Never insert the in-flow "Loading schedule preview..." banner — it shoves
+  // the grid down and back up on every refresh.
+  if (loadingEl) loadingEl.style.display = "none";
   if (errorEl) {
     errorEl.style.display = error ? "block" : "none";
     errorEl.textContent = error || "";
   }
+  void loading;
 }
 
 export {

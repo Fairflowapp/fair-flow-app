@@ -1,7 +1,7 @@
 import {
   enumerateDateRange,
   getEffectiveAvailability,
-} from "./schedule-availability.js?v=20260615_default_schedule_source";
+} from "./schedule-availability.js?v=20260902_sched_dual";
 import {
   normalizeManagerType,
   normalizeScheduleRules,
@@ -17,12 +17,11 @@ import {
   resolvedSegmentCoverage,
   getCustomSegmentOverlapCoverageGaps,
   assignmentDurationHoursFromTimes,
-  sliceTimeWindowFromStart,
   parseScheduleTimeToMinutes,
   formatMinutesAsScheduleTime,
   normalizeBusinessHours,
   clipTimeWindowToBestShiftSegment,
-} from "./schedule-helpers.js?v=20260704_schedule_helpers_split";
+} from "./schedule-helpers.js?v=20260902_sched_dual";
 
 function getNormalizedStaffList(staffList) {
   return (Array.isArray(staffList) ? staffList : [])
@@ -527,33 +526,7 @@ function narrowTechniciansToBestSegment({
 
 function buildDayDraft({ date, staffList, availabilityDirectory, rules, coverageRules, businessHours, dayShiftSegments, crossLocationBusy } = {}) {
   const all = buildAssignmentsForDate(staffList, availabilityDirectory, date, { crossLocationBusy });
-  let assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
-  assignments = applyStaggeredFullManagerSegmentWindows({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-    coverageRules,
-  });
-  assignments = narrowAssistantManagersToFirstSegment({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-    coverageRules,
-  });
-  assignments = narrowTechniciansToBestSegment({
-    date,
-    assignments,
-    staffList,
-    availabilityDirectory,
-    businessHours,
-    dayShiftSegments,
-  });
+  const assignments = filterAssignmentsByCoverageTargets(all, date, rules, coverageRules, { businessHours, dayShiftSegments });
   return {
     date,
     assignments,
@@ -574,8 +547,8 @@ function computeTotalsHoursByAssignmentKey(days) {
 }
 
 /**
- * Drops whole-day assignments from the end of the week backward until each staff member is
- * within getEffectiveWeeklyHoursCap (Weekly Hours Target / Max Weekly Hours).
+ * Drops whole-day assignments until each staff member is within
+ * getEffectiveWeeklyHoursCap. Prefers weekdays over Saturday/Sunday.
  */
 function applyWeeklyHoursCapToDraft(draft, staffList) {
   const capMap = new Map();
@@ -609,14 +582,31 @@ function applyWeeklyHoursCapToDraft(draft, staffList) {
     if (!overKey) break;
 
     let removed = false;
-    for (let d = days.length - 1; d >= 0; d--) {
+    const dropOrder = days
+      .map((day, index) => {
+        const assignment = (day.assignments || []).find((a) => assignmentStaffKey(a) === overKey);
+        if (!assignment) return null;
+        const dayName = getDayNameFromDateKey(day.date);
+        const weekend = dayName === "saturday" || dayName === "sunday";
+        return {
+          index,
+          weekend,
+          hours: assignmentDurationHoursFromTimes(assignment.startTime, assignment.endTime),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.weekend !== b.weekend) return a.weekend ? 1 : -1;
+        return b.hours - a.hours;
+      });
+    if (dropOrder.length > 0) {
+      const d = dropOrder[0].index;
       const arr = days[d].assignments || [];
       const idx = arr.findIndex((a) => assignmentStaffKey(a) === overKey);
       if (idx >= 0) {
         arr.splice(idx, 1);
         days[d].assignments = arr;
         removed = true;
-        break;
       }
     }
     if (!removed) break;
@@ -682,17 +672,10 @@ function applyWeeklyRemainingHoursFill(draft, staffList, crossLocationBusy) {
       if (!avail?.isAvailable || !avail.startTime || !avail.endTime) continue;
 
       const maxDayH = assignmentDurationHoursFromTimes(avail.startTime, avail.endTime);
-      const addH = Math.min(remaining, maxDayH);
-      if (addH <= 0.02) continue;
+      if (maxDayH <= 0.02 || remaining + 1e-6 < maxDayH) continue;
 
-      const window = sliceTimeWindowFromStart(avail.startTime, avail.endTime, addH);
-      if (!window) continue;
-
-      // Respect cross-location busy windows when topping up weekly hours too,
-      // otherwise the fill step could re-introduce the exact double-booking
-      // buildDayDraft just prevented.
-      const winStart = parseScheduleTimeToMinutes(window.startTime);
-      const winEnd = parseScheduleTimeToMinutes(window.endTime);
+      const winStart = parseScheduleTimeToMinutes(avail.startTime);
+      const winEnd = parseScheduleTimeToMinutes(avail.endTime);
       if (hasCrossLocationBusyConflict(crossLocationBusy, staffKeys, day.date, winStart, winEnd)) {
         continue;
       }
@@ -703,13 +686,13 @@ function applyWeeklyRemainingHoursFill(draft, staffList, crossLocationBusy) {
         name: getStaffDisplayName(staff),
         role: getStaffRole(staff),
         managerType: getAssignmentManagerType(staff),
-        startTime: window.startTime,
-        endTime: window.endTime,
+        startTime: avail.startTime,
+        endTime: avail.endTime,
         hasApprovedOverride: false,
         overrideApplied: false,
         overrideTypes: [],
       });
-      remaining -= addH;
+      remaining -= maxDayH;
     }
   });
 
@@ -889,8 +872,6 @@ function generateWeeklySchedule({ staffList = [], requests = [], rules = {}, dat
 
   let draft = applyWeeklyHoursCapToDraft(draftBeforeCap, normalizedStaffList);
   draft = applyWeeklyRemainingHoursFill(draft, normalizedStaffList, normalizedCrossBusy);
-  draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
-  draft = applyEqualSplitAmongManagement(draft, normalizedStaffList, businessHours, dayShiftSegments);
   draft = applyWeeklyHoursCapToDraft(draft, normalizedStaffList);
   return draft;
 }

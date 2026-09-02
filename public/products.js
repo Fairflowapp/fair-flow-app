@@ -6,11 +6,11 @@
 // index.html keeps dynamic-importing this file; the public surface is unchanged
 // and window.* hooks are assigned inside products-screen.js.
 
-import { initProductsEditor } from "./products-editor.js?v=20260702_products_split";
-import { renderProducts } from "./products-screen.js?v=20260702_products_split";
+import { initProductsEditor } from "./products-editor.js?v=20260902_prod_cats";
+import { renderProducts } from "./products-screen.js?v=20260902_prod_cats";
 
-export * from "./products-screen.js?v=20260702_products_split";
-export * from "./products-editor.js?v=20260702_products_split";
+export * from "./products-screen.js?v=20260902_prod_cats";
+export * from "./products-editor.js?v=20260902_prod_cats";
 
 // Back-edge injection: the editor re-renders the screen after CRUD.
 initProductsEditor({ renderProducts });

@@ -36,8 +36,14 @@ function sha256Text(s) {
   return crypto.createHash("sha256").update(String(s || ""), "utf8").digest("hex");
 }
 
-function sealIdFor(taskId, documentVersionId) {
-  return `seal_${trimStr(taskId)}_${trimStr(documentVersionId)}`;
+function sealIdFor(taskId, documentVersionId, staffId, runId) {
+  const staff = trimStr(staffId);
+  const run = trimStr(runId);
+  const base = `${trimStr(taskId)}_${trimStr(documentVersionId)}`;
+  // Must be unique per employee + run. Task+version alone reused a test seal
+  // across staff (same template id) and attached the wrong signed PDF.
+  if (staff && run) return `seal_${staff}_${run}_${base}`;
+  return `seal_${base}`;
 }
 
 let _bucketPromise = null;
@@ -95,18 +101,31 @@ function assertEsignAllowed(cfg) {
 
 function publicFieldSchema(schema) {
   if (!Array.isArray(schema)) return [];
-  return schema.slice(0, 100).map((f) => ({
-    id: trimStr(f.id),
-    type: trimStr(f.type),
-    page: Number(f.page) || 1,
-    x: Number(f.x) || 0,
-    y: Number(f.y) || 0,
-    width: Number(f.width) || 0.1,
-    height: Number(f.height) || 0.05,
-    required: f.required === true,
-    label: trimStr(f.label) || trimStr(f.type),
-    signerRole: "employee",
-  }));
+  return schema.slice(0, 100).map((f) => {
+    const type = trimStr(f.type);
+    const entry = {
+      id: trimStr(f.id),
+      type,
+      page: Number(f.page) || 1,
+      x: Number(f.x) || 0,
+      y: Number(f.y) || 0,
+      width: Number(f.width) || 0.1,
+      height: Number(f.height) || 0.05,
+      required: f.required === true,
+      label: trimStr(f.label) || trimStr(f.type),
+      signerRole: "employee",
+    };
+    // S3: expose sensitive only for text (portal/seal use this snapshot).
+    if (type === "text" && f.sensitive === true) {
+      entry.sensitive = true;
+      const kind = trimStr(f.sensitiveKind).toLowerCase();
+      entry.sensitiveKind =
+        kind === "ssn" || kind === "bank_account" || kind === "other"
+          ? kind
+          : "other";
+    }
+    return entry;
+  });
 }
 
 function publicEsignResult(result) {
@@ -284,6 +303,86 @@ function validateEsignSubmission(task, payload) {
   };
 }
 
+/**
+ * S4 — encrypt sensitive text for Firestore; keep plaintext only for PDF overlay.
+ * @returns {{
+ *   fieldValuesEncrypted: object,
+ *   fieldValuesPublic: object,
+ *   fieldValuesSafe: object,
+ *   sensitiveFieldIds: string[]
+ * }}
+ */
+function partitionEsignFieldValues(schema, fieldValues) {
+  const { encryptFieldValue, maskDisplay } = require("./onboarding-crypto");
+  const values =
+    fieldValues && typeof fieldValues === "object" ? fieldValues : {};
+  const fieldValuesEncrypted = {};
+  const fieldValuesPublic = {};
+  const fieldValuesSafe = { ...values };
+  const sensitiveFieldIds = [];
+
+  for (const f of Array.isArray(schema) ? schema : []) {
+    const id = trimStr(f.id);
+    if (!id) continue;
+    const type = trimStr(f.type);
+    const label = trimStr(f.label) || id;
+
+    if (type === "checkbox") {
+      fieldValuesPublic[id] = {
+        type: "checkbox",
+        checked: values[id] === true,
+        label,
+      };
+      continue;
+    }
+    if (type === "signature") {
+      fieldValuesPublic[id] = { type: "signature", label };
+      continue;
+    }
+
+    const raw = values[id];
+    const text = trimStr(raw);
+    if (type === "text" && f.sensitive === true) {
+      if (!text) continue;
+      const sensitiveKind =
+        trimStr(f.sensitiveKind).toLowerCase() === "ssn" ||
+        trimStr(f.sensitiveKind).toLowerCase() === "bank_account"
+          ? trimStr(f.sensitiveKind).toLowerCase()
+          : "other";
+      const envelope = encryptFieldValue(text, { sensitiveKind });
+      fieldValuesEncrypted[id] = envelope;
+      const displayValue = maskDisplay(envelope.last4, sensitiveKind);
+      fieldValuesPublic[id] = {
+        type: "text",
+        sensitive: true,
+        sensitiveKind,
+        last4: envelope.last4,
+        displayValue,
+        label,
+      };
+      fieldValuesSafe[id] = displayValue;
+      sensitiveFieldIds.push(id);
+      continue;
+    }
+
+    if (text) {
+      fieldValuesPublic[id] = {
+        type: type || "text",
+        sensitive: false,
+        displayValue: text.slice(0, 200),
+        label,
+      };
+    }
+  }
+
+  return {
+    fieldValuesEncrypted,
+    fieldValuesPublic,
+    fieldValuesSafe,
+    sensitiveFieldIds,
+  };
+}
+
 module.exports = {
   crypto,
   admin,
@@ -306,4 +405,5 @@ module.exports = {
   publicEsignResult,
   decodePngBase64,
   validateEsignSubmission,
+  partitionEsignFieldValues,
 };

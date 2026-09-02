@@ -17,7 +17,7 @@
  */
 
 import { injectStyles } from "./queue-analytics-styles.js?v=20260625_queue_analytics_split";
-import { _qaLocationScope } from "./queue-analytics-data.js?v=20260625_queue_analytics_split";
+import { _qaLocationScope } from "./queue-analytics-data.js?v=20260816_dash_live";
 import {
   LOG,
   LOC_LOG,
@@ -28,7 +28,7 @@ import {
   fmtHourRange,
   buildWaitTimeTypeRows,
   formatTypeBreakdown,
-} from "./queue-analytics-compute.js?v=20260625_queue_analytics_split";
+} from "./queue-analytics-compute.js?v=20260816_dash_live";
 import {
   renderEmpty,
   renderSummary,

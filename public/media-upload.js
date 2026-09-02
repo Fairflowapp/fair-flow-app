@@ -5,7 +5,7 @@
 
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260719_media_lightbox";
+import { mediaState } from "./media-state.js?v=20260901_media_iso";
 import {
   subscribeContentWorks,
   updateContentWork,
@@ -14,9 +14,9 @@ import {
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260719_media_lightbox";
-import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260719_media_lightbox";
-import { initMediaNativeShare } from "./media-native-share.js?v=20260719_media_lightbox";
+} from "./media-cloud.js?v=20260901_media_iso";
+import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260901_media_iso";
+import { initMediaNativeShare } from "./media-native-share.js?v=20260901_media_iso";
 import {
   initMediaUploadForm,
   populateWorksDropdown,
@@ -27,14 +27,14 @@ import {
   setupModalBackdrops,
   toggleFileInputs,
   toggleNewFieldsAndExisting,
-} from "./media-upload-form.js?v=20260719_media_lightbox";
+} from "./media-upload-form.js?v=20260901_media_iso";
 import {
   initMediaWorkDetails,
   closeWorkDetails,
   closeMarkPostedModal,
   setupWorkDetailsListeners,
   setupMarkPostedListeners,
-} from "./media-work-details.js?v=20260719_media_lightbox";
+} from "./media-work-details.js?v=20260901_media_iso";
 import {
   setMediaTab,
   renderMediaFilters,
@@ -50,7 +50,7 @@ import {
   updateMediaUploadWorkButtonVisibility,
   closeMediaDropdowns,
   _positionMediaDropdownPanel,
-} from "./media-view.js?v=20260719_media_lightbox";
+} from "./media-view.js?v=20260901_media_iso";
 
 
 
@@ -625,6 +625,10 @@ if (typeof window !== "undefined") {
   if (typeof document !== "undefined" && !document.__ffMediaCatLocBound) {
     document.__ffMediaCatLocBound = true;
     document.addEventListener("ff-active-location-changed", () => {
+      try { closeUploadModal(); } catch (_) {}
+      try { closeWorkDetails(); } catch (_) {}
+      try { closeMarkPostedModal(); } catch (_) {}
+      try { renderMediaList(); } catch (_) {}
       try {
         const card = document.getElementById("userProfileCardMediaCategories");
         if (card && card.style.display !== "none") {

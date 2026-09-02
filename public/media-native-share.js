@@ -5,7 +5,7 @@
  * media-upload.js (M5).
  */
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { canHandleMediaWork } from "./media-profile.js?v=20260719_media_lightbox";
+import { canHandleMediaWork } from "./media-profile.js?v=20260901_media_iso";
 
 // Injected from media-upload.js to avoid an import cycle: showMediaMessage lives in the main UI slab.
 let showMediaMessage = () => {};

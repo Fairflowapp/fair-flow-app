@@ -31,8 +31,8 @@ import {
   _chatSortByOrder,
   _chatCategoryValue,
   _chatGroupByCategory
-} from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
+} from "./chat-helpers.js?v=20260901_chat_iso";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
 
 // ─── Injected core dependencies (set by initChatAdminFlows, fanned out from initChatAdmin) ──
 let _chatManageAllowed = () => false;

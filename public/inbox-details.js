@@ -15,13 +15,15 @@ import {
   inboxSupplyStatusDisplayLabel,
   inboxDocAlertIsExpiredForUi,
   inboxSupplyRequestIsPending,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+  inboxItemMatchesActiveLocation,
+  inboxGetActiveLocationId,
+} from "./inbox-helpers.js?v=20260901_sched_req";
 import { escapeHtml } from "./inbox-utils.js?v=20260630_inbox_utils_split";
 import {
   inboxUserRoleLc,
   inboxCanManageInbox,
   inboxCanSendRequests,
-} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-data.js?v=20260901_inbox_iso";
 import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { ffShowInventorySuggestionModal } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
 import {
@@ -35,7 +37,7 @@ import {
   ffDocAlertStaffId,
   ffDocAlertModalFooterIds,
 } from "./inbox-documents.js?v=20260629_inbox_documents_split";
-import { updateInboxBadges } from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
+import { updateInboxBadges } from "./inbox-list-render.js?v=20260901_inbox_iso";
 
 // =====================
 // Request Details Modal
@@ -43,6 +45,10 @@ import { updateInboxBadges } from "./inbox-list-render.js?v=20260810_owner_inbox
 function showRequestDetails(requestId) {
   const request = inboxState.currentRequests.find(r => r.id === requestId);
   if (!request) return;
+  if (!inboxItemMatchesActiveLocation(request, inboxGetActiveLocationId())) {
+    console.warn('[Inbox] blocked details for another location', requestId);
+    return;
+  }
   
   console.log('[Inbox] Showing request details', requestId);
 
@@ -270,7 +276,7 @@ function showRequestDetails(requestId) {
       <div style="border-top:1px solid #e5e7eb;padding-top:20px;margin-top:20px;">
         <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:#374151;">Your action</h3>
         <p style="font-size:13px;color:#6b7280;margin-bottom:12px;">Upload a renewed document for management to review.</p>
-        <button type="button" onclick="closeRequestDetailsModal(); openCreateRequestModal(); selectRequestType('document_upload');" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
+        <button type="button" data-ff-inbox-upload-renew="1" data-doc-type="${escapeHtml((request.data && request.data.documentType) || "")}" data-doc-id="${escapeHtml((request.data && (request.data.relatedDocumentId || request.data.documentId)) || request.documentId || "")}" style="width:100%;padding:12px;background:#7c3aed;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">
           📤 Upload a Document
         </button>
       </div>
@@ -348,6 +354,11 @@ function showRequestDetails(requestId) {
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           ${openStaffBtn}
           ${chatBtn}
+          ${renewPayload.documentId || renewPayload.documentType
+            ? `<button type="button" data-ff-inbox-upload-renew="1" data-doc-type="${escapeHtml(renewPayload.documentType || "")}" data-doc-id="${escapeHtml(renewPayload.documentId || "")}" style="${docAlertBtnOutline}">
+          ${ffDocAlertIsHebrewUI() ? "העלה חידוש ב-Inbox" : "Upload replacement in Inbox"}
+        </button>`
+            : ""}
           <button type="button" onclick="markBirthdayReminderDone('${requestId}')" style="${docAlertBtnDone}">
             ✓ ${ffDocAlertIsHebrewUI() ? 'סמן כבוצע וארכב' : 'Mark done &amp; archive'}
           </button>
@@ -500,6 +511,14 @@ function showRequestDetails(requestId) {
         }
       });
     }
+    content.querySelectorAll("[data-ff-inbox-upload-renew]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        window.ffInboxOpenDocumentUpload({
+          documentType: btn.getAttribute("data-doc-type") || "",
+          renewForDocId: btn.getAttribute("data-doc-id") || "",
+        });
+      });
+    });
   } catch (e) {
     console.warn('[Inbox] doc alert action wiring', e);
   }
@@ -517,6 +536,20 @@ function showRequestDetails(requestId) {
 window.closeRequestDetailsModal = function() {
   const modal = document.getElementById('requestDetailsModal');
   if (modal) modal.remove();
+};
+
+window.ffInboxOpenDocumentUpload = function ({ documentType, renewForDocId } = {}) {
+  window.__ffDocUploadPrefill = {
+    documentType: String(documentType || "").trim() || null,
+    renewForDocId: String(renewForDocId || "").trim() || null,
+  };
+  try { window.closeRequestDetailsModal(); } catch (_) {}
+  if (typeof window.openCreateRequestModal === "function") window.openCreateRequestModal();
+  setTimeout(() => {
+    if (typeof window.selectRequestType === "function") {
+      void window.selectRequestType("document_upload");
+    }
+  }, 60);
 };
 
 /**
@@ -804,6 +837,7 @@ function renderRequestData(request) {
       const artifactPath = String(data.storagePath || data.filePath || "").trim();
       const isOdArtifact =
         data.viaOnboardingArtifacts === true ||
+        !!String(data.onboardingRunId || "").trim() ||
         artifactPath.startsWith("onboardingArtifacts/") ||
         artifactPath.includes("/onboarding-portal/");
       const uploadThumb = (() => {

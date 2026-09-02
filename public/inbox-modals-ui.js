@@ -27,7 +27,8 @@ import {
   getRequestTypesGroupedByCategory,
 } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { escapeHtml, showToast } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { inboxUserRoleLc, inboxCanSendRequests } from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+import { inboxUserRoleLc, inboxCanSendRequests } from "./inbox-data.js?v=20260901_inbox_iso";
+import { inboxHasActiveLocationForWrite } from "./inbox-helpers.js?v=20260901_sched_req";
 
 // =====================
 // Create Request Modal
@@ -39,6 +40,10 @@ function removeAllCreateRequestModals() {
 window.openCreateRequestModal = function() {
   if (!inboxCanSendRequests()) {
     if (typeof showToast === "function") showToast("You do not have permission to create requests.", "error");
+    return;
+  }
+  if (!inboxHasActiveLocationForWrite()) {
+    if (typeof showToast === "function") showToast("Choose a location before creating a request.", "error");
     return;
   }
   console.log('[Inbox] Opening create request modal');

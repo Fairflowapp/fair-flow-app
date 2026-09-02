@@ -23,7 +23,7 @@ import {
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState, _ticketSummaryPageSize } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getTicketTaxConfig, isTicketProductLine } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
-import { canSeeTicket, getActiveLocationIdForTickets, isTicketsTechnicianRestrictedRole, isStaffRecordManagerOrAdmin, ticketBelongsToTicketsTechnician } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { canSeeTicket, getActiveLocationIdForTickets, isTicketsTechnicianRestrictedRole, isStaffRecordManagerOrAdmin, ticketBelongsToTicketsTechnician } from "./tickets-permissions.js?v=20260901_loc_isolate";
 
 let normalizeTicketTechName, getServiceStaffOverrides, getProductStaffOverrides, getStaffDefaultServiceCommission, getStaffDefaultSupplyDeduction;
 export function initTicketsHelpers(deps) {

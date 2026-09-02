@@ -18,9 +18,11 @@ import {
   inboxDocAlertIsExpiredForUi,
   inboxSupplyStatusDisplayLabel,
   formatRelativeDate,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+  inboxGetActiveLocationId,
+  inboxItemMatchesActiveLocation,
+} from "./inbox-helpers.js?v=20260901_sched_req";
 import { escapeHtml } from "./inbox-utils.js?v=20260630_inbox_utils_split";
-import { inboxUserRoleLc, inboxCanManageInbox } from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+import { inboxUserRoleLc, inboxCanManageInbox } from "./inbox-data.js?v=20260901_inbox_iso";
 import { getRequestTypeInfo } from "./inbox-types.js?v=20260810_owner_inbox_load_v5";
 import { ffRenderInventorySuggestionCard } from "./inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split";
 import {
@@ -47,21 +49,8 @@ function updateInboxBadges() {
 
   const uid = inboxState.currentUserProfile.uid;
 
-  // Scope the counts to the currently active branch so the badges match
-  // what the user actually sees in the list for that location.
-  let activeLocId = null;
-  try {
-    if (typeof window.ffGetActiveLocationId === 'function') {
-      const v = window.ffGetActiveLocationId();
-      if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
-    }
-    if (!activeLocId && typeof window.__ff_active_location_id === 'string'
-        && window.__ff_active_location_id.trim()) {
-      activeLocId = window.__ff_active_location_id.trim();
-    }
-  } catch (_) {}
-  const staffLocMap = activeLocId ? inboxGetStaffLocationMap() : null;
-  const inActiveLoc = (r) => !activeLocId || inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
+  const activeLocId = inboxGetActiveLocationId();
+  const inActiveLoc = (r) => inboxItemMatchesActiveLocation(r, activeLocId);
 
   // Open: new requests not yet seen by recipient
   const openCount = inboxState.currentRequests.filter(
@@ -112,7 +101,9 @@ function updateInboxStaffFilterOptions() {
   if (role === "technician") return;
 
   const seen = new Map();
+  const locId = inboxGetActiveLocationId();
   inboxState.currentRequests.forEach(req => {
+    if (!inboxItemMatchesActiveLocation(req, locId)) return;
     const uid = req.forUid || req.createdByUid || '';
     const name = (req.forStaffName || req.createdByName || '').trim() || uid || 'Unknown';
     if (uid && !seen.has(uid)) seen.set(uid, name);
@@ -149,6 +140,8 @@ function renderInboxList() {
 if (typeof document !== 'undefined' && !window.__ffInboxLocationListenerBound) {
   window.__ffInboxLocationListenerBound = true;
   document.addEventListener('ff-active-location-changed', function () {
+    try { if (typeof window.closeRequestDetailsModal === 'function') window.closeRequestDetailsModal(); } catch (_) {}
+    try { if (typeof window.closeCreateRequestModal === 'function') window.closeCreateRequestModal(); } catch (_) {}
     try { renderInboxList(); } catch (_) {}
   });
   // Staff locations may change (e.g. owner just toggled a location on/off in
@@ -157,82 +150,6 @@ if (typeof document !== 'undefined' && !window.__ffInboxLocationListenerBound) {
   document.addEventListener('ff-staff-cloud-updated', function () {
     try { renderInboxList(); } catch (_) {}
   });
-}
-
-/** Build a quick map { staffId -> allowedLocationIds[] } from the local staff cache. */
-function inboxGetStaffLocationMap() {
-  try {
-    if (typeof window.ffGetStaffStore === 'function') {
-      const store = window.ffGetStaffStore();
-      const map = Object.create(null);
-      (store.staff || []).forEach(function (s) {
-        if (s && s.id != null) {
-          map[String(s.id)] = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds.slice() : [];
-        }
-      });
-      return map;
-    }
-  } catch (_) {}
-  try {
-    const raw = localStorage.getItem('ff_staff_v1');
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed && parsed.staff) ? parsed.staff : [];
-    const map = Object.create(null);
-    list.forEach(function (s) {
-      if (s && s.id != null) {
-        map[String(s.id)] = Array.isArray(s.allowedLocationIds) ? s.allowedLocationIds.slice() : [];
-      }
-    });
-    return map;
-  } catch (_) {
-    return {};
-  }
-}
-
-/** The staff member an inbox item is "about". Different types use different fields. */
-function inboxItemSubjectStaffId(req) {
-  if (!req) return '';
-  const d = req.data || {};
-  const candidates = [
-    d.subjectStaffId,
-    d.staffId,
-    d.targetStaffId,
-    req.forStaffId,
-    req.createdByStaffId,
-  ];
-  for (let i = 0; i < candidates.length; i += 1) {
-    const v = candidates[i];
-    if (v != null && String(v).trim() !== '') return String(v).trim();
-  }
-  return '';
-}
-
-/**
- * Whether an inbox item should be visible under the currently active
- * location. Rule:
- *   - If no active location (single-branch salon), show everything.
- *   - If the item has an explicit locationId stamped on it, match against
- *     that directly.
- *   - Otherwise, resolve the "subject" staff member and check their
- *     allowedLocationIds. Missing / empty allowedLocationIds is treated as
- *     "visible in all locations" (legacy staff, or admins who work across
- *     every branch).
- *   - If we cannot resolve any staff at all (e.g. an operational reminder
- *     with no staff tied to it), fall through and show it — we should not
- *     silently hide inbox rows.
- */
-function inboxItemMatchesActiveLocation(req, activeLocationId, staffLocMap) {
-  if (!activeLocationId) return true;
-  const explicit = req && typeof req.locationId === 'string' ? req.locationId.trim() : '';
-  if (explicit) {
-    return explicit === activeLocationId;
-  }
-  const staffId = inboxItemSubjectStaffId(req);
-  if (!staffId) return true;
-  const allowed = staffLocMap && staffLocMap[staffId];
-  if (!Array.isArray(allowed) || allowed.length === 0) return true;
-  return allowed.indexOf(activeLocationId) !== -1;
 }
 
 function _renderInboxListInner() {
@@ -279,25 +196,14 @@ function _renderInboxListInner() {
     requestsToShow = requestsToShow.filter(r => (r.forUid || r.createdByUid) === inboxState.inboxStaffFilterUid);
   }
 
-  // Scope the Inbox to the active location. An item for a staff member who
-  // only works at Brickell must not show up when the user is viewing Key
-  // Biscayne in the header switcher. See inboxItemMatchesActiveLocation for
-  // the exact rule set (explicit locationId → staff allowedLocationIds →
-  // fall-through for legacy / unattributed rows).
   try {
-    const activeLocId =
-      (typeof window.ffGetActiveLocationId === 'function' ? window.ffGetActiveLocationId() : null) ||
-      (typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id
-        ? window.__ff_active_location_id
-        : null);
-    if (activeLocId) {
-      const staffLocMap = inboxGetStaffLocationMap();
-      requestsToShow = requestsToShow.filter(function (r) {
-        return inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap);
-      });
-    }
+    const activeLocId = inboxGetActiveLocationId();
+    requestsToShow = requestsToShow.filter(function (r) {
+      return inboxItemMatchesActiveLocation(r, activeLocId);
+    });
   } catch (e) {
-    console.warn('[Inbox] location filter failed, showing all', e);
+    console.warn('[Inbox] location filter failed', e);
+    requestsToShow = [];
   }
 
   if (requestsToShow.length === 0) {
@@ -566,6 +472,4 @@ export {
   updateInboxBadges,
   updateInboxStaffFilterOptions,
   renderInboxList,
-  inboxGetStaffLocationMap,
-  inboxItemMatchesActiveLocation,
 };

@@ -279,7 +279,29 @@ function normalizeAndValidateFieldSchema(raw, pageCount) {
         "Only signerRole=employee is supported in v1 (no countersign)."
       );
     }
-    out.push({
+    // S3: sensitive flag only on text fields (UI + server).
+    let sensitive = f.sensitive === true;
+    let sensitiveKind = trimStr(f.sensitiveKind).toLowerCase() || "";
+    if (sensitive && type !== "text") {
+      throw new HttpsError(
+        "invalid-argument",
+        `Field "${id}": sensitive is only allowed on text fields.`
+      );
+    }
+    if (!sensitive) {
+      sensitiveKind = "";
+    } else if (
+      sensitiveKind &&
+      !["ssn", "bank_account", "other"].includes(sensitiveKind)
+    ) {
+      throw new HttpsError(
+        "invalid-argument",
+        `Field "${id}": unsupported sensitiveKind "${sensitiveKind}".`
+      );
+    } else if (!sensitiveKind) {
+      sensitiveKind = "other";
+    }
+    const entry = {
       id,
       type,
       page,
@@ -290,7 +312,12 @@ function normalizeAndValidateFieldSchema(raw, pageCount) {
       required: f.required === true,
       label: trimStr(f.label) || type.replace(/_/g, " "),
       signerRole: "employee",
-    });
+    };
+    if (sensitive) {
+      entry.sensitive = true;
+      entry.sensitiveKind = sensitiveKind;
+    }
+    out.push(entry);
   }
   return out;
 }

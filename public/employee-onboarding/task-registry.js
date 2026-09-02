@@ -65,7 +65,7 @@ function _fail(errors) {
 function _normalizeDocumentConfig(raw) {
   const c = raw && typeof raw === "object" ? raw : {};
   return {
-    requiresExpiration: _asBool(c.requiresExpiration, false),
+    requiresExpiration: _asBool(c.requiresExpiration, true),
     allowEmployeeUpload: _asBool(c.allowEmployeeUpload, true),
     allowManagerUpload: _asBool(c.allowManagerUpload, true),
     requiresApproval: _asBool(c.requiresApproval, true),
@@ -79,7 +79,7 @@ function _normalizeFileUploadConfig(raw) {
   const storeInDocuments = _asBool(c.storeInDocuments, true);
   return {
     storeInDocuments,
-    requiresExpiration: _asBool(c.requiresExpiration, false),
+    requiresExpiration: _asBool(c.requiresExpiration, true),
     allowEmployeeUpload: _asBool(c.allowEmployeeUpload, true),
     allowManagerUpload: _asBool(c.allowManagerUpload, true),
     requiresApproval: _asBool(
@@ -141,7 +141,21 @@ export function ffNormalizeOnboardingEsignFieldSchema(raw) {
     if (x + width > 1) width = Math.max(0.01, 1 - x);
     if (y + height > 1) height = Math.max(0.01, 1 - y);
     const page = Math.max(1, Math.floor(Number(f.page) || 1));
-    out.push({
+    // S3: sensitive only on text — strip (don't keep) for other types.
+    let sensitive = f.sensitive === true && type === "text";
+    let sensitiveKind = _asString(f.sensitiveKind, "")
+      .trim()
+      .toLowerCase();
+    if (!sensitive) {
+      sensitiveKind = "";
+    } else if (
+      sensitiveKind !== "ssn" &&
+      sensitiveKind !== "bank_account" &&
+      sensitiveKind !== "other"
+    ) {
+      sensitiveKind = "other";
+    }
+    const entry = {
       id: _asString(f.id, "").trim() || `fld_${i + 1}_${type}`,
       type,
       page,
@@ -152,7 +166,12 @@ export function ffNormalizeOnboardingEsignFieldSchema(raw) {
       required: f.required === true,
       label: _asString(f.label, type.replace(/_/g, " ")).trim() || type,
       signerRole: "employee",
-    });
+    };
+    if (sensitive) {
+      entry.sensitive = true;
+      entry.sensitiveKind = sensitiveKind || "other";
+    }
+    out.push(entry);
   });
   return out;
 }
@@ -178,7 +197,21 @@ export function ffValidateOnboardingEsignFieldSchema(raw, opts) {
     if (f.signerRole !== "employee") {
       errors.push("Only signerRole=employee is supported in v1");
     }
+    if (f.sensitive === true && f.type !== "text") {
+      errors.push(`Field "${f.id}": sensitive is only allowed on text fields`);
+    }
   });
+  // Also catch raw payloads that normalize would strip (UI must block before save).
+  if (Array.isArray(raw)) {
+    raw.forEach((f, i) => {
+      if (!f || typeof f !== "object") return;
+      const type = _asString(f.type, "").trim().toLowerCase();
+      if (f.sensitive === true && type && type !== "text") {
+        const id = _asString(f.id, "").trim() || `#${i + 1}`;
+        errors.push(`Field "${id}": sensitive is only allowed on text fields`);
+      }
+    });
+  }
   return errors.length ? _fail(errors) : _ok();
 }
 

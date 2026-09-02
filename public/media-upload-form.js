@@ -9,15 +9,16 @@ import {
   mediaState,
   MEDIA_UPLOAD_POINTS_DAILY_CAP,
   MEDIA_MAX_IMAGES_PER_UPLOAD,
-} from "./media-state.js?v=20260719_media_lightbox";
-import { loadUserProfile } from "./media-profile.js?v=20260719_media_lightbox";
+} from "./media-state.js?v=20260901_media_iso";
+import { loadUserProfile } from "./media-profile.js?v=20260901_media_iso";
 import {
   createWorkWithMedia,
   createWorkWithMediaBestEffort,
   addMediaToExistingWork,
   addMediaToExistingWorkBestEffort,
   getContentWork,
-} from "./media-cloud.js?v=20260719_media_lightbox";
+  mediaItemMatchesActiveLocation,
+} from "./media-cloud.js?v=20260901_media_iso";
 
 // Injected from media-upload.js (setupModalBackdrops closes sibling modals).
 let closeWorkDetails = () => {};
@@ -483,6 +484,7 @@ async function doUpload() {
         categoryNames,
         serviceType: categoryNames[0] || "", // backward compat
         caption,
+        locationId: typeof window.ffGetActiveLocationId === "function" ? String(window.ffGetActiveLocationId() || "").trim() : "",
       };
       showUploadMessage(`Uploading 0/${files.length}...`, false);
       const uploadResult = mediaType === "photo"
@@ -515,6 +517,11 @@ async function doUpload() {
       if (!failures.length) setTimeout(() => closeUploadModal(), 1500);
     } else {
       const workId = document.getElementById("uploadWorkExistingSelect")?.value?.trim();
+      const existing = workId ? await getContentWork(workId) : null;
+      if (!existing || !mediaItemMatchesActiveLocation(existing)) {
+        showUploadMessage("This work belongs to another location.", true);
+        return;
+      }
       const files = getUploadSelectedFiles(mediaType);
       showUploadMessage(`Uploading 0/${files.length}...`, false);
       const uploadResult = mediaType === "photo"
@@ -561,6 +568,15 @@ async function doUpload() {
 }
 
 function openUploadModal() {
+  try {
+    const multi = typeof window.ffUserHasMultipleLocations === "function" && window.ffUserHasMultipleLocations();
+    const loc = typeof window.ffGetActiveLocationId === "function" ? String(window.ffGetActiveLocationId() || "").trim() : "";
+    if (multi && !loc) {
+      if (typeof window.showToast === "function") window.showToast("Choose a location before uploading media.", "error");
+      else alert("Choose a location before uploading media.");
+      return;
+    }
+  } catch (_) {}
   const modal = document.getElementById("uploadWorkModal");
   if (modal) {
     modal.style.display = "flex";

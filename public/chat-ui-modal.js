@@ -8,9 +8,9 @@
  * halves free of a circular import. The two permission predicates
  * (_chatFreeTextAllowed / _getChatFreeTextTrimmed) are injected the same way.
  */
-import { chatState } from "./chat-state.js?v=20260627_chat_state_split";
-import { _chatGroupByCategory, _chatSortByOrder, _chatUserMatchesAllowedSenders, _memberDisplayNameFromRow, _trimStr, escHtml, isMgrPlus, roleLabel } from "./chat-helpers.js?v=20260626_chat_helpers_split";
-import { loadChatFlows, loadChatSalonUsers, loadChatTemplates } from "./chat-data.js?v=20260628_chat_data_b0";
+import { chatState } from "./chat-state.js?v=20260901_chat_iso";
+import { _chatGroupByCategory, _chatSortByOrder, _chatUserMatchesAllowedSenders, _memberDisplayNameFromRow, _trimStr, escHtml, isMgrPlus, roleLabel } from "./chat-helpers.js?v=20260901_chat_iso";
+import { loadChatFlows, loadChatSalonUsers, loadChatTemplates } from "./chat-data.js?v=20260901_chat_iso";
 
 let _chatFreeTextAllowed = () => false;
 let _getChatFreeTextTrimmed = () => '';

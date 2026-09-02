@@ -64,35 +64,58 @@ function _ffInvActiveLocId() {
 function _ffInvUserHasMultipleLocations() {
   try {
     if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
-      return !!window.ffUserHasMultipleLocations();
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
     }
   } catch (_) {}
   return false;
+}
+
+function _ffInvPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+function _ffInvHasActiveLocationForWrite() {
+  if (!_ffInvUserHasMultipleLocations()) return true;
+  return !!_ffInvActiveLocId();
 }
 
 /**
  * Return true when the given Firestore doc payload belongs to the active
  * branch.
  *
- * Rules (simple + strict):
- *   - No active locationId resolved → show everything (single-branch accounts
- *     or the brief frame before the active-location helper bootstraps).
- *   - Active locationId resolved → require the doc's `locationId` to match
- *     exactly. Docs with missing or different `locationId` are hidden — no
- *     "legacy default" bucket, because that's what keeps leaking between
- *     branches.
- *
- * Note: we intentionally do NOT consult `ffUserHasMultipleLocations()` here.
- * If that helper returns false during startup for a legitimately multi-branch
- * account, we were falling back to "show everything" and the filter did
- * nothing. The active-location id is the single source of truth.
+ * Stamped `locationId` must match the active header location.
+ * Unstamped/legacy docs: single-location accounts, or the primary location
+ * only when multi-location — never every branch.
+ * No active location on a multi-location account: hide everything.
  */
 function _ffInvDocInActiveLoc(data) {
+  const multi = _ffInvUserHasMultipleLocations();
   const active = _ffInvActiveLocId();
-  if (!active) return true;
   const raw = data && typeof data.locationId === "string" ? data.locationId.trim() : "";
-  if (!raw) return false;
-  return raw === active;
+  if (!active) return !multi;
+  if (raw) return raw === active;
+  if (!multi) return true;
+  const primary = _ffInvPrimaryLocationId();
+  return !!primary && active === primary;
 }
 
 const STYLE_ID = "ff-inv2-mock-styles-v152-order-detail-footer-one-row";
@@ -135,7 +158,10 @@ async function getSalonId() {
 }
 
 function getInventoryLocationStateId() {
-  return _ffInvActiveLocId() || "default";
+  const active = _ffInvActiveLocId();
+  if (active) return active;
+  if (!_ffInvUserHasMultipleLocations()) return "default";
+  return "";
 }
 
 
@@ -154,6 +180,8 @@ export {
   ffCanManageInventory,
   _ffInvActiveLocId,
   _ffInvUserHasMultipleLocations,
+  _ffInvPrimaryLocationId,
+  _ffInvHasActiveLocationForWrite,
   _ffInvDocInActiveLoc,
   getSalonId,
   getInventoryLocationStateId,

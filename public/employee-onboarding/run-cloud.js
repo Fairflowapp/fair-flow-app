@@ -14,7 +14,7 @@ export {
   ffCanManageOnboardingRunsClient,
   ffBuildOnboardingRunSnapshot,
   ffBuildOnboardingRunSnapshotAsync,
-} from "./run-cloud-shared.js?v=20260810_od_split_v1";
+} from "./run-cloud-shared.js?v=20260812_od_s5";
 export {
   ffGetOnboardingRuns,
   ffGetOnboardingRunTasks,
@@ -22,22 +22,24 @@ export {
   ffActivateOnboardingRun,
   ffCancelOnboardingRun,
   ffSkipOnboardingTask,
-} from "./run-cloud-lifecycle.js?v=20260810_od_split_v1";
+} from "./run-cloud-lifecycle.js?v=20260812_od_s5";
 export {
   ffAcknowledgeOnboardingPolicyTask,
   ffCompleteOnboardingTaskFromInboxApprove,
   ffRejectOnboardingTaskFromInbox,
   ffSubmitOnboardingDocumentUpload,
+  ffPromoteOnboardingWaitingUpload,
   ffSubscribeOnboardingRuns,
   ffSubscribeOnboardingRunTasks,
-} from "./run-cloud-actions.js?v=20260810_od_split_v1";
+  ffReopenOnboardingEsignTask,
+} from "./run-cloud-actions.js?v=20260819_od_reopen";
 
 import {
   ffComputeOnboardingRunProgress,
   ffCanManageOnboardingRunsClient,
   ffBuildOnboardingRunSnapshot,
   ffBuildOnboardingRunSnapshotAsync,
-} from "./run-cloud-shared.js?v=20260810_od_split_v1";
+} from "./run-cloud-shared.js?v=20260812_od_s5";
 import {
   ffGetOnboardingRuns,
   ffGetOnboardingRunTasks,
@@ -45,15 +47,17 @@ import {
   ffActivateOnboardingRun,
   ffCancelOnboardingRun,
   ffSkipOnboardingTask,
-} from "./run-cloud-lifecycle.js?v=20260810_od_split_v1";
+} from "./run-cloud-lifecycle.js?v=20260812_od_s5";
 import {
   ffAcknowledgeOnboardingPolicyTask,
   ffCompleteOnboardingTaskFromInboxApprove,
   ffRejectOnboardingTaskFromInbox,
   ffSubmitOnboardingDocumentUpload,
+  ffPromoteOnboardingWaitingUpload,
   ffSubscribeOnboardingRuns,
   ffSubscribeOnboardingRunTasks,
-} from "./run-cloud-actions.js?v=20260810_od_split_v1";
+  ffReopenOnboardingEsignTask,
+} from "./run-cloud-actions.js?v=20260819_od_reopen";
 
 if (typeof window !== "undefined") {
   window.ffComputeOnboardingRunProgress = ffComputeOnboardingRunProgress;
@@ -70,6 +74,8 @@ if (typeof window !== "undefined") {
   window.ffCompleteOnboardingTaskFromInboxApprove = ffCompleteOnboardingTaskFromInboxApprove;
   window.ffRejectOnboardingTaskFromInbox = ffRejectOnboardingTaskFromInbox;
   window.ffSubmitOnboardingDocumentUpload = ffSubmitOnboardingDocumentUpload;
+  window.ffPromoteOnboardingWaitingUpload = ffPromoteOnboardingWaitingUpload;
   window.ffSubscribeOnboardingRuns = ffSubscribeOnboardingRuns;
   window.ffSubscribeOnboardingRunTasks = ffSubscribeOnboardingRunTasks;
+  window.ffReopenOnboardingEsignTask = ffReopenOnboardingEsignTask;
 }

@@ -72,10 +72,49 @@ function _ffSchedActiveLocId() {
   return "";
 }
 
+function _ffSchedUserHasMultipleLocations() {
+  try {
+    if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
+      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function _ffSchedPrimaryLocationId() {
+  try {
+    const w = typeof window !== "undefined" ? window : {};
+    if (typeof w.ffResolveCurrentStaff === "function" && typeof w.ffEnsureStaffLocationFields === "function") {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === "string" ? f.primaryLocationId.trim() : "";
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === "function") {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return "";
+}
+
+function _ffSchedHasActiveLocationForWrite() {
+  if (!_ffSchedUserHasMultipleLocations()) return true;
+  return !!_ffSchedActiveLocId();
+}
+
 /** Per-location document id for `salons/{salonId}/schedulePublish/{id}`. */
 function _ffSchedPublishDocId() {
   const locId = _ffSchedActiveLocId();
-  return locId ? `weeks_${locId}` : "weeks";
+  if (locId) return `weeks_${locId}`;
+  if (_ffSchedUserHasMultipleLocations()) return "";
+  return "weeks";
 }
 
 /** Per-location document id for ack / change-ping docs. */
@@ -83,7 +122,10 @@ function _ffSchedPerLocDocId(weekStart, staffId) {
   const locId = _ffSchedActiveLocId();
   const ws = String(weekStart || "").trim();
   const sid = String(staffId || "").trim();
-  return locId ? `${locId}__${ws}_${sid}` : `${ws}_${sid}`;
+  if (!ws || !sid) return "";
+  if (locId) return `${locId}__${ws}_${sid}`;
+  if (_ffSchedUserHasMultipleLocations()) return "";
+  return `${ws}_${sid}`;
 }
 
 /** Toast for schedule messages — works even when `window.showToast` is not defined (common in this app shell). */
@@ -113,49 +155,65 @@ function ffScheduleAppToast(message, duration = 5000) {
   }, duration);
 }
 
-/** Shown to all other staff when a manager publishes a week — English only, centered on screen. */
-const FF_SCHEDULE_STAFF_BROADCAST_MESSAGE = "NEW SCHEDULE POSTED — PLEASE CHECK YOUR SCHEDULE";
-
-function hideScheduleStaffBroadcastToast() {
+function hideScheduleStaffBroadcastToast(immediate) {
   const el = document.getElementById("ff-schedule-staff-broadcast-toast");
   if (!el) return;
-  el.style.display = "none";
   if (el.__ffHide) {
     clearTimeout(el.__ffHide);
     el.__ffHide = null;
   }
+  if (immediate === true) {
+    try {
+      el.remove();
+    } catch (_) {
+      /* ignore */
+    }
+    return;
+  }
+  el.classList.add("is-out");
+  setTimeout(() => {
+    try {
+      el.remove();
+    } catch (_) {
+      /* ignore */
+    }
+  }, 220);
 }
 
-function ffScheduleStaffBroadcastToast(duration = 6500) {
-  let el = document.getElementById("ff-schedule-staff-broadcast-toast");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "ff-schedule-staff-broadcast-toast";
-    el.setAttribute("role", "alert");
-    el.style.cssText =
-      "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);max-width:min(92vw,480px);background:#ffffff;padding:0;border-radius:16px;z-index:100065;border:2px solid #7c3aed;box-shadow:0 10px 36px rgba(15,23,42,0.08);";
-    el.innerHTML = `
-      <div style="position:relative;padding:22px 44px 24px 22px;">
-        <button type="button" class="ff-schedule-broadcast-close" aria-label="Close notification" title="Close"
-          style="position:absolute;top:10px;right:10px;width:34px;height:34px;padding:0;border:1px solid #e5e7eb;border-radius:10px;background:#f9fafb;color:#374151;font-size:20px;line-height:1;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center;">×</button>
-        <div style="color:#111827;font-size:16px;font-weight:700;letter-spacing:0.03em;text-align:center;line-height:1.45;">
-          ${FF_SCHEDULE_STAFF_BROADCAST_MESSAGE}
-        </div>
-      </div>`;
-    const closeBtn = el.querySelector(".ff-schedule-broadcast-close");
-    closeBtn?.addEventListener("click", hideScheduleStaffBroadcastToast);
-    closeBtn?.addEventListener("mouseenter", (e) => {
-      e.currentTarget.style.background = "#f3e8ff";
-      e.currentTarget.style.borderColor = "#c4b5fd";
-    });
-    closeBtn?.addEventListener("mouseleave", (e) => {
-      e.currentTarget.style.background = "#f9fafb";
-      e.currentTarget.style.borderColor = "#e5e7eb";
-    });
-    document.body.appendChild(el);
-  }
-  el.style.display = "block";
-  if (el.__ffHide) clearTimeout(el.__ffHide);
+function ffScheduleStaffBroadcastToast(duration = 10000) {
+  hideScheduleStaffBroadcastToast(true);
+  const el = document.createElement("div");
+  el.id = "ff-schedule-staff-broadcast-toast";
+  el.className = "ff-sched-broadcast";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-modal", "true");
+  el.setAttribute("aria-labelledby", "ffSchedBroadcastTitle");
+  el.innerHTML = `
+    <div class="ff-sched-broadcast-backdrop" data-ff-broadcast-dismiss="1"></div>
+    <div class="ff-sched-broadcast-card">
+      <button type="button" class="ff-sched-broadcast-close" aria-label="Close" data-ff-broadcast-dismiss="1">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+          <path d="M2.2 2.2l9.6 9.6M11.8 2.2L2.2 11.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div class="ff-sched-broadcast-icon" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <rect x="3.5" y="5" width="17" height="15.5" rx="3.5" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M3.5 10h17M8 3.5v4M16 3.5v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <p class="ff-sched-broadcast-kicker">Just published</p>
+      <h2 id="ffSchedBroadcastTitle" class="ff-sched-broadcast-title">Your week is live</h2>
+      <p class="ff-sched-broadcast-body">New shifts were posted. Take a look when you have a moment.</p>
+      <button type="button" class="ff-sched-broadcast-cta" data-ff-broadcast-dismiss="1">Got it</button>
+    </div>`;
+  el.addEventListener("click", (e) => {
+    if (e.target?.closest?.("[data-ff-broadcast-dismiss]")) {
+      hideScheduleStaffBroadcastToast();
+    }
+  });
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("is-in"));
   el.__ffHide = setTimeout(() => {
     hideScheduleStaffBroadcastToast();
   }, duration);
@@ -192,6 +250,12 @@ function ensureScheduleWeekAckListener(weekStart) {
     return;
   }
   const locId = _ffSchedActiveLocId();
+  if (_ffSchedUserHasMultipleLocations() && !locId) {
+    teardownScheduleAckListener();
+    scheduleState.scheduleWeekAckSeenAtByStaffId = {};
+    updateScheduleWeekAckStrip();
+    return;
+  }
   const subKey = `${salonId}::${locId || "_legacy"}::${weekStart}`;
   if (scheduleState.scheduleAckSalonWeek === subKey && scheduleState.scheduleAckUnsub) {
     updateScheduleWeekAckStrip();
@@ -200,9 +264,6 @@ function ensureScheduleWeekAckListener(weekStart) {
 
   teardownScheduleAckListener();
   scheduleState.scheduleAckSalonWeek = subKey;
-  // Match per-location: if a location is active we only watch acks stamped
-  // with that `locationId`. Legacy (unstamped) docs stay visible when there
-  // is no active location yet (e.g. single-branch salons).
   const ackCol = collection(db, `salons/${salonId}/scheduleWeekAcks`);
   const ackQ = locId
     ? query(ackCol, where("weekStart", "==", weekStart), where("locationId", "==", locId))
@@ -365,6 +426,10 @@ async function loadScheduleWeekPingMap(weekStart) {
       return;
     }
     const locId = _ffSchedActiveLocId();
+    if (_ffSchedUserHasMultipleLocations() && !locId) {
+      scheduleState.scheduleWeekPingAtByStaffId = {};
+      return;
+    }
     const pingCol = collection(db, `salons/${salonId}/scheduleStaffChangePings`);
     const pingQ = locId
       ? query(pingCol, where("weekStart", "==", weekStart), where("locationId", "==", locId))
@@ -392,7 +457,13 @@ async function submitScheduleWeekAck() {
   if (!salonId || !mySid || !ws || scheduleState.schedulePublishedMap[ws] !== true) return;
   try {
     const locId = _ffSchedActiveLocId();
-    const ref = doc(db, `salons/${salonId}/scheduleWeekAcks/${_ffSchedPerLocDocId(ws, mySid)}`);
+    if (!_ffSchedHasActiveLocationForWrite()) {
+      ffScheduleAppToast("Choose a location before confirming this schedule.", 3500);
+      return;
+    }
+    const ackDocId = _ffSchedPerLocDocId(ws, mySid);
+    if (!ackDocId) return;
+    const ref = doc(db, `salons/${salonId}/scheduleWeekAcks/${ackDocId}`);
     await setDoc(
       ref,
       {
@@ -517,6 +588,9 @@ function ensureScheduleChangePingListener(weekStart) {
 
 export {
   _ffSchedActiveLocId,
+  _ffSchedUserHasMultipleLocations,
+  _ffSchedPrimaryLocationId,
+  _ffSchedHasActiveLocationForWrite,
   _ffSchedPerLocDocId,
   _ffSchedPublishDocId,
   ensureScheduleChangePingListener,

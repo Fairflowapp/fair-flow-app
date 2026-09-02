@@ -16,29 +16,29 @@
  */
 import {
   initOrdersList,
-} from "./inventory-orders-list.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-list.js?v=20260902_inv_iso";
 import {
   initOrdersDetail,
-} from "./inventory-orders-detail.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-detail.js?v=20260902_inv_iso";
 import {
   initOrdersReceipts,
-} from "./inventory-orders-receipts.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-receipts.js?v=20260902_inv_iso";
 import {
   initOrdersBuilder,
   refreshOrderBuilderPreviewAsync,
   renderOrderBuilderSourceHtml,
-} from "./inventory-orders-builder.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-builder.js?v=20260902_inv_iso";
 import {
   initOrdersDrafts,
-} from "./inventory-orders-drafts.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-orders-drafts.js?v=20260902_inv_iso";
 
 // Re-export the full Orders public surface (verbatim names) from the sub-modules.
-export * from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-orders-list.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-orders-detail.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-orders-builder.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-orders-drafts.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-orders-receipts.js?v=20260728_inv_mobile_unstick";
+export * from "./inventory-orders-core.js?v=20260902_inv_iso";
+export * from "./inventory-orders-list.js?v=20260902_inv_iso";
+export * from "./inventory-orders-detail.js?v=20260902_inv_iso";
+export * from "./inventory-orders-builder.js?v=20260902_inv_iso";
+export * from "./inventory-orders-drafts.js?v=20260902_inv_iso";
+export * from "./inventory-orders-receipts.js?v=20260902_inv_iso";
 
 /**
  * Wire the orchestrator spine (from inventory.js) into each Orders sub-module,
@@ -52,6 +52,7 @@ export function initInventoryOrders(deps) {
     mountOrRefreshMockUi,
     _ffInvActiveLocId,
     _ffInvDocInActiveLoc,
+    _ffInvHasActiveLocationForWrite,
     getSelectedSubMeta,
     isInvMobileNarrow,
     loadInventoryTableForSub,
@@ -64,6 +65,7 @@ export function initInventoryOrders(deps) {
     mountOrRefreshMockUi,
     _ffInvActiveLocId,
     _ffInvDocInActiveLoc,
+    _ffInvHasActiveLocationForWrite,
     isInvMobileNarrow,
     renderOrderBuilderSourceHtml,
   });
@@ -83,6 +85,7 @@ export function initInventoryOrders(deps) {
     mountOrRefreshMockUi,
     _ffInvActiveLocId,
     _ffInvDocInActiveLoc,
+    _ffInvHasActiveLocationForWrite,
     findCategoryAndSubForSubId,
     refreshOrderBuilderPreviewAsync,
   });

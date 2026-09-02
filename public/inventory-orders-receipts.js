@@ -14,15 +14,15 @@ import {
   onSnapshot,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   escapeHtml,
   formatInventoryOrderCreatedAt,
   sanitizeReceiptStorageFileName,
   getReceiptFileTypeEmoji,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
-import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260728_inv_mobile_unstick";
-import { isInvOrderDetailCommitBusy } from "./inventory-orders-detail.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
+import { inventoryOrderDraftToast } from "./inventory-orders-core.js?v=20260902_inv_iso";
+import { isInvOrderDetailCommitBusy } from "./inventory-orders-detail.js?v=20260902_inv_iso";
 
 // ── injected by initOrdersReceipts() (orchestrator spine + builder back-edges) ──
 let getSalonId, mountOrRefreshMockUi;

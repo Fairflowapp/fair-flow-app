@@ -24,7 +24,9 @@ import {
   enumerateInclusiveDateKeysForInbox,
   ffInboxRuleString,
   suppliesRowRequiresVariant,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+  inboxHasActiveLocationForWrite,
+  inboxGetActiveLocationId,
+} from "./inbox-helpers.js?v=20260901_sched_req";
 import {
   classifySuppliesRow,
   readSuppliesRowSnapshot,
@@ -37,7 +39,7 @@ import {
   getInboxRecipientsList,
   loadSalonUsersForRecipients,
   resolveCurrentInboxActorName,
-} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-data.js?v=20260901_inbox_iso";
 
 // loadInboxItems lives in inbox.js (many callers); injected here.
 let loadInboxItems = () => {};
@@ -136,6 +138,10 @@ export async function submitRequest(type) {
   await loadCurrentUserProfile();
   if (!inboxState.currentUserProfile) {
     showToast('User profile not loaded', 'error');
+    return;
+  }
+  if (!inboxHasActiveLocationForWrite()) {
+    showToast('Choose a location before creating a request.', 'error');
     return;
   }
 
@@ -352,6 +358,7 @@ export async function submitRequest(type) {
         return;
       }
       if (!documentType || !fileInput?.files?.length) { showToast('Please select document type and choose a file', 'error'); return; }
+      if (!expirationDate) { showToast('Expiration date is required', 'error'); return; }
       const file = fileInput.files[0];
       const maxSize = 10 * 1024 * 1024;
       if (file.size > maxSize) { showToast('File must be under 10 MB', 'error'); return; }
@@ -363,6 +370,19 @@ export async function submitRequest(type) {
       const fileRef = storageRef(storage, path);
       await uploadBytes(fileRef, file);
       const fileUrl = await getDownloadURL(fileRef);
+      let linkedDocId = renewForDocId;
+      if (!linkedDocId) {
+        try {
+          const sync = await import("./staff-documents-inbox-sync.js?v=20260816_od_link");
+          if (typeof sync.ffFindStaffDocumentIdForRenewal === "function") {
+            linkedDocId = await sync.ffFindStaffDocumentIdForRenewal(db, salonId, ownerStaffId, {
+              documentType,
+            });
+          }
+        } catch (e) {
+          console.warn("[Inbox] find existing staff document for renewal", e);
+        }
+      }
       data = {
         documentType,
         expirationDate,
@@ -371,7 +391,7 @@ export async function submitRequest(type) {
         fileName: file.name,
         notes,
         documentOwnerStaffId: ownerStaffId,
-        ...(renewForDocId ? { staffDocumentId: renewForDocId } : {}),
+        ...(linkedDocId ? { staffDocumentId: linkedDocId } : {}),
       };
       
     } else if (type === 'supplies') {
@@ -508,20 +528,18 @@ export async function submitRequest(type) {
     // can keep it scoped to the branch where it was submitted. Without this
     // the item falls back to the subject staff's allowedLocationIds, which
     // makes requests leak into every branch the staff member is allowed in.
-    let activeLocationIdForCreate = null;
-    try {
-      if (typeof window.ffGetActiveLocationId === 'function') {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === 'string' && v.trim()) activeLocationIdForCreate = v.trim();
-      }
-      if (!activeLocationIdForCreate && typeof window.__ff_active_location_id === 'string' && window.__ff_active_location_id.trim()) {
-        activeLocationIdForCreate = window.__ff_active_location_id.trim();
-      }
-    } catch (_) {}
+    const activeLocationIdForCreate = inboxGetActiveLocationId();
+    if (!activeLocationIdForCreate && !inboxHasActiveLocationForWrite()) {
+      showToast('Choose a location before creating a request.', 'error');
+      return;
+    }
+    if (activeLocationIdForCreate && data && typeof data === 'object') {
+      data.locationId = activeLocationIdForCreate;
+    }
 
     const baseDoc = {
       tenantId: salonId,
-      locationId: activeLocationIdForCreate,
+      ...(activeLocationIdForCreate ? { locationId: activeLocationIdForCreate } : {}),
       type: ffInboxRuleString(type),
       status: "open",
       priority: 'normal',

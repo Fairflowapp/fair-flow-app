@@ -4,7 +4,7 @@
  * Self-contained utilities for the Inbox/Requests module: date normalization,
  * expiry/type classification + noise filters, role/permission evaluation
  * (operate on a passed-in profile), supply-line parsing, and number/date
- * formatting. No module state, no DOM, no Firestore, no window.
+ * formatting. Location isolation helpers may read the header switcher on window.
  * Extracted verbatim from inbox.js.
  */
 
@@ -260,6 +260,120 @@ function suppliesCategorySubcategoryVariantsRelevant(categoryName, subcategoryNa
  */
 export function suppliesRowRequiresVariant(_row) {
   return false;
+}
+
+/** Active location from the header switcher. */
+export function inboxGetActiveLocationId() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
+      const v = window.ffGetActiveLocationId();
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    if (typeof window !== 'undefined' && typeof window.__ff_active_location_id === 'string'
+        && window.__ff_active_location_id.trim()) {
+      return window.__ff_active_location_id.trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+export function inboxUserHasMultipleLocations() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+      if (window.ffUserHasMultipleLocations()) return true;
+    }
+    if (typeof window !== 'undefined' && typeof window.ffGetLocations === 'function') {
+      const locs = (window.ffGetLocations() || []).filter(l => l && l.isActive !== false);
+      if (locs.length > 1) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+export function inboxPrimaryLocationId() {
+  try {
+    const w = typeof window !== 'undefined' ? window : {};
+    if (typeof w.ffResolveCurrentStaff === 'function' && typeof w.ffEnsureStaffLocationFields === 'function') {
+      const row = w.ffResolveCurrentStaff();
+      if (row) {
+        const f = w.ffEnsureStaffLocationFields(row);
+        const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+        if (primary) return primary;
+      }
+    }
+    if (typeof w.ffGetUserAllowedLocations === 'function') {
+      const locs = w.ffGetUserAllowedLocations();
+      if (Array.isArray(locs) && locs[0] && locs[0].id) return String(locs[0].id).trim();
+    }
+  } catch (_) {}
+  return '';
+}
+
+export function inboxHasActiveLocationForWrite() {
+  if (!inboxUserHasMultipleLocations()) return true;
+  return !!inboxGetActiveLocationId();
+}
+
+/**
+ * Inbox row belongs to the active branch only.
+ * Stamped locationId must match. Unstamped/legacy rows: single-location salons,
+ * or the primary branch only — never every allowed location of the subject staff.
+ */
+export function inboxItemMatchesActiveLocation(req, activeLocationId) {
+  const multi = inboxUserHasMultipleLocations();
+  const active = typeof activeLocationId === 'string' && activeLocationId.trim()
+    ? activeLocationId.trim()
+    : inboxGetActiveLocationId();
+  const explicitTop = req && typeof req.locationId === 'string' ? req.locationId.trim() : '';
+  const data = req && req.data && typeof req.data === 'object' ? req.data : null;
+  const explicitData = data && typeof data.locationId === 'string' ? data.locationId.trim() : '';
+  const explicit = explicitTop || explicitData;
+  if (!active) return !multi;
+  if (explicit) return explicit === active;
+  if (!multi) return true;
+  const primary = inboxPrimaryLocationId();
+  return !!primary && active === primary;
+}
+
+export function inboxMemberAllowedAtActiveLocation(member) {
+  if (!member) return false;
+  const activeLoc = inboxGetActiveLocationId();
+  const multi = inboxUserHasMultipleLocations();
+  if (!activeLoc) return !multi;
+
+  const roleLc = String(member.role || '').toLowerCase().trim();
+  let staffRow = null;
+  try {
+    const store = typeof window.ffGetStaffStore === 'function' ? window.ffGetStaffStore() : null;
+    const staff = store && Array.isArray(store.staff) ? store.staff : [];
+    const uid = String(member.uid || '').trim();
+    const staffId = String(member.staffId || member.id || '').trim();
+    staffRow = staff.find(s => s && (
+      (uid && (String(s.uid || '').trim() === uid || String(s.firebaseUid || '').trim() === uid))
+      || (staffId && String(s.id || '').trim() === staffId)
+    )) || null;
+  } catch (_) {}
+
+  if (staffRow && typeof window.ffEnsureStaffLocationFields === 'function') {
+    try {
+      const f = window.ffEnsureStaffLocationFields(staffRow);
+      const allowed = Array.isArray(f.allowedLocationIds)
+        ? f.allowedLocationIds.map(id => String(id || '').trim()).filter(Boolean)
+        : [];
+      if (allowed.length) return allowed.indexOf(activeLoc) !== -1;
+      const primary = typeof f.primaryLocationId === 'string' ? f.primaryLocationId.trim() : '';
+      if (primary) return primary === activeLoc;
+    } catch (_) {}
+  }
+
+  if (Array.isArray(member.allowedLocationIds) && member.allowedLocationIds.length) {
+    return member.allowedLocationIds.map(id => String(id || '').trim()).indexOf(activeLoc) !== -1;
+  }
+  if (typeof member.primaryLocationId === 'string' && member.primaryLocationId.trim()) {
+    return member.primaryLocationId.trim() === activeLoc;
+  }
+  if (roleLc === 'owner') return true;
+  return !multi;
 }
 
 export function formatRelativeDate(date) {

@@ -15,18 +15,42 @@ import {
   _esignResult,
   _dueLabel,
   _portalMetaHtml,
+  _portalOpened,
   _staffEmail,
   _hasPortalEmailSent,
   _syncOdShellStartUi,
   _inviteEmployeeByEmail,
   _closeModal,
   _openModal,
-} from "./run-ui-shared.js?v=20260811_od_s1_artifacts";
-import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260811_od_s1_artifacts";
+} from "./run-ui-shared.js?v=20260815_od_s6";
+import { ffOpenStartOnboardingModal } from "./run-ui-start-modal.js?v=20260815_od_s6";
+import { ffOpenInAppDocumentOverlay } from "/inapp-pdf-viewer.js?v=20260825_od_iospdf";
 
 let _odUnsubRuns = null;
 let _odUnsubTasks = null;
 let _odStaffId = null;
+const _odPromotedUploads = new Set();
+
+function _promoteWaitingUploads(staff, runId, tasks) {
+  if (!staff || !runId || !Array.isArray(tasks)) return;
+  if (typeof window.ffPromoteOnboardingWaitingUpload !== "function") return;
+  tasks.forEach((task) => {
+    if (!task || !task.id) return;
+    if (task.taskType !== "document" && task.taskType !== "file_upload") return;
+    if (String(task.status || "") !== "waiting_approval") return;
+    const key = `${staff.id}:${runId}:${task.id}`;
+    if (_odPromotedUploads.has(key)) return;
+    _odPromotedUploads.add(key);
+    window.ffPromoteOnboardingWaitingUpload({
+      staffId: staff.id,
+      runId,
+      taskId: task.id,
+    }).catch((e) => {
+      _odPromotedUploads.delete(key);
+      console.warn("[OnboardingRun] promote waiting upload", e);
+    });
+  });
+}
 let _odRunsCache = [];
 let _odTasksByRun = {};
 
@@ -41,14 +65,33 @@ function _teardownSubs() {
   _odUnsubTasks = null;
 }
 
-function _renderEsignSummary(task) {
+function _renderEsignSummary(task, opts) {
+  const manage = !!(opts && opts.manage);
+  const cancelled = !!(opts && opts.cancelled);
   const cfg = _esignCfg(task);
   const res = _esignResult(task);
   const st = String(task.status || "pending");
   const failed =
     (st === "in_progress" || st === "pending") && !!res.lastSealError;
+  const canVoid =
+    manage &&
+    !cancelled &&
+    (st === "completed" || st === "sealing");
+  const voidBtn = canVoid
+    ? `<button type="button" data-od-act="esign_reopen" data-task="${_esc(task.id)}" title="Void this form only and email the employee to fill it again" style="padding:6px 10px;border:1px solid #fecaca;border-radius:7px;background:#fff;color:#b91c1c;font-size:11px;font-weight:700;cursor:pointer;">Void this form &amp; send again</button>`
+    : "";
 
-  if (st === "completed" && (res.signedPdfSha256 || res.signedDocumentId)) {
+  const encMapEarly =
+    res.fieldValuesEncrypted && typeof res.fieldValuesEncrypted === "object"
+      ? res.fieldValuesEncrypted
+      : {};
+  const hasEncryptedFields = Object.keys(encMapEarly).length > 0;
+
+  if (
+    (st === "completed" &&
+      (res.signedPdfSha256 || res.signedDocumentId || res.signedStoragePath)) ||
+    hasEncryptedFields
+  ) {
     const docName =
       cfg.documentTitle || task.templateNameSnapshot || "Document";
     const version =
@@ -57,23 +100,74 @@ function _renderEsignSummary(task) {
         : res.documentVersionId || "—";
     const signedWhen = _fmtWhen(res.signedAt || task.completedAt);
     const signer = res.signerName || "—";
-    return `<div style="margin-top:8px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:10px;background:#fafafa;">
-      <div style="font-size:11px;font-weight:700;color:#065f46;margin-bottom:6px;">E-signed · Completed</div>
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:11px;color:#374151;line-height:1.4;">
+    const pub =
+      res.fieldValuesPublic && typeof res.fieldValuesPublic === "object"
+        ? res.fieldValuesPublic
+        : {};
+    const enc = encMapEarly;
+    const sensitiveRows = Object.keys(enc)
+      .map((fid) => {
+        const p = pub[fid] || {};
+        const e = enc[fid] || {};
+        const display =
+          p.displayValue ||
+          (e.last4
+            ? e.sensitiveKind === "ssn"
+              ? `***-**-${e.last4}`
+              : `••••${e.last4}`
+            : "••••");
+        const label = p.label || fid;
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:11px;color:#374151;"><span style="color:#9ca3af;">${_esc(label)}</span> · ${_esc(display)}</span>
+          <button type="button" data-od-act="esign_reveal_sensitive" data-task="${_esc(task.id)}" data-field="${_esc(fid)}" style="padding:4px 8px;border:1px solid #fde68a;border-radius:6px;background:#fffbeb;color:#92400e;font-size:10px;font-weight:700;cursor:pointer;">Reveal</button>
+        </div>`;
+      })
+      .join("");
+    const sealed =
+      st === "completed" &&
+      !!(res.signedPdfSha256 || res.signedDocumentId || res.signedStoragePath);
+    return `<div style="margin-top:10px;padding:12px 14px;border:1px solid #e5e7eb;border-radius:12px;background:#fafafa;">
+      <div style="font-size:13px;font-weight:700;color:#111827;line-height:1.3;">${_esc(docName)}</div>
+      <div style="font-size:11px;font-weight:700;color:${sealed ? "#065f46" : "#92400e"};margin-top:4px;">${sealed ? "E-signed · Completed" : "Sensitive fields (encrypted)"}</div>
+      ${
+        sealed
+          ? `<div style="display:grid;grid-template-columns:72px 1fr;gap:3px 10px;font-size:11px;color:#374151;line-height:1.45;margin-top:8px;">
         <span style="color:#9ca3af;">Signed</span><span>${_esc(signedWhen || "—")}</span>
         <span style="color:#9ca3af;">Signer</span><span>${_esc(signer)}</span>
-        <span style="color:#9ca3af;">Document</span><span>${_esc(docName)}</span>
         <span style="color:#9ca3af;">Version</span><span>${_esc(String(version))}</span>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">
-        <button type="button" data-od-act="esign_view_signed" data-task="${_esc(task.id)}" style="padding:5px 9px;border:1px solid #111827;border-radius:7px;background:#111827;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">View signed PDF</button>
+      </div>`
+          : ""
+      }
+      ${
+        sensitiveRows
+          ? `<div style="margin-top:8px;"><div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:4px;">Sensitive fields (masked)</div>${sensitiveRows}</div>`
+          : ""
+      }
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center;">
+        ${
+          res.signedPdfSha256 || res.signedDocumentId || res.signedStoragePath
+            ? `<button type="button" data-od-act="esign_view_signed" data-task="${_esc(task.id)}" style="padding:6px 10px;border:1px solid #111827;border-radius:7px;background:#111827;color:#fff;font-size:11px;font-weight:600;cursor:pointer;">View signed PDF</button>`
+            : ""
+        }
         ${
           res.certificateDocumentId || res.certificateStoragePath
-            ? `<button type="button" data-od-act="esign_view_cert" data-task="${_esc(task.id)}" style="padding:5px 9px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;font-size:11px;font-weight:600;cursor:pointer;">View certificate</button>`
+            ? `<button type="button" data-od-act="esign_view_cert" data-task="${_esc(task.id)}" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:7px;background:#fff;font-size:11px;font-weight:600;cursor:pointer;">View certificate</button>`
             : ""
         }
       </div>
-      <div style="font-size:10px;color:#9ca3af;margin-top:6px;line-height:1.4;">Sealed copy is read-only. A new library version needs a new task — older signed copies stay in Documents.</div>
+      ${
+        voidBtn
+          ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #ececec;">
+        <div style="font-size:10px;color:#9ca3af;margin-bottom:6px;">This action applies only to ${_esc(docName)}.</div>
+        ${voidBtn}
+      </div>`
+          : ""
+      }
+      ${
+        hasEncryptedFields
+          ? `<div style="font-size:10px;color:#9ca3af;margin-top:8px;line-height:1.4;">Sensitive values are masked here. Reveal is audited (who / when / field / IP). The signed PDF still shows the full value.</div>`
+          : ""
+      }
     </div>`;
   }
 
@@ -82,10 +176,17 @@ function _renderEsignSummary(task) {
   }
 
   if (st === "sealing" || st === "in_progress" || st === "pending") {
-    return `<div style="margin-top:6px;font-size:11px;color:#6b7280;line-height:1.4;">Employee signs in the Onboarding Portal. Status updates when the signature is sealed.</div>`;
+    return `<div style="margin-top:8px;">
+      <div style="font-size:11px;color:#6b7280;line-height:1.4;">Employee signs in the Onboarding Portal. Status updates when the signature is sealed.</div>
+      ${
+        voidBtn
+          ? `<div style="margin-top:8px;">${voidBtn}</div>`
+          : ""
+      }
+    </div>`;
   }
 
-  return "";
+  return voidBtn ? `<div style="margin-top:8px;">${voidBtn}</div>` : "";
 }
 
 function _renderTaskRow(staff, run, task) {
@@ -100,7 +201,7 @@ function _renderTaskRow(staff, run, task) {
     }
     if (task.taskType === "document" || task.taskType === "file_upload") {
       if (task.status === "waiting_approval") {
-        actions += `<span style="font-size:11px;color:#b45309;font-weight:600;">In Inbox for approval</span>`;
+        actions += `<span style="font-size:11px;color:#6b7280;font-weight:600;">Saving to documents…</span>`;
       } else if (
         task.status === "rejected" ||
         task.status === "pending" ||
@@ -110,7 +211,7 @@ function _renderTaskRow(staff, run, task) {
       }
     }
     if (task.taskType === "electronic_signature") {
-      actions += `<span style="font-size:11px;color:#6b7280;font-weight:600;">Portal e-sign</span>`;
+      actions += `<button type="button" data-od-act="open_portal" data-task="${_esc(task.id)}" title="Open the employee portal for this task" style="padding:6px 10px;border:1px solid #ddd6fe;border-radius:8px;background:#f5f3ff;color:#5b21b6;font-size:11px;font-weight:700;cursor:pointer;">Open portal</button>`;
     }
     if (manage && task.required === false && task.status !== "skipped") {
       actions += `<button type="button" data-od-act="skip" data-task="${_esc(task.id)}" style="padding:5px 9px;border:1px solid #e5e7eb;border-radius:7px;background:#fafafa;font-size:11px;font-weight:600;cursor:pointer;color:#6b7280;">Skip</button>`;
@@ -125,9 +226,11 @@ function _renderTaskRow(staff, run, task) {
         : "";
 
   const esignBlock =
-    task.taskType === "electronic_signature" ? _renderEsignSummary(task) : "";
+    task.taskType === "electronic_signature"
+      ? _renderEsignSummary(task, { manage, cancelled })
+      : "";
 
-  return `<div data-od-task-row="${_esc(task.id)}" style="padding:10px 0;border-bottom:1px solid #f3f4f6;">
+  return `<div data-od-task-row="${_esc(task.id)}" style="padding:12px 0;border-bottom:1px solid #f3f4f6;">
     <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:flex-start;">
       <div style="min-width:0;flex:1;">
         <div style="font-size:13px;font-weight:600;color:#111827;">${_esc(task.templateNameSnapshot || task.templateId)}</div>
@@ -140,7 +243,11 @@ function _renderTaskRow(staff, run, task) {
         ${rejectNote}
         ${esignBlock}
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${actions}</div>
+      ${
+        actions
+          ? `<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">${actions}</div>`
+          : ""
+      }
     </div>
   </div>`;
 }
@@ -183,37 +290,7 @@ function _closeBlankTab(w) {
 
 function _showPdfViewerOverlay(url, title) {
   if (!url) return false;
-  const rid = `ffOdPdfView_${Date.now()}`;
-  const overlay = document.createElement("div");
-  overlay.id = rid;
-  overlay.setAttribute("role", "dialog");
-  overlay.setAttribute("aria-modal", "true");
-  overlay.style.cssText =
-    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100vh;height:100dvh;background:#0f172a;z-index:2147483647;display:flex;flex-direction:column;box-sizing:border-box;padding:calc(10px + env(safe-area-inset-top,0px)) 10px calc(10px + env(safe-area-inset-bottom,0px));";
-  overlay.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 4px 12px;color:#fff;flex:0 0 auto;">
-      <div style="min-width:0;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(title || "Signed PDF")}</div>
-      <div style="display:flex;gap:8px;flex-shrink:0;">
-        <a href="${_esc(url)}" target="_blank" rel="noopener noreferrer" style="border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;text-decoration:none;">Open tab</a>
-        <button type="button" data-ff-od-pdf-close style="border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.12);color:#fff;border-radius:999px;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer;">Close</button>
-      </div>
-    </div>
-    <div style="flex:1 1 auto;min-height:0;background:#fff;border-radius:14px;overflow:hidden;">
-      <iframe src="${_esc(url)}" title="${_esc(title || "Signed PDF")}" style="width:100%;height:100%;border:0;background:#fff;"></iframe>
-    </div>`;
-  const close = () => {
-    try {
-      overlay.remove();
-    } catch (_) {}
-    document.removeEventListener("keydown", onKey);
-  };
-  const onKey = (ev) => {
-    if (ev.key === "Escape") close();
-  };
-  overlay.querySelector("[data-ff-od-pdf-close]")?.addEventListener("click", close);
-  document.addEventListener("keydown", onKey);
-  document.body.appendChild(overlay);
-  return true;
+  return ffOpenInAppDocumentOverlay(url, title || "Signed PDF");
 }
 
 function _assignUrlToTabOrOverlay(url, tab, title) {
@@ -269,6 +346,35 @@ async function _resolveStaffDocFile(staffId, documentId) {
   }
 }
 
+async function _ensureArtifactReader() {
+  if (
+    typeof window.ffGetOnboardingArtifactReadUrl === "function" &&
+    window.ffGetOnboardingArtifactReadUrl._ffFileB64
+  ) {
+    return true;
+  }
+  if (!document.querySelector('script[data-ff-od-run="artifact_b64"]')) {
+    const s = document.createElement("script");
+    s.type = "module";
+    s.src = "/employee-onboarding/esign-library-cloud.js?v=20260825_od_iospdf";
+    s.setAttribute("data-ff-od-run", "artifact_b64");
+    document.body.appendChild(s);
+  }
+  for (let i = 0; i < 40; i += 1) {
+    if (
+      typeof window.ffGetOnboardingArtifactReadUrl === "function" &&
+      window.ffGetOnboardingArtifactReadUrl._ffFileB64
+    ) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return !!(
+    typeof window.ffGetOnboardingArtifactReadUrl === "function" &&
+    window.ffGetOnboardingArtifactReadUrl._ffFileB64
+  );
+}
+
 async function _openEsignStoredPdf(staff, task, kind) {
   // Open blank tab synchronously so mobile/desktop popup blockers don't kill the view
   // after the async download URL resolve (Documents tab already does this).
@@ -282,7 +388,6 @@ async function _openEsignStoredPdf(staff, task, kind) {
           "Signed PDF");
   let path =
     kind === "cert" ? res.certificateStoragePath : res.signedStoragePath;
-  let fileUrl = "";
   let fileName = title;
 
   const docId =
@@ -290,30 +395,44 @@ async function _openEsignStoredPdf(staff, task, kind) {
   if (docId) {
     const resolved = await _resolveStaffDocFile(staff.id, docId);
     if (!path) path = resolved.path;
-    if (resolved.fileUrl) fileUrl = resolved.fileUrl;
     if (resolved.fileName) fileName = resolved.fileName;
+  }
+  if (!path && staff && staff.id && task && task.id) {
+    const salonId = String(window.currentSalonId || "").trim();
+    const runId = String(
+      (task && task.runId) || odUiState.selectedRunId || ""
+    ).trim();
+    if (salonId && runId) {
+      const file = kind === "cert" ? "certificate.pdf" : "signed.pdf";
+      path = `onboardingArtifacts/${salonId}/sealed/${staff.id}/${runId}/${task.id}/${file}`;
+    }
   }
 
   try {
-    // S1: never use client getDownloadURL — Storage denies onboarding artifacts.
-    let url = "";
-    const kindArg = kind === "cert" ? "certificate" : "signed";
-    if (typeof window.ffGetOnboardingArtifactReadUrl === "function") {
-      const meta = await window.ffGetOnboardingArtifactReadUrl({
-        storagePath: path || undefined,
-        staffId: staff && staff.id,
-        runId: task && (task.runId || odUiState.selectedRunId),
-        taskId: task && task.id,
-        kind: kindArg,
-      });
-      url = (meta && meta.readUrl) || "";
-    } else if (fileUrl.startsWith("http://") || fileUrl.startsWith("https://")) {
-      // Legacy inbox/staff-doc public URLs only (pre-S1).
-      url = fileUrl;
+    // S1/S7: never use client getDownloadURL — Storage denies onboarding artifacts.
+    const ready = await _ensureArtifactReader();
+    if (!ready) {
+      _closeBlankTab(tab);
+      _toast("Download is still loading — tap again in a moment.", "error");
+      return;
     }
+    const kindArg = kind === "cert" ? "certificate" : "signed";
+    const meta = await window.ffGetOnboardingArtifactReadUrl({
+      storagePath: path || undefined,
+      staffId: staff && staff.id,
+      runId: task && (task.runId || odUiState.selectedRunId),
+      taskId: task && task.id,
+      kind: kindArg,
+    });
+    const url = (meta && meta.readUrl) || "";
     if (!url) {
       _closeBlankTab(tab);
-      _toast("Signed file not found yet.", "error");
+      _toast(
+        kind === "cert"
+          ? "Certificate file is missing."
+          : "Signed PDF is missing.",
+        "error"
+      );
       return;
     }
     if (!_assignUrlToTabOrOverlay(url, tab, fileName || title)) {
@@ -460,6 +579,102 @@ function _wireTaskActions(host, staff, run, tasks) {
         await _openEsignStoredPdf(staff, task, "signed");
       } else if (act === "esign_view_cert") {
         await _openEsignStoredPdf(staff, task, "cert");
+      } else if (act === "open_portal") {
+        if (typeof window.ffOpenOnboardingPortalLink !== "function") {
+          _toast("Portal module not loaded yet.", "error");
+          return;
+        }
+        btn.disabled = true;
+        try {
+          await window.ffOpenOnboardingPortalLink({
+            staffId: staff.id,
+            runId: run.id,
+            taskId: task.id,
+          });
+        } catch (e) {
+          _toast((e && e.message) || "Could not open portal", "error");
+        } finally {
+          btn.disabled = false;
+        }
+      } else if (act === "esign_reveal_sensitive") {
+        const fieldId = btn.getAttribute("data-field");
+        if (!fieldId) return;
+        if (typeof window.ffRevealOnboardingSensitiveField !== "function") {
+          _toast("Reveal module not loaded yet.", "error");
+          return;
+        }
+        if (
+          !window.confirm(
+            "Reveal this sensitive value? This action is audited (who, when, field, IP)."
+          )
+        ) {
+          return;
+        }
+        btn.disabled = true;
+        try {
+          const out = await window.ffRevealOnboardingSensitiveField({
+            staffId: staff.id,
+            runId: run.id,
+            taskId: task.id,
+            fieldId,
+          });
+          const value = out && out.plaintext != null ? String(out.plaintext) : "";
+          try {
+            window.alert(`Revealed value:\n\n${value}`);
+          } catch (_) {
+            _toast(value || "Revealed", "success");
+          }
+        } catch (e) {
+          console.error("[OnboardingRun] reveal", e);
+          _toast(e.message || "Reveal failed", "error");
+          try {
+            window.alert(e.message || "Reveal failed");
+          } catch (_) {}
+        } finally {
+          btn.disabled = false;
+        }
+      } else if (act === "esign_reopen") {
+        if (!_canManage()) return;
+        if (btn.dataset.busy === "1") return;
+        const formName = task.templateNameSnapshot || "this form";
+        if (
+          !window.confirm(
+            `Void “${formName}” and email the employee to fill only this form again?\n\nOther completed documents stay as they are.`
+          )
+        ) {
+          return;
+        }
+        btn.dataset.busy = "1";
+        btn.disabled = true;
+        try {
+          if (typeof window.ffReopenOnboardingEsignTask !== "function") {
+            throw new Error("Reopen is not loaded yet. Refresh and try again.");
+          }
+          await window.ffReopenOnboardingEsignTask({
+            staffId: staff.id,
+            runId: run.id,
+            taskId: task.id,
+          });
+          if (typeof window.ffSendOnboardingPortalEmail === "function") {
+            await window.ffSendOnboardingPortalEmail({
+              staffId: staff.id,
+              runId: run.id,
+            });
+          } else if (typeof window.ffSendOnboardingPortalReminder === "function") {
+            await window.ffSendOnboardingPortalReminder({
+              staffId: staff.id,
+              runId: run.id,
+            });
+          }
+          _toast(
+            `Voided. An email was queued so they can complete ${formName}.`,
+            "success"
+          );
+        } catch (e) {
+          _toast(e.message || "Could not reopen this form", "error");
+          btn.dataset.busy = "0";
+          btn.disabled = false;
+        }
       } else if (act === "skip") {
         if (!_canManage()) return;
         if (btn.dataset.busy === "1") return;
@@ -485,12 +700,14 @@ function _renderRunsPanel(host, staff) {
   if (odUiState.selectedRunId) {
     const found = (_odRunsCache || []).find((r) => r.id === odUiState.selectedRunId);
     if (found) {
-      /* keep selection */
+      /* keep explicit chip click, including cancelled history */
     } else if (active) {
       odUiState.selectedRunId = active.id;
     }
   } else if (active) {
     odUiState.selectedRunId = active.id;
+  } else if (cancelled[0]) {
+    odUiState.selectedRunId = cancelled[0].id;
   }
 
   const selected =
@@ -533,6 +750,22 @@ function _renderRunsPanel(host, staff) {
                         ? _hasPortalEmailSent(selected)
                           ? `<button type="button" id="ffOdPrimaryInviteBtn" data-od-invite="reminder" style="padding:8px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Send Reminder</button>`
                           : `<button type="button" id="ffOdPrimaryInviteBtn" data-od-invite="invite" style="padding:8px 14px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:12px;font-weight:700;cursor:pointer;">Send to employee</button>`
+                        : ""
+                    }
+                    ${
+                      selected.status !== "cancelled"
+                        ? `<button type="button" id="ffOdOpenPortalBtn" style="padding:8px 12px;border:1px solid #c4b5fd;border-radius:8px;background:#f5f3ff;color:#5b21b6;font-size:12px;font-weight:700;cursor:pointer;">Open portal</button>
+                           ${
+                             !_portalOpened(selected)
+                               ? `<button type="button" id="ffOdCopyPortalBtn" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">Copy link</button>`
+                               : ""
+                           }
+                           <button type="button" id="ffOdNewPortalBtn" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;">New link</button>
+                           ${
+                             selected.portal && selected.portal.activeTokenId
+                               ? `<button type="button" id="ffOdRevokePortalBtn" style="padding:8px 12px;border:1px solid #fecaca;border-radius:8px;background:#fff;color:#b91c1c;font-size:12px;font-weight:600;cursor:pointer;">Revoke</button>`
+                               : ""
+                           }`
                         : ""
                     }
                     ${
@@ -652,6 +885,105 @@ function _renderRunsPanel(host, staff) {
         }
       });
     }
+    const openPortalBtn = runsHost.querySelector("#ffOdOpenPortalBtn");
+    if (openPortalBtn && selected) {
+      openPortalBtn.addEventListener("click", async () => {
+        if (openPortalBtn.dataset.busy === "1") return;
+        if (typeof window.ffOpenOnboardingPortalLink !== "function") {
+          _toast("Portal module not loaded yet.", "error");
+          return;
+        }
+        openPortalBtn.dataset.busy = "1";
+        try {
+          await window.ffOpenOnboardingPortalLink({
+            staffId: staff.id,
+            runId: selected.id,
+          });
+        } catch (e) {
+          _toast((e && e.message) || "Could not open portal", "error");
+        } finally {
+          openPortalBtn.dataset.busy = "0";
+        }
+      });
+    }
+    const copyPortalBtn = runsHost.querySelector("#ffOdCopyPortalBtn");
+    if (copyPortalBtn && selected) {
+      copyPortalBtn.addEventListener("click", async () => {
+        if (copyPortalBtn.dataset.busy === "1") return;
+        if (typeof window.ffCopyOnboardingPortalLink !== "function") {
+          _toast("Portal module not loaded yet.", "error");
+          return;
+        }
+        copyPortalBtn.dataset.busy = "1";
+        try {
+          await window.ffCopyOnboardingPortalLink({
+            staffId: staff.id,
+            runId: selected.id,
+          });
+        } catch (e) {
+          _toast((e && e.message) || "Could not copy link", "error");
+        } finally {
+          copyPortalBtn.dataset.busy = "0";
+        }
+      });
+    }
+    const newPortalBtn = runsHost.querySelector("#ffOdNewPortalBtn");
+    if (newPortalBtn && selected) {
+      newPortalBtn.addEventListener("click", async () => {
+        if (newPortalBtn.dataset.busy === "1") return;
+        if (typeof window.ffReissueAndCopyOnboardingPortalLink !== "function") {
+          _toast("Portal module not loaded yet.", "error");
+          return;
+        }
+        if (
+          !window.confirm(
+            "Create a new portal link? The previous link will stop working."
+          )
+        ) {
+          return;
+        }
+        newPortalBtn.dataset.busy = "1";
+        try {
+          await window.ffReissueAndCopyOnboardingPortalLink({
+            staffId: staff.id,
+            runId: selected.id,
+          });
+        } catch (e) {
+          _toast((e && e.message) || "Could not create a new link", "error");
+        } finally {
+          newPortalBtn.dataset.busy = "0";
+        }
+      });
+    }
+    const revokePortalBtn = runsHost.querySelector("#ffOdRevokePortalBtn");
+    if (revokePortalBtn && selected) {
+      revokePortalBtn.addEventListener("click", async () => {
+        if (revokePortalBtn.dataset.busy === "1") return;
+        if (typeof window.ffRevokeOnboardingPortalToken !== "function") {
+          _toast("Portal module not loaded yet.", "error");
+          return;
+        }
+        if (
+          !window.confirm(
+            "Revoke the current portal link? The employee will not be able to open it."
+          )
+        ) {
+          return;
+        }
+        revokePortalBtn.dataset.busy = "1";
+        try {
+          await window.ffRevokeOnboardingPortalToken({
+            staffId: staff.id,
+            runId: selected.id,
+          });
+          _toast("Portal link revoked.", "success");
+        } catch (e) {
+          _toast((e && e.message) || "Could not revoke link", "error");
+        } finally {
+          revokePortalBtn.dataset.busy = "0";
+        }
+      });
+    }
     const cancelBtn = runsHost.querySelector("#ffOdCancelRunBtn");
     if (cancelBtn && selected) {
       cancelBtn.addEventListener("click", async () => {
@@ -695,6 +1027,7 @@ function _subscribeTasks(staff, runId) {
     _odTasksByRun[runId] = tasks || [];
     const host = document.getElementById("staffOdOnboardingPane");
     if (host && _odStaffId === staff.id) _renderRunsPanel(host, staff);
+    _promoteWaitingUploads(staff, runId, tasks || []);
   });
 }
 
@@ -756,7 +1089,8 @@ export function ffMountStaffOnboardingRuns(pane, staff) {
     _odUnsubRuns = window.ffSubscribeOnboardingRuns(staff.id, (runs) => {
       _odRunsCache = runs || [];
       if (!odUiState.selectedRunId && _odRunsCache.length) {
-        odUiState.selectedRunId = _odRunsCache[0].id;
+        const open = _odRunsCache.find((r) => r && r.status !== "cancelled");
+        odUiState.selectedRunId = (open || _odRunsCache[0]).id;
       }
       if (odUiState.selectedRunId) _subscribeTasks(staff, odUiState.selectedRunId);
       _renderRunsPanel(pane, staff);

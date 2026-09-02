@@ -2,7 +2,7 @@
  * Portal e-sign — signer chrome, zoom gestures, signature pad.
  */
 
-import { esc } from "./esign-signer-helpers.js?v=20260810_od_split_v1";
+import { esc } from "./esign-signer-helpers.js?v=20260816_od_pdfb64";
 
 export function attachEsignChrome(s) {
   s.renderSigner = async function renderSigner() {

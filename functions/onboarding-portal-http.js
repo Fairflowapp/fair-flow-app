@@ -26,13 +26,24 @@ const {
   enrichSalonStaffNames,
   recomputeRunInTxn,
 } = require("./onboarding-portal-shared");
+const {
+  ONBOARDING_FIELD_ENCRYPTION_KEY,
+} = require("./onboarding-crypto");
+
+/** S4 — submit/seal needs HMAC + field encryption key. */
+const SUBMIT_SECRET_OPTS = {
+  secrets: [
+    ...(PORTAL_SECRET_OPTS.secrets || []),
+    ONBOARDING_FIELD_ENCRYPTION_KEY,
+  ],
+};
 
 // ─── Portal HTTP actions (unauthenticated; auth via token/session) ───────────
 // Uses onRequest (not onCall+invoker:public) because org policy blocks setting
 // Cloud Run invoker IAM from the Firebase CLI on this project.
 
 function httpsErrorToHttp(err) {
-  const code = (err && err.code) || "internal";
+  const code = String((err && err.code) || "internal").replace(/^functions\//, "");
   const map = {
     "invalid-argument": 400,
     unauthenticated: 401,
@@ -46,12 +57,13 @@ function httpsErrorToHttp(err) {
   return map[code] || 500;
 }
 
-function wrapPortalHttp(handler) {
+function wrapPortalHttp(handler, extra) {
   return onRequest(
     {
       region: REGION,
       cors: true,
       ...PORTAL_SECRET_OPTS,
+      ...(extra || {}),
       // invoker omitted — same pattern as mediaDownloadFile on this project
     },
     async (req, res) => {
@@ -85,11 +97,59 @@ function wrapPortalHttp(handler) {
   );
 }
 
+async function consumePortalBootstrap(ctx) {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ctx.tokenRef);
+    if (!snap.exists) {
+      throw new HttpsError("unauthenticated", "Invalid or expired link.");
+    }
+    const t = snap.data() || {};
+    if (t.status !== "active") {
+      throw new HttpsError("unauthenticated", "Invalid or expired link.");
+    }
+    // Same link can be opened again (email preview, refresh, second device).
+    // Only the first open records bootstrappedAt.
+    if (t.bootstrappedAt) {
+      return;
+    }
+    tx.set(
+      ctx.tokenRef,
+      { bootstrappedAt: now, updatedAt: now },
+      { merge: true }
+    );
+    tx.set(
+      ctx.runRef,
+      {
+        portal: { bootstrappedAt: now },
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+  });
+}
+
 async function handleBootstrap(request) {
-  const ctx = await resolvePortalAccess(request.data && request.data.token, request, {
+  let ctx = await resolvePortalAccess(request.data && request.data.token, request, {
     allowCompletedRead: true,
     mutating: false,
   });
+  await consumePortalBootstrap(ctx);
+  try {
+    const { promoteWaitingPortalUploads } = require("./onboarding-portal-staff-doc");
+    const n = await promoteWaitingPortalUploads(ctx);
+    if (n) {
+      await recomputeRunInTxn(ctx.salonId, ctx.staffId, ctx.runId);
+      ctx = await resolvePortalAccess(request.data && request.data.token, request, {
+        allowCompletedRead: true,
+        mutating: false,
+      });
+    }
+  } catch (e) {
+    logPortal("promote_waiting_upload_failed", {
+      message: String((e && e.message) || e).slice(0, 200),
+    });
+  }
   const sessionToken = mintSession(ctx);
   const tokenSnap = await ctx.tokenRef.get();
   const t = tokenSnap.data() || {};
@@ -105,16 +165,33 @@ async function handleBootstrap(request) {
     runId: ctx.runId,
     tokenId: ctx.tokenId,
     readOnly: ctx.readOnly,
+    consumed: true,
   });
   return dto;
 }
 
 async function handleGetState(request) {
-  const ctx = await resolveSessionAccess(
+  let ctx = await resolveSessionAccess(
     request.data && request.data.sessionToken,
     request,
     { mutating: false }
   );
+  try {
+    const { promoteWaitingPortalUploads } = require("./onboarding-portal-staff-doc");
+    const n = await promoteWaitingPortalUploads(ctx);
+    if (n) {
+      await recomputeRunInTxn(ctx.salonId, ctx.staffId, ctx.runId);
+      ctx = await resolveSessionAccess(
+        request.data && request.data.sessionToken,
+        request,
+        { mutating: false }
+      );
+    }
+  } catch (e) {
+    logPortal("promote_waiting_upload_failed", {
+      message: String((e && e.message) || e).slice(0, 200),
+    });
+  }
   const sessionToken = mintSession(ctx);
   const tokenSnap = await ctx.tokenRef.get();
   const t = tokenSnap.data() || {};
@@ -232,7 +309,24 @@ async function handleCreateUpload(request) {
   }
   const cfg = task.configSnapshot || {};
   const maxMb = Number(cfg.maxSizeMb) || 10;
-  if (size > maxMb * 1024 * 1024) {
+  const maxBytes = maxMb * 1024 * 1024;
+  if (size > maxBytes) {
+    throw new HttpsError("invalid-argument", `File must be under ${maxMb} MB.`);
+  }
+  const fileBase64 = trimStr(request.data && request.data.fileBase64);
+  if (!fileBase64) {
+    throw new HttpsError("invalid-argument", "Missing file. Please try again.");
+  }
+  let buf;
+  try {
+    buf = Buffer.from(fileBase64, "base64");
+  } catch (_) {
+    throw new HttpsError("invalid-argument", "Could not read the file.");
+  }
+  if (!buf.length) {
+    throw new HttpsError("invalid-argument", "Empty file.");
+  }
+  if (buf.length > maxBytes) {
     throw new HttpsError("invalid-argument", `File must be under ${maxMb} MB.`);
   }
 
@@ -272,11 +366,12 @@ async function handleCreateUpload(request) {
 
   const bucket = await resolvePortalBucket();
   const file = bucket.file(storagePath);
-  const [uploadUrl] = await file.getSignedUrl({
-    version: "v4",
-    action: "write",
-    expires: Date.now() + UPLOAD_URL_TTL_MS,
+  // This project cannot mint V4 signed URLs (signBlob denied).
+  // Write the file with the Admin SDK instead of a client PUT.
+  await file.save(buf, {
     contentType,
+    resumable: false,
+    metadata: { contentType },
   });
 
   logPortal("create_upload", {
@@ -285,11 +380,13 @@ async function handleCreateUpload(request) {
     taskId,
     uploadId,
     tokenId: ctx.tokenId,
+    bytes: buf.length,
   });
 
   return {
     uploadId,
-    uploadUrl,
+    uploadUrl: null,
+    uploaded: true,
     storagePath,
     contentType,
     expiresAt: expiresAt.toDate().toISOString(),
@@ -314,7 +411,7 @@ async function handleFinalizeUpload(request) {
   const uploadSnap = await uploadRef.get();
   if (!uploadSnap.exists) throw new HttpsError("not-found", "Upload not found.");
   const up = uploadSnap.data() || {};
-  if (up.status === "finalized" && up.inboxItemId) {
+  if (up.status === "finalized" && (up.linkedDocumentId || up.inboxItemId)) {
     const fresh = await resolveSessionAccess(
       request.data && request.data.sessionToken,
       request,
@@ -322,7 +419,8 @@ async function handleFinalizeUpload(request) {
     );
     return {
       ok: true,
-      inboxItemId: up.inboxItemId,
+      linkedDocumentId: up.linkedDocumentId || null,
+      inboxItemId: up.inboxItemId || null,
       state: buildPortalDto(fresh, mintSession(fresh)),
     };
   }
@@ -378,79 +476,26 @@ async function handleFinalizeUpload(request) {
   const destFile = bucket.file(destPath);
   await portalFile.copy(destFile);
 
-  const inboxRef = db().collection(`salons/${ctx.salonId}/inboxItems`).doc();
-  await inboxRef.set({
-    tenantId: ctx.salonId,
-    locationId: null,
-    type: "document_upload",
-    status: "open",
-    priority: "normal",
-    assignedTo: null,
-    sentToStaffIds: [],
-    sentToNames: [],
-    data: {
-      documentType,
-      expirationDate,
-      filePath: destPath,
-      fileUrl: null,
-      storagePath: destPath,
-      viaOnboardingArtifacts: true,
-      fileName: up.fileName || safeName,
-      notes,
-      documentOwnerStaffId: ctx.staffId,
-      onboardingRunId: ctx.runId,
-      onboardingTaskId: taskId,
-      templateId: task.templateId || taskId,
-      taskType: task.taskType,
-      via: "portal",
-    },
-    managerNotes: null,
-    responseNote: null,
-    decidedBy: null,
-    decidedAt: null,
-    needsInfoQuestion: null,
-    staffReply: null,
-    visibility: "managers_only",
-    unreadForManagers: true,
-    documentOwnerStaffId: ctx.staffId,
-    createdByUid: "onboarding_portal",
-    createdByStaffId: ctx.staffId,
-    createdByName: "Onboarding Portal",
-    createdByRole: "portal",
-    forUid: "onboarding_portal",
-    forStaffId: ctx.staffId,
-    forStaffName: "Onboarding Portal",
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    lastActivityAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: null,
-  });
-
-  const taskRef = db().doc(
-    `salons/${ctx.salonId}/staff/${ctx.staffId}/onboardingRuns/${ctx.runId}/tasks/${taskId}`
-  );
-  await db().runTransaction(async (tx) => {
-    const ts = await tx.get(taskRef);
-    if (!ts.exists) return;
-    const cur = ts.data() || {};
-    if (cur.status === "completed") return;
-    tx.update(taskRef, {
-      status: "waiting_approval",
-      result: {
-        ...(cur.result || {}),
-        inboxItemId: inboxRef.id,
-        fileName: up.fileName || safeName,
-        storagePath: destPath,
-        portalUploadId: uploadId,
-      },
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+  const { finalizePortalUploadAsStaffDoc } = require("./onboarding-portal-staff-doc");
+  const linkedDocumentId = await finalizePortalUploadAsStaffDoc({
+    salonId: ctx.salonId,
+    staffId: ctx.staffId,
+    runId: ctx.runId,
+    taskId,
+    task,
+    storagePath: destPath,
+    fileName: up.fileName || safeName,
+    expirationDate,
+    notes,
+    inboxItemId: trimStr(up.inboxItemId),
+    documentType,
   });
 
   await uploadRef.set(
     {
       status: "finalized",
-      inboxItemId: inboxRef.id,
       destPath,
+      linkedDocumentId,
       finalizedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }
@@ -462,7 +507,7 @@ async function handleFinalizeUpload(request) {
     runId: ctx.runId,
     taskId,
     uploadId,
-    inboxItemId: inboxRef.id,
+    linkedDocumentId,
     tokenId: ctx.tokenId,
   });
 
@@ -473,7 +518,7 @@ async function handleFinalizeUpload(request) {
   );
   return {
     ok: true,
-    inboxItemId: inboxRef.id,
+    linkedDocumentId,
     state: buildPortalDto(fresh, mintSession(fresh)),
   };
 }
@@ -495,14 +540,18 @@ async function handleGetSignaturePacket(request) {
   const cfg = esign.esignCfg(task);
   esign.assertEsignAllowed(cfg);
 
-  // Always verify snapshot hash still matches library bytes
+  // Always verify snapshot hash still matches library bytes.
+  // Return the PDF as base64 — this project cannot mint V4 signed URLs
+  // (iam.serviceAccounts.signBlob is denied).
   const source = await esign.downloadSourcePdf(ctx.salonId, cfg);
-  const bucket = await esign.resolveBucket();
-  const [readUrl] = await bucket.file(source.storagePath).getSignedUrl({
-    version: "v4",
-    action: "read",
-    expires: Date.now() + esign.PACKET_URL_TTL_MS,
-  });
+  const maxBytes = 6.5 * 1024 * 1024;
+  if (!source.buf || !source.buf.length || source.buf.length > maxBytes) {
+    throw new HttpsError(
+      "failed-precondition",
+      "This document is too large to open on a phone. Ask your manager for a smaller PDF."
+    );
+  }
+  const pdfBase64 = source.buf.toString("base64");
 
   const ip = clientIp(request);
   const ua = String(
@@ -541,11 +590,9 @@ async function handleGetSignaturePacket(request) {
     requireDrawnSignature: cfg.requireDrawnSignature !== false,
     consentText: String(cfg.consentText || ""),
     fieldSchema: esign.publicFieldSchema(cfg.fieldSchema),
-    pdfReadUrl: readUrl,
-    pdfReadUrlExpiresAt: new Date(
-      Date.now() + esign.PACKET_URL_TTL_MS
-    ).toISOString(),
-    // Intentionally omit IP, source storage path internals beyond signed URL
+    pdfBase64,
+    pdfReadUrl: null,
+    pdfReadUrlExpiresAt: null,
     resultPublic: esign.publicEsignResult(task.result || {}),
   };
 }
@@ -569,7 +616,12 @@ async function handleSubmitSignature(request) {
 
   const cfg = esign.esignCfg(existing);
   const { documentVersionId } = esign.documentIds(cfg);
-  const sealId = esign.sealIdFor(taskId, documentVersionId);
+  const sealId = esign.sealIdFor(
+    taskId,
+    documentVersionId,
+    ctx.staffId,
+    ctx.runId
+  );
 
   if (existing.status === "completed" && existing.result && existing.result.sealId) {
     return {
@@ -759,10 +811,45 @@ async function handleSubmitSignature(request) {
 exports.onboardingPortalBootstrap = wrapPortalHttp(handleBootstrap);
 exports.onboardingPortalGetState = wrapPortalHttp(handleGetState);
 exports.onboardingPortalAckPolicy = wrapPortalHttp(handleAckPolicy);
-exports.onboardingPortalCreateUpload = wrapPortalHttp(handleCreateUpload);
+exports.onboardingPortalCreateUpload = wrapPortalHttp(handleCreateUpload, {
+  timeoutSeconds: 90,
+  memory: "512MiB",
+});
 exports.onboardingPortalFinalizeUpload = wrapPortalHttp(handleFinalizeUpload);
-exports.onboardingPortalGetSignaturePacket = wrapPortalHttp(
-  handleGetSignaturePacket
+exports.onboardingPortalGetSignaturePacket = onRequest(
+  {
+    region: REGION,
+    cors: true,
+    timeoutSeconds: 60,
+    memory: "512MiB",
+    ...PORTAL_SECRET_OPTS,
+  },
+  async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "POST only" });
+      return;
+    }
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const data = body.data && typeof body.data === "object" ? body.data : body;
+      const request = { data, rawRequest: req, auth: null };
+      const result = await handleGetSignaturePacket(request);
+      res.status(200).json({ result });
+    } catch (e) {
+      const message = (e && e.message) || "Request failed.";
+      logPortal("http_error", {
+        message: String(message).slice(0, 200),
+        code: e && e.code,
+      });
+      res.status(httpsErrorToHttp(e)).json({
+        error: { message, status: (e && e.code) || "internal" },
+      });
+    }
+  }
 );
 exports.onboardingPortalSubmitSignature = onRequest(
   {
@@ -770,7 +857,7 @@ exports.onboardingPortalSubmitSignature = onRequest(
     cors: true,
     timeoutSeconds: 120,
     memory: "1GiB",
-    ...PORTAL_SECRET_OPTS,
+    ...SUBMIT_SECRET_OPTS,
   },
   async (req, res) => {
     // Same contract as wrapPortalHttp but with higher resources for seal.

@@ -16,9 +16,9 @@ import {
   setErrorFromException,
   CF_NAMES,
   bindRequestRender,
-} from "./app-shared.js?v=20260810_od_split_v1";
-import { renderHome, wireHome, goHome } from "./app-home.js?v=20260810_od_split_v1";
-import { renderTaskDetail, wireTaskDetail } from "./app-task.js?v=20260810_od_split_v1";
+} from "./app-shared.js?v=20260812_od_portal_sameorigin";
+import { renderHome, wireHome, goHome } from "./app-home.js?v=20260812_od_portal_sameorigin";
+import { renderTaskDetail, wireTaskDetail } from "./app-task.js?v=20260812_od_portal_sameorigin";
 
 function render() {
   const el = root();
@@ -37,19 +37,23 @@ function render() {
     const title =
       state.errorKind === "cancelled"
         ? "Onboarding cancelled"
-        : state.errorKind === "invalid"
-          ? "Link unavailable"
-          : state.errorKind === "rate"
-            ? "Please wait"
-            : "Unable to open";
+        : state.errorKind === "used"
+          ? "Link already used"
+          : state.errorKind === "invalid"
+            ? "Link unavailable"
+            : state.errorKind === "rate"
+              ? "Please wait"
+              : "Unable to open";
     const body =
       state.errorKind === "cancelled"
         ? "This onboarding was cancelled. Ask your manager for help."
-        : state.errorKind === "invalid"
-          ? "This link is invalid, expired, or no longer active. Ask your manager for a new link."
-          : state.errorKind === "rate"
-            ? "Too many attempts from this network. Wait a minute and refresh this page."
-            : esc(state.error || "Please try again later.");
+        : state.errorKind === "used"
+          ? "This link was already opened. Ask your manager for a new link."
+          : state.errorKind === "invalid"
+            ? "This link is invalid, expired, or no longer active. Ask your manager for a new link."
+            : state.errorKind === "rate"
+              ? "Too many attempts from this network. Wait a minute and refresh this page."
+              : esc(state.error || "Please try again later.");
     el.innerHTML = `
       <div class="state">
         <h1>${esc(title)}</h1>
@@ -95,7 +99,66 @@ function render() {
 }
 
 
+const SESS_TTL_MS = 2 * 60 * 60 * 1000 - 30 * 1000;
+
+function sessionStoreKey(token) {
+  return "ff_od_sess_v1_" + String(token || "").slice(-20);
+}
+
+function loadStoredSession(token) {
+  try {
+    const raw = sessionStorage.getItem(sessionStoreKey(token));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.sessionToken) return null;
+    if (o.exp && Date.now() > Number(o.exp)) {
+      sessionStorage.removeItem(sessionStoreKey(token));
+      return null;
+    }
+    return String(o.sessionToken);
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveStoredSession(token, sessionToken) {
+  try {
+    if (!sessionToken) return;
+    sessionStorage.setItem(
+      sessionStoreKey(token),
+      JSON.stringify({
+        sessionToken: String(sessionToken),
+        exp: Date.now() + SESS_TTL_MS,
+      })
+    );
+  } catch (_) {}
+}
+
+function clearStoredSession(token) {
+  try {
+    sessionStorage.removeItem(sessionStoreKey(token));
+  } catch (_) {}
+}
+
+function paintFromDto(dto) {
+  applyDto(dto);
+  const hashTask = parseHashTaskId();
+  if (dto.readOnly || (dto.run && dto.run.status === "completed")) {
+    state.screen = "done";
+    if (hashTask) {
+      state.taskId = hashTask;
+      state.screen = "task";
+    }
+  } else if (hashTask) {
+    state.taskId = hashTask;
+    state.screen = "task";
+  } else {
+    state.screen = "home";
+  }
+}
+
 async function boot() {
+  try { if (typeof window.__ffPortalMarkBooted === "function") window.__ffPortalMarkBooted(); } catch (_) {}
   state.screen = "loading";
   render();
   const token = parseTokenFromPath();
@@ -106,22 +169,28 @@ async function boot() {
     render();
     return;
   }
+  const stored = loadStoredSession(token);
+  if (stored) {
+    try {
+      const dto = await portalHttp(CF_NAMES.getState, { sessionToken: stored });
+      if (dto && dto.sessionToken) saveStoredSession(token, dto.sessionToken);
+      paintFromDto(dto);
+      render();
+      return;
+    } catch (e) {
+      clearStoredSession(token);
+      const msg = String((e && e.message) || "");
+      if (/cancel/i.test(msg)) {
+        setErrorFromException(e);
+        render();
+        return;
+      }
+    }
+  }
   try {
     const dto = await portalHttp(CF_NAMES.bootstrap, { token });
-    applyDto(dto);
-    const hashTask = parseHashTaskId();
-    if (dto.readOnly || (dto.run && dto.run.status === "completed")) {
-      state.screen = "done";
-      if (hashTask) {
-        state.taskId = hashTask;
-        state.screen = "task";
-      }
-    } else if (hashTask) {
-      state.taskId = hashTask;
-      state.screen = "task";
-    } else {
-      state.screen = "home";
-    }
+    if (dto && dto.sessionToken) saveStoredSession(token, dto.sessionToken);
+    paintFromDto(dto);
     render();
   } catch (e) {
     setErrorFromException(e);

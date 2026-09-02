@@ -504,14 +504,36 @@ function parsePhotoPayload(raw) {
 }
 
 /**
- * Photo policy from salons/{salonId}/settings/timeClock.kioskPhoto.
+ * Photo / overtime / enforcement rules are per-branch under
+ * locationTimeClock.{locationId}. Unstamped top-level fields remain the
+ * fallback for the primary branch and single-location salons.
+ */
+function pickTimeClockField(data, locationId, field) {
+  const locMap = data && data.locationTimeClock && typeof data.locationTimeClock === "object"
+    ? data.locationTimeClock
+    : {};
+  const loc = trimStr(locationId);
+  if (loc && loc !== "default" && locMap[loc] && typeof locMap[loc] === "object"
+      && locMap[loc][field] != null) {
+    return locMap[loc][field];
+  }
+  return data ? data[field] : null;
+}
+
+async function loadTimeClockDoc(salonId) {
+  const snap = await db().doc(`salons/${salonId}/settings/timeClock`).get();
+  return snap.exists ? (snap.data() || {}) : {};
+}
+
+/**
+ * Photo policy from salons/{salonId}/settings/timeClock (per punch location).
  * enabled requires an EXPLICIT true (privacy feature — salons opt in via
  * Time Clock Settings); onFailure defaults to "fallback".
  */
-async function loadKioskPhotoPolicy(salonId) {
+async function loadKioskPhotoPolicy(salonId, locationId) {
   try {
-    const snap = await db().doc(`salons/${salonId}/settings/timeClock`).get();
-    const raw = snap.exists ? snap.get("kioskPhoto") : null;
+    const data = await loadTimeClockDoc(salonId);
+    const raw = pickTimeClockField(data, locationId, "kioskPhoto");
     const enabled = !!(raw && typeof raw === "object" && raw.enabled === true);
     const onFailure =
       raw && trimStr(raw.onFailure).toLowerCase() === "block" ? "block" : "fallback";
@@ -621,11 +643,11 @@ async function verifyPhotoManagerOverride(args) {
   return verifyKioskManagerPinOverride({ ...args, reasonPrefix: "photo" });
 }
 
-/** Schedule enforcement block from salons/{salonId}/settings/timeClock. */
-async function loadScheduleEnforcement(salonId) {
+/** Schedule enforcement block from salons/{salonId}/settings/timeClock (per punch location). */
+async function loadScheduleEnforcement(salonId, locationId) {
   try {
-    const snap = await db().doc(`salons/${salonId}/settings/timeClock`).get();
-    const raw = snap.exists ? snap.get("scheduleEnforcement") : null;
+    const data = await loadTimeClockDoc(salonId);
+    const raw = pickTimeClockField(data, locationId, "scheduleEnforcement");
     return tcSchedule.normalizeScheduleEnforcement(raw);
   } catch (e) {
     console.warn("[timeClockPunch] loadScheduleEnforcement failed — treating as disabled", e);
@@ -641,7 +663,7 @@ async function loadScheduleEnforcement(salonId) {
 async function resolveClockInScheduleGate({
   salonId, locationId, staffId, callerKind, kioskId, data, isPersonalOverride,
 }) {
-  const enforcement = await loadScheduleEnforcement(salonId);
+  const enforcement = await loadScheduleEnforcement(salonId, locationId);
   const empty = {
     enforcement,
     snapshot: {
@@ -757,14 +779,14 @@ async function resolveClockInScheduleGate({
  * Throws photo_required (block mode, no valid override) — the client shows
  * the quick manager-PIN override form on that reason code.
  */
-async function resolveKioskPhotoPlan({ salonId, kioskId, data, staffId }) {
+async function resolveKioskPhotoPlan({ salonId, kioskId, data, staffId, locationId }) {
   const clientSupportsPhoto =
     Object.prototype.hasOwnProperty.call(data, "photo") ||
     Object.prototype.hasOwnProperty.call(data, "photoError") ||
     Object.prototype.hasOwnProperty.call(data, "photoOverride");
   if (!clientSupportsPhoto) return null;
 
-  const policy = await loadKioskPhotoPolicy(salonId);
+  const policy = await loadKioskPhotoPolicy(salonId, locationId);
   if (!policy.enabled) return null;
 
   const buffer = parsePhotoPayload(data.photo);
@@ -1149,7 +1171,7 @@ async function timeClockPunchHandler(data, context) {
   //    uploaded for a punch that would be rejected anyway. null → feature not
   //    applicable (personal device, legacy client, or salon opt-out).
   const photoPlan = caller.kind === "kiosk"
-    ? await resolveKioskPhotoPlan({ salonId, kioskId, data, staffId })
+    ? await resolveKioskPhotoPlan({ salonId, kioskId, data, staffId, locationId })
     : null;
 
   const source = caller.kind === "kiosk" ? "kiosk" : (isOverride ? "admin" : "manual");
@@ -1381,7 +1403,7 @@ async function timeClockPunchHandler(data, context) {
   let lateClockOutAudit = {};
   let lateSnapshotPatch = null;
   try {
-    const enforcement = await loadScheduleEnforcement(salonId);
+    const enforcement = await loadScheduleEnforcement(salonId, locationId);
     const lateResolved = await tcSchedule.resolveLateClockOutForPunch(db(), {
       salonId,
       locationId,
@@ -1561,7 +1583,7 @@ async function timeClockManageEntryHandler(data, context) {
       linkedShiftDateKey: null,
     };
     try {
-      const enforcement = await loadScheduleEnforcement(salonId);
+      const enforcement = await loadScheduleEnforcement(salonId, locationId);
       if (enforcement.enabled === true) {
         const resolved = await tcSchedule.resolveLinkedShiftSnapshotForManageAdd(db(), {
           salonId,

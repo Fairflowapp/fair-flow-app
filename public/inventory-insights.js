@@ -6,12 +6,12 @@
 // This barrel re-exports the full original public surface so external importers
 // (inventory.js, inventory-nav.js, delegates, table modules) are unchanged.
 
-import { initInsightsScans } from "./inventory-insights-scans.js?v=20260728_inv_mobile_unstick";
-import { initInsightsCompute } from "./inventory-insights-compute.js?v=20260728_inv_mobile_unstick";
+import { initInsightsScans } from "./inventory-insights-scans.js?v=20260902_prod_cats";
+import { initInsightsCompute } from "./inventory-insights-compute.js?v=20260902_inv_iso";
 
-export * from "./inventory-insights-scans.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-insights-compute.js?v=20260728_inv_mobile_unstick";
-export * from "./inventory-insights-ui.js?v=20260728_inv_mobile_unstick";
+export * from "./inventory-insights-scans.js?v=20260902_prod_cats";
+export * from "./inventory-insights-compute.js?v=20260902_inv_iso";
+export * from "./inventory-insights-ui.js?v=20260902_inv_iso";
 
 /** Wire the orchestrator spine (from inventory.js) into both stateful sub-modules. */
 export function initInventoryInsights(deps) {

@@ -10,7 +10,7 @@
  * controlledStaffCanProvideService are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter, resolveServiceDurationMinutes, parseStaffDurationOverrideInput } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
+import { getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, getTicketsAccountId, loadServices, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, sharedServiceCatalogItemsRef, _applyCatalogFilter, resolveServiceDurationMinutes, parseStaffDurationOverrideInput, splitServiceDurationParts, formatServiceDurationLabel, parseStaffDurationOverrideFromParts } from "./tickets-catalog-data.js?v=20260902_prod_cats";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { db } from "/app.js?v=20260610_force_lp_ios";
@@ -299,7 +299,7 @@ function renderServicesStaffTabHtml(service) {
     const storedDuration = Number(override.durationMinutes);
     const hasDurationOverride = Number.isInteger(storedDuration) && storedDuration >= 1 && storedDuration <= 1440
       && storedDuration !== serviceDefaultDuration;
-    const durationValue = hasDurationOverride ? String(storedDuration) : '';
+    const durationParts = hasDurationOverride ? splitServiceDurationParts(storedDuration) : { hours: '', minutes: '' };
     const commission = override.commission && typeof override.commission === 'object' ? override.commission : {};
     const defaultCommission = getStaffDefaultServiceCommission(staff, staffId);
     const hasCommissionOverride = Number.isFinite(Number(commission.value));
@@ -339,10 +339,19 @@ function renderServicesStaffTabHtml(service) {
           <input type="number" min="0" step="0.01" class="ff-services-staff-price" value="${escapeHtml(String(price))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
           <span style="font-size:11px;color:#9ca3af;">Default ${ffTicketMoney(basePrice)}</span>
         </div>
-        <div style="display:grid;grid-template-columns:100px minmax(110px,170px) auto;gap:8px;align-items:center;margin-bottom:8px;">
-          <div style="font-size:12px;color:#6b7280;">Duration</div>
-          <input type="number" min="1" max="1440" step="1" class="ff-services-staff-duration" value="${escapeHtml(durationValue)}" placeholder="${escapeHtml(String(serviceDefaultDuration))}" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
-          <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};">${hasDurationOverride ? 'Override' : `Default ${serviceDefaultDuration} min`}</span>
+        <div style="display:grid;grid-template-columns:100px minmax(160px,220px) auto;gap:8px;align-items:end;margin-bottom:8px;">
+          <div style="font-size:12px;color:#6b7280;padding-bottom:8px;">Duration</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <label style="display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;color:#6b7280;">
+              Hours
+              <input type="number" min="0" max="24" step="1" inputmode="numeric" class="ff-services-staff-duration-hours" value="${escapeHtml(String(durationParts.hours))}" placeholder="0" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;color:#6b7280;">
+              Minutes
+              <input type="number" min="0" max="59" step="1" inputmode="numeric" class="ff-services-staff-duration-minutes" value="${escapeHtml(String(durationParts.minutes))}" placeholder="0" style="width:100%;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
+            </label>
+          </div>
+          <span style="font-size:11px;color:${hasDurationOverride ? '#7c3aed' : '#9ca3af'};padding-bottom:8px;">${hasDurationOverride ? 'Override' : `Default ${formatServiceDurationLabel(serviceDefaultDuration)}`}</span>
         </div>
         <div style="margin-bottom:8px;padding:8px 0;border-top:1px solid #f3f4f6;border-bottom:1px solid #f3f4f6;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">
@@ -503,6 +512,9 @@ if (typeof window !== 'undefined') {
   window.ffStaffServicesDefaultsForStaffMember = ffStaffServicesDefaultsForStaffMember;
   window.ffResolveServiceDurationMinutes = resolveServiceDurationMinutes;
   window.ffParseStaffDurationOverrideInput = parseStaffDurationOverrideInput;
+  window.ffSplitServiceDurationParts = splitServiceDurationParts;
+  window.ffFormatServiceDurationLabel = formatServiceDurationLabel;
+  window.ffParseStaffDurationOverrideFromParts = parseStaffDurationOverrideFromParts;
   window.ffStaffServicesMoney = ffTicketMoney;
   window.ffStaffServicesEscapeHtml = escapeHtml;
 }
@@ -514,7 +526,8 @@ function wireServicesStaffTab(root, service) {
     const staffId = card.getAttribute('data-staff-id');
     const enabledInput = card.querySelector('.ff-services-staff-enabled');
     const priceInput = card.querySelector('.ff-services-staff-price');
-    const durationInput = card.querySelector('.ff-services-staff-duration');
+    const durationHoursInput = card.querySelector('.ff-services-staff-duration-hours');
+    const durationMinutesInput = card.querySelector('.ff-services-staff-duration-minutes');
     const commissionValueInput = card.querySelector('.ff-services-staff-commission-value');
     const commissionTypeInput = card.querySelector('.ff-services-staff-commission-type');
     const supplyEnabledInput = card.querySelector('.ff-services-staff-supply-enabled');
@@ -529,15 +542,16 @@ function wireServicesStaffTab(root, service) {
       if (!staffId) return;
       const enabled = enabledInput ? enabledInput.checked : true;
       const rawPrice = parseFloat(priceInput?.value);
-      const parsedDuration = parseStaffDurationOverrideInput(durationInput?.value);
+      const parsedDuration = parseStaffDurationOverrideFromParts(durationHoursInput?.value, durationMinutesInput?.value);
       if (!parsedDuration.ok) {
-        if (durationInput) {
-          const prev = durationInput.style.borderColor;
-          durationInput.style.borderColor = '#ef4444';
-          durationInput.focus();
-          setTimeout(() => { durationInput.style.borderColor = prev || '#e5e7eb'; }, 1400);
-        }
-        showToast('Duration must be a whole number of minutes (1–1440), or empty for the service default.', 'error');
+        [durationHoursInput, durationMinutesInput].forEach((el) => {
+          if (!el) return;
+          const prev = el.style.borderColor;
+          el.style.borderColor = '#ef4444';
+          setTimeout(() => { el.style.borderColor = prev || '#e5e7eb'; }, 1400);
+        });
+        if (durationHoursInput) durationHoursInput.focus();
+        showToast('Duration must be hours and minutes (1 minute to 24 hours), or empty for the service default.', 'error');
         return;
       }
       const commissionValue = parseFloat(commissionValueInput?.value);

@@ -26,19 +26,19 @@ import {
   inboxItemActivityMs,
   inboxErrorNeedsIndex,
   inboxSessionIsSalonOwnerOrAdmin,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+  inboxGetActiveLocationId,
+  inboxItemMatchesActiveLocation,
+} from "./inbox-helpers.js?v=20260901_sched_req";
 import {
   inboxUserRoleLc,
   inboxCanManageInbox,
   inboxCanSendRequests,
-} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-data.js?v=20260901_inbox_iso";
 import {
   updateInboxStaffFilterOptions,
   updateInboxBadges,
   renderInboxList,
-  inboxGetStaffLocationMap,
-  inboxItemMatchesActiveLocation,
-} from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-list-render.js?v=20260901_inbox_iso";
 
 /** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
 export function inboxTechnicianNoiseFilter(rows) {
@@ -394,28 +394,8 @@ export function _bgBadgeRecompute() {
   try {
     let rows = inboxState._bgBadgeLatestRows || [];
 
-    // Scope the badges to the currently active branch. Use the same rule
-    // set as the main inbox list (explicit locationId → subject staff
-    // allowedLocationIds → fall-through). Without this, a request sent in
-    // branch A would show "1" on the Open tab and on the nav Inbox icon
-    // when viewing branch B.
-    let activeLocId = null;
-    try {
-      if (typeof window !== 'undefined' && typeof window.ffGetActiveLocationId === 'function') {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === 'string' && v.trim()) activeLocId = v.trim();
-      }
-      if (!activeLocId && typeof window !== 'undefined'
-          && typeof window.__ff_active_location_id === 'string'
-          && window.__ff_active_location_id.trim()) {
-        activeLocId = window.__ff_active_location_id.trim();
-      }
-    } catch (_) {}
-    if (activeLocId) {
-      const staffLocMap = (typeof inboxGetStaffLocationMap === 'function')
-        ? inboxGetStaffLocationMap() : {};
-      rows = rows.filter((r) => inboxItemMatchesActiveLocation(r, activeLocId, staffLocMap));
-    }
+    const activeLocId = inboxGetActiveLocationId();
+    rows = rows.filter((r) => inboxItemMatchesActiveLocation(r, activeLocId));
 
     const openCount = rows.filter((r) => r.status === 'open' || r.status === 'pending').length;
     const needsInfoCount = rows.filter((r) => r.status === 'needs_info').length;

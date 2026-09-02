@@ -290,6 +290,15 @@ function canSeeTicket(ticket) {
   //    mode but hidden from multi-branch users (matches Inventory policy
   //    so cross-branch revenue/bills don't leak into the wrong branch).
   const activeLoc = getActiveLocationIdForTickets();
+  if (!activeLoc && ticket) {
+    let viewerIsMultiBranch = false;
+    try {
+      if (typeof window !== 'undefined' && typeof window.ffUserHasMultipleLocations === 'function') {
+        viewerIsMultiBranch = !!window.ffUserHasMultipleLocations();
+      }
+    } catch (_) {}
+    if (viewerIsMultiBranch) return false;
+  }
   if (activeLoc && ticket) {
     const ticketLoc = typeof ticket.locationId === 'string' ? ticket.locationId : '';
     if (ticketLoc && ticketLoc !== activeLoc) {

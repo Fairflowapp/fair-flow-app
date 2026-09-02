@@ -59,6 +59,7 @@ export const ticketsState = {
   _rawSharedCategories: [],
   _rawServiceOverrides: {},
   _catalogSource: 'unknown', // 'shared' | 'location' | 'unknown'
+  _sharedServiceCatalogEnabled: false, // Shared Setup "Share Service Catalog"
   _ffCatalogModalMode: 'location', // 'location' | 'shared'
   _servicesUnsub: null,
   _serviceCatsUnsub: null,

@@ -3,10 +3,11 @@
  * and Mark as Posted flow for the Media module. Extracted verbatim from media-upload.js (M6).
  */
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260719_media_lightbox";
-import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260719_media_lightbox";
+import { mediaState } from "./media-state.js?v=20260901_media_iso";
+import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260901_media_iso";
 import {
   getContentWork,
+  mediaItemMatchesActiveLocation,
   getMediaItems,
   getPostedHistory,
   resolveMediaItemsForDisplay,
@@ -16,7 +17,7 @@ import {
   deleteContentWork,
   deleteMediaItem,
   selfDeleteContentWork,
-} from "./media-cloud.js?v=20260719_media_lightbox";
+} from "./media-cloud.js?v=20260901_media_iso";
 import {
   ffGetCapacitor,
   ffWithTimeout,
@@ -30,7 +31,7 @@ import {
   ffShareBlobNative,
   fetchBlobViaHttpProxy,
   triggerMediaFileDownload,
-} from "./media-native-share.js?v=20260719_media_lightbox";
+} from "./media-native-share.js?v=20260901_media_iso";
 
 // Injected from media-upload.js (main UI slab) to avoid import cycles.
 let showMediaMessage = () => {};
@@ -518,6 +519,10 @@ async function openWorkDetails(workId) {
 
   const work = await getContentWork(workId);
   if (!work) return;
+  if (!mediaItemMatchesActiveLocation(work)) {
+    console.warn("[Media] blocked work details for another location", workId);
+    return;
+  }
 
   const sid = work.salonId != null && String(work.salonId).trim() !== "" ? String(work.salonId).trim() : null;
   let items = await getMediaItems(workId, sid);

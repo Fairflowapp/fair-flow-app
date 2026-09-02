@@ -6,12 +6,34 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
+  setDoc,
   updateDoc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { pstate } from "./products-state.js?v=20260626_products_split";
+import { pstate } from "./products-state.js?v=20260902_prod_cats";
+import {
+  ffProductsActiveLocId,
+  productsUserHasMultipleLocations,
+  productsHasActiveLocationForWrite,
+  isProductCatalogShareEnabled,
+  setProductCatalogShareEnabledCache,
+  productDocInActiveLoc,
+  filterProductCatalogDocs,
+  filterProductCategoryDocs,
+} from "./products-location.js?v=20260902_prod_cats";
+
+export {
+  ffProductsActiveLocId,
+  productsUserHasMultipleLocations,
+  productsHasActiveLocationForWrite,
+  isProductCatalogShareEnabled,
+  productDocInActiveLoc,
+  filterProductCatalogDocs,
+  filterProductCategoryDocs,
+};
 
 export function getSalonId() {
   return window.currentSalonId || window.currentUserProfile?.salonId || null;
@@ -19,6 +41,12 @@ export function getSalonId() {
 
 export function ffCanManageProducts() {
   try {
+    if (typeof window.ffCurrentUserSalonOwnerPermissionBypass === "function" && window.ffCurrentUserSalonOwnerPermissionBypass()) {
+      return true;
+    }
+    if (typeof window.ffHasAdminAccess === "function" && window.ffHasAdminAccess()) {
+      return true;
+    }
     if (typeof window.ffCurrentUserHasProductsManagePermission === "function") {
       return window.ffCurrentUserHasProductsManagePermission();
     }
@@ -30,20 +58,52 @@ export function ffProductsManageError() {
   return new Error("You do not have permission to manage products.");
 }
 
-// The currently active branch/location id (shared with the Inventory app).
-export function ffProductsActiveLocId() {
-  try {
-    if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
-      const v = window.ffGetActiveLocationId();
-      if (typeof v === "string" && v.trim()) return v.trim();
-    }
-    if (typeof window !== "undefined"
-        && typeof window.__ff_active_location_id === "string"
-        && window.__ff_active_location_id.trim()) {
-      return window.__ff_active_location_id.trim();
-    }
-  } catch (_) {}
+export function getProductsAccountId() {
+  const candidates = [
+    typeof window !== "undefined" ? window.currentAccountId : null,
+    typeof window !== "undefined" ? window.accountId : null,
+    typeof window !== "undefined" ? window.currentUserProfile?.accountId : null,
+    typeof window !== "undefined" ? window.currentUserProfile?.accountID : null,
+    getSalonId(),
+  ];
+  for (const v of candidates) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
   return null;
+}
+
+function productCatalogShareRef(accountId) {
+  return doc(db, `accounts/${accountId}/shared/productCatalog`);
+}
+
+export async function loadProductCatalogShareEnabled() {
+  const accountId = getProductsAccountId();
+  setProductCatalogShareEnabledCache(false);
+  if (!accountId) return false;
+  try {
+    const snap = await getDoc(productCatalogShareRef(accountId));
+    const data = snap.exists() ? (snap.data() || {}) : {};
+    setProductCatalogShareEnabledCache(data.shareEnabled === true || data.enabled === true);
+  } catch (e) {
+    console.warn("[Products] share flag load failed", e);
+    setProductCatalogShareEnabledCache(false);
+  }
+  return isProductCatalogShareEnabled();
+}
+
+export async function setProductCatalogShareEnabled(enabled) {
+  const accountId = getProductsAccountId();
+  if (!accountId) throw new Error("No account");
+  const next = !!enabled;
+  await setDoc(productCatalogShareRef(accountId), {
+    shareEnabled: next,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  setProductCatalogShareEnabledCache(next);
+  try {
+    document.dispatchEvent(new CustomEvent("ff-product-share-changed", { detail: { enabled: next } }));
+  } catch (_) {}
+  return next;
 }
 
 export function findCategory(catId) {
@@ -62,21 +122,38 @@ export function genSubId() {
 export async function loadProductsCatalog() {
   const salonId = getSalonId();
   if (!salonId) return;
+  if (productsUserHasMultipleLocations() && !ffProductsActiveLocId()) {
+    pstate.productCategories = [];
+    pstate.products = [];
+    pstate.productsCatalogError = "Choose a location to view products.";
+    return;
+  }
   try {
+    try { await loadProductCatalogShareEnabled(); } catch (_) {}
     const [catSnap, productSnap] = await Promise.all([
       getDocs(collection(db, `salons/${salonId}/productCategories`)),
       getDocs(collection(db, `salons/${salonId}/products`)),
     ]);
-    pstate.productCategories = catSnap.docs
+    const cats = catSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
-    pstate.products = productSnap.docs
+    const products = productSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+    pstate.productCategories = filterProductCategoryDocs(cats);
+    pstate.products = filterProductCatalogDocs(products);
     pstate.productsCatalogError = "";
     if (pstate.editorState && pstate.editorState.mode === "product" && !pstate.productCategories.length) {
       pstate.editorState = null;
     }
+    console.log("[Products] catalog scoped", {
+      activeLocationId: ffProductsActiveLocId() || "",
+      shareEnabled: isProductCatalogShareEnabled(),
+      categoriesBefore: cats.length,
+      categoriesAfter: pstate.productCategories.length,
+      productsBefore: products.length,
+      productsAfter: pstate.products.length,
+    });
   } catch (error) {
     console.warn("[Products] Unable to load catalog", error);
     pstate.productCategories = [];
@@ -88,6 +165,7 @@ export async function loadProductsCatalog() {
 export async function reorderProductWithinCategory(srcId, targetProductId, categoryId, placeAfter, subId) {
   const salonId = getSalonId();
   if (!salonId) return;
+  if (!productsHasActiveLocationForWrite()) return;
   const catKey = String(categoryId || "");
   const subKey = String(subId || "");
   const src = pstate.products.find((p) => String(p.id) === String(srcId));
@@ -120,6 +198,7 @@ export async function reorderProductWithinCategory(srcId, targetProductId, categ
 
 export async function saveProductLocationOverride(productId, locationId, override) {
   if (!ffCanManageProducts()) throw ffProductsManageError();
+  if (!productsHasActiveLocationForWrite()) throw new Error("Choose a location to edit products.");
   const salonId = getSalonId();
   if (!salonId || !locationId) throw new Error("No salon/location");
   await updateDoc(doc(db, `salons/${salonId}/products`, productId), {
@@ -135,6 +214,7 @@ export async function saveProductLocationOverride(productId, locationId, overrid
 
 export async function saveProductStaffOverride(productId, staffId, override) {
   if (!ffCanManageProducts()) throw ffProductsManageError();
+  if (!productsHasActiveLocationForWrite()) throw new Error("Choose a location to edit products.");
   const salonId = getSalonId();
   if (!salonId || !staffId) throw new Error("No salon/staff");
   await updateDoc(doc(db, `salons/${salonId}/products`, productId), {
@@ -150,6 +230,7 @@ export async function saveProductStaffOverride(productId, staffId, override) {
 
 export async function saveProductInventory(productId, inventory) {
   if (!ffCanManageProducts()) throw ffProductsManageError();
+  if (!productsHasActiveLocationForWrite()) throw new Error("Choose a location to edit products.");
   const salonId = getSalonId();
   if (!salonId) throw new Error("No salon");
   const prod = pstate.products.find((p) => String(p.id) === String(productId));
@@ -199,4 +280,12 @@ export async function ffStaffProductsSaveOverrideForStaffMember(productId, staff
   if (!product) throw new Error("Product not found");
   await saveProductStaffOverride(productId, staffId, override || {});
   return product;
+}
+
+if (typeof window !== "undefined") {
+  window.ffProductDocInActiveLoc = productDocInActiveLoc;
+  window.ffLoadProductCatalogShareEnabled = loadProductCatalogShareEnabled;
+  window.ffSetProductCatalogShareEnabled = setProductCatalogShareEnabled;
+  window.ffIsProductCatalogShareEnabled = isProductCatalogShareEnabled;
+  window.ffFilterProductCatalogDocs = filterProductCatalogDocs;
 }

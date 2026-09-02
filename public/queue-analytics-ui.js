@@ -14,7 +14,7 @@ import {
   fmtStaffAverage,
   fmtHourRange,
   buildWaitTimeTypeRows,
-} from "./queue-analytics-compute.js?v=20260625_queue_analytics_split";
+} from "./queue-analytics-compute.js?v=20260816_dash_live";
 
 function escapeHtml(s) {
   return String(s == null ? "" : s)

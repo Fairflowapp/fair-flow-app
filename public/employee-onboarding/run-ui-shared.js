@@ -201,17 +201,31 @@ export function _portalEmailLabel(run) {
   return html;
 }
 
+export function _portalOpened(run) {
+  const portal = (run && run.portal) || {};
+  return !!portal.bootstrappedAt;
+}
+
 export function _portalMetaHtml(run) {
   const portal = (run && run.portal) || {};
   const active = !!(portal.activeTokenId);
+  const opened = _portalOpened(run);
   const exp = _portalExpiresLabel(run);
+  const openedWhen = _fmtPortalTs(portal.bootstrappedAt);
   const emailLine = _portalEmailLabel(run);
   if (!active) {
-    return `<span>Portal link: <strong style="color:#111827;">none active</strong> — tap <strong>Send to employee</strong> to invite them.</span>${emailLine}`;
+    return `<span>Portal link: <strong style="color:#111827;">none active</strong> — tap <strong>Send to employee</strong> or <strong>New link</strong>.</span>${emailLine}`;
   }
-  return `<span>Portal link: <strong style="color:#059669;">active</strong>${
+  if (opened) {
+    return `<span>Portal link: <strong style="color:#b45309;">opened</strong>${
+      openedWhen ? ` <strong style="color:#111827;">${_esc(openedWhen)}</strong>` : ""
+    }${
+      exp ? ` · expires <strong style="color:#111827;">${_esc(exp)}</strong>` : ""
+    } — Copy is disabled. Use <strong>New link</strong> if they need another.</span>${emailLine}`;
+  }
+  return `<span>Portal link: <strong style="color:#059669;">not opened yet</strong>${
     exp ? ` · expires <strong style="color:#111827;">${_esc(exp)}</strong>` : ""
-  }</span>${emailLine}`;
+  } — send the email, or <strong>Copy link</strong>.</span>${emailLine}`;
 }
 
 export function _staffEmail(staff) {

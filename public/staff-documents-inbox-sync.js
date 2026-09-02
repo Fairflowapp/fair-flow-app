@@ -12,9 +12,10 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  deleteField,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { parseExpirationForStaffDoc, stripUndefined, trimStr } from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
+import { ffComputeLifecycleFromExpiration, parseExpirationForStaffDoc, stripUndefined, trimStr } from "./staff-documents-format.js?v=20260701_staffdoc_format_split";
 
 /**
  * Firestore staff id for the employee whose profile should receive this document.
@@ -220,6 +221,47 @@ export function ffResolveLinkedStaffDocumentId(inboxItem) {
   );
 }
 
+/**
+ * Reuse the same staff document for a later Inbox upload (renewal after
+ * onboarding). Prefer an explicit link, then the onboarding template id,
+ * then an expired / expiring-soon row of the same type.
+ */
+export async function ffFindStaffDocumentIdForRenewal(dbConn, salonId, ownerStaffId, opts = {}) {
+  const linked = trimStr(opts.linkedId);
+  if (linked) return linked;
+  const sid = trimStr(salonId);
+  const staffId = trimStr(ownerStaffId);
+  const docType = trimStr(opts.documentType);
+  const templateId = trimStr(opts.templateId);
+  if (!sid || !staffId || (!docType && !templateId)) return "";
+  try {
+    const snap = await getDocs(collection(dbConn, "salons", sid, "staff", staffId, "documents"));
+    const rows = snap.docs
+      .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+      .filter((r) => trimStr(r.lifecycleStatus).toLowerCase() !== "archived");
+    if (templateId) {
+      const byT = rows.filter((r) => trimStr(r.onboardingTemplateId) === templateId);
+      if (byT.length) {
+        const urgent = byT.find((r) => {
+          const life = ffComputeLifecycleFromExpiration(r.expirationDate);
+          return life === "expired" || life === "expiring_soon";
+        });
+        return (urgent || byT[0]).id;
+      }
+    }
+    if (!docType) return "";
+    const sameType = rows.filter((r) => trimStr(r.type) === docType);
+    const urgent = sameType.filter((r) => {
+      const life = ffComputeLifecycleFromExpiration(r.expirationDate);
+      return life === "expired" || life === "expiring_soon";
+    });
+    if (urgent.length) return urgent[0].id;
+  } catch (e) {
+    console.warn("[staff-documents] find renewal document", e);
+  }
+  return "";
+}
+
 function staffDocumentRef(dbConn, salonId, staffMemberId, documentId) {
   return doc(dbConn, "salons", trimStr(salonId), "staff", trimStr(staffMemberId), "documents", trimStr(documentId));
 }
@@ -277,6 +319,10 @@ function buildPayloadFromInbox(inboxItem, inboxItemId, approverUid, existingStaf
     const parsed = parseExpirationForStaffDoc(expirationDate);
     base.expirationDate = parsed != null ? parsed : expirationDate;
   }
+  const templateId = trimStr(data.templateId || data.onboardingTemplateId);
+  if (templateId) base.onboardingTemplateId = templateId;
+  const onboardingRunId = trimStr(data.onboardingRunId);
+  if (onboardingRunId) base.onboardingRunId = onboardingRunId;
 
   return stripUndefined(base);
 }
@@ -302,8 +348,14 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
     return null;
   }
 
+  const data = inboxItem.data || {};
   const linked = ffResolveLinkedStaffDocumentId(inboxItem);
-  const documentId = linked || iid;
+  const reused = await ffFindStaffDocumentIdForRenewal(dbConn, sid, ownerStaffId, {
+    linkedId: linked,
+    documentType: data.documentType,
+    templateId: data.templateId || data.onboardingTemplateId,
+  });
+  const documentId = reused || linked || iid;
 
   const ref = staffDocumentRef(dbConn, sid, ownerStaffId, documentId);
   const existingSnap = await getDoc(ref);
@@ -311,6 +363,10 @@ export async function ffSyncStaffDocumentOnInboxApprove(dbConn, params) {
   const payload = buildPayloadFromInbox(inboxItem, iid, approverUid, existingSnap);
   if (isNew) {
     payload.createdAt = serverTimestamp();
+  } else {
+    payload.thirtyDayReminderSentAt = deleteField();
+    payload.expiredReminderSentAt = deleteField();
+    payload.lifecycleStatus = ffComputeLifecycleFromExpiration(payload.expirationDate || (existingSnap.data() || {}).expirationDate);
   }
   await setDoc(ref, stripUndefined(payload), { merge: true });
 

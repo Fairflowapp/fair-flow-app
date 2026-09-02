@@ -24,8 +24,39 @@ const NOTE_COLORS = ['yellow', 'red', 'lightred', 'lightyellow', 'sky', 'green',
 let notesSalonId = null;
 let notesUser = null;
 let notesUnsub = null;
+let rawStickyNotes = [];
 let stickyNotes = [];
 const cleanupAttempted = new Set();
+
+function getActiveLocationIdForNotes() {
+  try {
+    if (typeof window.ffGetActiveLocationId === 'function') {
+      const value = window.ffGetActiveLocationId();
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  } catch (_) {}
+  return typeof window.__ff_active_location_id === 'string' ? window.__ff_active_location_id.trim() : '';
+}
+
+function notesUserHasMultipleLocations() {
+  try {
+    if (typeof window.ffUserHasMultipleLocations === 'function') return !!window.ffUserHasMultipleLocations();
+  } catch (_) {}
+  return false;
+}
+
+function noteMatchesActiveLocation(note) {
+  const activeLoc = getActiveLocationIdForNotes();
+  if (!activeLoc) return !notesUserHasMultipleLocations();
+  const loc = note && typeof note.locationId === 'string' ? note.locationId.trim() : '';
+  if (loc) return loc === activeLoc;
+  return !notesUserHasMultipleLocations();
+}
+
+function applyNotesLocationFilter() {
+  stickyNotes = rawStickyNotes.filter(noteMatchesActiveLocation);
+  refreshLiveNotesCard();
+}
 
 function cleanText(value) {
   return String(value || '').trim();
@@ -74,7 +105,7 @@ function refreshLiveNotesCard() {
 // snapshot; the attempted-set prevents retry loops when a delete is rejected.
 function cleanupExpiredDoneNotes() {
   const cutoff = Date.now() - DONE_NOTE_TTL_MS;
-  stickyNotes.forEach((note) => {
+  rawStickyNotes.forEach((note) => {
     if (!note.done) return;
     const doneAtMs = Number(note.doneAtMs) || 0;
     if (!doneAtMs || doneAtMs > cutoff) return;
@@ -91,9 +122,9 @@ function subscribeStickyNotes() {
   notesUnsub = onSnapshot(
     query(collection(db, `salons/${notesSalonId}/stickyNotes`), orderBy('createdAtMs', 'desc')),
     (snap) => {
-      stickyNotes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rawStickyNotes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      applyNotesLocationFilter();
       cleanupExpiredDoneNotes();
-      refreshLiveNotesCard();
     },
     (err) => console.warn('[StickyNotes] subscription failed', err)
   );
@@ -103,6 +134,12 @@ function requireNotesContext() {
   if (!notesSalonId) {
     if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
       window.ffToast.show('Notes are still loading. Try again in a moment.', { variant: 'info', durationMs: 2200 });
+    }
+    return false;
+  }
+  if (notesUserHasMultipleLocations() && !getActiveLocationIdForNotes()) {
+    if (typeof window.ffToast === 'object' && window.ffToast && typeof window.ffToast.show === 'function') {
+      window.ffToast.show('Select a location first.', { variant: 'info', durationMs: 2200 });
     }
     return false;
   }
@@ -120,7 +157,7 @@ window.ffStickyNoteAdd = async function (text, color) {
   if (!body) return false;
   const noteColor = NOTE_COLORS.includes(color) ? color : 'yellow';
   try {
-    await addDoc(collection(db, `salons/${notesSalonId}/stickyNotes`), {
+    const payload = {
       text: body,
       color: noteColor,
       done: false,
@@ -128,7 +165,10 @@ window.ffStickyNoteAdd = async function (text, color) {
       createdAtMs: Date.now(),
       createdByUid: notesUser?.uid || null,
       createdByName: currentNoteAuthorName()
-    });
+    };
+    const loc = getActiveLocationIdForNotes();
+    if (loc) payload.locationId = loc;
+    await addDoc(collection(db, `salons/${notesSalonId}/stickyNotes`), payload);
     return true;
   } catch (err) {
     reportNoteError('Add note', err);
@@ -172,6 +212,7 @@ onAuthStateChanged(auth, async (user) => {
   notesUser = user || null;
   if (!user) {
     notesSalonId = null;
+    rawStickyNotes = [];
     stickyNotes = [];
     refreshLiveNotesCard();
     return;
@@ -191,3 +232,10 @@ setTimeout(async () => {
   notesSalonId = salonId;
   subscribeStickyNotes();
 }, 2500);
+
+if (typeof document !== 'undefined' && !window.__ffStickyNotesLocationListenerBound) {
+  window.__ffStickyNotesLocationListenerBound = true;
+  document.addEventListener('ff-active-location-changed', function () {
+    applyNotesLocationFilter();
+  });
+}

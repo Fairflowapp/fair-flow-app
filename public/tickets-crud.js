@@ -21,7 +21,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState, TICKETS_PAGE_SIZE } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { canSeeTicket, getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { canSeeTicket, getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260901_loc_isolate";
 
 let getActiveTicketsSalonId, notifyTicketsAnalyticsDataChanged, ticketSubmittedAtDate, _fmtYmdLocal, showToast, renderTicketsList, closeTicketModal;
 export function initTicketsCrud(deps) {
@@ -85,6 +85,25 @@ function ffTicketsPatchLocalTicket(ticketId, patch) {
   return touched;
 }
 
+function ticketsActiveLocationQueryParts() {
+  let loc = "";
+  try { loc = String(getActiveLocationIdForTickets() || "").trim(); } catch (_) {}
+  let multi = false;
+  try {
+    multi = typeof window !== "undefined"
+      && typeof window.ffUserHasMultipleLocations === "function"
+      && !!window.ffUserHasMultipleLocations();
+  } catch (_) {}
+  return { loc, scoped: !!(multi && loc) };
+}
+
+function ticketsListQueryConstraints() {
+  const { loc, scoped } = ticketsActiveLocationQueryParts();
+  return scoped
+    ? [where("locationId", "==", loc), orderBy("createdAt", "desc")]
+    : [orderBy("createdAt", "desc")];
+}
+
 function updateTicketsLoadMoreUi() {
   const wrap = document.getElementById('ticketsLoadMoreWrap');
   const btn = document.getElementById('ticketsLoadMoreBtn');
@@ -105,7 +124,7 @@ async function loadMoreTicketsOlder() {
   try {
     const qMore = query(
       collection(db, `salons/${salonId}/tickets`),
-      orderBy('createdAt', 'desc'),
+      ...ticketsListQueryConstraints(),
       startAfter(ticketsState._ticketsNextPageCursor),
       limit(TICKETS_PAGE_SIZE)
     );
@@ -158,7 +177,7 @@ function subscribeTickets(options) {
   }
   const q = query(
     collection(db, `salons/${salonId}/tickets`),
-    orderBy('createdAt', 'desc'),
+    ...ticketsListQueryConstraints(),
     limit(TICKETS_PAGE_SIZE)
   );
   ticketsState.ticketsUnsubscribe = onSnapshot(q, (snap) => {
@@ -219,6 +238,15 @@ async function createTicket(payload) {
   if (!salonId) throw new Error('No salon - ensure your account has salonId');
   const status = payload.status === 'READY_FOR_CHECKOUT' ? 'READY_FOR_CHECKOUT' : 'OPEN';
   const activeLocForNewTicket = getActiveLocationIdForTickets();
+  let multi = false;
+  try {
+    multi = typeof window !== 'undefined'
+      && typeof window.ffUserHasMultipleLocations === 'function'
+      && !!window.ffUserHasMultipleLocations();
+  } catch (_) {}
+  if (multi && !activeLocForNewTicket) {
+    throw new Error('No active location — cannot create a ticket');
+  }
   console.log('[Tickets] createTicket → activeLocationId:', activeLocForNewTicket || '(NONE — ticket will have no locationId)');
   const doc = {
     status,

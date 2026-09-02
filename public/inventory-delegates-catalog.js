@@ -2,12 +2,12 @@
 // Catalog / Manage Categories click + keydown delegates extracted verbatim from
 // ensureInventoryScreenDelegates in inventory.js (Phase 12).
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   cloneCategoryTree,
   newCategoryId,
   newSubcategoryId,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
 import {
   importSharedCatalogIntoCurrentBranch,
   loadInventoryCategoriesFromFirestore,
@@ -18,7 +18,7 @@ import {
   ensureValidSubcategorySelection,
   resetCatModalTransientState,
   bindCatManageDnDOnce,
-} from "./inventory-catalog.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-catalog.js?v=20260902_prod_cats";
 
 let mountOrRefreshMockUi;
 

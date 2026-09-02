@@ -78,3 +78,6 @@ node_modules/
 keystore/
 *.jks
 *.keystore
+
+# Onboarding encryption key envelopes (S9) — never commit
+*.ff-key-envelope.json

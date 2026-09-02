@@ -8,7 +8,7 @@
  * only caller always passes an explicit range). No DOM, no Firestore.
  */
 
-import { clean, safeArr, LOG, TABS, KINDS } from "./tasks-analytics-data.js?v=20260625_tasks_analytics_split";
+import { clean, safeArr, LOG, TABS, KINDS } from "./tasks-analytics-data.js?v=20260816_dash_tasks";
 
 const TASK_TYPE_LABELS = ["Opening", "Closing", "Weekly", "Monthly", "Yearly"];
 
@@ -147,9 +147,13 @@ export function filterRowsByRange(rows, range) {
   const from = Number(range?.fromMs);
   const to = Number(range?.toMs);
   if (!Number.isFinite(from) || !Number.isFinite(to)) return rows;
+  const rangeIncludesNow = Date.now() >= from && Date.now() <= to;
+  // Current week/month/today: show the live Tasks lists (Opening resets daily,
+  // so this is the only way to see this week's real Opening %).
+  if (rangeIncludesNow) return rows;
   return rows.filter((row) => {
     const ms = taskRangeMs(row);
-    return !Number.isFinite(ms) || (ms >= from && ms <= to);
+    return Number.isFinite(ms) && ms >= from && ms <= to;
   });
 }
 
@@ -167,9 +171,9 @@ export function computeMetrics(rows, source, range, allRows = rows) {
   const open = rows.length - completed;
   const overdue = rows.filter((row) => !row.completed && Number.isFinite(row.dueMs) && row.dueMs < now).length;
   const prev = previousRange(range);
-  const thisWeek = periodRate(allRows, range.fromMs, range.toMs + 1);
+  const selected = { total: rows.length, completed, rate: rate(completed, rows.length) };
   const lastWeek = prev ? periodRate(allRows, prev.fromMs, prev.toMs + 1) : { total: 0, completed: 0, rate: null };
-  const overallRate = rate(completed, rows.length);
+  const overallRate = selected.rate;
   const labels = [...TASK_TYPE_LABELS];
   rows.forEach((row) => {
     if (row.type && !labels.includes(row.type)) labels.push(row.type);
@@ -185,7 +189,7 @@ export function computeMetrics(rows, source, range, allRows = rows) {
     completionRate: overallRate,
     byType,
     byRole,
-    thisWeek,
+    thisWeek: selected,
     lastWeek,
     rangeLabel: range.label,
     hasData: rows.length > 0,

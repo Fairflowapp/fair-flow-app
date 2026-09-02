@@ -323,22 +323,27 @@ function normalizeLocationScheduleAvailability(value) {
 /**
  * Returns the effective `defaultSchedule` for a staff row at a given location.
  *
- * Precedence:
- *   1. `locationScheduleAvailability[locId].defaultSchedule` when present.
- *   2. Multi-location staff who have already configured at least one
- *      branch-specific schedule but NOT this branch → "not scheduled here"
- *      (all days off). This matches the owner's mental model of
- *      "tell me which days you work at each branch" — a branch that was
- *      deliberately left empty is not a place the staff works.
- *   3. Otherwise fall back to the top-level `staff.defaultSchedule`.
- *      This preserves legacy behaviour for single-location staff and for
- *      multi-location staff who haven't yet been migrated to the new
- *      per-branch schedule UI.
+ * Dual-location staff (the option we built):
+ *   1. Use `locationScheduleAvailability[thisLoc].defaultSchedule` when that
+ *      branch has working days.
+ *   2. If they already set hours at another branch but left this one empty
+ *      → all days off here (they chose not to work at this branch).
+ *   3. If they have not set per-branch hours yet → use top-level
+ *      `defaultSchedule` at EVERY assigned location, so they still appear
+ *      and can be built at both branches.
  */
-/** True when a normalized default-schedule map has at least one working day. */
 function scheduleHasEnabledDay(sched) {
   if (!sched || typeof sched !== "object") return false;
   return DAY_KEYS.some((dayKey) => sched[dayKey] && sched[dayKey].enabled === true);
+}
+
+function staffHasHoursAtAnotherLocation(mapRaw, exceptLoc) {
+  if (!mapRaw || typeof mapRaw !== "object") return false;
+  return Object.keys(mapRaw).some((id) => {
+    if (!id || id === exceptLoc) return false;
+    const ds = mapRaw[id] && mapRaw[id].defaultSchedule;
+    return scheduleHasEnabledDay(normalizeDefaultSchedule(ds));
+  });
 }
 
 function getStaffDefaultScheduleForLocation(staff, locationId) {
@@ -349,18 +354,11 @@ function getStaffDefaultScheduleForLocation(staff, locationId) {
     const entry = mapRaw[locKey];
     if (entry && entry.defaultSchedule && typeof entry.defaultSchedule === "object") {
       const perLoc = normalizeDefaultSchedule(entry.defaultSchedule);
-      // Use the branch-specific schedule when it actually has working days.
-      // If it's entirely empty (e.g. an auto-created placeholder with no days),
-      // fall back to the staff's global default so Build doesn't leave them
-      // all Off at a branch they're assigned to.
       if (scheduleHasEnabledDay(perLoc)) return perLoc;
+      if (staffHasHoursAtAnotherLocation(mapRaw, locKey)) return cloneDefaultSchedule();
       return globalSchedule;
     }
-    // No branch-specific schedule for this location: fall back to the staff's
-    // global default schedule. (Previously this returned an all-Off schedule
-    // for multi-location staff, which surprised owners who never set a
-    // per-branch schedule. Explicit per-branch overrides above still win, and
-    // cross-location overlaps are surfaced by the conflict warnings.)
+    if (staffHasHoursAtAnotherLocation(mapRaw, locKey)) return cloneDefaultSchedule();
     return globalSchedule;
   }
   return globalSchedule;

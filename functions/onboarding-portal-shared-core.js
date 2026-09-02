@@ -101,7 +101,10 @@ function tokenDocIdFromHash(tokenHash) {
 }
 
 function portalUrl(rawToken) {
-  return `${appBaseUrl()}/onboarding/${rawToken}`;
+  // Prefer query token — more resilient in mobile email in-app browsers
+  // (path-only links sometimes lose the token segment).
+  const t = encodeURIComponent(String(rawToken || ""));
+  return `${appBaseUrl()}/onboarding?t=${t}`;
 }
 
 function maskEmail(email) {
@@ -341,6 +344,7 @@ function computeProgress(tasks, currentStatus) {
   let status = currentStatus || "draft";
   if (status !== "cancelled") {
     if (required.length > 0 && missing === 0) status = "completed";
+    else if (missing > 0 && status === "completed") status = "in_progress";
     else if (
       list.some((t) =>
         [
@@ -412,6 +416,7 @@ async function revokeActiveTokensForRun(salonId, staffId, runId, reason, uid) {
       portal: {
         activeTokenId: null,
         revokedAt: now,
+        bootstrappedAt: admin.firestore.FieldValue.delete(),
       },
       updatedAt: now,
     },
@@ -475,6 +480,7 @@ async function issueTokenCore({
     useCount: 0,
     replacedByTokenId: null,
     replacesTokenId: replacesTokenId || null,
+    bootstrappedAt: null,
     schemaVersion: 1,
     updatedAt: now,
   });
@@ -499,6 +505,7 @@ async function issueTokenCore({
         lastIssuedByUid: uid,
         revokedAt: null,
         expiresAt,
+        bootstrappedAt: admin.firestore.FieldValue.delete(),
       },
       updatedAt: now,
     },

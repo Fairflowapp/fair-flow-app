@@ -39,6 +39,10 @@ export const scheduleState = {
   schedulePublishLastSeenBroadcastMs: null,
   /** weekStart -> JSON string of `weekDraftSnapshots[weekStart]` from last snapshot; detect draft updates for staff. */
   lastSeenWeekDraftSnapshotJsonByWeek: {},
+  /** Writer skips the echo refresh after its own server write (other devices still refresh). */
+  scheduleSkipNextDraftSnapshotRefresh: false,
+  /** Ignore own-write snapshot echoes for a short window (serverTimestamp can fire twice). */
+  scheduleSkipDraftRefreshUntil: 0,
   /** staffId -> seenAt millis (0 = not acknowledged) */
   scheduleWeekAckSeenAtByStaffId: {},
   /** staffId -> last scheduleStaffChangePings.pingAt millis (managers’ grid) */
@@ -66,4 +70,7 @@ export const scheduleState = {
   _ffLastHoursDebugKey: null,
 
   scheduleStandByModalDateKey: null,
+  /** Snapshots of draft + stand-by before each local edit. */
+  scheduleUndoStack: [],
+  scheduleUndoSkip: false,
 };

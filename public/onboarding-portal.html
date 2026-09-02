@@ -55,6 +55,13 @@
       display: flex;
       flex-direction: column;
     }
+    #root {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      min-height: 200px;
+    }
     .topbar {
       display: flex;
       align-items: center;
@@ -537,9 +544,60 @@
       <img src="/fairflow-logo-transparent.png" alt="Fair Flow" width="36" height="36">
       <div class="brand">Fair Flow</div>
     </div>
-    <div id="root" aria-live="polite"></div>
+    <div id="root" aria-live="polite" data-boot="pending">
+      <div class="state">
+        <div class="spinner" aria-hidden="true"></div>
+        <h1>Loading your onboarding…</h1>
+        <p class="sub">Please wait a moment.</p>
+      </div>
+    </div>
   </div>
   <meta name="referrer" content="no-referrer">
-  <script type="module" src="/onboarding-portal/app.js?v=20260810_od_split_v1"></script>
+  <script>
+    // Mobile-first: classic bundle (no ES modules) so Gmail/iOS in-app browsers work.
+    (function () {
+      var done = false;
+      window.__ffPortalMarkBooted = function () {
+        done = true;
+        try {
+          var root = document.getElementById("root");
+          if (root) root.setAttribute("data-boot", "ok");
+        } catch (_) {}
+      };
+      function showRetry(msg) {
+        var root = document.getElementById("root");
+        if (!root) return;
+        root.setAttribute("data-boot", "retry");
+        root.innerHTML =
+          '<div class="state">' +
+          "<h1>Tap to continue</h1>" +
+          '<p class="sub">' +
+          (msg || "Your onboarding is ready. Tap below to open it on this phone.") +
+          "</p>" +
+          '<div class="btn-row" style="max-width:280px;margin:16px auto 0;">' +
+          '<button type="button" class="btn btn-primary" id="ffPortalContinue">Continue</button>' +
+          "</div></div>";
+        var b = document.getElementById("ffPortalContinue");
+        if (b) {
+          b.onclick = function () {
+            location.reload();
+          };
+        }
+      }
+      setTimeout(function () {
+        if (done) return;
+        var root = document.getElementById("root");
+        if (!root || root.getAttribute("data-boot") !== "pending") return;
+        showRetry();
+      }, 8000);
+      var s = document.createElement("script");
+      s.src = "/onboarding-portal/app.bundle.js?v=20260816_od_docdirect";
+      s.async = true;
+      s.onerror = function () {
+        showRetry("Could not load onboarding. Tap Continue to try again.");
+      };
+      document.head.appendChild(s);
+    })();
+  </script>
 </body>
 </html>

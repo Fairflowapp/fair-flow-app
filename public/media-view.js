@@ -9,11 +9,11 @@ import {
   MY_UPLOADS_FILTERS,
   TO_HANDLE_FILTERS,
   SORT_OPTIONS,
-} from "./media-state.js?v=20260719_media_lightbox";
-import { canHandleMediaWork } from "./media-profile.js?v=20260719_media_lightbox";
-import { resolveWorkCardPreviewUrl } from "./media-cloud.js?v=20260719_media_lightbox";
-import { openUploadModal } from "./media-upload-form.js?v=20260719_media_lightbox";
-import { openWorkDetails } from "./media-work-details.js?v=20260719_media_lightbox";
+} from "./media-state.js?v=20260901_media_iso";
+import { canHandleMediaWork } from "./media-profile.js?v=20260901_media_iso";
+import { resolveWorkCardPreviewUrl } from "./media-cloud.js?v=20260901_media_iso";
+import { openUploadModal } from "./media-upload-form.js?v=20260901_media_iso";
+import { openWorkDetails } from "./media-work-details.js?v=20260901_media_iso";
 
 // =====================
 // Tab switching

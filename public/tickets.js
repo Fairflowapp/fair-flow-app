@@ -16,17 +16,17 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/fi
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
 import "./format-utils.js?v=20260806_sched_12h_picker";
 import { ticketsState, TICKETS_PAGE_SIZE, _ticketSummaryPageSize } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { initTicketsPermissions, getAutoFrontDeskRecipients, getTicketVisibility, _ticketsCurrentStaffRow, canViewTicketsSummaryTab, canViewTicketsArchivedTab, canCurrentUserCloseTickets, updateTicketsTabsVisibility, ffTicketsSetTimePeriodFiltersVisible, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole, ffTicketsHideFrontDeskFiltersOnThisView, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician, updateTicketsEmployeeFilterVisibility, getActiveLocationIdForTickets, canSeeTicket } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { initTicketsPermissions, getAutoFrontDeskRecipients, getTicketVisibility, _ticketsCurrentStaffRow, canViewTicketsSummaryTab, canViewTicketsArchivedTab, canCurrentUserCloseTickets, updateTicketsTabsVisibility, ffTicketsSetTimePeriodFiltersVisible, isStaffRecordManagerOrAdmin, isTicketsTechnicianRestrictedRole, ffTicketsHideFrontDeskFiltersOnThisView, getTicketsSelfEmployeeFilterId, ticketBelongsToTicketsTechnician, updateTicketsEmployeeFilterVisibility, getActiveLocationIdForTickets, canSeeTicket } from "./tickets-permissions.js?v=20260901_loc_isolate";
 import { getTicketTaxConfig, isTicketProductLine, computeTicketTotalsFromLines } from "./tickets-pricing.js?v=20260630_tickets_pricing_split";
-import { initTicketsCatalogData, ffCanViewServices, ffCanManageServices, getTicketsAccountId, normalizeSharedCategoryName, sharedCategoryId, sharedServiceCatalogItemsRef, loadSharedServiceOverrides, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, seedSharedServiceCatalogFromLocationCatalogIfEmpty, _applyCatalogFilter, subscribeProductsCatalog, loadServices, saveService, deleteService, loadServiceCategories, saveServiceCategory, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260818_staff_dur_ui";
-import { initTicketsCrud, _rebuildCurrentTicketsMerged, ffTicketsPatchLocalTicket, updateTicketsLoadMoreUi, loadMoreTicketsOlder, subscribeTickets, updateTicketsNavBadge, getTicketCustomerPriceApprovedFromForm, createTicket, updateTicket, finalizeTicket, closeTicket, reopenTicket, archiveTicket, setTicketServiceUpgrade, awardTicketUpgradePoints, deleteTicketPermanently, markTicketSeenByFrontDesk } from "./tickets-crud.js?v=20260721_ticket_soft_delete";
+import { initTicketsCatalogData, ffCanViewServices, ffCanManageServices, getTicketsAccountId, normalizeSharedCategoryName, sharedCategoryId, sharedServiceCatalogItemsRef, isSharedServiceCatalogEnabled, loadSharedServiceCatalogShareFlag, setSharedServiceCatalogEnabled, loadSharedServiceOverrides, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, loadSharedServiceLocationOverridesForService, saveSharedServiceLocationOverride, seedSharedServiceCatalogFromLocationCatalogIfEmpty, _applyCatalogFilter, subscribeProductsCatalog, applyProductsCatalogFilter, loadServices, saveService, deleteService, loadServiceCategories, saveServiceCategory, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260902_prod_cats";
+import { initTicketsCrud, _rebuildCurrentTicketsMerged, ffTicketsPatchLocalTicket, updateTicketsLoadMoreUi, loadMoreTicketsOlder, subscribeTickets, updateTicketsNavBadge, getTicketCustomerPriceApprovedFromForm, createTicket, updateTicket, finalizeTicket, closeTicket, reopenTicket, archiveTicket, setTicketServiceUpgrade, awardTicketUpgradePoints, deleteTicketPermanently, markTicketSeenByFrontDesk } from "./tickets-crud.js?v=20260901_loc_isolate2";
 import { initTicketsHelpers, formatTicketDisplayDateTime, formatDate, ticketSubmittedAtDate, passesTicketsDateFilter, fetchClosedTicketsForSummary, _fmtYmdLocal, computeRangeForPreset, _ticketsFmtMonthDay, _ticketsRangeLabelMd, ticketMatchesEmployeeFilter, formatSummaryMoney, ffTicketMoney, ffTicketCurSym, formatSummaryInt, getSummaryFilterDateRangeFromDom, summaryDocMatchesLocation, buildSummaryRowsFromClosedTicketList, buildSummaryRowsFromLiveClosedTickets } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { initTicketsList, ffTicketsBulkInit, renderTicketsList, escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { initTicketsModal, openTicketModal, ffFormatReviewedAt, closeTicketModal, closeTicketDetailsModal, addServiceToTicket, addProductToTicket, saveTicket } from "./tickets-modal.js?v=20260818_staff_dur_ui";
-import { initTicketsCatalogUI, _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, openServicesModal, closeServicesModal, renderServicesCatalogV2, ffServiceStaffPermissionTrue, canStaffSendNewTicket, getStaffDefaultServiceCommission, getStaffDefaultSupplyDeduction, _ffCatalogEditorClose, addServiceCategoryV2, addSharedServiceV2 } from "./tickets-catalog-ui.js?v=20260818_staff_dur_ui";
-import { initTicketsNav, goToTickets, goToServices } from "./tickets-nav.js?v=20260818_staff_dur_ui";
-import { loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod, setupTicketsDateFilters } from "./tickets-summary.js?v=20260818_staff_dur_ui";
-import { initTicketsPicker, setupTicketsUI, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, updateNewTicketButtonVisibility, ensureTicketsBackgroundSubscription } from "./tickets-picker.js?v=20260818_staff_dur_ui";
+import { initTicketsCatalogUI, _ffEnsureCatalogEditorPortal, _ffServicesMobileShowList, openServicesModal, closeServicesModal, renderServicesCatalogV2, ffServiceStaffPermissionTrue, canStaffSendNewTicket, getStaffDefaultServiceCommission, getStaffDefaultSupplyDeduction, _ffCatalogEditorClose, addServiceCategoryV2, addSharedServiceV2 } from "./tickets-catalog-ui.js?v=20260901_dur_hm";
+import { initTicketsNav, goToTickets, goToServices } from "./tickets-nav.js?v=20260902_prod_cats";
+import { loadAndRenderTicketsSummary, populateTicketsEmployeeSelect, syncTicketsTimePeriodSelectOptions, ensureTicketsSummaryDefaultTimePeriod, setupTicketsDateFilters } from "./tickets-summary.js?v=20260902_prod_cats";
+import { initTicketsPicker, setupTicketsUI, ffTicketServiceSearchClear, ffTicketServiceSearchSetVisible, updateNewTicketButtonVisibility, ensureTicketsBackgroundSubscription } from "./tickets-picker.js?v=20260902_prod_cats";
 
 initTicketsPermissions({ normalizeTicketTechName });
 initTicketsCrud({ getActiveTicketsSalonId, notifyTicketsAnalyticsDataChanged, ticketSubmittedAtDate, _fmtYmdLocal, showToast, renderTicketsList, closeTicketModal });
@@ -70,7 +70,10 @@ function resetTicketsRuntimeCache() {
 }
 
 window.ffGetCurrentTickets = function() {
-  return Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets.slice() : [];
+  const list = Array.isArray(ticketsState.currentTickets) ? ticketsState.currentTickets : [];
+  return list.filter((t) => {
+    try { return canSeeTicket(t); } catch (_) { return false; }
+  });
 };
 
 // Live Desk (and other surfaces) open a ticket's details by id.
@@ -83,23 +86,34 @@ window.ffTicketMoney = function(n, decimals) {
   return ffTicketMoney(n, decimals);
 };
 
-window.ffLoadTicketsForAnalytics = async function() {
+window.ffLoadTicketsForAnalytics = async function(range) {
   const salonId = getActiveTicketsSalonId();
   if (!ticketsState.currentUserProfile) {
     try { await loadCurrentUserProfile(); } catch (_) {}
   }
   const resolvedSalonId = getActiveTicketsSalonId() || salonId;
   if (!resolvedSalonId) return [];
-  const qAnalytics = query(
-    collection(db, `salons/${resolvedSalonId}/tickets`),
-    orderBy('createdAt', 'desc'),
-    limit(500)
-  );
-  const snap = await getDocs(qAnalytics);
-  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const toYmd = (value) => {
+    if (value == null || value === "") return "";
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+    const ms = typeof value === "number" ? value : Date.parse(value);
+    if (!Number.isFinite(ms)) return "";
+    return _fmtYmdLocal(new Date(ms));
+  };
+  const fromStr = toYmd(range?.from || range?.fromMs || range?.startMs || "");
+  const toStr = toYmd(range?.to || range?.toMs || range?.endMs || "");
+
+  let rows = [];
+  try {
+    rows = await fetchClosedTicketsForSummary(resolvedSalonId, fromStr, toStr);
+  } catch (err) {
+    console.warn("[Tickets] ffLoadTicketsForAnalytics failed", err);
+    return [];
+  }
   return rows.filter((ticket) => {
     if (ticket && ticket.deleted === true) return false;
-    try { return canSeeTicket(ticket); } catch (_) { return true; }
+    try { return canSeeTicket(ticket); } catch (_) { return false; }
   });
 };
 
@@ -676,6 +690,9 @@ export function initTickets() {
   window.saveTicket = saveTicket;
   window.closeServicesModal = closeServicesModal;
   window.openServicesModal = openServicesModal;
+  window.ffIsSharedServiceCatalogEnabled = isSharedServiceCatalogEnabled;
+  window.ffLoadSharedServiceCatalogShareFlag = loadSharedServiceCatalogShareFlag;
+  window.ffSetSharedServiceCatalogEnabled = setSharedServiceCatalogEnabled;
   window.renderServicesCatalogV2 = renderServicesCatalogV2;
   window.addServiceCategoryV2 = addServiceCategoryV2;
   window.addSharedServiceV2 = addSharedServiceV2;
@@ -696,13 +713,24 @@ export function initTickets() {
     loadMoreBtn.onclick = () => void loadMoreTicketsOlder();
   }
 
-  // Re-render Tickets list, summary and badge whenever the active branch
-  // switches. The underlying Firestore subscription stays the same (we
-  // don't want to rebuild/refetch), only the client-side visibility gate
-  // (canSeeTicket + summaryDocMatchesLocation) changes.
+  // Re-subscribe Tickets to the active branch only. Each location is its own
+  // business — do not keep another branch's list, modal, or catalog on screen.
   if (typeof document !== 'undefined' && !window.__ffTicketsLocationListenerBound) {
     window.__ffTicketsLocationListenerBound = true;
     document.addEventListener('ff-active-location-changed', function () {
+      try {
+        const modal = document.getElementById('ticketModal');
+        if (modal && modal.style.display === 'flex' && typeof window.closeTicketModal === 'function') {
+          window.closeTicketModal();
+        }
+      } catch (_) {}
+      ticketsState.salonServices = [];
+      ticketsState.serviceCategories = [];
+      ticketsState._ffServicesLocationOverridesByService = {};
+      ticketsState._ffServicesLocationOverridesLoading = {};
+      ticketsState._ffSelectedServiceId = null;
+      ticketsState._ffSelectedCategoryId = null;
+      ticketsState._ticketsSummaryFetchSeq = (ticketsState._ticketsSummaryFetchSeq || 0) + 1;
       if (ticketsState.ticketsUnsubscribe) { try { ticketsState.ticketsUnsubscribe(); } catch (_) {} ticketsState.ticketsUnsubscribe = null; }
       resetTicketsRuntimeCache();
       if (typeof subscribeTickets === 'function') subscribeTickets({ resetLoading: true });
@@ -718,12 +746,13 @@ export function initTickets() {
       // branch (no Firestore roundtrip), then refresh anything on screen.
       try {
         const refreshCatalogForLocation = async () => {
-          if (ticketsState._catalogSource === 'shared') {
+          if (ticketsState._catalogSource === 'shared' && isSharedServiceCatalogEnabled()) {
             await loadSharedServiceOverrides(getTicketsAccountId(), getActiveLocationIdForTickets());
           }
           _applyCatalogFilter();
+          applyProductsCatalogFilter();
           setupTicketsUI();
-          if (ticketsState._ffCatalogModalMode === 'shared') {
+          if (ticketsState._ffCatalogModalMode === 'shared' && isSharedServiceCatalogEnabled()) {
             await loadSharedCatalogForManager();
           }
           const modal = document.getElementById('servicesModal');
@@ -737,6 +766,14 @@ export function initTickets() {
         };
         refreshCatalogForLocation().catch((e) => console.warn('[SharedServices] location refresh failed', e));
       } catch (_) {}
+    });
+    document.addEventListener('ff-product-share-changed', function () {
+      try {
+        applyProductsCatalogFilter();
+        setupTicketsUI();
+      } catch (e) {
+        console.warn('[Tickets] product share refresh failed', e);
+      }
     });
   }
 

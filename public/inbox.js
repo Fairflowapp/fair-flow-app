@@ -18,7 +18,7 @@ import {
   inboxCanViewInboxEval,
   inboxCanManageInboxEval,
   inboxSessionIsSalonOwnerOrAdmin,
-} from "./inbox-helpers.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-helpers.js?v=20260901_sched_req";
 
 // ── Module state + config tables — extracted to inbox-state.js
 import { inboxState } from "./inbox-state.js?v=20260810_owner_inbox_load_v5";
@@ -57,35 +57,35 @@ import {
   inboxCanSendRequests,
   mergeSalonStaffIntoUserProfile,
   loadCurrentUserProfile,
-} from "./inbox-data.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-data.js?v=20260901_inbox_iso";
 
 // ── Modals + settings UI — extracted to inbox-modals-ui.js
-import "./inbox-modals-ui.js?v=20260721_inbox_modal_stack";
+import "./inbox-modals-ui.js?v=20260901_inbox_iso";
 
 // ── List rendering — extracted to inbox-list-render.js
 import {
   renderInboxList,
   updateInboxBadges,
   initInboxListRender,
-} from "./inbox-list-render.js?v=20260810_owner_inbox_load_v5";
+} from "./inbox-list-render.js?v=20260901_inbox_iso";
 initInboxListRender({ showRequestDetails, inboxTechnicianNoiseFilter });
 
 // ── Request details modal — extracted to inbox-details.js
-import { showRequestDetails } from "./inbox-details.js?v=20260811_od_s1_artifacts";
+import { showRequestDetails } from "./inbox-details.js?v=20260901_inbox_iso";
 
 // ── Submit request (create) — extracted to inbox-submit.js
-import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260721_inbox_tech_fix";
+import { initInboxSubmit, submitRequest } from "./inbox-submit.js?v=20260901_sched_req";
 initInboxSubmit({ loadInboxItems });
 
 // ── Manager action handlers — extracted to inbox-actions.js
-import { initInboxActions } from "./inbox-actions.js?v=20260808_onboarding_stage_d";
+import { initInboxActions } from "./inbox-actions.js?v=20260816_od_link";
 initInboxActions({ loadInboxItems });
 
 // ── Listeners & data loading — extracted to inbox-listeners.js
-import { loadInboxItems, inboxTechnicianNoiseFilter, _bgBadgeRecompute, startBgBadgeListener } from "./inbox-listeners.js?v=20260810_owner_inbox_load_v5";
+import { loadInboxItems, inboxTechnicianNoiseFilter, _bgBadgeRecompute, startBgBadgeListener } from "./inbox-listeners.js?v=20260901_inbox_iso";
 
 // ── Create request form — extracted to inbox-create-form.js
-import { initInboxCreateForm } from "./inbox-create-form.js?v=20260630_inbox_create_form_split";
+import { initInboxCreateForm } from "./inbox-create-form.js?v=20260901_inbox_iso";
 initInboxCreateForm({ submitRequest });
 
 // Category order for display (Schedule → Payments → Operations → Documents → Other at end)

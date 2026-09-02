@@ -3,14 +3,15 @@
 // alerts into inboxItems. Extracted verbatim from inventory-insights.js.
 // Note: `auth` resolves via the window.auth global set by app.js (pre-existing).
 
-import { invState } from "./inventory-state.js?v=20260728_inv_mobile_unstick";
+import { invState } from "./inventory-state.js?v=20260902_inv_iso";
 import {
   parseNum,
   ffResolveItemEventDate,
   getProductStockForInventoryRow,
   getProductTargetStockForInventoryRow,
   parseSubcategoryDocToTable,
-} from "./inventory-helpers.js?v=20260728_inv_mobile_unstick";
+} from "./inventory-helpers.js?v=20260902_inv_iso";
+import { productDocInActiveLoc } from "./products-location.js?v=20260902_prod_cats";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import {
   doc,
@@ -26,9 +27,11 @@ import {
 // ── injected inventory.js internals (set once via initInsightsScans) ──
 let getSalonId;
 let _ffInvDocInActiveLoc;
+let _ffInvActiveLocId;
+let _ffInvHasActiveLocationForWrite;
 
 export function initInsightsScans(deps) {
-  ({ getSalonId, _ffInvDocInActiveLoc } = deps);
+  ({ getSalonId, _ffInvDocInActiveLoc, _ffInvActiveLocId, _ffInvHasActiveLocationForWrite } = deps);
 }
 
 async function scanInventorySuggestionsOnce() {
@@ -37,6 +40,7 @@ async function scanInventorySuggestionsOnce() {
   try {
     const salonId = await getSalonId();
     if (!salonId) return;
+    if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) return;
     const user = auth.currentUser;
     if (!user) return;
 
@@ -72,6 +76,7 @@ async function scanInventorySuggestionsOnce() {
       );
       existingSnap.forEach((d) => {
         const data = d.data() || {};
+        if (!_ffInvDocInActiveLoc(data)) return;
         const nested = (data.data && typeof data.data === "object") ? data.data : {};
         const rowId = nested.rowId != null ? String(nested.rowId) : "";
         const groupId = nested.groupId != null ? String(nested.groupId) : "";
@@ -179,18 +184,7 @@ async function scanInventorySuggestionsOnce() {
             // surfaces in the Inbox of the location where the scan ran.
             // Falls back to null for single-location salons (Inbox filter
             // treats null as "no filter" in that case).
-            let suggestionLocationId = null;
-            try {
-              if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
-                const v = window.ffGetActiveLocationId();
-                if (typeof v === "string" && v.trim()) suggestionLocationId = v.trim();
-              }
-              if (!suggestionLocationId && typeof window !== "undefined"
-                  && typeof window.__ff_active_location_id === "string"
-                  && window.__ff_active_location_id.trim()) {
-                suggestionLocationId = window.__ff_active_location_id.trim();
-              }
-            } catch (_) {}
+            const suggestionLocationId = typeof _ffInvActiveLocId === "function" ? (_ffInvActiveLocId() || null) : null;
             const payload = {
               tenantId: salonId,
               locationId: suggestionLocationId,
@@ -219,6 +213,7 @@ async function scanInventorySuggestionsOnce() {
               lastActivityAt: serverTimestamp(),
               updatedAt: null,
               data: {
+                locationId: suggestionLocationId,
                 itemName,
                 groupName,
                 categoryId: String(cat.id),
@@ -262,6 +257,7 @@ async function scanProductReorderAlertsOnce(force) {
   try {
     const salonId = await getSalonId();
     if (!salonId) return;
+    if (typeof _ffInvHasActiveLocationForWrite === "function" && !_ffInvHasActiveLocationForWrite()) return;
     const user = auth.currentUser;
     if (!user) return;
 
@@ -280,19 +276,7 @@ async function scanProductReorderAlertsOnce(force) {
     const staffId = userData.staffId != null ? String(userData.staffId) : "";
     const displayName = userData.displayName || userData.name || "System";
 
-    // Active location — alerts surface per-branch only.
-    let activeLoc = null;
-    try {
-      if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
-        const v = window.ffGetActiveLocationId();
-        if (typeof v === "string" && v.trim()) activeLoc = v.trim();
-      }
-      if (!activeLoc && typeof window !== "undefined"
-          && typeof window.__ff_active_location_id === "string"
-          && window.__ff_active_location_id.trim()) {
-        activeLoc = window.__ff_active_location_id.trim();
-      }
-    } catch (_) {}
+    const activeLoc = typeof _ffInvActiveLocId === "function" ? (_ffInvActiveLocId() || null) : null;
 
     // Dedup against existing reorder-point alerts (any status) by product id.
     const existingKeys = new Set();
@@ -305,6 +289,7 @@ async function scanProductReorderAlertsOnce(force) {
       );
       existingSnap.forEach((d) => {
         const data = d.data() || {};
+        if (!_ffInvDocInActiveLoc(data)) return;
         const nested = (data.data && typeof data.data === "object") ? data.data : {};
         if (nested.kind !== "reorder_point") return;
         const rowId = nested.rowId != null ? String(nested.rowId) : "";
@@ -315,6 +300,9 @@ async function scanProductReorderAlertsOnce(force) {
       return;
     }
 
+    if (typeof window.ffLoadProductCatalogShareEnabled === "function") {
+      try { await window.ffLoadProductCatalogShareEnabled(); } catch (_) {}
+    }
     const [catSnap, prodSnap] = await Promise.all([
       getDocs(collection(db, `salons/${salonId}/productCategories`)),
       getDocs(collection(db, `salons/${salonId}/products`)),
@@ -333,6 +321,7 @@ async function scanProductReorderAlertsOnce(force) {
     let createdCount = 0;
     for (const d of prodSnap.docs) {
       const product = { id: d.id, ...d.data() };
+      if (!productDocInActiveLoc(product)) continue;
       const productId = String(product.id);
       if (existingKeys.has(productId)) continue;
 
@@ -343,7 +332,9 @@ async function scanProductReorderAlertsOnce(force) {
 
       let reorderPoint = NaN;
       if (locO && Number.isFinite(Number(locO.reorderPoint))) reorderPoint = Number(locO.reorderPoint);
-      else if (Number.isFinite(Number(inv.reorderPoint))) reorderPoint = Number(inv.reorderPoint);
+      else if (Number.isFinite(Number(inv.reorderPoint)) && (!activeLoc || !_ffInvDocInActiveLoc || _ffInvDocInActiveLoc({ locationId: null }))) {
+        reorderPoint = Number(inv.reorderPoint);
+      }
       if (!Number.isFinite(reorderPoint) || reorderPoint <= 0) continue;
 
       const current = getProductStockForInventoryRow(product, activeLoc);
@@ -387,6 +378,7 @@ async function scanProductReorderAlertsOnce(force) {
         lastActivityAt: serverTimestamp(),
         updatedAt: null,
         data: {
+          locationId: activeLoc,
           kind: "reorder_point",
           itemName: String(product.name || "").trim(),
           groupName: "",
