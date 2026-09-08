@@ -1,0 +1,54 @@
+.ff-booking-page-reports {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #ffffff;
+}
+.ff-booking-page-reports.is-active {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+#ffBookingReportsRoot {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.ff-rpt {
+  max-width: 640px;
+  padding: 28px 28px 48px;
+  color: #111827;
+}
+.ff-rpt-head h1 {
+  margin: 0 0 8px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.ff-rpt-head p {
+  margin: 0 0 22px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #6b7280;
+}
+.ff-rpt-card {
+  padding: 20px 20px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fafafa;
+}
+.ff-rpt-card h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+.ff-rpt-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #6b7280;
+}

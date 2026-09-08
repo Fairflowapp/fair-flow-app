@@ -16,6 +16,7 @@ const windowObj = {
   settings: { preferences: { salonTimeZone: "America/New_York" } }
 };
 load("public/booking/calendar-time.js", windowObj);
+load("public/booking/settings/model.js", windowObj);
 load("public/booking/appointments/model.js", windowObj);
 load("public/booking/appointments/form.js", windowObj);
 load("public/booking/calendar-draft.js", windowObj);
@@ -63,7 +64,8 @@ check("line 1 end is 12:45", state.lines[0].endMin === 12 * 60 + 45);
 form.addLine(state);
 check("I add a second line", state.lines.length === 2);
 check("C default start is previous end", state.lines[1].startMin === 12 * 60 + 45);
-check("line 2 provider starts empty", state.lines[1].providerId === "");
+check("line 2 inherits previous provider", state.lines[1].providerId === "koko");
+check("hold shows second line after inherit", form.holdSpec(state).lines.length === 2);
 
 state.lines[1].providerId = "bobo";
 state.lines[1].services = [{ id: "pedi", name: "Pedicure", durationMinutes: 60, price: 65, raw: { durationMinutes: 60, defaultPrice: 65 } }];
@@ -104,6 +106,7 @@ check("B two complete lines can create", form.canCreate(state) === true && state
 
 const hold = form.holdSpec(state);
 check("Q hold has one block per line", hold && hold.lines.length === 2);
+check("hold lines keep keys for drag", !!(hold.lines[0].lineKey && hold.lines[1].lineKey && hold.lines[0].lineKey !== hold.lines[1].lineKey));
 check("R hold uses each provider", hold.lines[0].providerId === "koko" && hold.lines[1].providerId === "bobo");
 check("S hold uses each start", hold.lines[0].startMin === 11 * 60 + 45 && hold.lines[1].startMin === 12 * 60 + 45);
 
@@ -210,6 +213,167 @@ const overlapHtml = form.createLinesHtml(overlap, [
 check("overlapping different providers still render both cards", overlapHtml.indexOf("Manicure") !== -1 && overlapHtml.indexOf("Pedicure") !== -1);
 check("overlapping lines keep both start times", overlapHtml.indexOf("10:30") !== -1);
 check("hold still has one block per overlapping line", form.holdSpec(overlap).lines.length === 2);
+check("overlapping services for the same client stay one person", form.partySize(overlap) === 1);
+check("create UI does not call add-service a second person", overlapHtml.indexOf("for 2 people") === -1);
+check("consecutive services stay one person", form.partySize(state) === 1);
+
+const guestState = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 12 * 60, providerId: "koko" });
+form.setClient(guestState, { clientId: "cli_g", displayName: "Allen mora" });
+guestState.lines[0].services = [{ id: "gel", name: "UV Gel Pedi", durationMinutes: 60, price: 31, raw: { durationMinutes: 60, defaultPrice: 31 } }];
+form.setLineService(guestState, guestState.lines[0].key, "gel");
+form.addGuest(guestState);
+check("add guest starts at the same time", guestState.lines[1].startMin === 12 * 60);
+check("add guest is a second person", form.uniquePeople(guestState) === 2 && form.partySize(guestState) === 2);
+form.setLineGuestName(guestState, guestState.lines[1].key, "Sara");
+guestState.lines[1].providerId = "bobo";
+guestState.lines[1].services = [{ id: "gel", name: "UV Gel Pedi", durationMinutes: 60, price: 31, raw: { durationMinutes: 60, defaultPrice: 31 } }];
+form.setLineService(guestState, guestState.lines[1].key, "gel");
+check("named guest is served under their name", form.servedName(guestState, guestState.lines[1]) === "Sara");
+check("booker line keeps the booker name", form.servedName(guestState, guestState.lines[0]) === "Allen mora");
+check("hold uses the guest name", form.holdSpec(guestState).lines[1].clientName === "Sara");
+check("unnamed guest keeps the booker name on the calendar", form.servedName(guestState, Object.assign({}, guestState.lines[1], { guestName: "" })) === "Allen mora");
+const guestHtml = form.createLinesHtml(guestState, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+]);
+check("guest name field is optional", guestHtml.indexOf("Name (optional)") !== -1 && guestHtml.indexOf("Sara") !== -1);
+const sameWorker = form.emptyState({ locationId: "locA", dateKey: "2026-08-30", startMin: 11 * 60, providerId: "bobo" });
+form.setClient(sameWorker, { clientId: "cli_allen", displayName: "Allen mora" });
+sameWorker.lines[0].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(sameWorker, sameWorker.lines[0].key, "combo");
+form.addGuest(sameWorker);
+sameWorker.lines[1].providerId = "bobo";
+sameWorker.lines[1].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(sameWorker, sameWorker.lines[1].key, "combo");
+form.setLineStart(sameWorker, sameWorker.lines[1].key, 11 * 60);
+check("same provider same time is a clash", form.findProviderOverlaps(sameWorker).length === 1);
+check("same provider same time blocks booking", form.canCreate(sameWorker) === false);
+const clashHtml = form.createLinesHtml(sameWorker, [{ id: "bobo", firstName: "Bobo" }]);
+check("same provider clash shows on both cards", clashHtml.indexOf("cannot serve two guests") !== -1 && (clashHtml.match(/is-error/g) || []).length >= 2);
+
+const backToBack = form.emptyState({ locationId: "locA", dateKey: "2026-08-30", startMin: 11 * 60, providerId: "bobo" });
+form.setClient(backToBack, { clientId: "cli_allen", displayName: "Allen mora" });
+backToBack.lines[0].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(backToBack, backToBack.lines[0].key, "combo");
+form.addLine(backToBack);
+backToBack.lines[1].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(backToBack, backToBack.lines[1].key, "combo");
+form.setLineStart(backToBack, backToBack.lines[1].key, 12 * 60 + 30);
+check("back-to-back same provider is allowed", form.findProviderOverlaps(backToBack).length === 0 && form.canCreate(backToBack) === true);
+
+const twoWorkers = form.emptyState({ locationId: "locA", dateKey: "2026-08-30", startMin: 11 * 60, providerId: "bobo" });
+form.setClient(twoWorkers, { clientId: "cli_allen", displayName: "Allen mora" });
+twoWorkers.lines[0].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(twoWorkers, twoWorkers.lines[0].key, "combo");
+form.addGuest(twoWorkers);
+twoWorkers.lines[1].providerId = "koko";
+twoWorkers.lines[1].services = [{ id: "combo", name: "UV Gel Mani / Reg Pedi", durationMinutes: 90, price: 84, raw: { durationMinutes: 90, defaultPrice: 84 } }];
+form.setLineService(twoWorkers, twoWorkers.lines[1].key, "combo");
+form.setLineStart(twoWorkers, twoWorkers.lines[1].key, 11 * 60);
+check("two providers at the same time are allowed", form.findProviderOverlaps(twoWorkers).length === 0 && form.canCreate(twoWorkers) === true);
+
+function overlapState(startMin, nextStartMin) {
+  const state = form.emptyState({ locationId: "locA", dateKey: "2026-09-05", startMin: startMin, providerId: "ashley" });
+  form.setClient(state, { clientId: "cli_allen", displayName: "Allen mora" });
+  state.lines[0].services = [{ id: "pedi", name: "UV Gel Pedi", durationMinutes: 60, price: 31, raw: { durationMinutes: 60, defaultPrice: 31 } }];
+  form.setLineService(state, state.lines[0].key, "pedi");
+  form.addGuest(state);
+  state.lines[1].providerId = "ashley";
+  state.lines[1].services = [{ id: "pedi", name: "UV Gel Pedi", durationMinutes: 60, price: 31, raw: { durationMinutes: 60, defaultPrice: 31 } }];
+  form.setLineService(state, state.lines[1].key, "pedi");
+  form.setLineStart(state, state.lines[1].key, nextStartMin);
+  return state;
+}
+const fifteenOverlap = overlapState(9 * 60 + 30, 10 * 60 + 15);
+check("15-minute overlap is a clash by default", form.findProviderOverlaps(fifteenOverlap).length === 1 && form.canCreate(fifteenOverlap) === false);
+windowObj.settings.booking = { allowedOverlapMinutes: 15 };
+check("15-minute overlap is allowed when the salon allows 15", form.findProviderOverlaps(fifteenOverlap).length === 0 && form.canCreate(fifteenOverlap) === true);
+windowObj.settings.booking = { allowedOverlapMinutes: 20 };
+const twentyOne = overlapState(9 * 60 + 30, 10 * 60 + 9);
+check("21-minute overlap still clashes when only 20 is allowed", form.findProviderOverlaps(twentyOne).length === 1);
+windowObj.settings.booking = { allowedOverlapMinutes: 15 };
+windowObj.ffBookingCalAppointments = {
+  getCached: function () {
+    return [{
+      appointmentId: "appt_allen",
+      locationId: "locA",
+      status: "scheduled",
+      serviceLines: [{
+        lineId: "line_allen",
+        providerId: "ashley",
+        startAt: new Date("2026-09-05T13:30:00.000Z"),
+        endAt: new Date("2026-09-05T14:30:00.000Z"),
+        durationMinutes: 60
+      }]
+    }];
+  }
+};
+const vsSaved = form.emptyState({ locationId: "locA", dateKey: "2026-09-05", startMin: 10 * 60 + 15, providerId: "ashley" });
+form.setClient(vsSaved, { clientId: "cli_shiri", displayName: "Shiri A" });
+vsSaved.lines[0].services = [{ id: "pedi", name: "UV Gel Pedi", durationMinutes: 60, price: 31, raw: { durationMinutes: 60, defaultPrice: 31 } }];
+form.setLineService(vsSaved, vsSaved.lines[0].key, "pedi");
+check("saved 15-minute overlap is allowed when the salon allows 15", form.findProviderOverlaps(vsSaved).length === 0 && form.canCreate(vsSaved) === true);
+windowObj.settings.booking = { allowedOverlapMinutes: 0 };
+check("saved overlap uses the already-has-an-appointment copy", form.findProviderOverlaps(vsSaved).length === 1 && /already has an appointment/.test(form.providerOverlapMessage(vsSaved)));
+windowObj.settings.booking = { allowedOverlapMinutes: 0 };
+windowObj.ffBookingCalAppointments = { getCached: function () { return []; } };
+
+check("payload keeps the guest snapshot", form.editPatch(form.editStateFrom({
+  appointmentId: "appt_g",
+  clientId: "cli_g",
+  locationId: "locA",
+  dateKey: "2026-08-24",
+  lines: [{
+    lineId: "l1", providerId: "koko", serviceId: "gel", serviceName: "UV Gel Pedi",
+    startMin: 12 * 60, durationMinutes: 60, price: 31, guestKey: "g_1", guestName: "Sara"
+  }]
+})).serviceLines[0].guestName === "Sara");
+
+const gapped = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 11 * 60 + 15, providerId: "koko" });
+gapped.lines[0].services = [{ id: "gel", name: "UV Gel Pedi", durationMinutes: 60, price: 70, raw: { durationMinutes: 60, defaultPrice: 70 } }];
+form.setLineService(gapped, gapped.lines[0].key, "gel");
+form.addLine(gapped);
+gapped.lines[1].providerId = "bobo";
+gapped.lines[1].services = [{ id: "pedi", name: "Pedicure", durationMinutes: 30, price: 31, raw: { durationMinutes: 30, defaultPrice: 31 } }];
+form.setLineService(gapped, gapped.lines[1].key, "pedi");
+form.setLineStart(gapped, gapped.lines[1].key, 12 * 60 + 45);
+const gaps = form.findGaps(gapped);
+check("gap is detected between services", gaps.length === 1 && gaps[0].gapMin === 30);
+check("consecutive lines have no gap", form.findGaps(state).length === 0);
+const gapHtml = form.createLinesHtml(gapped, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+]);
+check("create UI warns about a service gap", gapHtml.indexOf("ff-appt-gap") !== -1 && gapHtml.indexOf("30 min gap") !== -1);
+check("create UI offers keep or consecutive", gapHtml.indexOf("Keep gap") !== -1 && gapHtml.indexOf("Make consecutive") !== -1);
+form.setClient(gapped, { clientId: "cli_gap", displayName: "Allen mora" });
+check("unresolved gap blocks booking", form.canCreate(gapped) === false);
+gapped.lines.forEach(function (line) { line.endMin = 0; });
+check("gap is still found when endMin is missing", form.findGaps(gapped).length === 1 && form.findGaps(gapped)[0].gapMin === 30);
+form.derive(gapped);
+form.keepGap(gapped, form.findGaps(gapped)[0].signature);
+check("keep gap allows booking", form.canCreate(gapped) === true);
+check("keepGap hides the notice", form.createLinesHtml(gapped, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+]).indexOf("ff-appt-gap") === -1);
+form.setLineStart(gapped, gapped.lines[1].key, 13 * 60);
+check("a new gap after a time change blocks again", form.canCreate(gapped) === false);
+form.closeGap(gapped, gapped.lines[1].key);
+check("close gap starts the next service at the previous end", gapped.lines[1].startMin === gapped.lines[0].endMin);
+check("close gap removes the warning", form.findGaps(gapped).length === 0);
+check("close gap allows booking", form.canCreate(gapped) === true);
+const dismissedHtml = form.createLinesHtml(gapped, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+], { dismissedGaps: { "x": true } });
+form.setLineStart(gapped, gapped.lines[1].key, 13 * 60);
+const keepHtml = form.createLinesHtml(gapped, [
+  { id: "koko", firstName: "Koko" },
+  { id: "bobo", firstName: "Bobo" }
+], { dismissedGaps: { [form.findGaps(gapped)[0].signature]: true } });
+check("kept gap can be dismissed", keepHtml.indexOf("ff-appt-gap") === -1);
+check("dismissed helper does not hide other markup", dismissedHtml.indexOf("UV Gel Pedi") !== -1);
 
 const emptyCreate = form.emptyState({ locationId: "locA", dateKey: "2026-08-24", startMin: 735 });
 check("empty create line is a search row", form.createLinesHtml(emptyCreate, []).indexOf("Search or select service") !== -1);
@@ -273,6 +437,22 @@ const pickerComboIds = form.createLinesHtml(emptyCreate, [], {
 });
 check("Combo stays one group when category ids differ", (pickerComboIds.match(/data-ff-cat="Combo"/g) || []).length === 1);
 check("legacy Combo id still lists every service", pickerComboIds.indexOf("Structured Gel") !== -1 && pickerComboIds.indexOf("Manicure / Pedicure") !== -1 && pickerComboIds.indexOf("Dip Mani / UV Gel Pedi") !== -1);
+
+const reqState = form.emptyState({ locationId: "locA", dateKey: "2026-09-06" });
+check("a named provider is not a request by default", reqState.lines[0].requested === false);
+form.setLineRequested(reqState, reqState.lines[0].key, true);
+check("request can be marked on that provider", reqState.lines[0].requested === true);
+reqState.lines[0].serviceId = "mani";
+reqState.lines[0].service = { name: "mani", durationMinutes: 30, price: 44 };
+reqState.lines[0].providerId = "rebecca";
+reqState.lines[0].startMin = 15 * 60;
+reqState.lines[0].durationMinutes = 30;
+reqState.lines[0].endMin = 15 * 60 + 30;
+const reqOnHtml = form.createLinesHtml(reqState, [{ id: "rebecca", firstName: "Rebecca" }]);
+check("request button lights up when marked", reqOnHtml.indexOf("ff-appt-request is-on") !== -1);
+reqState.lines[0].requested = false;
+const reqOffHtml = form.createLinesHtml(reqState, [{ id: "rebecca", firstName: "Rebecca" }]);
+check("request stays off unless marked", reqOffHtml.indexOf("toggle-request") !== -1 && reqOffHtml.indexOf("ff-appt-request is-on") === -1);
 
 check("empty serviceLines rejected", model.normalizeCreateInput({
   clientId: "cli_1",

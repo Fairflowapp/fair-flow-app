@@ -90,6 +90,15 @@ service firebase.storage {
       allow read, write: if signedIn();
     }
 
+    // Booking client profile photos. Signed-in staff only; images, max 8 MB.
+    match /salons/{salonId}/clients/{clientId}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.resource != null
+        && request.resource.size <= 8 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|heic|heif|gif)');
+    }
+
     // Legacy Media uploads (contentWorks) — files under media/{workId}/...
     match /salons/{salonId}/media/{workId}/{allPaths=**} {
       allow read, write: if signedIn();

@@ -4,20 +4,28 @@
  */
 (function () {
   var ROOT_ID = "ffBookingApptDetails";
-  var STATUS_LABELS = {
-    scheduled: "Scheduled",
-    confirmed: "Confirmed",
-    checked_in: "Checked In",
-    in_service: "In Service",
-    completed: "Completed",
-    cancelled: "Cancelled",
-    no_show: "No Show"
-  };
   var current = null;
   var mode = "view";
   var edit = null;
   var cancelling = false;
+  var statusSaving = false;
+  var editUi = {
+    servicePickerKey: "",
+    providerPickerKey: "",
+    serviceQ: "",
+    providerQ: "",
+    expandedCats: {}
+  };
 
+  function resetEditUi() {
+    editUi.servicePickerKey = "";
+    editUi.providerPickerKey = "";
+    editUi.serviceQ = "";
+    editUi.providerQ = "";
+    editUi.expandedCats = {};
+  }
+
+  function statusApi() { return window.ffBookingAppointmentStatus || null; }
   function live() { return window.ffBookingDrawerLive || null; }
   function calAppts() { return window.ffBookingCalAppointments || null; }
   function repo() { return window.ffBookingAppointments || null; }
@@ -133,10 +141,26 @@
   }
 
   function statusLabel(status) {
+    var api = statusApi();
+    if (api && typeof api.label === "function") return api.label(status);
     var key = trim(status);
-    if (STATUS_LABELS[key]) return STATUS_LABELS[key];
     if (!key) return "";
     return key.replace(/_/g, " ").replace(/\b\w/g, function (ch) { return ch.toUpperCase(); });
+  }
+
+  function statusHint(status) {
+    var api = statusApi();
+    return api && typeof api.hint === "function" ? api.hint(status) : "";
+  }
+
+  function statusActions(status) {
+    var api = statusApi();
+    return api && typeof api.actions === "function" ? api.actions(status) : [];
+  }
+
+  function statusClass(status) {
+    var api = statusApi();
+    return api && typeof api.cardClass === "function" ? api.cardClass(status) : "";
   }
 
   function lineView(appointment, line) {
@@ -163,7 +187,10 @@
       price: Number(line && line.priceSnapshot) || 0,
       priceLabel: money(line && line.priceSnapshot),
       providerName: providerName,
-      providerPhoto: photo
+      providerPhoto: photo,
+      guestName: trim(line && line.guestName),
+      guestKey: trim(line && line.guestKey),
+      requested: !!(line && line.requested)
     };
   }
 
@@ -218,7 +245,37 @@
       status: trim(appointment && appointment.status) || "scheduled",
       statusLabel: statusLabel(appointment && appointment.status),
       isCancelled: trim(appointment && appointment.status) === "cancelled",
-      cancellationReason: trim(appointment && appointment.cancellationReason)
+      canCheckIn: statusActions(appointment && appointment.status).some(function (act) {
+        return act && act.id === "check-in";
+      }),
+      statusHint: statusHint(appointment && appointment.status),
+      statusClass: statusClass(appointment && appointment.status),
+      statusActions: statusActions(appointment && appointment.status),
+      isNewClient: !!(appointment && appointment.firstVisit),
+      cancellationReason: trim(appointment && appointment.cancellationReason),
+      partySize: (function () {
+        var api = form();
+        if (api && typeof api.partySize === "function") {
+          return api.partySize({
+            lines: services.map(function (row, index) {
+              return {
+                key: row.lineId || ("view_" + index),
+                serviceId: row.lineId || ("view_" + index),
+                service: { name: row.serviceName },
+                startMin: row.startMin,
+                endMin: row.endMin,
+                guestKey: row.guestKey,
+                guestName: row.guestName
+              };
+            })
+          });
+        }
+        var modelApi = model();
+        if (modelApi && typeof modelApi.partySizeForVisit === "function") {
+          return modelApi.partySizeForVisit(services);
+        }
+        return 1;
+      }())
     };
   }
 
@@ -227,24 +284,57 @@
     if (!rows.length) {
       return '<div class="ff-apd-value">' + escapeHtml(view && view.serviceName || "Service") + "</div>";
     }
-    return rows.map(function (row) {
+    var api = form();
+    var fake = {
+      client: { displayName: trim(view && view.clientName) },
+      lines: rows.map(function (row, index) {
+        return {
+          key: row.lineId || ("view_" + index),
+          serviceId: row.lineId || ("view_" + index),
+          service: { name: row.serviceName },
+          startMin: row.startMin,
+          endMin: row.endMin,
+          guestKey: row.guestKey,
+          guestName: row.guestName
+        };
+      })
+    };
+    var party = api && typeof api.partyNoticeHtml === "function" ? api.partyNoticeHtml(fake) : "";
+    var after = {};
+    if (api && typeof api.findGaps === "function") {
+      api.findGaps(fake).forEach(function (gap) {
+        after[gap.prevKey] = api.gapNoticeHtml(gap, { gapReadOnly: true });
+      });
+    }
+    return party + rows.map(function (row, index) {
+      var key = row.lineId || ("view_" + index);
+      var forName = trim(row.guestName) || trim(view && view.clientName) || "Client";
+      var showFor = Number(view && view.partySize) > 1 || !!trim(row.guestName);
       return (
         '<article class="ff-apd-svc">' +
           "<strong>" + escapeHtml(row.serviceName) + "</strong>" +
-          "<span>" + escapeHtml(row.providerName) + "</span>" +
+          (showFor ? "<span>For " + escapeHtml(forName) + "</span>" : "") +
+          "<span>" + escapeHtml(row.providerName) +
+            (row.requested
+              ? '<em class="ff-apd-request" title="Requested for this provider" aria-label="Requested for this provider"></em>'
+              : "") +
+          "</span>" +
           "<span>" + escapeHtml(row.startLabel + " – " + row.endLabel) + "</span>" +
           "<span>" + escapeHtml(row.durationLabel + " · " + row.priceLabel) + "</span>" +
-        "</article>"
+        "</article>" +
+        (after[key] || "")
       );
     }).join("");
   }
 
   function clientHtml(view) {
     return (
-      '<div class="ff-apd-client">' +
+      '<div class="ff-apd-client' + (view.isNewClient ? " is-new-client" : "") + '">' +
         '<span class="ff-apd-avatar ff-apd-initials">' + escapeHtml(view.clientInitials) + "</span>" +
         '<div class="ff-apd-client-id">' +
-          "<strong>" + escapeHtml(view.clientName) + "</strong>" +
+          "<strong>" + escapeHtml(view.clientName) +
+            (view.isNewClient ? '<em class="ff-apd-new-client">New Client</em>' : "") +
+          "</strong>" +
           (view.clientSecondary ? "<span>" + escapeHtml(view.clientSecondary) + "</span>" : "") +
         "</div>" +
       "</div>"
@@ -304,8 +394,10 @@
       notes: document.getElementById("ffApdNotes"),
       statusRow: document.getElementById("ffApdStatusRow"),
       status: document.getElementById("ffApdStatus"),
+      statusHint: document.getElementById("ffApdStatusHint"),
       dateIn: document.getElementById("ffApdDateIn"),
       lines: document.getElementById("ffApdLines"),
+      addRow: document.getElementById("ffApdAddRow"),
       notesIn: document.getElementById("ffApdNotesIn"),
       error: document.getElementById("ffApdError"),
       save: document.getElementById("ffApdSave"),
@@ -317,6 +409,7 @@
       confirmKeep: document.getElementById("ffApdKeep"),
       confirmGo: document.getElementById("ffApdConfirmCancel"),
       cancelBtn: document.getElementById("ffApdCancelBtn"),
+      statusActs: document.getElementById("ffApdStatusActs"),
       editBtn: document.getElementById("ffApdEditBtn"),
       closeCancelled: document.getElementById("ffApdCloseCancelled")
     };
@@ -331,7 +424,14 @@
     ui.notes.textContent = view.notesEmpty ? "No notes" : view.notes;
     ui.notes.classList.toggle("is-empty", view.notesEmpty);
     ui.statusRow.hidden = !view.statusLabel;
-    ui.status.textContent = view.statusLabel;
+    if (ui.status) {
+      ui.status.className = ("ff-apd-status " + (view.statusClass || "")).trim();
+      ui.status.textContent = view.statusLabel;
+    }
+    if (ui.statusHint) {
+      ui.statusHint.hidden = !view.statusHint;
+      ui.statusHint.textContent = view.statusHint || "";
+    }
     if (ui.reasonRow) {
       ui.reasonRow.hidden = !view.isCancelled || !view.cancellationReason;
       if (ui.reason) ui.reason.textContent = view.cancellationReason;
@@ -346,14 +446,37 @@
     ui.editLocation.textContent = view.locationLabel;
     ui.dateIn.value = edit.dateKey || "";
     if (document.activeElement !== ui.notesIn) ui.notesIn.value = edit.notes || "";
-    if (ui.lines && typeof api.linesHtml === "function") {
-      ui.lines.innerHTML = api.linesHtml(edit, providersForEdit(edit));
+    var active = document.activeElement;
+    if (active && active.hasAttribute) {
+      if (active.hasAttribute("data-ff-service-q")) editUi.serviceQ = active.value;
+      if (active.hasAttribute("data-ff-provider-q")) editUi.providerQ = active.value;
+    }
+    if (ui.lines && typeof api.createLinesHtml === "function") {
+      ui.lines.innerHTML = api.createLinesHtml(edit, providersForEdit(edit), editUi);
+    }
+    if (ui.addRow) {
+      ui.addRow.hidden = !(edit.lines || []).some(function (line) { return line && line.serviceId; });
     }
     var lineError = !!(edit.error && edit.errorLineKey);
-    ui.error.hidden = !edit.error || lineError;
-    ui.error.textContent = lineError ? "" : (edit.error || "");
-    ui.save.disabled = !api.canSave(edit) || !!edit.saving;
+    var unresolvedGap = typeof api.unresolvedGaps === "function" && api.unresolvedGaps(edit).length > 0;
+    var providerClash = typeof api.findProviderOverlaps === "function" && api.findProviderOverlaps(edit).length > 0;
+    var clashMsg = typeof api.providerOverlapMessage === "function" ? api.providerOverlapMessage(edit) : "";
+    ui.error.hidden = (!edit.error && !unresolvedGap && !providerClash) || lineError;
+    ui.error.textContent = lineError ? "" : (edit.error || (providerClash ? clashMsg : (unresolvedGap ? "Choose whether to keep the gap or make the times consecutive." : "")));
+    ui.save.disabled = !api.canSave(edit) || !!edit.saving || unresolvedGap || providerClash;
     ui.save.textContent = edit.saving ? "Saving…" : "Save Changes";
+    if (active && active.hasAttribute && ui.root) {
+      var sel = null;
+      if (active.hasAttribute("data-ff-service-q")) sel = ui.root.querySelector("[data-ff-service-q]");
+      if (active.hasAttribute("data-ff-provider-q")) sel = ui.root.querySelector("[data-ff-provider-q]");
+      if (active.hasAttribute("data-ff-guest-name")) {
+        sel = ui.root.querySelector('[data-ff-guest-name][data-ff-line="' + (active.getAttribute("data-ff-line") || "") + '"]');
+      }
+      if (sel) {
+        sel.focus();
+        try { sel.setSelectionRange(sel.value.length, sel.value.length); } catch (_) {}
+      }
+    }
   }
 
   function paint() {
@@ -368,7 +491,18 @@
     ui.footView.hidden = !!editing || confirming;
     ui.footEdit.hidden = !editing;
     if (ui.confirm) ui.confirm.hidden = !confirming;
-    if (ui.cancelBtn) ui.cancelBtn.hidden = cancelled;
+    if (ui.cancelBtn) ui.cancelBtn.hidden = cancelled || trim(current.appointment.status) === "completed";
+    if (ui.statusActs) {
+      var acts = !cancelled && !editing && !confirming ? statusActions(current.appointment.status) : [];
+      ui.statusActs.innerHTML = acts.map(function (act, index) {
+        var main = index === 0;
+        return '<button type="button" class="' + (main ? "ff-apd-primary" : "ff-apd-ghost") +
+          '" data-ff-apd-act="' + escapeHtml(act.id) + '" data-ff-apd-next="' + escapeHtml(act.next) + '"' +
+          (statusSaving ? " disabled" : "") + ">" +
+          escapeHtml(statusSaving ? "Saving…" : act.label) +
+          "</button>";
+      }).join("");
+    }
     if (ui.editBtn) ui.editBtn.hidden = cancelled;
     if (ui.closeCancelled) ui.closeCancelled.hidden = !cancelled;
     if (ui.confirmGo) {
@@ -382,7 +516,7 @@
 
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
-    if (existing && (!document.getElementById("ffApdEdit") || !document.getElementById("ffApdCancel") || !document.getElementById("ffApdLines"))) {
+    if (existing && (!document.getElementById("ffApdEdit") || !document.getElementById("ffApdCancel") || !document.getElementById("ffApdLines") || !document.getElementById("ffApdStatusActs") || !document.getElementById("ffApdAddRow"))) {
       existing.parentNode.removeChild(existing);
       existing = null;
     }
@@ -408,15 +542,18 @@
           '<div class="ff-apd-field"><span class="ff-apd-label">Date</span><div id="ffApdDate" class="ff-apd-value"></div></div>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdLocation" class="ff-apd-value"></div></div>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Notes</span><div id="ffApdNotes" class="ff-apd-notes"></div></div>' +
-          '<div id="ffApdStatusRow" class="ff-apd-field"><span class="ff-apd-label">Status</span><div id="ffApdStatus" class="ff-apd-value"></div></div>' +
+          '<div id="ffApdStatusRow" class="ff-apd-field"><span class="ff-apd-label">Status</span><div id="ffApdStatus" class="ff-apd-status"></div><p id="ffApdStatusHint" class="ff-apd-status-hint" hidden></p></div>' +
           '<div id="ffApdReasonRow" class="ff-apd-field" hidden><span class="ff-apd-label">Cancellation reason</span><div id="ffApdReason" class="ff-apd-notes"></div></div>' +
         "</div>" +
         '<div id="ffApdEdit" hidden>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Client</span><div id="ffApdEditClient"></div></div>' +
           '<div class="ff-apd-field"><span class="ff-apd-label">Location</span><div id="ffApdEditLocation" class="ff-apd-value"></div></div>' +
           '<label class="ff-appt-field"><span>Date</span><input id="ffApdDateIn" type="date"></label>' +
-          '<div class="ff-appt-field"><span>Services</span><div id="ffApdLines" class="ff-appt-lines"></div>' +
-            '<button type="button" class="ff-appt-add-line" data-ff-apd-act="add-line">+ Add another service</button>' +
+          '<div class="ff-appt-field"><span>Services</span><div id="ffApdLines" class="ff-appt-svcs"></div>' +
+            '<div class="ff-appt-add-row" id="ffApdAddRow" hidden>' +
+              '<button type="button" class="ff-appt-add-line" data-ff-apd-act="add-line">+ Add another service</button>' +
+              '<button type="button" class="ff-appt-add-line" data-ff-apd-act="add-guest">+ Add a guest</button>' +
+            "</div>" +
           "</div>" +
           '<label class="ff-appt-field"><span>Notes</span><textarea id="ffApdNotesIn" rows="3" maxlength="2000" placeholder="Add a note..."></textarea></label>' +
           '<div id="ffApdError" class="ff-apd-error" hidden></div>' +
@@ -435,7 +572,10 @@
       '<footer id="ffApdFootView" class="ff-apd-foot">' +
         '<button type="button" class="ff-apd-danger-text" id="ffApdCancelBtn" data-ff-apd-act="ask-cancel">Cancel Appointment</button>' +
         '<button type="button" class="ff-apd-ghost" id="ffApdCloseCancelled" data-ff-apd-act="close" hidden>Close</button>' +
-        '<button type="button" class="ff-apd-primary" id="ffApdEditBtn" data-ff-apd-act="edit">Edit Appointment</button>' +
+        '<div class="ff-apd-foot-acts">' +
+          '<div id="ffApdStatusActs" class="ff-apd-status-acts"></div>' +
+          '<button type="button" class="ff-apd-ghost" id="ffApdEditBtn" data-ff-apd-act="edit">Edit Appointment</button>' +
+        "</div>" +
       "</footer>" +
       '<footer id="ffApdFootEdit" class="ff-apd-foot" hidden>' +
         '<button type="button" class="ff-apd-ghost" data-ff-apd-act="cancel-edit">Cancel</button>' +
@@ -511,6 +651,48 @@
     close();
   }
 
+  async function setVisitStatus(nextStatus) {
+    if (!current || !current.appointment || statusSaving) return;
+    var next = trim(nextStatus);
+    var from = trim(current.appointment.status);
+    if (!next || from === "cancelled") return;
+    if (next === "completed") {
+      var checkout = window.ffBookingSalesCheckout;
+      if (checkout && typeof checkout.open === "function") {
+        checkout.open({
+          locationId: current.appointment.locationId,
+          appointment: current.appointment
+        });
+        close();
+        return;
+      }
+    }
+    var flow = statusApi();
+    if (flow && typeof flow.canAdvanceTo === "function" && !flow.canAdvanceTo(from, next)) return;
+    var api = repo();
+    if (!api || typeof api.updateAppointment !== "function") return;
+    statusSaving = true;
+    paint();
+    var result;
+    try {
+      result = await api.updateAppointment(current.appointment.appointmentId, { status: next });
+    } catch (err) {
+      result = { ok: false, error: err && err.message ? err.message : "This status could not be updated." };
+    }
+    statusSaving = false;
+    if (!result || !result.ok) {
+      if (window.ffToast && typeof window.ffToast.show === "function") {
+        window.ffToast.show((result && result.error) || "This status could not be updated.", { variant: "error", durationMs: 3200 });
+      }
+      paint();
+      return;
+    }
+    current.appointment = result.appointment || Object.assign({}, current.appointment, { status: next });
+    mode = "view";
+    paint();
+    placeLive();
+  }
+
   async function enterEdit() {
     var api = form();
     if (!api || !current || !current.appointment) return;
@@ -524,7 +706,10 @@
         serviceName: line.serviceNameSnapshot,
         durationMinutes: line.durationMinutes,
         price: line.priceSnapshot,
-        startMin: minutesOf(line.startAt, loc)
+        startMin: minutesOf(line.startAt, loc),
+        guestKey: line.guestKey,
+        guestName: line.guestName,
+        requested: !!line.requested
       };
     });
     edit = api.editStateFrom({
@@ -558,6 +743,7 @@
       }
     });
     api.derive(edit);
+    resetEditUi();
     mode = "edit";
     paint();
     placeLive();
@@ -566,6 +752,7 @@
   function cancelEdit() {
     mode = "view";
     edit = null;
+    resetEditUi();
     paint();
     placeLive();
   }
@@ -587,6 +774,7 @@
     var savedKey = trim(result.appointment && result.appointment.dateKey);
     mode = "view";
     edit = null;
+    resetEditUi();
     if (savedKey && savedKey !== visibleDateKey()) {
       close();
       return;
@@ -608,9 +796,11 @@
 
   function closeSiblingDrawers() {
     try {
-      if (window.ffBookingAppointmentDrawer && window.ffBookingAppointmentDrawer.forceClose) {
-        window.ffBookingAppointmentDrawer.forceClose();
+      var drawer = window.ffBookingAppointmentDrawer;
+      if (drawer && typeof drawer.hasUnsavedWork === "function" && drawer.hasUnsavedWork()) {
+        if (!window.confirm("Discard this unsaved appointment?")) return false;
       }
+      if (drawer && drawer.forceClose) drawer.forceClose();
     } catch (_) {}
     try {
       if (window.ffBookingClientsOptions && window.ffBookingClientsOptions.forceClose) {
@@ -627,6 +817,7 @@
         window.ffBookingClientsDrawer.forceClose();
       }
     } catch (_) {}
+    return true;
   }
 
   function placeLive() {
@@ -650,6 +841,7 @@
     mode = "view";
     edit = null;
     cancelling = false;
+    statusSaving = false;
     if (ui.root) {
       ui.root.hidden = true;
       ui.root.classList.remove("is-open");
@@ -677,7 +869,7 @@
   async function open(spec) {
     var appointmentId = trim(spec && spec.appointmentId);
     if (!appointmentId || !canOpen()) return;
-    closeSiblingDrawers();
+    if (closeSiblingDrawers() === false) return;
     var appointment = await resolveAppointment(appointmentId);
     if (!appointment || trim(appointment.appointmentId) !== appointmentId) return;
     current = {
@@ -687,6 +879,7 @@
     mode = "view";
     edit = null;
     cancelling = false;
+    statusSaving = false;
     ensureDom();
     var ui = els();
     ui.root.hidden = false;
@@ -702,26 +895,121 @@
       var api = form();
       var remove = ev.target && ev.target.closest ? ev.target.closest("[data-ff-line-act='remove']") : null;
       if (remove && mode === "edit" && api && edit) {
+        ev.preventDefault();
         edit = api.removeLine(edit, remove.getAttribute("data-ff-line"));
+        resetEditUi();
         paint();
         return;
       }
+      var gapAct = ev.target && ev.target.closest
+        ? ev.target.closest("[data-ff-line-act='keep-gap'], [data-ff-line-act='close-gap']")
+        : null;
+      if (gapAct && mode === "edit" && api && edit) {
+        ev.preventDefault();
+        var gapKind = gapAct.getAttribute("data-ff-line-act");
+        if (gapKind === "keep-gap") {
+          if (typeof api.keepGap === "function") {
+            edit = api.keepGap(edit, gapAct.getAttribute("data-ff-gap-sig"));
+          }
+        } else if (typeof api.closeGap === "function") {
+          edit = api.closeGap(edit, gapAct.getAttribute("data-ff-line"));
+        }
+        paint();
+        return;
+      }
+      var pickerAct = ev.target && ev.target.closest ? ev.target.closest("[data-ff-appt-act]") : null;
+      if (pickerAct && mode === "edit" && api && edit) {
+        var pickerName = pickerAct.getAttribute("data-ff-appt-act");
+        if (pickerName === "open-service-picker") {
+          editUi.servicePickerKey = pickerAct.getAttribute("data-ff-line") || "";
+          editUi.providerPickerKey = "";
+          editUi.serviceQ = "";
+          paint();
+          return;
+        }
+        if (pickerName === "open-provider-picker") {
+          editUi.providerPickerKey = pickerAct.getAttribute("data-ff-line") || "";
+          editUi.servicePickerKey = "";
+          editUi.providerQ = "";
+          paint();
+          return;
+        }
+        if (pickerName === "toggle-service-cat") {
+          var cat = pickerAct.getAttribute("data-ff-cat") || "";
+          if (!cat) return;
+          if (!editUi.expandedCats) editUi.expandedCats = {};
+          editUi.expandedCats[cat] = !editUi.expandedCats[cat];
+          var group = pickerAct.closest(".ff-appt-picker-group");
+          if (group) group.classList.toggle("is-collapsed", !editUi.expandedCats[cat]);
+          pickerAct.setAttribute("aria-expanded", editUi.expandedCats[cat] ? "true" : "false");
+          return;
+        }
+        if (pickerName === "toggle-request" && typeof api.setLineRequested === "function") {
+          edit = api.setLineRequested(edit, pickerAct.getAttribute("data-ff-line"));
+          paint();
+          return;
+        }
+        if (pickerName === "pick-service") {
+          edit = api.setLineService(edit, pickerAct.getAttribute("data-ff-line"), pickerAct.getAttribute("data-ff-service"));
+          editUi.servicePickerKey = "";
+          editUi.serviceQ = "";
+          paint();
+          return;
+        }
+        if (pickerName === "pick-provider") {
+          api.setLineProvider(edit, pickerAct.getAttribute("data-ff-line"), pickerAct.getAttribute("data-ff-provider")).then(function (next) {
+            edit = next;
+            editUi.providerPickerKey = "";
+            editUi.providerQ = "";
+            paint();
+          });
+          return;
+        }
+      }
       var act = ev.target && ev.target.closest ? ev.target.closest("[data-ff-apd-act]") : null;
-      if (!act) return;
+      if (!act) {
+        if (
+          mode === "edit" &&
+          (editUi.servicePickerKey || editUi.providerPickerKey) &&
+          ev.target.closest &&
+          !ev.target.closest(".ff-appt-picker, .ff-appt-search-row, .ff-appt-chip, .ff-appt-card-name")
+        ) {
+          editUi.servicePickerKey = "";
+          editUi.providerPickerKey = "";
+          paint();
+        }
+        return;
+      }
       var name = act.getAttribute("data-ff-apd-act");
       if (name === "close") requestClose();
       else if (name === "edit") enterEdit();
       else if (name === "cancel-edit") cancelEdit();
       else if (name === "save") saveEdit();
-      else if (name === "add-line" && mode === "edit" && api && edit) {
-        edit = api.addLine(edit);
+      else if ((name === "add-line" || name === "add-guest") && mode === "edit" && api && edit) {
+        if (name === "add-guest" && typeof api.addGuest === "function") edit = api.addGuest(edit);
+        else {
+          var last = edit.lines && edit.lines[edit.lines.length - 1];
+          if (!(last && !last.serviceId)) edit = api.addLine(edit);
+        }
+        last = edit.lines && edit.lines[edit.lines.length - 1];
+        editUi.servicePickerKey = last ? last.key : "";
+        editUi.providerPickerKey = "";
+        editUi.serviceQ = "";
+        if (last && last.providerId && typeof api.setLineProvider === "function") {
+          api.setLineProvider(edit, last.key, last.providerId).then(function (next) {
+            edit = next;
+            paint();
+          });
+        }
         paint();
       } else if (name === "ask-cancel") askCancel();
+      else if (act.getAttribute("data-ff-apd-next")) setVisitStatus(act.getAttribute("data-ff-apd-next"));
       else if (name === "keep") keepAppointment();
       else if (name === "confirm-cancel") confirmCancel();
     });
     root.addEventListener("input", function (ev) {
       if (mode !== "edit" || !edit || !form()) return;
+      var api = form();
       if (ev.target.id === "ffApdNotesIn") {
         edit.notes = ev.target.value;
         edit.error = "";
@@ -731,9 +1019,24 @@
           ui.error.textContent = "";
         }
         if (ui.save) {
-          ui.save.disabled = !form().canSave(edit) || !!edit.saving;
+          ui.save.disabled = !api.canSave(edit) || !!edit.saving;
           ui.save.setAttribute("aria-disabled", ui.save.disabled ? "true" : "false");
         }
+        return;
+      }
+      if (ev.target.hasAttribute && ev.target.hasAttribute("data-ff-service-q")) {
+        editUi.serviceQ = ev.target.value;
+        paint();
+        return;
+      }
+      if (ev.target.hasAttribute && ev.target.hasAttribute("data-ff-provider-q")) {
+        editUi.providerQ = ev.target.value;
+        paint();
+        return;
+      }
+      if (ev.target.hasAttribute && ev.target.hasAttribute("data-ff-guest-name") && api) {
+        var guestWrap = ev.target.closest("[data-ff-line]");
+        edit = api.setLineGuestName(edit, ev.target.getAttribute("data-ff-line") || (guestWrap && guestWrap.getAttribute("data-ff-line")), ev.target.value);
       }
     });
     root.addEventListener("change", async function (ev) {
@@ -762,7 +1065,15 @@
     if (document.getElementById("ffLiveFloorDrawer") && document.getElementById("ffLiveFloorDrawer").classList.contains("is-open")) return;
     if (document.getElementById("ffLiveDeskPanel") && document.getElementById("ffLiveDeskPanel").classList.contains("is-open")) return;
     ev.preventDefault();
-    if (mode === "edit") cancelEdit();
+    if (mode === "edit") {
+      if (editUi.servicePickerKey || editUi.providerPickerKey) {
+        editUi.servicePickerKey = "";
+        editUi.providerPickerKey = "";
+        paint();
+        return;
+      }
+      cancelEdit();
+    }
     else if (mode === "cancel") keepAppointment();
     else close();
   });

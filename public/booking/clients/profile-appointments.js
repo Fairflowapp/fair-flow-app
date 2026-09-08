@@ -5,11 +5,11 @@
   var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var STATUS_LABELS = {
-    scheduled: "Scheduled",
+    scheduled: "Waiting for confirmation",
     confirmed: "Confirmed",
     checked_in: "Checked In",
     in_service: "In Service",
-    completed: "Completed",
+    completed: "Checked Out",
     cancelled: "Cancelled",
     no_show: "No Show"
   };
@@ -61,8 +61,10 @@
   }
 
   function statusLabel(status) {
+    var flow = window.ffBookingAppointmentStatus;
+    if (flow && typeof flow.label === "function") return flow.label(status);
     var key = String(status || "").trim();
-    return STATUS_LABELS[key] || key || "Scheduled";
+    return STATUS_LABELS[key] || key || "Waiting for confirmation";
   }
 
   function serviceNames(appt) {

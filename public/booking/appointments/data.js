@@ -149,6 +149,23 @@ async function loadClient(salonId, clientId) {
   return { clientId: snap.id, ...snap.data() };
 }
 
+async function clientHasOtherActiveAppointment(salonId, clientId, excludeId) {
+  const id = String(clientId || "").trim();
+  if (!salonId || !id) return false;
+  const skip = String(excludeId || "").trim();
+  const snap = await getDocs(query(
+    appointmentsRef(salonId),
+    where("clientId", "==", id),
+    orderBy("startAt", "asc"),
+    limit(8)
+  ));
+  return snap.docs.some((row) => {
+    if (skip && row.id === skip) return false;
+    const appt = toAppointment(row);
+    return !!(appt && appt.status && appt.status !== "cancelled");
+  });
+}
+
 function availabilityCode(api, providerId, startAt, durationMinutes, locationId) {
   const engine = window.ffBookingAvailability;
   if (!engine || typeof engine.canProviderFitDuration !== "function") {
@@ -211,6 +228,20 @@ async function queryStartRange(salonId, startAt, endAt, extras) {
   });
 }
 
+function allowedOverlapMinutes() {
+  const settings = window.ffBookingSettingsModel;
+  if (settings && typeof settings.allowedMinutes === "function") return settings.allowedMinutes();
+  return 0;
+}
+
+function providerTimesConflict(start, end, otherStart, otherEnd) {
+  const settings = window.ffBookingSettingsModel;
+  if (settings && typeof settings.isConflictDates === "function") {
+    return settings.isConflictDates(start, end, otherStart, otherEnd, allowedOverlapMinutes());
+  }
+  return requireModel().intervalsOverlap(start, end, otherStart, otherEnd);
+}
+
 async function checkProviderConflict(providerId, startAt, endAt, locationId, excludeAppointmentId) {
   const api = requireModel();
   const salonId = requireSalon();
@@ -230,7 +261,7 @@ async function checkProviderConflict(providerId, startAt, endAt, locationId, exc
     if (!api.isActiveStatus(row.status)) continue;
     for (const line of row.serviceLines || []) {
       if (String(line.providerId || "") !== id) continue;
-      if (api.intervalsOverlap(start, end, line.startAt, line.endAt)) {
+      if (providerTimesConflict(start, end, line.startAt, line.endAt)) {
         return { conflict: true, appointment: row, line };
       }
     }
@@ -295,6 +326,9 @@ async function buildServiceLine(salonId, locationId, rawLine) {
       priceSnapshot: preservePrice && Number.isFinite(Number(rawLine.priceSnapshot))
         ? Number(rawLine.priceSnapshot)
         : api.resolvePriceSnapshot(service, providerId),
+      guestKey: String(rawLine && rawLine.guestKey || "").trim(),
+      guestName: String(rawLine && rawLine.guestName || "").trim(),
+      requested: rawLine && rawLine.requested === true,
     },
   };
 }
@@ -340,7 +374,7 @@ async function validateAppointment(data, options) {
     }
     for (let j = i + 1; j < lines.length; j += 1) {
       const other = lines[j];
-      if (line.providerId === other.providerId && api.intervalsOverlap(line.startAt, line.endAt, other.startAt, other.endAt)) {
+      if (line.providerId === other.providerId && providerTimesConflict(line.startAt, line.endAt, other.startAt, other.endAt)) {
         return {
           ok: false,
           code: api.CODES.APPOINTMENT_CONFLICT,
@@ -351,6 +385,13 @@ async function validateAppointment(data, options) {
         };
       }
     }
+  }
+  if (api.clientIdleGaps && api.clientIdleGaps(lines).length && !data.gapsAcknowledged) {
+    return {
+      ok: false,
+      code: api.CODES.UNRESOLVED_GAP || "UNRESOLVED_GAP",
+      error: "Choose whether to keep the gap or make the times consecutive."
+    };
   }
   const windowTimes = api.deriveWindow(lines);
   const dateKey = api.dateKeyOf(windowTimes.startAt, checked.fields.locationId);
@@ -386,6 +427,9 @@ function persistableLines(lines) {
     endAt: asTimestamp(line.endAt),
     durationMinutes: line.durationMinutes,
     priceSnapshot: line.priceSnapshot,
+    guestKey: line.guestKey || "",
+    guestName: line.guestName || "",
+    requested: line.requested === true,
   }));
 }
 
@@ -412,6 +456,7 @@ async function createAppointment(data) {
     endAt: asTimestamp(row.endAt),
     dateKey: row.dateKey,
     dateKeys: row.dateKeys,
+    firstVisit: !(await clientHasOtherActiveAppointment(salonId, row.clientId)),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
     createdByUid: actor.uid,
@@ -513,6 +558,7 @@ async function updateAppointment(appointmentId, patch) {
       existing.serviceLines,
       patch && patch.serviceLines != null ? patch.serviceLines : existing.serviceLines
     ),
+    gapsAcknowledged: !!(patch && patch.gapsAcknowledged),
   };
   const checked = await validateAppointment(next, { salonId, excludeAppointmentId: id });
   if (!checked.ok) return checked;
@@ -532,6 +578,13 @@ async function updateAppointment(appointmentId, patch) {
     updatedAt: serverTimestamp(),
   });
   const appointment = await getAppointmentById(id, salonId);
+  if (existing.status !== "completed" && row.status === "completed" && appointment && !appointment.saleId) {
+    try {
+      if (window.ffBookingSales && typeof window.ffBookingSales.createFromAppointment === "function") {
+        await window.ffBookingSales.createFromAppointment(appointment);
+      }
+    } catch (_) {}
+  }
   emitAppointmentUpdated(appointment);
   return { ok: true, appointment };
 }

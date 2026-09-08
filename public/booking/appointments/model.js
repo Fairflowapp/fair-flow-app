@@ -39,7 +39,8 @@
     INVALID_SOURCE: "INVALID_SOURCE",
     INVALID_ASSIGNMENT: "INVALID_ASSIGNMENT",
     MISSING_LOCATION: "MISSING_LOCATION",
-    INVALID_LINE: "INVALID_LINE"
+    INVALID_LINE: "INVALID_LINE",
+    UNRESOLVED_GAP: "UNRESOLVED_GAP"
   };
 
   function trimText(value) {
@@ -282,6 +283,81 @@
     return Number.isFinite(Number(price)) ? Number(price) : 0;
   }
 
+  function lineStartMs(line) {
+    var start = toDate(line && line.startAt);
+    return start ? start.getTime() : NaN;
+  }
+
+  function lineEndMs(line) {
+    var end = toDate(line && line.endAt);
+    if (end) return end.getTime();
+    var start = lineStartMs(line);
+    var duration = Number(line && line.durationMinutes);
+    if (Number.isFinite(start) && duration > 0) return start + duration * 60000;
+    return NaN;
+  }
+
+  function clientIdleGaps(lines) {
+    var rows = (lines || []).map(function (line) {
+      return { start: lineStartMs(line), end: lineEndMs(line) };
+    }).filter(function (row) {
+      return Number.isFinite(row.start) && Number.isFinite(row.end) && row.end > row.start;
+    }).sort(function (a, b) {
+      return a.start - b.start || a.end - b.end;
+    });
+    var gaps = [];
+    for (var i = 0; i < rows.length - 1; i += 1) {
+      if (rows[i + 1].start > rows[i].end) {
+        gaps.push({
+          start: rows[i].end,
+          end: rows[i + 1].start,
+          ms: rows[i + 1].start - rows[i].end
+        });
+      }
+    }
+    return gaps;
+  }
+
+  function partySizeFromIntervals(intervals) {
+    var events = [];
+    (intervals || []).forEach(function (row) {
+      var start = Number(row && row.start);
+      var end = Number(row && row.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+      events.push({ t: start, d: 1 });
+      events.push({ t: end, d: -1 });
+    });
+    if (!events.length) return 1;
+    events.sort(function (a, b) {
+      return a.t - b.t || a.d - b.d;
+    });
+    var current = 0;
+    var max = 0;
+    events.forEach(function (event) {
+      current += event.d;
+      if (current > max) max = current;
+    });
+    return Math.max(1, max);
+  }
+
+  function personKey(line) {
+    var key = trimText(line && line.guestKey);
+    return key && key !== "booker" ? key : "booker";
+  }
+
+  function uniquePeopleFromLines(lines) {
+    var keys = {};
+    (lines || []).forEach(function (line) {
+      var key = personKey(line);
+      if (key !== "booker") keys[key] = true;
+    });
+    return 1 + Object.keys(keys).length;
+  }
+
+  function partySizeForVisit(lines) {
+    return uniquePeopleFromLines(lines);
+  }
+
   function deriveWindow(lines) {
     var start = null;
     var end = null;
@@ -359,7 +435,10 @@
         ? collapseSpaces(current.serviceNameSnapshot)
         : collapseSpaces(next.serviceNameSnapshot),
       preservePriceSnapshot: sameService,
-      preserveNameSnapshot: sameService
+      preserveNameSnapshot: sameService,
+      guestKey: trimText(next.guestKey) || trimText(current.guestKey),
+      guestName: collapseSpaces(next.guestName != null ? next.guestName : current.guestName),
+      requested: next.requested != null ? next.requested === true : current.requested === true
     };
   }
 
@@ -393,7 +472,10 @@
         startAt: row.startAt || null,
         endAt: row.endAt || null,
         durationMinutes: Number(row.durationMinutes) || 0,
-        priceSnapshot: Number(row.priceSnapshot) || 0
+        priceSnapshot: Number(row.priceSnapshot) || 0,
+        guestKey: trimText(row.guestKey),
+        guestName: collapseSpaces(row.guestName),
+        requested: row.requested === true
       };
     }) : [];
     return {
@@ -423,8 +505,14 @@
       createdByStaffId: trimText(raw.createdByStaffId),
       cancelledAt: raw.cancelledAt || null,
       cancelledByUid: trimText(raw.cancelledByUid),
-      cancellationReason: collapseSpaces(raw.cancellationReason)
+      cancellationReason: collapseSpaces(raw.cancellationReason),
+      firstVisit: raw.firstVisit === true,
+      saleId: trimText(raw.saleId)
     };
+  }
+
+  function isFirstVisit(appointment) {
+    return !!(appointment && appointment.firstVisit);
   }
 
   window.ffBookingAppointmentModel = {
@@ -450,9 +538,15 @@
     resolveDurationMinutes: resolveDurationMinutes,
     resolvePriceSnapshot: resolvePriceSnapshot,
     deriveWindow: deriveWindow,
+    clientIdleGaps: clientIdleGaps,
+    partySizeFromIntervals: partySizeFromIntervals,
+    personKey: personKey,
+    uniquePeopleFromLines: uniquePeopleFromLines,
+    partySizeForVisit: partySizeForVisit,
     normalizeNotes: normalizeNotes,
     normalizeCreateInput: normalizeCreateInput,
     mergeServiceLinePatch: mergeServiceLinePatch,
-    fromDoc: fromDoc
+    fromDoc: fromDoc,
+    isFirstVisit: isFirstVisit
   };
 })();

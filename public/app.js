@@ -1824,6 +1824,7 @@ function _ffOwnerDefaultPermissions() {
     tickets_manage: true,
     tasks_view: true,
     tasks_use: true,
+    tasks_view_all: true,
     tasks_manage: true,
     tasks_reset: true,
     chat_view: true,

@@ -1290,6 +1290,25 @@ service cloud.firestore {
       allow delete: if belongsToSalon(salonId) && isManager(salonId);
     }
 
+    // ===== BOOKING SALES =====
+    // Checkout tickets. Not public. Salon members can read and create.
+    match /salons/{salonId}/sales/{saleId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == request.auth.uid;
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.clientId == resource.data.clientId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if belongsToSalon(salonId) && isManager(salonId);
+    }
+
+    match /salons/{salonId}/counters/{counterId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create, update: if belongsToSalon(salonId);
+      allow delete: if false;
+    }
+
     // ===== SERVICE CATALOG =====
     // All salon members can read; Manager/Admin/Owner can CRUD
     match /salons/{salonId}/services/{serviceId} {

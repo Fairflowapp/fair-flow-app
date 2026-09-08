@@ -11,7 +11,9 @@
     INVALID_CLIENT: "Please select a valid client.",
     INVALID_SERVICE: "Please select a valid service.",
     MISSING_LOCATION: "A location is required.",
-    INVALID_LINE: "Please complete every service."
+    INVALID_LINE: "Please complete every service.",
+    UNRESOLVED_GAP: "Choose whether to keep the gap or make the times consecutive.",
+    PROVIDER_DOUBLE_BOOKED: "This provider cannot serve two guests at the same time."
   };
 
   function trim(value) {
@@ -61,6 +63,8 @@
     if (code === "APPOINTMENT_CONFLICT") return first + " already has an appointment during this time.";
     if (code === "PROVIDER_NOT_WORKING") return first + " is not scheduled to work at this time.";
     if (code === "PROVIDER_INCAPABLE") return first + " is not available for this service.";
+    if (code === "UNRESOLVED_GAP") return CODES.UNRESOLVED_GAP;
+    if (code === "PROVIDER_DOUBLE_BOOKED") return first + " cannot serve two guests at the same time.";
     return CODES[code] || "This appointment could not be created.";
   }
 
@@ -103,7 +107,10 @@
       originalServiceName: trim(seed && (seed.originalServiceName || seed.serviceName)),
       storedDurationMinutes: Number(seed && (seed.storedDurationMinutes != null ? seed.storedDurationMinutes : seed.durationMinutes)) || 0,
       storedPrice: Number.isFinite(Number(storedPrice)) ? Number(storedPrice) : null,
-      keepStoredSnapshots: !!(seed && seed.keepStoredSnapshots)
+      keepStoredSnapshots: !!(seed && seed.keepStoredSnapshots),
+      guestKey: trim(seed && seed.guestKey),
+      guestName: seed && seed.guestName != null ? String(seed.guestName) : "",
+      requested: !!(seed && seed.requested)
     };
   }
 
@@ -191,7 +198,8 @@
       error: "",
       errorLineKey: "",
       catalogServices: [],
-      creating: false
+      creating: false,
+      keptGaps: {}
     };
     return derive(state);
   }
@@ -223,6 +231,8 @@
       && state.lines
       && state.lines.length
       && state.lines.every(lineComplete)
+      && !unresolvedGaps(state).length
+      && !findProviderOverlaps(state).length
     );
   }
 
@@ -291,14 +301,36 @@
     return derive(state);
   }
 
-  async function setLineProvider(state, key, providerId) {
+  function applyLineProvider(state, key, providerId) {
     ensureLines(state);
     var line = findLine(state, key) || state.lines[0];
     if (!line) return derive(state);
     line.providerId = trim(providerId);
     state.error = "";
     state.errorLineKey = "";
-    await refreshLineServices(state, line);
+    if (line.service) {
+      var svcApi = window.ffBookingAppointmentServices;
+      if (svcApi && typeof svcApi.isCapable === "function" && !svcApi.isCapable(line.service.raw || line.service, line.providerId)) {
+        line.capabilityMessage = "This provider is not available for this service.";
+      } else {
+        line.capabilityMessage = "";
+      }
+    }
+    return derive(state);
+  }
+
+  async function setLineProvider(state, key, providerId) {
+    applyLineProvider(state, key, providerId);
+    var line = findLine(state, key) || state.lines[0];
+    if (line) await refreshLineServices(state, line);
+    return derive(state);
+  }
+
+  function setLineRequested(state, key, on) {
+    ensureLines(state);
+    var line = findLine(state, key);
+    if (!line) return derive(state);
+    line.requested = arguments.length > 2 ? !!on : !line.requested;
     return derive(state);
   }
 
@@ -310,6 +342,307 @@
     state.error = "";
     state.errorLineKey = "";
     return derive(state);
+  }
+
+  function lineServiceName(line) {
+    return trim(line && line.service && line.service.name)
+      || trim(line && line.originalServiceName)
+      || "Service";
+  }
+
+  function lineEndMin(line) {
+    var start = Number(line && line.startMin);
+    var end = Number(line && line.endMin);
+    if (Number.isFinite(end) && Number.isFinite(start) && end > start) return end;
+    var duration = Number(line && line.durationMinutes);
+    if (Number.isFinite(start) && duration > 0) return start + duration;
+    return 0;
+  }
+
+  function findGaps(state) {
+    var rows = ((state && state.lines) || []).filter(function (line) {
+      return line
+        && (trim(line.serviceId) || (line.service && line.service.name))
+        && Number.isFinite(Number(line.startMin))
+        && lineEndMin(line) > Number(line.startMin);
+    }).slice().sort(function (a, b) {
+      return Number(a.startMin) - Number(b.startMin) || lineEndMin(a) - lineEndMin(b);
+    });
+    var gaps = [];
+    for (var i = 0; i < rows.length - 1; i += 1) {
+      var prev = rows[i];
+      var next = rows[i + 1];
+      var prevEnd = lineEndMin(prev);
+      var gapMin = Number(next.startMin) - prevEnd;
+      if (!(gapMin > 0)) continue;
+      var prevKey = trim(prev.key || prev.lineId);
+      var nextKey = trim(next.key || next.lineId);
+      gaps.push({
+        prevKey: prevKey,
+        nextKey: nextKey,
+        gapMin: gapMin,
+        prevEnd: prevEnd,
+        nextStart: Number(next.startMin),
+        prevName: lineServiceName(prev),
+        nextName: lineServiceName(next),
+        signature: [prevKey, nextKey, gapMin, prevEnd, next.startMin].join("|")
+      });
+    }
+    return gaps;
+  }
+
+  function allowedOverlapMinutes() {
+    var settings = window.ffBookingSettingsModel;
+    if (settings && typeof settings.allowedMinutes === "function") return settings.allowedMinutes();
+    return 0;
+  }
+
+  function overlapMinutesOf(aStart, aEnd, bStart, bEnd) {
+    var settings = window.ffBookingSettingsModel;
+    if (settings && typeof settings.overlapMinutes === "function") {
+      return settings.overlapMinutes(aStart, aEnd, bStart, bEnd);
+    }
+    var start = Math.max(Number(aStart), Number(bStart));
+    var end = Math.min(Number(aEnd), Number(bEnd));
+    var n = end - start;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  function toJsDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value.toDate === "function") {
+      try {
+        var fromTs = value.toDate();
+        return fromTs instanceof Date && !Number.isNaN(fromTs.getTime()) ? fromTs : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    if (typeof value.seconds === "number") {
+      var fromSec = new Date(value.seconds * 1000);
+      return Number.isNaN(fromSec.getTime()) ? null : fromSec;
+    }
+    var parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  function dateToMinutes(value, locationId) {
+    var date = toJsDate(value);
+    if (!date) return NaN;
+    var tm = window.ffBookingTime;
+    if (tm && typeof tm.zonedMinutes === "function") {
+      try { return tm.zonedMinutes(date, locationId); } catch (_) {}
+    }
+    return date.getHours() * 60 + date.getMinutes();
+  }
+
+  function isActiveAppointment(appt) {
+    var api = window.ffBookingAppointmentModel;
+    if (api && typeof api.isActiveStatus === "function") return api.isActiveStatus(appt && appt.status);
+    var status = String(appt && appt.status || "").toLowerCase();
+    return status !== "cancelled" && status !== "no_show";
+  }
+
+  function cachedLineRange(line, locationId) {
+    var start = dateToMinutes(line && line.startAt, locationId);
+    var end = dateToMinutes(line && line.endAt, locationId);
+    if (!Number.isFinite(start) && Number.isFinite(Number(line && line.startMin))) start = Number(line.startMin);
+    if (!Number.isFinite(end) && Number.isFinite(start) && Number(line && line.durationMinutes) > 0) {
+      end = start + Number(line.durationMinutes);
+    }
+    return { start: start, end: end };
+  }
+
+  function findProviderOverlaps(state) {
+    var allowed = allowedOverlapMinutes();
+    var rows = ((state && state.lines) || []).filter(function (line) {
+      return line
+        && trim(line.providerId)
+        && Number.isFinite(Number(line.startMin))
+        && lineEndMin(line) > Number(line.startMin);
+    });
+    var hits = [];
+    for (var i = 0; i < rows.length; i += 1) {
+      for (var j = i + 1; j < rows.length; j += 1) {
+        if (trim(rows[i].providerId) !== trim(rows[j].providerId)) continue;
+        var aStart = Number(rows[i].startMin);
+        var aEnd = lineEndMin(rows[i]);
+        var bStart = Number(rows[j].startMin);
+        var bEnd = lineEndMin(rows[j]);
+        var formOverlap = overlapMinutesOf(aStart, aEnd, bStart, bEnd);
+        if (!(formOverlap > allowed)) continue;
+        hits.push({
+          aKey: trim(rows[i].key || rows[i].lineId),
+          bKey: trim(rows[j].key || rows[j].lineId),
+          providerId: trim(rows[i].providerId),
+          source: "form",
+          overlapMin: formOverlap
+        });
+      }
+    }
+    var store = window.ffBookingCalAppointments;
+    var cached = store && typeof store.getCached === "function" ? store.getCached() : [];
+    var excludeId = trim(state && state.appointmentId);
+    var locationId = trim(state && state.locationId);
+    if (Array.isArray(cached) && cached.length) {
+      rows.forEach(function (line) {
+        var aStart = Number(line.startMin);
+        var aEnd = lineEndMin(line);
+        cached.forEach(function (appt) {
+          if (!appt || (excludeId && trim(appt.appointmentId) === excludeId)) return;
+          if (!isActiveAppointment(appt)) return;
+          if (locationId && trim(appt.locationId) && trim(appt.locationId) !== locationId) return;
+          (appt.serviceLines || []).forEach(function (other) {
+            if (!other || trim(other.providerId) !== trim(line.providerId)) return;
+            var range = cachedLineRange(other, locationId || trim(appt.locationId));
+            var calOverlap = overlapMinutesOf(aStart, aEnd, range.start, range.end);
+            if (!(calOverlap > allowed)) return;
+            hits.push({
+              aKey: trim(line.key || line.lineId),
+              bKey: trim(other.lineId || appt.appointmentId),
+              providerId: trim(line.providerId),
+              source: "calendar",
+              overlapMin: calOverlap
+            });
+          });
+        });
+      });
+    }
+    return hits;
+  }
+
+  function providerOverlapKeys(state) {
+    var keys = {};
+    findProviderOverlaps(state).forEach(function (hit) {
+      if (hit.aKey) keys[hit.aKey] = true;
+      if (hit.bKey) keys[hit.bKey] = true;
+    });
+    return keys;
+  }
+
+  function providerOverlapMessage(state) {
+    var hits = findProviderOverlaps(state);
+    if (!hits.length) return "";
+    var first = hits[0];
+    var name = providerName(first.providerId);
+    if (hits.some(function (hit) { return hit.source === "calendar"; })) {
+      return name + " already has an appointment during this time.";
+    }
+    return name + " cannot serve two guests at the same time.";
+  }
+
+  function closeGap(state, nextKey) {
+    var id = trim(nextKey);
+    var gap = findGaps(state).find(function (row) { return row.nextKey === id; });
+    if (!gap) return derive(state);
+    return setLineStart(state, gap.nextKey, gap.prevEnd);
+  }
+
+  function keepGap(state, signature) {
+    if (!state) return state;
+    if (!state.keptGaps) state.keptGaps = {};
+    var sig = trim(signature);
+    if (sig) state.keptGaps[sig] = true;
+    state.error = "";
+    return state;
+  }
+
+  function keptGapMap(state, options) {
+    var map = {};
+    var fromState = state && state.keptGaps;
+    if (fromState && typeof fromState === "object") {
+      Object.keys(fromState).forEach(function (key) {
+        if (fromState[key]) map[key] = true;
+      });
+    }
+    var fromOpt = options && options.dismissedGaps;
+    if (fromOpt && typeof fromOpt === "object") {
+      Object.keys(fromOpt).forEach(function (key) {
+        if (fromOpt[key]) map[key] = true;
+      });
+    }
+    return map;
+  }
+
+  function unresolvedGaps(state) {
+    var kept = state && state.keptGaps || {};
+    return findGaps(state).filter(function (gap) { return !kept[gap.signature]; });
+  }
+
+  function gapNoticeHtml(gap, options) {
+    var dismissed = options && options.dismissedGaps || {};
+    if (!gap || dismissed[gap.signature]) return "";
+    var dur = formatDurationLabel(gap.gapMin) || (gap.gapMin + " min");
+    var readOnly = !!(options && options.gapReadOnly);
+    var actions = readOnly ? "" : (
+      '<div class="ff-appt-gap-acts">' +
+        '<button type="button" class="ff-appt-gap-keep" data-ff-line-act="keep-gap" data-ff-gap-sig="' +
+          escapeHtml(gap.signature) + '">Keep gap</button>' +
+        '<button type="button" class="ff-appt-gap-close" data-ff-line-act="close-gap" data-ff-line="' +
+          escapeHtml(gap.nextKey) + '">Make consecutive</button>' +
+      "</div>"
+    );
+    return (
+      '<div class="ff-appt-gap' + (readOnly ? " is-note" : "") + '" data-ff-gap="' + escapeHtml(gap.signature) + '">' +
+        '<p class="ff-appt-gap-title">There\'s a ' + escapeHtml(dur) + " gap between these services.</p>" +
+        '<p class="ff-appt-gap-sub">' + escapeHtml(gap.prevName) + " ends at " +
+          escapeHtml(formatMinutes(gap.prevEnd)) + " · " + escapeHtml(gap.nextName) + " starts at " +
+          escapeHtml(formatMinutes(gap.nextStart)) +
+          (readOnly ? "." : ". Keep the wait, or make the times consecutive?") + "</p>" +
+        actions +
+      "</div>"
+    );
+  }
+
+  function overlapPartySize(state) {
+    var model = window.ffBookingAppointmentModel;
+    var rows = ((state && state.lines) || []).filter(function (line) {
+      return line
+        && (trim(line.serviceId) || (line.service && line.service.name))
+        && Number.isFinite(Number(line.startMin))
+        && lineEndMin(line) > Number(line.startMin);
+    }).map(function (line) {
+      return { start: Number(line.startMin), end: lineEndMin(line) };
+    });
+    if (model && typeof model.partySizeFromIntervals === "function") {
+      return model.partySizeFromIntervals(rows);
+    }
+    return rows.length ? rows.length : 1;
+  }
+
+  function partySize(state) {
+    return uniquePeople(state);
+  }
+
+  function partyNoticeHtml(state) {
+    var size = partySize(state);
+    if (!(size > 1)) return "";
+    var people = uniquePeople(state);
+    var named = [];
+    var seen = {};
+    ((state && state.lines) || []).forEach(function (line) {
+      if (!isGuestLine(line) || !trim(line.guestName) || seen[line.guestKey]) return;
+      seen[line.guestKey] = true;
+      named.push(trim(line.guestName));
+    });
+    var sub = people > 1
+      ? (named.length
+        ? bookerName(state) + " is booking with " + named.join(" + ") + "."
+        : bookerName(state) + " is booking. Guest name is optional.")
+      : "These services overlap, so more than one guest is being served at the same time.";
+    return (
+      '<div class="ff-appt-party" data-ff-party="' + size + '">' +
+        '<p class="ff-appt-party-title">This booking is for ' + size + " people</p>" +
+        '<p class="ff-appt-party-sub">' + escapeHtml(sub) + "</p>" +
+      "</div>"
+    );
+  }
+
+  function gapAfterHtml(state, prevKey, options) {
+    var id = trim(prevKey);
+    var gap = findGaps(state).find(function (row) { return row.prevKey === id; });
+    return gap ? gapNoticeHtml(gap, Object.assign({}, options, { dismissedGaps: keptGapMap(state, options) })) : "";
   }
 
   function setService(state, serviceId) {
@@ -347,10 +680,78 @@
     var startMin = prev && Number(prev.endMin) > 0
       ? Number(prev.endMin)
       : (prev && Number.isFinite(Number(prev.startMin)) ? Number(prev.startMin) : NaN);
-    state.lines.push(emptyLine({ startMin: startMin }));
+    state.lines.push(emptyLine({
+      startMin: startMin,
+      providerId: prev && prev.providerId,
+      guestKey: prev && prev.guestKey,
+      guestName: prev && prev.guestName
+    }));
     state.error = "";
     state.errorLineKey = "";
     return derive(state);
+  }
+
+  function addGuest(state) {
+    ensureLines(state);
+    var first = state.lines[0];
+    var startMin = first && Number.isFinite(Number(first.startMin)) ? Number(first.startMin) : NaN;
+    state.lines.push(emptyLine({
+      startMin: startMin,
+      guestKey: "g_" + makeLineKey(),
+      guestName: ""
+    }));
+    state.error = "";
+    state.errorLineKey = "";
+    return derive(state);
+  }
+
+  function setLineGuestName(state, key, name) {
+    ensureLines(state);
+    var line = findLine(state, key);
+    if (!line) return state;
+    line.guestName = name == null ? "" : String(name);
+    if (trim(line.guestKey)) {
+      state.lines.forEach(function (other) {
+        if (other && other.guestKey === line.guestKey) other.guestName = line.guestName;
+      });
+    }
+    return state;
+  }
+
+  function bookerName(state) {
+    return trim(state && state.client && state.client.displayName) || "Client";
+  }
+
+  function isGuestLine(line) {
+    var key = trim(line && line.guestKey);
+    return !!(key && key !== "booker");
+  }
+
+  function uniquePeople(state) {
+    var keys = {};
+    ((state && state.lines) || []).forEach(function (line) {
+      if (isGuestLine(line)) keys[line.guestKey] = true;
+    });
+    return 1 + Object.keys(keys).length;
+  }
+
+  function servedName(state, line) {
+    if (isGuestLine(line) && trim(line.guestName)) return trim(line.guestName);
+    return bookerName(state);
+  }
+
+  function guestRowHtml(state, line) {
+    if (uniquePeople(state) < 2 && !isGuestLine(line)) return "";
+    if (!isGuestLine(line)) {
+      return '<div class="ff-appt-guest">For <strong>' + escapeHtml(bookerName(state)) + "</strong></div>";
+    }
+    return (
+      '<label class="ff-appt-guest is-edit">' +
+        "<span>Guest</span>" +
+        '<input type="text" data-ff-guest-name data-ff-line="' + escapeHtml(line.key) +
+          '" maxlength="80" placeholder="Name (optional)" value="' + escapeHtml(line.guestName || "") + '">' +
+      "</label>"
+    );
   }
 
   function removeLine(state, key) {
@@ -407,11 +808,22 @@
       priceSnapshot: line.price,
       serviceNameSnapshot: sameService ? line.originalServiceName : (line.service && line.service.name) || "",
       preservePriceSnapshot: sameService,
-      preserveNameSnapshot: sameService
+      preserveNameSnapshot: sameService,
+      guestKey: trim(line.guestKey),
+      guestName: trim(line.guestName),
+      requested: !!line.requested
     };
   }
 
   async function create(state) {
+    if (findProviderOverlaps(state).length) {
+      state.error = providerOverlapMessage(state) || CODES.PROVIDER_DOUBLE_BOOKED;
+      return { ok: false, code: "PROVIDER_DOUBLE_BOOKED", error: state.error };
+    }
+    if (unresolvedGaps(state).length) {
+      state.error = CODES.UNRESOLVED_GAP;
+      return { ok: false, code: "UNRESOLVED_GAP", error: state.error };
+    }
     if (!canCreate(state)) {
       state.error = !state.clientId ? CODES.INVALID_CLIENT : CODES.INVALID_SERVICE;
       return { ok: false, error: state.error };
@@ -428,6 +840,7 @@
         source: "front_desk",
         assignmentType: "specific_provider",
         notes: state.notes,
+        gapsAcknowledged: unresolvedGaps(state).length === 0,
         serviceLines: state.lines.map(function (line) { return linePayload(state, line); })
       });
       if (!result || !result.ok) {
@@ -463,7 +876,7 @@
       trim(state && state.dateKey),
       trim(state && state.notes),
       ((state && state.lines) || []).map(function (line) {
-        return [trim(line.lineId), trim(line.serviceId), trim(line.providerId), Number(line.startMin)].join("|");
+        return [trim(line.lineId), trim(line.serviceId), trim(line.providerId), Number(line.startMin), trim(line.guestKey), trim(line.guestName), line.requested ? "1" : "0"].join("|");
       }).join(";")
     ].join("::");
   }
@@ -485,7 +898,10 @@
         serviceName: row && (row.serviceName || row.originalServiceName),
         durationMinutes: row && row.durationMinutes,
         price: row && row.price,
-        keepStoredSnapshots: true
+        keepStoredSnapshots: true,
+        guestKey: row && row.guestKey,
+        guestName: row && row.guestName,
+        requested: !!(row && row.requested)
       });
       if (line.serviceId) {
         line.service = {
@@ -502,6 +918,10 @@
       return deriveLine(line);
     });
     derive(state);
+    state.keptGaps = {};
+    findGaps(state).forEach(function (gap) {
+      state.keptGaps[gap.signature] = true;
+    });
     state.originalServiceId = state.serviceId;
     state.originalServiceName = state.lines[0] && state.lines[0].originalServiceName || "";
     state.storedDurationMinutes = state.durationMinutes;
@@ -531,17 +951,28 @@
       && state.lines
       && state.lines.length
       && state.lines.every(lineComplete)
+      && !unresolvedGaps(state).length
+      && !findProviderOverlaps(state).length
     );
   }
 
   function editPatch(state) {
     return {
       notes: state.notes,
+      gapsAcknowledged: unresolvedGaps(state).length === 0,
       serviceLines: (state.lines || []).map(function (line) { return linePayload(state, line); })
     };
   }
 
   async function update(state) {
+    if (findProviderOverlaps(state).length) {
+      state.error = providerOverlapMessage(state) || CODES.PROVIDER_DOUBLE_BOOKED;
+      return { ok: false, code: "PROVIDER_DOUBLE_BOOKED", error: state.error };
+    }
+    if (unresolvedGaps(state).length) {
+      state.error = CODES.UNRESOLVED_GAP;
+      return { ok: false, code: "UNRESOLVED_GAP", error: state.error };
+    }
     if (!canSave(state)) {
       state.error = state && !(state.lines || []).every(lineComplete) ? CODES.INVALID_SERVICE : "No changes to save.";
       return { ok: false, error: state.error };
@@ -570,21 +1001,30 @@
   }
 
   function holdSpec(state) {
-    if (!state || !state.dateKey) return null;
+    var dateKey = trim(state && state.dateKey);
+    if (!dateKey) {
+      try {
+        var cal = window.ffBookingCalState;
+        if (cal && typeof cal.getSelectedDateKey === "function") dateKey = trim(cal.getSelectedDateKey());
+      } catch (_) {}
+    }
+    if (!state || !dateKey) return null;
     var clientName = state.client && state.client.displayName ? String(state.client.displayName) : "";
     var lines = (state.lines || []).filter(function (line) {
       return line && trim(line.providerId) && Number.isFinite(Number(line.startMin));
     }).map(function (line) {
       return {
+        lineKey: trim(line.key) || trim(line.lineId),
         providerId: line.providerId,
         startMin: Number(line.startMin),
         durationMinutes: Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30,
         title: line.service && line.service.name ? String(line.service.name) : "",
-        clientName: clientName
+        clientName: servedName(state, line),
+        guestKey: trim(line.guestKey)
       };
     });
     if (!lines.length) return null;
-    return { dateKey: state.dateKey, clientName: clientName, lines: lines };
+    return { dateKey: dateKey, clientName: clientName, lines: lines };
   }
 
   function pickerServices(state, line) {
@@ -708,12 +1148,13 @@
     var ui = options || {};
     var canRemove = rows.length > 1;
     var showError = ui.showError !== false;
-    return rows.map(function (line, index) {
+    return partyNoticeHtml(state) + rows.map(function (line, index) {
       var lineProviders = list.slice();
       if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
         lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
       }
-      var err = showError && state.errorLineKey === line.key && state.error;
+      var clash = providerOverlapKeys(state)[line.key];
+      var err = !!(clash || (showError && state.errorLineKey === line.key && state.error));
       var pickingService = ui.servicePickerKey === line.key;
       var pickingProvider = ui.providerPickerKey === line.key;
       var rail = '<div class="ff-appt-rail"><span class="ff-appt-rail-node">' + (index + 1) + "</span></div>";
@@ -722,6 +1163,7 @@
           '<div class="ff-appt-svc is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
             rail +
             '<div class="ff-appt-card">' +
+              guestRowHtml(state, line) +
               '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
                 escapeHtml(line.key) + '">Search or select service</button>' +
               (pickingService ? servicePickerHtml(state, line, ui) : "") +
@@ -742,6 +1184,7 @@
         '<div class="ff-appt-svc' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           rail +
           '<div class="ff-appt-card">' +
+            guestRowHtml(state, line) +
             '<div class="ff-appt-card-top">' +
               '<button type="button" class="ff-appt-card-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
                 escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>" +
@@ -764,14 +1207,23 @@
                 escapeHtml(line.key) + '">' + avatar +
                 "<span>" + escapeHtml(withName) + "</span>" +
                 '<span class="ff-appt-caret" aria-hidden="true">▾</span></button>' +
+              '<button type="button" class="ff-appt-request' + (line.requested ? " is-on" : "") +
+                '" data-ff-appt-act="toggle-request" data-ff-line="' + escapeHtml(line.key) +
+                '" aria-pressed="' + (line.requested ? "true" : "false") + '" title="Requested for this provider">' +
+                '<span class="ff-appt-request-mark" aria-hidden="true"></span>Request</button>' +
               '<span class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
             "</div>" +
             (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
             (pickingService ? servicePickerHtml(state, line, ui) : "") +
             '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
-            (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
+            (clash
+              ? '<div class="ff-appt-error">' + escapeHtml(providerOverlapMessage(state)) + "</div>"
+              : (showError && state.errorLineKey === line.key && state.error
+                ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>"
+                : "")) +
           "</div>" +
-        "</div>"
+        "</div>" +
+        gapAfterHtml(state, line.key, ui)
       );
     }).join("");
   }
@@ -786,7 +1238,8 @@
       if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
         lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
       }
-      var err = showError && state.errorLineKey === line.key && state.error;
+      var clash = providerOverlapKeys(state)[line.key];
+      var err = !!(clash || (showError && state.errorLineKey === line.key && state.error));
       return (
         '<div class="ff-appt-line' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           '<div class="ff-appt-line-head">' +
@@ -823,8 +1276,11 @@
             "<div><span>Price</span><strong>" + escapeHtml(money(line.price)) + "</strong></div>" +
           "</div>" +
           '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
-          (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-        "</div>"
+          (clash
+            ? '<div class="ff-appt-error">' + escapeHtml(providerOverlapMessage(state)) + "</div>"
+            : (err && state.error ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "")) +
+        "</div>" +
+        gapAfterHtml(state, line.key, options)
       );
     }).join("");
   }
@@ -842,10 +1298,25 @@
     setStart: setStart,
     setClient: setClient,
     addLine: addLine,
+    addGuest: addGuest,
+    setLineGuestName: setLineGuestName,
+    servedName: servedName,
+    uniquePeople: uniquePeople,
     removeLine: removeLine,
     setLineService: setLineService,
+    applyLineProvider: applyLineProvider,
     setLineProvider: setLineProvider,
+    setLineRequested: setLineRequested,
     setLineStart: setLineStart,
+    findGaps: findGaps,
+    findProviderOverlaps: findProviderOverlaps,
+    providerOverlapMessage: providerOverlapMessage,
+    partySize: partySize,
+    partyNoticeHtml: partyNoticeHtml,
+    unresolvedGaps: unresolvedGaps,
+    keepGap: keepGap,
+    closeGap: closeGap,
+    gapNoticeHtml: gapNoticeHtml,
     startAtDate: startAtDate,
     create: create,
     timeOptionsHtml: timeOptionsHtml,

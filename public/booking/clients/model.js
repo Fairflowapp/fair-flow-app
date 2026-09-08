@@ -142,10 +142,26 @@
     return { ok: true, fields: fields };
   }
 
+  function profileExtras(raw) {
+    var row = raw && typeof raw === "object" ? raw : {};
+    return {
+      birthday: collapseSpaces(row.birthday),
+      referralSource: collapseSpaces(row.referralSource),
+      addressStreet: collapseSpaces(row.addressStreet),
+      addressCity: collapseSpaces(row.addressCity),
+      addressState: collapseSpaces(row.addressState),
+      addressZip: collapseSpaces(row.addressZip),
+      instagram: collapseSpaces(row.instagram),
+      allowSms: row.allowSms !== false,
+      allowEmail: row.allowEmail !== false
+    };
+  }
+
   function fromDoc(id, data) {
     var raw = data && typeof data === "object" ? data : {};
     var firstName = collapseSpaces(raw.firstName);
     var lastName = collapseSpaces(raw.lastName);
+    var extras = profileExtras(raw);
     return {
       clientId: String(id || raw.clientId || ""),
       firstName: firstName,
@@ -154,6 +170,15 @@
       phone: collapseSpaces(raw.phone),
       email: displayEmail(raw.email),
       notes: collapseSpaces(raw.notes),
+      birthday: extras.birthday,
+      referralSource: extras.referralSource,
+      addressStreet: extras.addressStreet,
+      addressCity: extras.addressCity,
+      addressState: extras.addressState,
+      addressZip: extras.addressZip,
+      instagram: extras.instagram,
+      allowSms: extras.allowSms,
+      allowEmail: extras.allowEmail,
       firstNameNormalized: String(raw.firstNameNormalized || normalizeNamePart(firstName)),
       lastNameNormalized: String(raw.lastNameNormalized || normalizeNamePart(lastName)),
       displayNameNormalized: String(raw.displayNameNormalized || ""),
@@ -192,6 +217,7 @@
     buildSearchFields: buildSearchFields,
     validateCreate: validateCreate,
     fromDoc: fromDoc,
+    profileExtras: profileExtras,
     classifyQuery: classifyQuery
   };
 })();

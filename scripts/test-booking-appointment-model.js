@@ -66,9 +66,49 @@ check(
 
 const clientSnap = model.clientSnapshotFrom({ firstName: "Jessica", lastName: "Miller", phone: "305-555-1212", email: "a@b.com" });
 check("client snapshot is display-only", clientSnap.displayName === "Jessica Miller" && clientSnap.phone === "305-555-1212");
+check("fromDoc keeps first-visit flag", model.fromDoc("a1", { firstVisit: true }).firstVisit === true);
+check("fromDoc defaults first-visit off", model.fromDoc("a2", {}).firstVisit === false);
+check("isFirstVisit reads the stored flag", model.isFirstVisit({ firstVisit: true }) === true);
+check("fromDoc keeps a requested line", model.fromDoc("a3", { serviceLines: [{ requested: true }] }).serviceLines[0].requested === true);
+check("fromDoc defaults requested off", model.fromDoc("a4", { serviceLines: [{}] }).serviceLines[0].requested === false);
 
 const missingLoc = model.normalizeCreateInput({ clientId: "c1", serviceLines: [{ serviceId: "s1" }] });
 check("missing location is rejected", missingLoc.ok === false && missingLoc.code === "MISSING_LOCATION");
+
+const idle = model.clientIdleGaps([
+  { startAt: ten, endAt: eleven },
+  { startAt: eleven30, endAt: twelve }
+]);
+check("model sees a client idle gap", idle.length === 1 && idle[0].ms === 30 * 60 * 1000);
+check("back-to-back lines are not a gap", model.clientIdleGaps([
+  { startAt: ten, endAt: eleven },
+  { startAt: eleven, endAt: twelve }
+]).length === 0);
+check("unresolved gap has a code", model.CODES.UNRESOLVED_GAP === "UNRESOLVED_GAP");
+check("overlapping intervals are 2 people", model.partySizeFromIntervals([
+  { start: 10 * 60 + 30, end: 11 * 60 + 30 },
+  { start: 11 * 60, end: 11 * 60 + 30 }
+]) === 2);
+check("back-to-back intervals stay 1 person", model.partySizeFromIntervals([
+  { start: 10 * 60, end: 11 * 60 },
+  { start: 11 * 60, end: 12 * 60 }
+]) === 1);
+check("two guests count as 3 people even if only 2 overlap", model.partySizeForVisit([
+  { guestKey: "" },
+  { guestKey: "g_1" },
+  { guestKey: "g_2" }
+], [
+  { start: 11 * 60 + 30, end: 13 * 60 },
+  { start: 11 * 60 + 30, end: 13 * 60 },
+  { start: 13 * 60, end: 13 * 60 + 45 }
+]) === 3);
+check("same client extra service is not another person", model.partySizeForVisit([
+  { guestKey: "" },
+  { guestKey: "" }
+], [
+  { start: 15 * 60 + 15, end: 15 * 60 + 45 },
+  { start: 15 * 60 + 45, end: 17 * 60 + 45 }
+]) === 1);
 
 if (failed) {
   console.error("FAILED", failed);

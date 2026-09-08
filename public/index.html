@@ -153,14 +153,17 @@
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/main.css?v=20260821_lfd_proto">
-<link rel="stylesheet" href="/booking/shell.css?v=20260824_sidebar">
+<link rel="stylesheet" href="/booking/shell.css?v=20260831_ops_switch">
 <link rel="stylesheet" href="/booking/sidebar.css?v=20260824_header_h">
-<link rel="stylesheet" href="/booking/calendar.css?v=20260825_guided">
-<link rel="stylesheet" href="/booking/appointments/calendar-cards.css?v=20260824_appt_details">
-<link rel="stylesheet" href="/booking/appointments/drawer.css?v=20260825_cats2">
-<link rel="stylesheet" href="/booking/appointments/details.css?v=20260824_multi_svc">
+<link rel="stylesheet" href="/booking/calendar.css?v=20260906_namebold">
+<link rel="stylesheet" href="/booking/appointments/calendar-cards.css?v=20260906_clientrose">
+<link rel="stylesheet" href="/booking/appointments/drawer.css?v=20260906_heart2">
+<link rel="stylesheet" href="/booking/appointments/details.css?v=20260906_heart2">
 <link rel="stylesheet" href="/booking/clients/clients.css?v=20260824_cli_profile_v1">
-<link rel="stylesheet" href="/booking/clients/profile.css?v=20260824_cli_profile_v1">
+<link rel="stylesheet" href="/booking/clients/profile.css?v=20260906_cli_cam">
+<link rel="stylesheet" href="/booking/settings/settings.css?v=20260906_overlap">
+<link rel="stylesheet" href="/booking/sales/sales.css?v=20260906_sales15">
+<link rel="stylesheet" href="/booking/reports/reports.css?v=20260906_reports1">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -3519,6 +3522,7 @@ async function initFirebaseAuth() {
                   var queueIsActive = queueBtnEl && queueBtnEl.classList.contains('active');
                   if (!queueIsActive) return;
                   if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return;
+                  if (typeof ffIsStaffMembersOpen === 'function' && ffIsStaffMembersOpen()) return;
                   if (typeof ffHasActiveNonQueueScreen === 'function' && ffHasActiveNonQueueScreen()) return;
                   var wrapEl = document.querySelector('.wrap');
                   var wrapHidden = !wrapEl || (window.getComputedStyle(wrapEl).display === 'none') || (window.getComputedStyle(wrapEl).visibility === 'hidden');
@@ -6185,6 +6189,20 @@ function ffCurrentUserHasTasksUsePermission() {
 }
 window.ffCurrentUserHasTasksUsePermission = ffCurrentUserHasTasksUsePermission;
 
+/** See every task (including other roles). Off = only this person's role + Everyone. Owners/admins always see all. */
+function ffStaffHasTasksViewAllPermission(staff) {
+  if (!staff || typeof staff !== 'object') return false;
+  const p = staff.permissions;
+  return !!(p && typeof p === 'object' && ffStaffPermissionValueIsTrue(p.tasks_view_all));
+}
+function ffCurrentUserHasTasksViewAllPermission() {
+  if (ffIsKioskAppMode()) return false;
+  if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) return true;
+  if (typeof ffCurrentUserSalonOwnerPermissionBypass === 'function' && ffCurrentUserSalonOwnerPermissionBypass()) return true;
+  return ffStaffHasTasksViewAllPermission(ffResolveCurrentStaffRowFromFfStaffV1());
+}
+window.ffCurrentUserHasTasksViewAllPermission = ffCurrentUserHasTasksViewAllPermission;
+
 /** Manage task templates / settings modal: tasks_manage === true, or app owner/admin session. */
 function ffStaffHasTasksManagePermission(staff) {
   if (!staff || typeof staff !== 'object') return false;
@@ -7015,9 +7033,25 @@ function ffIsAppsPanelOpen() {
 }
 window.ffIsAppsPanelOpen = ffIsAppsPanelOpen;
 
+function ffIsStaffMembersOpen() {
+  try {
+    if (document.body && document.body.classList.contains('ff-staff-members-open')) return true;
+    var el = document.getElementById('staffMembersModal');
+    if (!el) return false;
+    var display = el.style.display || (window.getComputedStyle ? window.getComputedStyle(el).display : '');
+    return !!(display && display !== 'none');
+  } catch (e) {
+    return false;
+  }
+}
+window.ffIsStaffMembersOpen = ffIsStaffMembersOpen;
+
 function ffHasActiveNonQueueScreen() {
   try {
     if (typeof ffIsAppsPanelOpen === 'function' && ffIsAppsPanelOpen()) return true;
+    if (typeof ffIsStaffMembersOpen === 'function' && ffIsStaffMembersOpen()) return true;
+    var settingsDlgEl = document.getElementById('settingsDlg');
+    if (settingsDlgEl && settingsDlgEl.open) return true;
     var ids = [
       'liveScreen',
       'floorScreen',
@@ -22405,7 +22439,9 @@ function renderTasksList(tab, opts) {
       const filterEl = document.getElementById('tasksAdminFilter');
       if (typeof window.ffSyncKioskTasksAudienceFilter === 'function') window.ffSyncKioskTasksAudienceFilter();
       if (filterEl) {
-        if (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess()) {
+        const canSeeAllTasks = (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess())
+          || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
+        if (canSeeAllTasks) {
           if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = 'inline-flex';
           if (!filterEl.__adminFilterPopulated && typeof populateTasksAdminFilter === 'function') {
             filterEl.__adminFilterPopulated = true;
@@ -22597,8 +22633,9 @@ function renderTasksList(tab, opts) {
           }
         }
         
-        // Admin sees everything (admin filter is applied separately in renderTasksList)
+        // Admin / explicit "see all tasks" see everything (filter is applied separately)
         if (currentUserRole === 'admin') return true;
+        if (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission()) return true;
         
         // Check assignTo
         if (assignTo === 'manager') {
@@ -22669,6 +22706,7 @@ function renderTasksList(tab, opts) {
       if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function') {
         doneToday = doneToday.filter((task) => window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab));
       }
+      doneToday = doneToday.filter((task) => isTaskRelevantToUser(task));
       
       // Build MY LIST directly from ACTIVE list only
       const myListTasks = activeTasks
@@ -22715,11 +22753,13 @@ function renderTasksList(tab, opts) {
           return true;
         });
       
-      // Admin filter: when admin selects a filter, further narrow the list
+      // Audience filter: when someone who can see all tasks picks a group
       let filteredForAdmin = myListTasks;
       const isAdmin = window.ff_is_admin_cached === true;
+      const canSeeAllTasks = isAdmin
+        || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
       const adminFilterVal = (document.getElementById('tasksAdminFilter') || {}).value || 'all';
-      if (isAdmin && adminFilterVal !== 'all') {
+      if (canSeeAllTasks && adminFilterVal !== 'all') {
         const catalog = window.ff_tasks_catalog_v1 || {};
         const catalogTabTasks = catalog[mainTab] || [];
         filteredForAdmin = myListTasks.filter(task => {
@@ -23023,6 +23063,7 @@ function renderTasksList(tab, opts) {
       if (typeof window.ffTaskAudienceMatchesKioskTaskFilter === 'function') {
         pendingTasks = pendingTasks.filter((task) => window.ffTaskAudienceMatchesKioskTaskFilter(task, mainTab));
       }
+      pendingTasks = pendingTasks.filter((task) => isTaskRelevantToUser(task));
       
       if (pendingTasks.length === 0) {
         pendingListContainer.innerHTML = ffTasksEmptyPendingHtml();
@@ -26050,8 +26091,10 @@ function initializeTasksScreenButtons() {
         const tasksStaffFilterWrap = document.getElementById('tasksStaffTypeFilterWrap');
         const filterEl = document.getElementById('tasksAdminFilter');
         if (filterEl) {
-          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = ffHasAdminAccess() ? 'inline-flex' : 'none';
-          if (ffHasAdminAccess()) populateTasksAdminFilter(filterEl);
+          const canSeeAllTasks = (typeof ffHasAdminAccess === 'function' && ffHasAdminAccess())
+            || (typeof ffCurrentUserHasTasksViewAllPermission === 'function' && ffCurrentUserHasTasksViewAllPermission());
+          if (tasksStaffFilterWrap) tasksStaffFilterWrap.style.display = canSeeAllTasks ? 'inline-flex' : 'none';
+          if (canSeeAllTasks) populateTasksAdminFilter(filterEl);
         }
       };
       
@@ -30459,7 +30502,7 @@ function initializeAppsPanel() {
         groupTitle: 'Tasks',
         parentKey: 'tasks_view',
         parentMode: 'strictTrue',
-        childKeys: ['tasks_use', 'tasks_manage', 'tasks_reset']
+        childKeys: ['tasks_use', 'tasks_view_all', 'tasks_manage', 'tasks_reset']
       },
       {
         groupTitle: 'Chat',
@@ -30661,6 +30704,11 @@ function initializeAppsPanel() {
             desc: 'Controls the Tasks tab in the top bar and access to the Tasks screen. When off, Tasks is hidden in navigation and task-related permissions below are unavailable.'
           },
           { key: 'tasks_use', label: 'Use tasks', desc: 'Select, complete, and work with tasks' },
+          {
+            key: 'tasks_view_all',
+            label: 'See all tasks',
+            desc: 'See every task, including ones assigned to technicians or other roles. Off = only tasks for this person\'s role, plus Everyone.'
+          },
           { key: 'tasks_manage', label: 'Manage tasks (templates)', desc: 'Edit task templates and schedules' },
           { key: 'tasks_reset', label: 'Reset tasks', desc: 'Reset done/pending progress for task tabs (PIN rules unchanged)' }
         ]
@@ -33028,6 +33076,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: false,
       manage: false,
       reset: false
     },
@@ -33099,6 +33148,7 @@ function initializeAppsPanel() {
       products_manage: false,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -33154,6 +33204,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: false,
       manage: false,
       reset: false
     },
@@ -33239,6 +33290,7 @@ function initializeAppsPanel() {
       products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -33299,6 +33351,7 @@ function initializeAppsPanel() {
     tasks: {
       view: true,
       use: true,
+      viewAll: true,
       manage: true,
       reset: true
     },
@@ -33419,6 +33472,7 @@ function initializeAppsPanel() {
       products_manage: true,
       tasks_view: d.tasks.view,
       tasks_use: d.tasks.use,
+      tasks_view_all: d.tasks.viewAll === true,
       tasks_manage: d.tasks.manage,
       tasks_reset: d.tasks.reset,
       chat_view: d.chat.view,
@@ -53684,35 +53738,51 @@ function hookSettingsGuard_DISABLED(){
   </script>
   <script src="/live-floor-drawer.js?v=20260821_lfd_proto"></script>
   <script src="/booking/access.js?v=20260821_booking_shell"></script>
-  <script src="/booking/state.js?v=20260821_booking_shell"></script>
+  <script src="/booking/state.js?v=20260906_reports1"></script>
   <script src="/booking/calendar-time.js?v=20260822_avail"></script>
-  <script src="/booking/calendar-layout.js?v=20260822_cal_hdr"></script>
+  <script src="/booking/calendar-layout.js?v=20260906_drag15"></script>
   <script src="/booking/calendar-state.js?v=20260822_avail"></script>
   <script src="/booking/availability.js?v=20260822_avail"></script>
   <script src="/booking/calendar-data.js?v=20260822_avail"></script>
   <script src="/booking/calendar-availability.js?v=20260822_avail"></script>
   <script src="/booking/calendar-menu.js?v=20260822_cal_menu_pos"></script>
-  <script src="/booking/calendar.js?v=20260824_appt_cancel"></script>
-  <script src="/booking/calendar-draft.js?v=20260824_multi_svc"></script>
+  <script src="/booking/calendar.js?v=20260906_segdrag"></script>
+  <script src="/booking/schedule-board.js?v=20260831_board"></script>
+  <script src="/booking/calendar-draft.js?v=20260906_onestack"></script>
   <script type="module" src="/booking/availability-store.js?v=20260822_avail"></script>
-  <script src="/booking/clients/model.js?v=20260824_phone_prefix"></script>
-  <script type="module" src="/booking/clients/data.js?v=20260824_phone_prefix"></script>
+  <script src="/booking/clients/model.js?v=20260830_cli_edit"></script>
+  <script type="module" src="/booking/clients/data.js?v=20260906_cli_photo"></script>
   <script src="/booking/clients/options-drawer.js?v=20260824_appt_details"></script>
-  <script src="/booking/clients/ui.js?v=20260824_cli_profile_v1"></script>
-  <script src="/booking/clients/profile-appointments.js?v=20260824_multi_svc"></script>
-  <script src="/booking/clients/profile.js?v=20260824_appt_cancel"></script>
+  <script src="/booking/clients/ui.js?v=20260906_cli_photo"></script>
+  <script src="/booking/clients/profile-appointments.js?v=20260906_status"></script>
+  <script src="/booking/clients/profile-sales.js?v=20260906_sales1"></script>
+  <script src="/booking/clients/profile-memberships.js?v=20260831_cli_pay"></script>
+  <script src="/booking/clients/profile-payments.js?v=20260831_cli_pay"></script>
+  <script src="/booking/clients/profile.js?v=20260906_cli_cam"></script>
   <script src="/booking/clients/drawer.js?v=20260824_appt_details"></script>
-  <script src="/booking/appointments/model.js?v=20260824_multi_svc"></script>
-  <script type="module" src="/booking/appointments/data.js?v=20260824_multi_svc"></script>
-  <script src="/booking/appointments/calendar-data.js?v=20260824_appt_details"></script>
-  <script src="/booking/appointments/calendar-render.js?v=20260823_cards"></script>
+  <script src="/booking/settings/model.js?v=20260906_overlap"></script>
+  <script type="module" src="/booking/settings/data.js?v=20260906_overlap"></script>
+  <script src="/booking/settings/ui.js?v=20260906_overlap"></script>
+  <script src="/booking/sales/model.js?v=20260906_sales15"></script>
+  <script type="module" src="/booking/sales/data.js?v=20260906_sales15"></script>
+  <script src="/booking/sales/checkout.js?v=20260906_sales15"></script>
+  <script src="/booking/sales/menu.js?v=20260906_sales15"></script>
+  <script src="/booking/sales/options.js?v=20260906_sales13"></script>
+  <script src="/booking/sales/ui.js?v=20260906_sales15"></script>
+  <script src="/booking/reports/ui.js?v=20260906_reports1"></script>
+  <script src="/booking/appointments/model.js?v=20260906_sales1"></script>
+  <script src="/booking/appointments/status.js?v=20260906_pinkok"></script>
+  <script type="module" src="/booking/appointments/data.js?v=20260906_sales1"></script>
+  <script src="/booking/appointments/calendar-data.js?v=20260906_clienthi"></script>
+  <script src="/booking/appointments/calendar-render.js?v=20260906_clienthi"></script>
   <script type="module" src="/booking/appointments/services.js?v=20260825_combo2"></script>
-  <script src="/booking/appointments/form.js?v=20260825_combo2"></script>
+  <script src="/booking/appointments/form.js?v=20260906_onestack"></script>
   <script src="/booking/appointments/drawer-live.js?v=20260825_guided"></script>
-  <script src="/booking/appointments/drawer.js?v=20260825_cats2"></script>
-  <script src="/booking/appointments/details.js?v=20260824_multi_svc"></script>
-  <script src="/booking/sidebar.js?v=20260824_header_h"></script>
-  <script src="/booking/shell.js?v=20260824_appt_details"></script>
+  <script src="/booking/appointments/drawer.js?v=20260906_req"></script>
+  <script src="/booking/appointments/details.js?v=20260906_sales15"></script>
+  <script src="/booking/calendar-drag.js?v=20260906_segdrag2"></script>
+  <script src="/booking/sidebar.js?v=20260906_reports1"></script>
+  <script src="/booking/shell.js?v=20260906_reports1"></script>
   <script>
     (function () {
       var STORAGE_KEY = "ff_live_desk_fab_pos_v1";
@@ -54046,7 +54116,7 @@ function hookSettingsGuard_DISABLED(){
 
   </div> <!-- End main-app-content -->
 
-  <script type="module" src="/app.js?v=20260610_force_lp_ios"></script>
+  <script type="module" src="/app.js?v=20260831_tasks_view_all"></script>
   <script type="module" src="/staff-avatar-admin.js?v=20260822_staff_photo"></script>
   <script src="/analytics-loader.js?v=20260804_batch_revert"></script>
   <script src="/auto-update.js?v=20260728_auto_update" defer></script>

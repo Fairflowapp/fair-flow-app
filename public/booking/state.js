@@ -5,7 +5,7 @@
 (function () {
   var AREA_OPS = "operations";
   var AREA_BOOKING = "booking";
-  var SECTIONS = { calendar: true, clients: true, services: true };
+  var SECTIONS = { calendar: true, sales: true, clients: true, reports: true, services: true, settings: true };
 
   var area = AREA_OPS;
   var section = "calendar";

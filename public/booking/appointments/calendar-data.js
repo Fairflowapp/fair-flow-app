@@ -27,6 +27,11 @@
     (rows || []).forEach(function (appt) {
       if (!appt || (api && typeof api.isActiveStatus === "function" && !api.isActiveStatus(appt.status))) return;
       if (appt.status === "cancelled") return;
+      var partySize = api && typeof api.partySizeForVisit === "function"
+        ? api.partySizeForVisit(appt.serviceLines)
+        : (api && typeof api.uniquePeopleFromLines === "function" ? api.uniquePeopleFromLines(appt.serviceLines) : 1);
+      var grouped = {};
+      var groupOrder = [];
       (appt.serviceLines || []).forEach(function (line) {
         if (!line || !line.providerId) return;
         var startMin = minutesOf(line.startAt, locationId);
@@ -36,19 +41,72 @@
           endMin = startMin + (Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 15);
         }
         if (endMin <= startMin) endMin = startMin + 15;
-        out.push({
+        var person = api && typeof api.personKey === "function" ? api.personKey(line) : "booker";
+        var key = String(appt.appointmentId || "") + "|" + String(line.providerId) + "|" + String(person);
+        if (!grouped[key]) {
+          grouped[key] = [];
+          groupOrder.push(key);
+        }
+        grouped[key].push({
           appointmentId: appt.appointmentId,
+          clientId: String(appt.clientId || "").trim(),
+          clientKey: (function () {
+            var client = String(appt.clientId || "").trim() || String(appt.appointmentId || "");
+            return person === "booker" ? client : client + ":" + person;
+          }()),
           lineId: line.lineId || appt.appointmentId,
           providerId: line.providerId,
           startMin: startMin,
           endMin: endMin,
           durationMinutes: endMin - startMin,
-          clientName: appt.clientSnapshot && appt.clientSnapshot.displayName
-            ? appt.clientSnapshot.displayName
-            : "Client",
+          clientName: (line.guestName && String(line.guestName).trim())
+            || (appt.clientSnapshot && appt.clientSnapshot.displayName)
+            || "Client",
           serviceName: line.serviceNameSnapshot || "Service",
-          status: appt.status
+          status: appt.status,
+          partySize: partySize,
+          firstVisit: !!(appt.firstVisit),
+          requested: !!(line.requested),
+          personKey: person
         });
+      });
+      groupOrder.forEach(function (key) {
+        var rows = grouped[key].slice().sort(function (a, b) {
+          return a.startMin - b.startMin || String(a.lineId).localeCompare(String(b.lineId));
+        });
+        var first = rows[0];
+        var startMin = first.startMin;
+        var endMin = first.endMin;
+        var names = [];
+        var lineIds = [];
+        var requested = false;
+        rows.forEach(function (row) {
+          if (row.startMin < startMin) startMin = row.startMin;
+          if (row.endMin > endMin) endMin = row.endMin;
+          if (row.serviceName && names.indexOf(row.serviceName) === -1) names.push(row.serviceName);
+          lineIds.push(row.lineId);
+          if (row.requested) requested = true;
+        });
+        out.push(Object.assign({}, first, {
+          startMin: startMin,
+          endMin: endMin,
+          durationMinutes: endMin - startMin,
+          serviceName: names.join(" · "),
+          serviceNames: names,
+          segments: rows.map(function (row) {
+            return {
+              lineId: row.lineId,
+              serviceName: row.serviceName,
+              startMin: row.startMin,
+              endMin: row.endMin,
+              durationMinutes: row.durationMinutes,
+              requested: !!(row.requested)
+            };
+          }),
+          lineId: first.lineId,
+          lineIds: lineIds,
+          requested: requested
+        }));
       });
     });
     return out;

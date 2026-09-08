@@ -6,7 +6,7 @@
       var scripts = [
         { src: "/billing-guard.js?v=20260604_staging_billing_bypass", type: "module", delay: 200 },
         { src: "/staff-cloud.js?v=20260509_hydrate_session_fix", type: "module", delay: 250 },
-        { src: "/settings-cloud.js?v=20260816_sat_open2", type: "module", delay: 300 },
+        { src: "/settings-cloud.js?v=20260906_overlap", type: "module", delay: 300 },
         { src: "/time-clock-entries.js?v=20260805_tc_schedule_s4", type: "module", delay: 350 },
         { src: "/locations-cloud.js?v=20260501_points", type: "module", delay: 400 },
         { src: "/location-helpers.js?v=20260603_owner_primary_location", delay: 450 },
@@ -46,7 +46,7 @@
         { src: "/billing-cloud.js?v=20260609_native_readonly_billing", type: "module", delay: 2100 },
         { src: "/time-clock-engine.js?v=20260501_points", delay: 2200 },
         { src: "/inventory.js?v=20260728_inv_mobile_unstick", type: "module", delay: 2300 },
-        { src: "/locations-manage.js?v=20260609_native_web_app_wording", type: "module", delay: 2400 }
+        { src: "/locations-manage.js?v=20260821_staging_location_bypass", type: "module", delay: 2400 }
       ];
       function wait(ms) {
         return new Promise(function (resolve) { setTimeout(resolve, ms); });

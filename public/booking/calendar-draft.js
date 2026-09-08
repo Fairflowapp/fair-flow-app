@@ -66,11 +66,13 @@
       return line && line.providerId && Number.isFinite(Number(line.startMin));
     }).map(function (line) {
       return {
+        lineKey: line.lineKey || line.key ? String(line.lineKey || line.key) : "",
         providerId: String(line.providerId),
         startMin: Number(line.startMin),
         durationMinutes: Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30,
         title: line.title || line.serviceName ? String(line.title || line.serviceName) : "",
-        clientName: line.clientName ? String(line.clientName) : clientName
+        clientName: line.clientName ? String(line.clientName) : clientName,
+        guestKey: line.guestKey ? String(line.guestKey) : ""
       };
     });
   }
@@ -80,37 +82,102 @@
     root.querySelectorAll("[data-ff-cal-hold]").forEach(function (el) { el.remove(); });
   }
 
-  function paintLine(root, axis, lay, line) {
-    var col = root.querySelector('[data-ff-cal-emp="' + line.providerId + '"]');
+  function findCol(root, providerId) {
+    var id = String(providerId || "");
+    if (!root || !id) return null;
+    var cols = root.querySelectorAll("[data-ff-cal-emp]");
+    for (var i = 0; i < cols.length; i += 1) {
+      if (cols[i].getAttribute("data-ff-cal-emp") === id) return cols[i];
+    }
+    return null;
+  }
+
+  function draftPartySize(lines) {
+    var model = window.ffBookingAppointmentModel;
+    var rows = (lines || []).map(function (line) {
+      var start = Number(line && line.startMin);
+      var duration = Number(line && line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30;
+      return { start: start, end: start + duration };
+    });
+    if (model && typeof model.partySizeForVisit === "function") {
+      return model.partySizeForVisit(lines);
+    }
+    if (model && typeof model.partySizeFromIntervals === "function") {
+      return model.partySizeFromIntervals(rows);
+    }
+    return 1;
+  }
+
+  function applyBoardBox(el, item) {
+    if (!el) return;
+    el.style.left = (item && item.left) || "4px";
+    el.style.width = (item && item.width) || "calc(100% - 10px)";
+    el.style.right = "auto";
+    el.style.zIndex = String(5 + ((item && item.lane) || 0));
+  }
+
+  function paintLine(root, axis, lay, line, partySize, item) {
+    var col = findCol(root, line.providerId);
     if (!col) return;
     var rect = lay.windowToRect(line.startMin, line.startMin + line.durationMinutes, axis.startMin, axis.endMin);
     if (!rect) return;
+    var density = "";
+    if (line.durationMinutes > 0 && line.durationMinutes <= 15) density = " is-tiny";
+    else if (line.durationMinutes > 0 && line.durationMinutes <= 30) density = " is-compact";
     var el = document.createElement("div");
-    el.className = "ff-cal-hold";
+    el.className = "ff-cal-hold" + density;
     el.setAttribute("data-ff-cal-hold", "");
     el.setAttribute("data-ff-cal-hold-provider", line.providerId);
+    if (line.lineKey) el.setAttribute("data-ff-cal-hold-line", line.lineKey);
+    el.setAttribute("data-ff-cal-start", String(line.startMin));
+    el.setAttribute("data-ff-cal-duration", String(line.durationMinutes));
     el.style.top = rect.top + "px";
     el.style.height = Math.max(rect.height, 28) + "px";
-    el.innerHTML = bodyHtml(line);
+    applyBoardBox(el, item);
+    var badge = Number(partySize) > 1
+      ? '<span class="ff-cal-card-party">' + escapeHtml(String(partySize) + " people") + "</span>"
+      : "";
+    el.innerHTML = badge + bodyHtml(line);
     col.appendChild(el);
   }
 
-  function sync(root) {
+  function paintFromBoard(root, built) {
     root = root || (typeof document !== "undefined" && document && document.getElementById
       ? document.getElementById("ffBookingCalendarRoot")
       : null);
-    if (!root) return;
     clearDom(root);
-    if (!draft || !draft.lines || !draft.lines.length) return;
+    if (!root || !draft || !draft.lines || !draft.lines.length) return;
     var st = calState();
     var lay = layout();
     if (!st || !lay) return;
     if (st.getSelectedDateKey() !== draft.dateKey) return;
     var axis = st.getAxis();
     if (!axis) return;
+    var partySize = draftPartySize(draft.lines);
+    var items = (built && built.items) || [];
     draft.lines.forEach(function (line) {
-      paintLine(root, axis, lay, line);
+      var item = items.find(function (row) {
+        if (row.kind !== "hold") return false;
+        if (row.providerId !== String(line.providerId)) return false;
+        if (row.startMin !== Number(line.startMin)) return false;
+        if (!line.lineKey) return true;
+        return row.lineId === String(line.lineKey) || row.key === "hold:" + String(line.lineKey);
+      }) || items.find(function (row) {
+        return row.kind === "hold"
+          && row.providerId === String(line.providerId)
+          && row.startMin === Number(line.startMin);
+      }) || null;
+      paintLine(root, axis, lay, line, partySize, item);
     });
+  }
+
+  function sync(root) {
+    var render = window.ffBookingCalCardRender;
+    if (render && typeof render.paint === "function" && !window.__ffPaintingBoard) {
+      render.paint(root);
+      return;
+    }
+    paintFromBoard(root, null);
   }
 
   function set(spec) {
@@ -153,6 +220,7 @@
     clear: clear,
     sync: sync,
     get: snapshot,
+    paintFromBoard: paintFromBoard,
     bodyHtml: bodyHtml,
     formatTime: formatTime
   };

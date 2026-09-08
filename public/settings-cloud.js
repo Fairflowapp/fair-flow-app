@@ -405,6 +405,20 @@ function _applyMainSnapshot(data) {
       changed = true;
     }
     // Task settings
+    if (data.booking && typeof data.booking === 'object') {
+      const rawOverlap = Math.round(Number(data.booking.allowedOverlapMinutes));
+      const nextBooking = {
+        allowedOverlapMinutes: [0, 15, 20, 30].indexOf(rawOverlap) !== -1 ? rawOverlap : 0
+      };
+      if (JSON.stringify(window.settings.booking || {}) !== JSON.stringify(nextBooking)) {
+        window.settings.booking = nextBooking;
+        try {
+          if (typeof document !== "undefined" && typeof CustomEvent === "function") {
+            document.dispatchEvent(new CustomEvent("ff-booking-settings-changed"));
+          }
+        } catch (_) {}
+      }
+    }
     if (data.taskSettings && typeof data.taskSettings === 'object') {
       if (data.taskSettings.taskReminders !== undefined) {
         window.settings.taskReminders = data.taskSettings.taskReminders;

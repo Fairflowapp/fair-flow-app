@@ -74,6 +74,7 @@ const windowObj = {
   }
 };
 
+load("public/booking/appointments/status.js", windowObj);
 load("public/booking/appointments/calendar-data.js", windowObj);
 load("public/booking/appointments/details.js", windowObj);
 
@@ -101,9 +102,24 @@ check("provider snapshot", view.providerName === "koko");
 check("date label", view.dateLabel === "Monday, Aug 24, 2026");
 check("location label", view.locationLabel === "Soso spa");
 check("notes", view.notes === "Prefers quiet room" && view.notesEmpty === false);
-check("status label", view.statusLabel === "Scheduled");
+check("status label", view.statusLabel === "Waiting for confirmation");
+check("regular details are not a first visit", view.isNewClient === false);
+const firstVisitView = details.viewFrom(Object.assign({}, appointment, { firstVisit: true }), "line_1");
+check("first-visit details mark New Client", firstVisitView.isNewClient === true);
+check("scheduled appointment can check in", view.canCheckIn === true);
+check("scheduled offers confirm first", view.statusActions[0] && view.statusActions[0].id === "confirm");
 check("single-service total matches line", view.total === 55 && view.totalLabel === "$55");
 check("single-service list has one row", view.services.length === 1);
+check("details do not treat a named provider as a request", view.services[0].requested === false);
+const requestedView = details.viewFrom({
+  appointmentId: "appt_r",
+  status: "confirmed",
+  locationId: "locA",
+  dateKey: "2026-08-24",
+  clientSnapshot: { displayName: "Jenny" },
+  serviceLines: [Object.assign({}, appointment.serviceLines[0], { requested: true })]
+}, "line_1");
+check("details keep a requested provider mark", requestedView.services[0].requested === true);
 
 const multi = details.viewFrom({
   appointmentId: "appt_m",
@@ -140,6 +156,7 @@ const emailOnly = details.viewFrom({
   serviceLines: appointment.serviceLines
 }, "line_1");
 check("email fallback", emailOnly.clientSecondary === "shiri@example.com");
+check("confirmed appointment can check in", emailOnly.canCheckIn === true);
 check("empty notes", emailOnly.notesEmpty === true);
 
 const cancelled = details.viewFrom({
@@ -153,6 +170,7 @@ const cancelled = details.viewFrom({
   serviceLines: appointment.serviceLines
 }, "line_1");
 check("cancelled status label", cancelled.statusLabel === "Cancelled" && cancelled.isCancelled === true);
+check("cancelled appointment cannot check in", cancelled.canCheckIn === false);
 check("cancellation reason shown", cancelled.cancellationReason === "Client asked");
 
 const repoSrc = fs.readFileSync(path.join(root, "public/booking/appointments/data.js"), "utf8");
@@ -163,6 +181,18 @@ check("cancel is idempotent for already-cancelled", repoSrc.indexOf("alreadyCanc
 const holdSrc = fs.readFileSync(path.join(root, "public/booking/calendar-draft.js"), "utf8");
 check("hold is not a calendar card", holdSrc.indexOf("data-ff-cal-card") === -1);
 check("hold keeps its own marker", holdSrc.indexOf("data-ff-cal-hold") !== -1);
+
+const detailsSrc = fs.readFileSync(path.join(root, "public/booking/appointments/details.js"), "utf8");
+check("edit reuses new-appointment cards", detailsSrc.indexOf("createLinesHtml") !== -1);
+check("edit can add a guest", detailsSrc.indexOf('data-ff-apd-act="add-guest"') !== -1);
+check("edit opens the in-drawer service picker", detailsSrc.indexOf("open-service-picker") !== -1);
+check("edit opens the in-drawer provider picker", detailsSrc.indexOf("open-provider-picker") !== -1);
+check("details show a New Client badge", detailsSrc.indexOf("ff-apd-new-client") !== -1);
+
+const detailsCss = fs.readFileSync(path.join(root, "public/booking/appointments/details.css"), "utf8");
+const drawerCss = fs.readFileSync(path.join(root, "public/booking/appointments/drawer.css"), "utf8");
+check("hidden edit footer does not stay visible", detailsCss.indexOf(".ff-apd-foot[hidden]") !== -1);
+check("edit add-service buttons match new appointment", /\.ff-apd\s+\.ff-appt-add-line:not\(\[hidden\]\)/.test(drawerCss));
 
 (async function () {
   await cal.loadForView("2026-08-24", "locA");

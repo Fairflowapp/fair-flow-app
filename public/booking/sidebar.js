@@ -16,9 +16,20 @@
   var ICON_PERSON =
     '<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>' +
     '<circle cx="12" cy="7" r="4"></circle>';
+  var ICON_SALES =
+    '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1-2-1z"></path>' +
+    '<line x1="8" y1="9" x2="16" y2="9"></line>' +
+    '<line x1="8" y1="13" x2="13" y2="13"></line>';
+  var ICON_REPORTS =
+    '<line x1="18" y1="20" x2="18" y2="10"></line>' +
+    '<line x1="12" y1="20" x2="12" y2="4"></line>' +
+    '<line x1="6" y1="20" x2="6" y2="14"></line>';
   var ICON_SERVICES =
     '<path d="M4 7h16"></path><path d="M4 12h16"></path>' +
     '<path d="M4 17h10"></path><circle cx="18" cy="17" r="2"></circle>';
+  var ICON_SETTINGS =
+    '<circle cx="12" cy="12" r="3"></circle>' +
+    '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"></path>';
   var ICON_CHEVRON_LEFT =
     '<polyline points="15 18 9 12 15 6"></polyline>';
   var ICON_CHEVRON_RIGHT =
@@ -113,8 +124,11 @@
     return (
       '<nav class="ff-booking-sidebar-nav" aria-label="Booking screens">' +
         itemHtml("calendar", "Calendar", ICON_SCHEDULE) +
+        itemHtml("sales", "Sales", ICON_SALES) +
         itemHtml("clients", "Clients", ICON_PERSON) +
+        itemHtml("reports", "Reports", ICON_REPORTS) +
         itemHtml("services", "Services", ICON_SERVICES) +
+        itemHtml("settings", "Settings", ICON_SETTINGS) +
       "</nav>" +
       '<button type="button" class="ff-booking-sidebar-toggle" data-ff-booking-sidebar-toggle aria-expanded="true" aria-label="Collapse booking menu" title="Collapse menu">' +
         '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -166,6 +180,12 @@
       existing.innerHTML = html();
       existing.addEventListener("click", onClick);
       workspace.insertBefore(existing, workspace.firstChild);
+    } else if (existing && (
+      !existing.querySelector('[data-ff-booking-section="settings"]') ||
+      !existing.querySelector('[data-ff-booking-section="sales"]') ||
+      !existing.querySelector('[data-ff-booking-section="reports"]')
+    )) {
+      existing.innerHTML = html();
     }
     bindResize();
     applyWidth(isCollapsed());

@@ -19,7 +19,10 @@ import {
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
-import { db } from "/app.js?v=20260610_force_lp_ios";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
+import { db, storage } from "/app.js?v=20260610_force_lp_ios";
+
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
 
 function model() {
   return window.ffBookingClientModel || null;
@@ -79,6 +82,95 @@ function emitClientCreated(client) {
   try {
     document.dispatchEvent(new CustomEvent("ff-booking-client-created", { detail: { client: client || null } }));
   } catch (_) {}
+}
+
+function emitClientUpdated(client) {
+  try {
+    document.dispatchEvent(new CustomEvent("ff-booking-client-updated", { detail: { client: client || null } }));
+  } catch (_) {}
+}
+
+function inferPhotoExt(file) {
+  const type = String(file && file.type || "").toLowerCase();
+  if (type.includes("png")) return "png";
+  if (type.includes("webp")) return "webp";
+  return "jpg";
+}
+
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not read that photo."));
+    };
+    img.src = url;
+  });
+}
+
+async function normalizePhoto(file) {
+  if (!file) throw new Error("Choose a photo.");
+  if (!String(file.type || "").startsWith("image/")) throw new Error("Choose a photo.");
+  if (file.size > PHOTO_MAX_BYTES) throw new Error("That photo is too large.");
+  try {
+    const img = await readImage(file);
+    const max = 800;
+    let width = img.naturalWidth || img.width || max;
+    let height = img.naturalHeight || img.height || max;
+    const scale = Math.min(1, max / Math.max(width, height));
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+    const blob = await new Promise(function (resolve) {
+      canvas.toBlob(resolve, "image/jpeg", 0.86);
+    });
+    if (blob) return new File([blob], "avatar.jpg", { type: "image/jpeg" });
+  } catch (_) {}
+  return file;
+}
+
+async function writeClientPhoto(clientId, photoUrl) {
+  const salonId = requireSalon();
+  const id = String(clientId || "").trim();
+  if (!id) return { ok: false, error: "A client is required." };
+  await updateDoc(doc(db, `salons/${salonId}/clients/${id}`), {
+    photoUrl: photoUrl || "",
+    photo: photoUrl || "",
+    avatarUrl: photoUrl || "",
+    updatedAt: serverTimestamp(),
+  });
+  const client = await getClientById(id, salonId);
+  emitClientUpdated(client);
+  return { ok: true, client, photoUrl: photoUrl || "" };
+}
+
+async function uploadClientPhoto(clientId, file) {
+  const salonId = requireSalon();
+  const id = String(clientId || "").trim();
+  if (!id) return { ok: false, error: "A client is required." };
+  let ready;
+  try {
+    ready = await normalizePhoto(file);
+  } catch (err) {
+    return { ok: false, error: err && err.message ? err.message : "Choose a photo." };
+  }
+  const path = `salons/${salonId}/clients/${id}/avatar.${inferPhotoExt(ready)}`;
+  const fileRef = storageRef(storage, path);
+  await uploadBytes(fileRef, ready, { contentType: ready.type || "image/jpeg" });
+  const url = await getDownloadURL(fileRef);
+  return writeClientPhoto(id, url);
+}
+
+async function clearClientPhoto(clientId) {
+  return writeClientPhoto(clientId, "");
 }
 
 async function getClientById(clientId, salonId) {
@@ -344,6 +436,17 @@ async function updateClient(clientId, patch) {
   if (!id) return { ok: false, error: "Missing clientId." };
   const existing = await getClientById(id, salonId);
   if (!existing) return { ok: false, error: "Client not found." };
+  const extras = api.profileExtras({
+    birthday: patch && patch.birthday != null ? patch.birthday : existing.birthday,
+    referralSource: patch && patch.referralSource != null ? patch.referralSource : existing.referralSource,
+    addressStreet: patch && patch.addressStreet != null ? patch.addressStreet : existing.addressStreet,
+    addressCity: patch && patch.addressCity != null ? patch.addressCity : existing.addressCity,
+    addressState: patch && patch.addressState != null ? patch.addressState : existing.addressState,
+    addressZip: patch && patch.addressZip != null ? patch.addressZip : existing.addressZip,
+    instagram: patch && patch.instagram != null ? patch.instagram : existing.instagram,
+    allowSms: patch && patch.allowSms != null ? patch.allowSms : existing.allowSms,
+    allowEmail: patch && patch.allowEmail != null ? patch.allowEmail : existing.allowEmail,
+  });
   const merged = api.buildSearchFields({
     firstName: patch && patch.firstName != null ? patch.firstName : existing.firstName,
     lastName: patch && patch.lastName != null ? patch.lastName : existing.lastName,
@@ -380,9 +483,19 @@ async function updateClient(clientId, patch) {
     phoneDigits: merged.phoneDigits,
     phoneKeys: merged.phoneKeys,
     phoneKeyPrefixes: merged.phoneKeyPrefixes,
+    birthday: extras.birthday,
+    referralSource: extras.referralSource,
+    addressStreet: extras.addressStreet,
+    addressCity: extras.addressCity,
+    addressState: extras.addressState,
+    addressZip: extras.addressZip,
+    instagram: extras.instagram,
+    allowSms: extras.allowSms,
+    allowEmail: extras.allowEmail,
     updatedAt: serverTimestamp(),
   });
   const client = await getClientById(id, salonId);
+  emitClientUpdated(client);
   return { ok: true, client };
 }
 
@@ -396,6 +509,8 @@ const api = {
   findClientByPhone,
   findClientByEmail,
   updateClient,
+  uploadClientPhoto,
+  clearClientPhoto,
   currentSalonId,
   currentLocationId,
   PAGE_SIZE,
@@ -412,4 +527,6 @@ export {
   findClientByPhone,
   findClientByEmail,
   updateClient,
+  uploadClientPhoto,
+  clearClientPhoto,
 };

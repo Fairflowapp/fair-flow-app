@@ -81,8 +81,7 @@
   }
 
   function yToSlotStart(y, axisStartMin) {
-    var snap = TOKENS.snapMin;
-    return Math.floor(yToMinutes(y, axisStartMin) / snap) * snap;
+    return snapMinutes(yToMinutes(y, axisStartMin), TOKENS.snapMin);
   }
 
   function windowToRect(startMin, endMin, axisStartMin, axisEndMin) {

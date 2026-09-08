@@ -205,7 +205,10 @@
         '<section class="ff-appt-step" aria-label="Services">' +
           '<div class="ff-appt-step-h"><span>02</span> Services</div>' +
           '<div id="ffApptLines" class="ff-appt-svcs"></div>' +
-          '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line" hidden>+ Add another service</button>' +
+          '<div class="ff-appt-add-row" id="ffApptAddRow" hidden>' +
+            '<button type="button" class="ff-appt-add-line" id="ffApptAddLine" data-ff-appt-act="add-line">+ Add another service</button>' +
+            '<button type="button" class="ff-appt-add-line" id="ffApptAddGuest" data-ff-appt-act="add-guest">+ Add a guest</button>' +
+          "</div>" +
         "</section>" +
         '<div class="ff-appt-notes-wrap">' +
           '<button type="button" class="ff-appt-note-toggle" id="ffApptNoteToggle" data-ff-appt-act="add-note">+ Add note</button>' +
@@ -234,6 +237,8 @@
       clientMsg: document.getElementById("ffApptClientMsg"),
       lines: document.getElementById("ffApptLines"),
       addLine: document.getElementById("ffApptAddLine"),
+      addGuest: document.getElementById("ffApptAddGuest"),
+      addRow: document.getElementById("ffApptAddRow"),
       date: document.getElementById("ffApptDate"),
       notes: document.getElementById("ffApptNotes"),
       noteToggle: document.getElementById("ffApptNoteToggle"),
@@ -270,7 +275,9 @@
     var ends = lines.map(function (line) { return Number(line.endMin); }).filter(Number.isFinite);
     var start = starts.length ? Math.min.apply(null, starts) : null;
     var end = ends.length ? Math.max.apply(null, ends) : null;
-    var who = lines.length + (lines.length === 1 ? " service" : " services") +
+    var people = typeof api.partySize === "function" ? api.partySize(state) : 1;
+    var who = (people > 1 ? people + " people · " : "") +
+      lines.length + (lines.length === 1 ? " service" : " services") +
       (names.length ? " · " + names.join(" + ") : "");
     var when = start != null && end != null ? api.formatMinutes(start) + " – " + api.formatMinutes(end) : "";
     ui.meta.hidden = false;
@@ -305,16 +312,23 @@
     if (ui.lines && typeof api.createLinesHtml === "function") {
       ui.lines.innerHTML = api.createLinesHtml(state, providers, uiState);
     }
-    if (ui.addLine) {
-      ui.addLine.hidden = !((state.lines || []).some(function (line) { return line && line.serviceId; }));
-    }
+    var canAdd = (state.lines || []).some(function (line) { return line && line.serviceId; });
+    if (ui.addRow) ui.addRow.hidden = !canAdd;
+    if (ui.addLine) ui.addLine.hidden = !canAdd;
+    if (ui.addGuest) ui.addGuest.hidden = !canAdd;
     paintClientState();
     paintSummary();
     var lineError = !!(state.error && state.errorLineKey);
-    var ready = api.canCreate(state) && !state.creating;
-    ui.error.hidden = !state.error || lineError;
-    ui.error.textContent = lineError ? "" : (state.error || "");
-    ui.create.disabled = !!state.creating;
+    var unresolvedGap = typeof api.unresolvedGaps === "function" && api.unresolvedGaps(state).length > 0;
+    var providerClash = typeof api.findProviderOverlaps === "function" && api.findProviderOverlaps(state).length > 0;
+    var clashMsg = typeof api.providerOverlapMessage === "function"
+      ? api.providerOverlapMessage(state)
+      : "This provider cannot serve two guests at the same time.";
+    var ready = api.canCreate(state) && !state.creating && !unresolvedGap && !providerClash;
+    var gapMsg = "Choose whether to keep the gap or make the times consecutive.";
+    ui.error.hidden = (!state.error && !unresolvedGap && !providerClash) || lineError;
+    ui.error.textContent = lineError ? "" : (state.error || (providerClash ? clashMsg : (unresolvedGap ? gapMsg : "")));
+    ui.create.disabled = !!state.creating || unresolvedGap || providerClash;
     ui.create.classList.toggle("is-wait", !ready);
     ui.create.setAttribute("aria-disabled", ready ? "false" : "true");
     ui.create.textContent = state.creating ? "Booking…" : "Book Appointment";
@@ -322,6 +336,10 @@
       var sel = null;
       if (active.hasAttribute("data-ff-service-q")) sel = ui.root.querySelector("[data-ff-service-q]");
       if (active.hasAttribute("data-ff-provider-q")) sel = ui.root.querySelector("[data-ff-provider-q]");
+        if (active.hasAttribute("data-ff-guest-name")) {
+          var guestLine = active.getAttribute("data-ff-line") || "";
+          sel = ui.root.querySelector('[data-ff-guest-name][data-ff-line="' + guestLine + '"]');
+        }
       if (sel) {
         sel.focus();
         try { sel.setSelectionRange(sel.value.length, sel.value.length); } catch (_) {}
@@ -486,6 +504,19 @@
       paint();
       return;
     }
+    var api = form();
+    if (api && typeof api.findProviderOverlaps === "function" && api.findProviderOverlaps(state).length) {
+      state.error = typeof api.providerOverlapMessage === "function"
+        ? api.providerOverlapMessage(state)
+        : "This provider cannot serve two guests at the same time.";
+      paint();
+      return;
+    }
+    if (api && typeof api.unresolvedGaps === "function" && api.unresolvedGaps(state).length) {
+      state.error = "Choose whether to keep the gap or make the times consecutive.";
+      paint();
+      return;
+    }
     state.error = "Complete the appointment before booking.";
     paint();
   }
@@ -493,12 +524,30 @@
   async function createAppointment() {
     var api = form();
     if (!api || !state || state.creating) return;
+    if (typeof api.findProviderOverlaps === "function" && api.findProviderOverlaps(state).length) {
+      state.error = typeof api.providerOverlapMessage === "function"
+        ? api.providerOverlapMessage(state)
+        : "This provider cannot serve two guests at the same time.";
+      paint();
+      window.alert(state.error);
+      return;
+    }
+    if (typeof api.unresolvedGaps === "function" && api.unresolvedGaps(state).length) {
+      state.error = "Choose whether to keep the gap or make the times consecutive.";
+      paint();
+      window.alert(state.error);
+      return;
+    }
     if (!api.canCreate(state)) {
       guideCreate();
       return;
     }
     var result = await api.create(state);
     paint();
+    if (result && !result.ok && (result.code === "UNRESOLVED_GAP" || result.code === "PROVIDER_DOUBLE_BOOKED")) {
+      window.alert(result.error || state.error);
+      return;
+    }
     if (result && result.ok) {
       close();
       restoreScroll();
@@ -539,9 +588,17 @@
     close();
   }
 
+  function hasUnsavedWork() {
+    var api = form();
+    return !!(isOpen() && state && api && typeof api.isDirty === "function" && api.isDirty(state));
+  }
+
   async function open(seed) {
     var api = form();
     if (!api || !canOpenOnCalendar()) return;
+    if (hasUnsavedWork()) {
+      if (!window.confirm("Discard this unsaved appointment?")) return;
+    }
     if (window.ffBookingAppointmentDetails && window.ffBookingAppointmentDetails.forceClose) {
       window.ffBookingAppointmentDetails.forceClose();
     }
@@ -580,6 +637,23 @@
         ev.stopPropagation();
         state = api.removeLine(state, remove.getAttribute("data-ff-line"));
         resetUiState();
+        paint();
+        return;
+      }
+      var gapAct = ev.target && ev.target.closest
+        ? ev.target.closest("[data-ff-line-act='keep-gap'], [data-ff-line-act='close-gap']")
+        : null;
+      if (gapAct && api && state) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        var gapKind = gapAct.getAttribute("data-ff-line-act");
+        if (gapKind === "keep-gap") {
+          if (typeof api.keepGap === "function") {
+            state = api.keepGap(state, gapAct.getAttribute("data-ff-gap-sig"));
+          }
+        } else if (typeof api.closeGap === "function") {
+          state = api.closeGap(state, gapAct.getAttribute("data-ff-line"));
+        }
         paint();
         return;
       }
@@ -643,6 +717,9 @@
         uiState.servicePickerKey = "";
         uiState.serviceQ = "";
         paint();
+      } else if (name === "toggle-request" && api && state && typeof api.setLineRequested === "function") {
+        state = api.setLineRequested(state, act.getAttribute("data-ff-line"));
+        paint();
       } else if (name === "pick-provider" && api && state) {
         api.setLineProvider(state, act.getAttribute("data-ff-line"), act.getAttribute("data-ff-provider")).then(function (next) {
           state = next;
@@ -662,7 +739,20 @@
           uiState.servicePickerKey = last ? last.key : "";
           uiState.providerPickerKey = "";
           uiState.serviceQ = "";
+          if (last && last.providerId && typeof api.setLineProvider === "function") {
+            api.setLineProvider(state, last.key, last.providerId).then(function (next) {
+              state = next;
+              paint();
+            });
+          }
         }
+        paint();
+      } else if (name === "add-guest" && api && state && typeof api.addGuest === "function") {
+        state = api.addGuest(state);
+        var guestLine = state.lines[state.lines.length - 1];
+        uiState.servicePickerKey = guestLine ? guestLine.key : "";
+        uiState.providerPickerKey = "";
+        uiState.serviceQ = "";
         paint();
       } else if (name === "new-client") {
         hideClientResults();
@@ -671,6 +761,7 @@
       } else if (name === "save-client") saveNewClient();
     });
     root.addEventListener("input", function (ev) {
+      var api = form();
       if (!state) return;
       if (ev.target.id === "ffApptClientQ") {
         clearTimeout(searchTimer);
@@ -684,6 +775,11 @@
       } else if (ev.target.hasAttribute && ev.target.hasAttribute("data-ff-provider-q")) {
         uiState.providerQ = ev.target.value;
         paint();
+      } else if (ev.target.hasAttribute && ev.target.hasAttribute("data-ff-guest-name") && api) {
+        var guestWrap = ev.target.closest("[data-ff-line]");
+        state = api.setLineGuestName(state, ev.target.getAttribute("data-ff-line") || (guestWrap && guestWrap.getAttribute("data-ff-line")), ev.target.value);
+        syncHold();
+        paintSummary();
       }
     });
     root.addEventListener("change", async function (ev) {
@@ -731,11 +827,56 @@
     close();
   });
 
+  function assignLineProvider(lineKey, providerId) {
+    return assignLineSlot(lineKey, providerId, null);
+  }
+
+  function assignLineSlot(lineKey, providerId, startMin) {
+    var api = form();
+    if (!state || !api) return Promise.resolve(false);
+    var key = String(lineKey || "").trim();
+    if (!key) return Promise.resolve(false);
+    var next = state;
+    if (Number.isFinite(Number(startMin)) && typeof api.setLineStart === "function") {
+      next = api.setLineStart(next, key, Number(startMin));
+    }
+    var id = String(providerId || "").trim();
+    var line = (next.lines || []).find(function (row) {
+      return row && (row.key === key || row.lineId === key);
+    });
+    var providerChanged = !!(id && line && String(line.providerId || "") !== id);
+    if (providerChanged && typeof api.applyLineProvider === "function") {
+      next = api.applyLineProvider(next, key, id);
+    } else if (providerChanged && typeof api.setLineProvider === "function") {
+      return api.setLineProvider(next, key, id).then(function (after) {
+        state = after;
+        paint();
+        return true;
+      });
+    }
+    state = next;
+    paint();
+    if (providerChanged && typeof api.setLineProvider === "function") {
+      api.setLineProvider(state, key, id).then(function (after) {
+        if (!isOpen() || !state) return;
+        state = after;
+        paint();
+      });
+    }
+    return Promise.resolve(true);
+  }
+
   window.ffBookingAppointmentDrawer = {
     open: open,
     close: requestClose,
     forceClose: forceClose,
     isOpen: isOpen,
-    getState: function () { return state; }
+    hasUnsavedWork: hasUnsavedWork,
+    getState: function () { return state; },
+    assignLineProvider: assignLineProvider,
+    assignLineSlot: assignLineSlot,
+    resyncHold: function () {
+      if (isOpen() && state) syncHold();
+    }
   };
 })();

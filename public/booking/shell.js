@@ -8,8 +8,11 @@
   var WORKSPACE_ID = "ffBookingWorkspace";
   var COPY = {
     calendar: { title: "Booking Calendar", body: "Calendar workspace coming next." },
+    sales: { title: "Sales", body: "Sales from checkout." },
     clients: { title: "Clients", body: "Client management coming soon." },
-    services: { title: "Services", body: "Service management coming soon." }
+    reports: { title: "Reports", body: "Salon reports from checkout sales." },
+    services: { title: "Services", body: "Service management coming soon." },
+    settings: { title: "Settings", body: "Booking settings." }
   };
   var ICON_SCHEDULE =
     '<rect x="3" y="4" width="18" height="18" rx="2"></rect>' +
@@ -67,17 +70,31 @@
 
   function ensureMain(workspace) {
     var main = document.getElementById("ffBookingMain");
-    if (main) return main;
-    main = document.createElement("div");
-    main.id = "ffBookingMain";
-    main.className = "ff-booking-main";
-    var pages = workspace.querySelectorAll("[data-ff-booking-page]");
-    if (pages.length) {
-      pages.forEach(function (page) { main.appendChild(page); });
-    } else {
-      main.innerHTML = pageHtml("calendar") + pageHtml("clients") + pageHtml("services");
+    if (!main) {
+      main = document.createElement("div");
+      main.id = "ffBookingMain";
+      main.className = "ff-booking-main";
+      var pages = workspace.querySelectorAll("[data-ff-booking-page]");
+      if (pages.length) {
+        pages.forEach(function (page) { main.appendChild(page); });
+      } else {
+        main.innerHTML = pageHtml("calendar") + pageHtml("sales") + pageHtml("clients") + pageHtml("reports") + pageHtml("services") + pageHtml("settings");
+      }
+      workspace.appendChild(main);
     }
-    workspace.appendChild(main);
+    if (!main.querySelector('[data-ff-booking-page="settings"]')) {
+      main.insertAdjacentHTML("beforeend", pageHtml("settings"));
+    }
+    if (!main.querySelector('[data-ff-booking-page="sales"]')) {
+      var clientsPage = main.querySelector('[data-ff-booking-page="clients"]');
+      if (clientsPage) clientsPage.insertAdjacentHTML("beforebegin", pageHtml("sales"));
+      else main.insertAdjacentHTML("beforeend", pageHtml("sales"));
+    }
+    if (!main.querySelector('[data-ff-booking-page="reports"]')) {
+      var servicesPage = main.querySelector('[data-ff-booking-page="services"]');
+      if (servicesPage) servicesPage.insertAdjacentHTML("beforebegin", pageHtml("reports"));
+      else main.insertAdjacentHTML("beforeend", pageHtml("reports"));
+    }
     return main;
   }
 
@@ -93,6 +110,27 @@
       return (
         '<section class="ff-booking-page ff-booking-page-clients" data-ff-booking-page="clients">' +
           '<div id="ffBookingClientsRoot"></div>' +
+        "</section>"
+      );
+    }
+    if (id === "sales") {
+      return (
+        '<section class="ff-booking-page ff-booking-page-sales" data-ff-booking-page="sales">' +
+          '<div id="ffBookingSalesRoot"></div>' +
+        "</section>"
+      );
+    }
+    if (id === "reports") {
+      return (
+        '<section class="ff-booking-page ff-booking-page-reports" data-ff-booking-page="reports">' +
+          '<div id="ffBookingReportsRoot"></div>' +
+        "</section>"
+      );
+    }
+    if (id === "settings") {
+      return (
+        '<section class="ff-booking-page ff-booking-page-settings" data-ff-booking-page="settings">' +
+          '<div id="ffBookingSettingsRoot"></div>' +
         "</section>"
       );
     }
@@ -158,6 +196,42 @@
     el.style.zIndex = "";
   }
 
+  var OPS_OVERLAY_IDS = [
+    "staffMembersModal",
+    "ticketsScreen",
+    "tasksScreen",
+    "floorScreen",
+    "chatScreen",
+    "mediaScreen",
+    "inventoryScreen",
+    "inboxScreen",
+    "trainingScreen",
+    "scheduleScreen",
+    "timeClockScreen",
+    "pointsAppScreen",
+    "productsScreen",
+    "dashboardScreen",
+    "userProfileScreen",
+    "myProfileScreen",
+    "queueAnalyticsScreen",
+    "ticketsAnalyticsScreen",
+    "timeAnalyticsScreen",
+    "tasksAnalyticsScreen",
+    "historyScreen"
+  ];
+
+  function hideOpsOverlays() {
+    if (typeof window.closeStaffMembersModal === "function") {
+      try { window.closeStaffMembersModal(); } catch (_) {}
+    }
+    document.body.classList.remove("ff-staff-members-open", "ff-staff-editing");
+    OPS_OVERLAY_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = "none";
+    });
+    hideOpsServices();
+  }
+
   function showServicesScreen() {
     var el = document.getElementById("servicesScreen");
     if (!el) return false;
@@ -204,6 +278,15 @@
     if (section === "clients" && typeof window.ffRefreshBookingClients === "function") {
       window.ffRefreshBookingClients();
     }
+    if (section === "sales" && typeof window.ffRefreshBookingSales === "function") {
+      window.ffRefreshBookingSales();
+    }
+    if (section === "reports" && typeof window.ffRefreshBookingReports === "function") {
+      window.ffRefreshBookingReports();
+    }
+    if (section === "settings" && typeof window.ffRefreshBookingSettings === "function") {
+      window.ffRefreshBookingSettings();
+    }
   }
 
   function closeAppointmentDrawer() {
@@ -215,6 +298,19 @@
     try {
       if (window.ffBookingAppointmentDetails && typeof window.ffBookingAppointmentDetails.forceClose === "function") {
         window.ffBookingAppointmentDetails.forceClose();
+      }
+    } catch (_) {}
+  }
+
+  function closeSalesCheckout() {
+    try {
+      if (window.ffBookingSalesCheckout && typeof window.ffBookingSalesCheckout.forceClose === "function") {
+        window.ffBookingSalesCheckout.forceClose();
+      }
+    } catch (_) {}
+    try {
+      if (window.ffBookingSalesOptions && typeof window.ffBookingSalesOptions.forceClose === "function") {
+        window.ffBookingSalesOptions.forceClose();
       }
     } catch (_) {}
   }
@@ -242,11 +338,13 @@
     if (!inBooking) {
       closeAppointmentDrawer();
       closeClientsDrawer();
+      closeSalesCheckout();
     }
     if (document.body) document.body.classList.toggle("ff-booking-area", inBooking);
     if (window.ffBookingSidebar && typeof window.ffBookingSidebar.setVisible === "function") {
       window.ffBookingSidebar.setVisible(inBooking);
     }
+    if (inBooking) hideOpsOverlays();
     if (!inBooking) {
       hideOpsServices();
       setWorkspaceVisible(false);
@@ -273,6 +371,7 @@
     if (!st || !st.isBooking()) return;
     if (next !== "calendar") closeAppointmentDrawer();
     if (next !== "clients") closeClientsDrawer();
+    if (next !== "sales") closeSalesCheckout();
     paintSection(st.setSection(next));
   }
 

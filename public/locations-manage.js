@@ -258,8 +258,24 @@ function showNativePaidLocationBlocked() {
   document.body.appendChild(overlay);
 }
 
+function isStagingLocationBillingBypass() {
+  try {
+    if (typeof window === "undefined") return false;
+    const host = String(window.location?.hostname || "");
+    return host === "fair-flow-staging.web.app"
+      || host === "fair-flow-staging.firebaseapp.com"
+      || host === "localhost"
+      || host === "127.0.0.1";
+  } catch (_) {
+    return false;
+  }
+}
+
 async function confirmAndSyncPaidLocationIfNeeded(desiredActiveLocationCount) {
   if (desiredActiveLocationCount <= 1) return true;
+  // Staging has no live Stripe subscription. Skip the paid-location
+  // confirm + sync so owners can add extra locations for UX review.
+  if (isStagingLocationBillingBypass()) return true;
   // Mobile app is login-only with no payment UI: paid locations are web-only.
   if (ffLocNativeApp()) {
     showNativePaidLocationBlocked();

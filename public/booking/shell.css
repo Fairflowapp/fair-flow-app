@@ -76,6 +76,9 @@ body.ff-booking-area .ff-booking-section-nav,
   overflow: hidden;
   -webkit-overflow-scrolling: touch;
 }
+body.ff-booking-area #staffMembersModal {
+  display: none !important;
+}
 .ff-booking-workspace:not([hidden]) {
   display: flex;
   flex-direction: row;

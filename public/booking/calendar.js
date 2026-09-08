@@ -178,9 +178,15 @@
     return typeof av.isBookableAt === "function" && av.isBookableAt(emp, axis, minutes);
   }
 
+  function composerHasUnsavedWork() {
+    var drawer = window.ffBookingAppointmentDrawer;
+    return !!(drawer && typeof drawer.hasUnsavedWork === "function" && drawer.hasUnsavedWork());
+  }
+
   function openAppointmentFromHit(hit) {
     if (!isCalendarVisible()) return;
     if (!hit || !hit.slot || !window.ffBookingAppointmentDrawer) return;
+    if (composerHasUnsavedWork()) return;
     var emp = (hit.employees || []).find(function (row) {
       return row && row.id === hit.slot.providerId;
     });
@@ -255,6 +261,7 @@
     var colsHtml = employees.map(function (emp) {
       return '<div class="ff-cal-col" data-ff-cal-emp="' + escapeHtml(emp.id) + '">' +
         columnOverlayHtml(emp, axis) +
+        '<div class="ff-cal-col-grid" aria-hidden="true">' + linesHtml + "</div>" +
       "</div>";
     }).join("");
 
@@ -299,7 +306,6 @@
             "</div>" +
             '<div class="ff-cal-times" style="height:' + height + 'px">' + linesHtml + timesHtml + "</div>" +
             '<div class="ff-cal-surface" data-ff-cal-surface style="height:' + height + 'px">' +
-              '<div class="ff-cal-gridlines" aria-hidden="true">' + linesHtml + "</div>" +
               '<div class="ff-cal-cols">' + colsHtml + "</div>" +
               nowHtml +
             "</div>" +
@@ -316,8 +322,21 @@
       window.ffBookingCalMenu.close();
     }
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
-    if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
-    if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
+    paintOverlays(root);
+  }
+
+  function paintOverlays(root) {
+    try {
+      if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
+    } catch (_) {}
+    try {
+      if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
+    } catch (_) {}
+    try {
+      if (window.ffBookingAppointmentDrawer && typeof window.ffBookingAppointmentDrawer.resyncHold === "function") {
+        window.ffBookingAppointmentDrawer.resyncHold();
+      }
+    } catch (_) {}
   }
 
   async function syncAppointmentCards() {
@@ -325,8 +344,7 @@
     var st = state();
     if (!root || !st || !window.ffBookingCalAppointments) return;
     await window.ffBookingCalAppointments.loadForView(st.getSelectedDateKey(), st.getLocationId());
-    if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
-    if (window.ffBookingCalDraft) window.ffBookingCalDraft.sync(root);
+    paintOverlays(root);
   }
 
   function updateNowLine() {
@@ -412,6 +430,11 @@
       if (!t || typeof t.closest !== "function") return;
       var root = document.getElementById(ROOT_ID);
       if (!root || !root.contains(t)) return;
+      if (window.ffBookingCalDrag && typeof window.ffBookingCalDrag.consumeClick === "function"
+          && window.ffBookingCalDrag.consumeClick()) {
+        ev.preventDefault();
+        return;
+      }
       if (t.closest("[data-ff-cal-hold]")) {
         ev.preventDefault();
         return;
@@ -419,6 +442,7 @@
       var card = t.closest("[data-ff-cal-card]");
       if (card) {
         ev.preventDefault();
+        if (card.classList.contains("is-stack")) return;
         if (window.ffBookingAppointmentDetails && typeof window.ffBookingAppointmentDetails.open === "function") {
           window.ffBookingAppointmentDetails.open({
             appointmentId: card.getAttribute("data-ff-cal-card"),

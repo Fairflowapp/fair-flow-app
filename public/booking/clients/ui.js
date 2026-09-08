@@ -377,6 +377,10 @@
       resetPaging();
       loadBrowse(null);
     });
+    document.addEventListener("ff-booking-client-updated", function (ev) {
+      var client = ev && ev.detail && ev.detail.client;
+      if (client) replaceClient(client);
+    });
   }
 
   function refresh() {

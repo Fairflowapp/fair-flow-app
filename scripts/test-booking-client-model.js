@@ -134,6 +134,17 @@ check(
   "classifyQuery still treats a name prefix as name",
   model.classifyQuery("Jess").kind === "name" && model.classifyQuery("Jess").value === "jess"
 );
+const extras = model.profileExtras({
+  birthday: "1988-02-07",
+  referralSource: "Walk-in",
+  addressCity: "Miami",
+  instagram: "shiri",
+  allowSms: false
+});
+check("profile extras keep birthday and address", extras.birthday === "1988-02-07" && extras.addressCity === "Miami");
+check("profile extras default email on", extras.allowEmail === true && extras.allowSms === false);
+const fromExtras = model.fromDoc("c1", { firstName: "Shiri", lastName: "A", birthday: "1988-02-07" });
+check("fromDoc exposes birthday", fromExtras.birthday === "1988-02-07");
 
 if (failed) {
   console.error("FAILED", failed);
