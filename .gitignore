@@ -81,3 +81,13 @@ keystore/
 
 # Onboarding encryption key envelopes (S9) — never commit
 *.ff-key-envelope.json
+
+# Local-only working artifacts (~1 GB): isolated hosting deploy packages, working-tree
+# snapshots, pre-split refactor copies and local tooling. Never belongs on the remote.
+.ff-*-deploy/
+.ff-root-*-backup-*/
+backups/
+refactor-backups/
+.local-patches/
+.local-tools/
+.npm-cache/

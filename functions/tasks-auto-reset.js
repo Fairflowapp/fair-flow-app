@@ -7,7 +7,9 @@
 //
 // Per tab (opening / closing), independently:
 //   - enable + time from tasksState.alertWindows[tab] (default time 21:00)
-//   - force = autoResetForce === true (reset even if incomplete tasks remain)
+//   - at that time, reset that branch's list even if some tasks were left
+//     incomplete (a new salon day must start clean; skipping here left
+//     locations stuck on yesterday's tasks)
 //   - rebuild active from catalog[tab], clear pending/done
 //   - stamp autoResetState[tab].lastRunDate + resetStamps[tab]
 //
@@ -189,13 +191,10 @@ function evaluateTabReset(data, tab, lp) {
     return { ok: false, reason: "empty-catalog" };
   }
 
-  const force = cfg.autoResetForce === true;
+  // Opening/Closing are daily lists. When auto-reset is on and the time has
+  // passed, always reset this branch — do not wait for every task to be done.
   const incomplete = countIncomplete(data[tab]);
-  if (!force && incomplete > 0) {
-    return { ok: false, reason: "incomplete", incomplete, force: false, resetMin };
-  }
-
-  return { ok: true, force, resetMin, catalogActive, incomplete };
+  return { ok: true, force: true, resetMin, catalogActive, incomplete };
 }
 
 /**

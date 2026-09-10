@@ -6,16 +6,16 @@
 // initScheduleDnd().
 
 import { validateScheduleDraft } from "./schedule-validator.js?v=20260817_build_hours";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260902_sched_dual";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260903_sched_lock";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { loadCrossLocationBusyForWeek } from "./schedule-cloud.js?v=20260902_sched_dual";
+import { loadCrossLocationBusyForWeek } from "./schedule-cloud.js?v=20260903_sched_lock";
 import {
   formatScheduleTimeRangeDisplay,
   getApprovedPartialTimeConflictMessage,
   getScheduleStaffKey,
   getScheduleStaffRole,
   getWeekRange,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   cloneScheduleDraft,
   dayHasManualOff,
@@ -25,12 +25,12 @@ import {
   pushScheduleUndoSnapshot,
   removeManualOffForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260902_sched_dual";
+} from "./schedule-draft.js?v=20260903_sched_lock";
 import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 
 // -- injected via initScheduleDnd() (wired in schedule-ui.js) --
 let renderScheduleBoard;

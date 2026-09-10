@@ -52,7 +52,7 @@ let _writeChain = Promise.resolve();
 // Version marker + rolling client-side event trace. The trace rides along on
 // every queueState write (payload.debugTrace) so a bad write observed in the
 // cloud can be traced back to the exact client-side sequence that produced it.
-const QUEUE_CLIENT_VER = "20260902_hist_iso";
+const QUEUE_CLIENT_VER = "20260904_no_resurrect";
 function ffQueueTrace(ev, info) {
   try {
     if (typeof window === "undefined") return;
@@ -347,6 +347,26 @@ function ffIsQueueIntentAction(action) {
   if (/^join blocked/i.test(a)) return false;
   return /^(start|finish|join|remove|add technician|queue reset|automatic queue reset)/i.test(a);
 }
+function ffIsQueueAddAction(action) {
+  const a = String(action || "").trim();
+  if (/^join blocked/i.test(a)) return false;
+  return /^(join|add technician)/i.test(a);
+}
+function ffJustifiedAddNames(localLog, knownLog) {
+  const names = new Set();
+  const known = new Set((Array.isArray(knownLog) ? knownLog : []).map(ffLogEntryKey));
+  const now = Date.now();
+  (Array.isArray(localLog) ? localLog : []).forEach((e) => {
+    if (!e || typeof e !== "object") return;
+    if (known.has(ffLogEntryKey(e))) return;
+    if (!ffIsQueueAddAction(e.action)) return;
+    const ts = typeof e.ts === "number" ? e.ts : 0;
+    if (!ts || Math.abs(now - ts) > QUEUE_REMOVAL_JUSTIFY_WINDOW_MS) return;
+    const w = ffNormWorkerName(e.worker);
+    if (w) names.add(w);
+  });
+  return names;
+}
 function ffJustifiedWorkerNames(localLog, knownLog) {
   const names = new Set();
   const known = new Set((Array.isArray(knownLog) ? knownLog : []).map(ffLogEntryKey));
@@ -507,7 +527,6 @@ function ffProtectCloudData(body, allowExplicitReplace) {
     const srvQueue = Array.isArray(srv.queue) ? srv.queue : [];
     const srvService = Array.isArray(srv.service) ? srv.service : [];
     const srvLog = Array.isArray(srv.log) ? srv.log : [];
-    if (!srvQueue.length && !srvService.length && !srvLog.length) return body;
     const out = Object.assign({}, body, {
       queue: Array.isArray(body.queue) ? body.queue.slice() : [],
       service: Array.isArray(body.service) ? body.service.slice() : [],
@@ -560,6 +579,25 @@ function ffProtectCloudData(body, allowExplicitReplace) {
       ffQueueTrace("write:guard-bounced-move", { n: bounce.length });
       console.warn("[QueueCloud] write would move people without a fresh action — bounced them", bounce);
       writeQueueDiag("guard-bounced-move", { bounced: bounce.slice(0, 12) });
+    }
+    // 4. Adds must be a fresh Join / Add technician. Overnight tablets still
+    // hold yesterday's names; the restore-only guard used to KEEP those extras
+    // on top of whoever already joined this morning (Sep 4 Brickell).
+    const addJustified = ffJustifiedAddNames(body.log, srvLog);
+    const liveKeys = ffCollectAllKeys(srvQueue.concat(srvService));
+    const stripped = [];
+    const keepLiveOrJustified = (it) => {
+      if (ffKeysOverlap(ffQueueItemAllKeys(it), liveKeys)) return true;
+      if (addJustified.has(ffNormWorkerName(it && it.name))) return true;
+      stripped.push((it && it.name) || "?");
+      return false;
+    };
+    out.queue = out.queue.filter(keepLiveOrJustified);
+    out.service = out.service.filter(keepLiveOrJustified);
+    if (stripped.length) {
+      ffQueueTrace("write:guard-stripped-adds", { n: stripped.length });
+      console.warn("[QueueCloud] write would resurrect people the cloud already cleared — stripped them", stripped);
+      writeQueueDiag("guard-stripped-adds", { stripped: stripped.slice(0, 12) });
     }
     return out;
   } catch (e) {
@@ -1038,12 +1076,11 @@ function writeState(capturedState) {
       payload.debugTrace = window.__ff_queueTrace.slice(-25);
     }
   } catch (_) {}
-  // Also sync ff_queues_v1 (auto-reset settings). runtime.* is server-owned and
-  // is stripped so this write can never clobber the auto-reset once-per-day stamp.
-  try {
-    const raw = localStorage.getItem('ff_queues_v1');
-    if (raw) payload.queueSettings = ffStripServerOwnedRuntime(JSON.parse(raw));
-  } catch (_) {}
+  // Do NOT attach queueSettings here. A queue move/save from a device whose
+  // local ff_queues_v1 is missing queueGeoFence would REPLACE the whole
+  // queueSettings map (Firestore merge is top-level only) and wipe Salon
+  // Location + Time Clock enforcement. Settings persist only via
+  // queueCloudWriteSettings.
   // Optimistic-concurrency commit. rev is stamped at the moment of the write
   // from the freshest tracked revision (snapshots + guard reads keep it
   // current), so the security rule serializes concurrent writers. On a stale-rev
@@ -1065,13 +1102,10 @@ function writeState(capturedState) {
   // .runtime.lastAutoResetDate stamped by the scheduled reset) survive the write.
   // queue/service/log are arrays and are replaced wholesale by merge (Firestore
   // does not element-merge arrays), so add/remove/reset semantics are unchanged.
-  const writeAt = (rawBody, baseRev) => {
-    // Final safety net: never delete people/history the cloud currently has
-    // unless this write carries a fresh action justifying it (see guard docs).
-    const body = ffProtectCloudData(rawBody, isExplicitIntent);
-    return setDoc(ref, Object.assign({}, body, { rev: baseRev + 1 }), { merge: true })
+  const persistAt = (body, revBase) => {
+    return setDoc(ref, Object.assign({}, body, { rev: revBase + 1 }), { merge: true })
     .then(() => {
-      if (_lastCloudRev <= baseRev) _lastCloudRev = baseRev + 1;
+      if (_lastCloudRev <= revBase) _lastCloudRev = revBase + 1;
       // Our write is now the authoritative state — make it the next merge base.
       setLastServerState(body.queue || [], body.service || [], body.log || []);
       _lastCloudLogLen = Array.isArray(body.log) ? body.log.length : _lastCloudLogLen;
@@ -1083,10 +1117,57 @@ function writeState(capturedState) {
           window.__ff_queueLastCloudUpdateReason = body.lastUpdateReason || reason || "";
         }
       }
-      const result = queueWriteResult(true, "ok", { rev: baseRev + 1, reason: body.lastUpdateReason || reason });
-      ffQueueTrace("write:ok", { rev: baseRev + 1, q: Array.isArray(body.queue) ? body.queue.length : 0, s: Array.isArray(body.service) ? body.service.length : 0 });
+      const result = queueWriteResult(true, "ok", { rev: revBase + 1, reason: body.lastUpdateReason || reason });
+      ffQueueTrace("write:ok", { rev: revBase + 1, q: Array.isArray(body.queue) ? body.queue.length : 0, s: Array.isArray(body.service) ? body.service.length : 0 });
       logQueueWrite("write ok", result);
       return result;
+    });
+  };
+
+  const writeAt = (rawBody, baseRev) => {
+    if (isExplicitIntent) {
+      return persistAt(ffProtectCloudData(rawBody, true), baseRev);
+    }
+    // Always reconcile against the LIVE cloud before writing. An overnight
+    // tablet's in-memory "last server state" still holds yesterday's names,
+    // so the old resurrection check thought the leftover list was already
+    // known and let it through.
+    return getDocFromServer(ref).then((snap) => {
+      let revBase = baseRev;
+      if (snap.exists()) {
+        const data = snap.data() || {};
+        const sq = Array.isArray(data.queue) ? data.queue : [];
+        const ss = Array.isArray(data.service) ? data.service : [];
+        const sl = Array.isArray(data.log) ? data.log : [];
+        setAuthServerState(sq, ss, sl);
+        if (typeof data.rev === "number" && data.rev >= 0) {
+          _lastCloudRev = data.rev;
+          revBase = data.rev;
+        }
+        _lastCloudLogLen = sl.length;
+        const liveKeys = ffCollectAllKeys(sq.concat(ss));
+        const baseGhosts = []
+          .concat(_lastServerState.queue || [])
+          .concat(_lastServerState.service || [])
+          .some((it) => !ffKeysOverlap(ffQueueItemAllKeys(it), liveKeys));
+        if (baseGhosts) setLastServerState(sq, ss, sl);
+      }
+      const body = ffProtectCloudData(rawBody, false);
+      const rawPeople = (Array.isArray(rawBody.queue) ? rawBody.queue.length : 0)
+        + (Array.isArray(rawBody.service) ? rawBody.service.length : 0);
+      const keptPeople = (Array.isArray(body.queue) ? body.queue.length : 0)
+        + (Array.isArray(body.service) ? body.service.length : 0);
+      if (keptPeople < rawPeople) {
+        forceApplyCloudState(body.queue || [], body.service || [], body.log || [], {
+          force: true,
+          reason: "strip-unjustified-adds",
+        });
+      }
+      return persistAt(body, revBase);
+    }).catch((e) => {
+      if (isPermissionDenied(e)) throw e;
+      console.warn("[QueueCloud] refused write without a fresh server read", e);
+      return queueWriteResult(false, "pre-write-refresh-failed", { error: queueErrorMessage(e) });
     });
   };
 

@@ -16,7 +16,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { generateWeeklySchedule } from "./schedule-generator.js?v=20260817_build_hours";
-import { getEffectiveAvailabilityForDate } from "./schedule-availability.js?v=20260902_sched_dual";
+import { getEffectiveAvailabilityForDate } from "./schedule-availability.js?v=20260903_sched_lock";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   _ffSchedActiveLocId,
@@ -26,19 +26,19 @@ import {
   ffScheduleAppToast,
   getAuthedStaffIdForSchedule,
   loadScheduleWeekPingMap,
-} from "./schedule-ack.js?v=20260902_sched_dual";
-import { getSchedulePublishDocRef } from "./schedule-cloud.js?v=20260902_sched_dual";
+} from "./schedule-ack.js?v=20260903_sched_lock";
+import { getSchedulePublishDocRef } from "./schedule-cloud.js?v=20260903_sched_lock";
 import {
   formatWeekLabel,
   getScheduleStaffKey,
   getWeekRange,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   closeScheduleShiftEdit,
   ensureScheduleRebuildConfirmModal,
   escapeScheduleHtml,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 
 // -- injected via initScheduleDraft() (wired in schedule-ui.js) --
 let _ffActiveLocationNameForIcs;
@@ -238,18 +238,13 @@ let _scheduleWeekDraftAutosaveQueued = false;
 function setScheduleSaveStatus(text, kind) {
   const btn = document.getElementById("scheduleSaveDraftBtn");
   if (!btn) return;
+  const state = kind === "error" ? "is-error" : kind === "busy" ? "is-busy" : kind === "dirty" ? "is-dirty" : "is-ok";
+  btn.style.display = "none";
   btn.disabled = true;
   btn.textContent = text;
   btn.dataset.ffSaveStatusSeeded = "1";
-  btn.classList.remove("is-ok", "is-busy", "is-error");
-  const state = kind === "error" ? "is-error" : kind === "busy" ? "is-busy" : "is-ok";
+  btn.classList.remove("is-ok", "is-busy", "is-error", "is-dirty");
   btn.classList.add(state);
-  btn.style.background = "";
-  btn.style.borderColor = "";
-  btn.style.color = "";
-  const canEdit = scheduleUserCanManualEdit();
-  const buildUi = !canEdit || scheduleState.schedulePreviewMode === "build";
-  btn.style.display = canEdit && buildUi && state !== "is-ok" ? "inline-flex" : "none";
 }
 
 function markScheduleLocalDirty(weekStart) {
@@ -267,18 +262,49 @@ function queueScheduleWeekDraftAutosave() {
   if (!scheduleUserCanManualEdit()) return;
   if (_scheduleWeekDraftAutosaveTimer) {
     clearTimeout(_scheduleWeekDraftAutosaveTimer);
+    _scheduleWeekDraftAutosaveTimer = null;
   }
+  const weekRange = getWeekRange(scheduleState.schedulePreviewWeekStart);
+  if (weekRange.startDate) markScheduleLocalDirty(weekRange.startDate);
   setScheduleSaveStatus("Saving", "busy");
   _scheduleWeekDraftAutosaveTimer = setTimeout(() => {
     _scheduleWeekDraftAutosaveTimer = null;
-    void saveScheduleWeekDraftToCloud({ silent: true });
-  }, 450);
+    saveScheduleWeekDraftToCloud({ silent: true });
+  }, 900);
+}
+
+/** Write the in-progress draft to the salon now (before Publish / week switch). */
+async function flushScheduleWeekDraftToCloud() {
+  if (!scheduleUserCanManualEdit()) return;
+  if (_scheduleWeekDraftAutosaveTimer) {
+    clearTimeout(_scheduleWeekDraftAutosaveTimer);
+    _scheduleWeekDraftAutosaveTimer = null;
+  }
+  const started = Date.now();
+  if (!_scheduleWeekDraftAutosaveInFlight) {
+    await saveScheduleWeekDraftToCloud({ silent: true });
+  }
+  while (_scheduleWeekDraftAutosaveInFlight && Date.now() - started < 8000) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function scheduleWeekHasUnsavedLocalEdits(weekStart) {
+  const ws = String(weekStart || "").trim();
+  if (!ws || typeof localStorage === "undefined") return false;
+  const dk = getScheduleLocalDirtyStorageKey(ws);
+  return !!(dk && localStorage.getItem(dk) === "1");
+}
+
+/** Flush the cloud draft before leaving the week. Staff still see the last Publish. */
+async function scheduleConfirmLeaveWeekIfDirty() {
+  await flushScheduleWeekDraftToCloud();
+  return true;
 }
 
 /**
- * Last write on the server is the source of truth (same idea as the queue).
- * Edits auto-save to `weekDraftSnapshots`. Staff still only see a week after it
- * is Published — but once it is, every device shows this snapshot.
+ * Autosave the manager draft to `weekDraftSnapshots`. Staff keep seeing
+ * `weekPublishedSnapshots` until Publish copies this draft over.
  */
 async function saveScheduleWeekDraftToCloud(options = {}) {
   if (!scheduleUserCanManualEdit()) return;
@@ -333,7 +359,6 @@ async function saveScheduleWeekDraftToCloud(options = {}) {
     );
     clearScheduleLocalDirtyForCurrentUser(weekStart);
     setScheduleSaveStatus("Saved", "ok");
-    queuePublishedWeekAutoNotify();
   } catch (e) {
     scheduleState.scheduleSkipNextDraftSnapshotRefresh = false;
     markScheduleLocalDirty(weekStart);
@@ -351,7 +376,7 @@ async function saveScheduleWeekDraftToCloud(options = {}) {
 
 /**
  * Stand-by was only persisted to localStorage until "Notify staff"; VIEW users read Firestore, so they always saw "Not set".
- * After saving stand-by in the modal, merge `standByByDate` into the published week snapshot so everyone sees it without a separate notify.
+ * After saving stand-by in the modal, merge `standByByDate` into the manager draft. Staff see it after Publish.
  */
 async function syncPublishedWeekStandByToCloud(weekStart) {
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
@@ -379,7 +404,7 @@ async function syncPublishedWeekStandByToCloud(weekStart) {
       },
       { merge: true },
     );
-    ffScheduleAppToast("Stand by saved — visible to all staff.", 3500);
+    ffScheduleAppToast("Stand by saved. Publish to update the team.", 3500);
   } catch (e) {
     console.warn("[ScheduleUI] sync stand-by to cloud", e);
     ffScheduleAppToast("Could not save stand by. Check connection.", 4500);
@@ -693,8 +718,8 @@ function clearScheduleLocalDirtyForCurrentUser(weekStart) {
 }
 
 /**
- * Clears local draft + Firestore week snapshot so the next load uses fresh generateWeeklySchedule output.
- * (Deleting only localStorage is not enough — published weeks also load weekDraftSnapshots from Firestore.)
+ * Build a fresh generated schedule for THIS week. Autosaves the manager draft.
+ * Staff keep the last published copy until Publish.
  */
 async function runDiscardSavedScheduleWeekDraftAndReload() {
   if (!scheduleUserCanManualEdit()) return;
@@ -707,7 +732,6 @@ async function runDiscardSavedScheduleWeekDraftAndReload() {
   const weekStart = weekRange.startDate;
   if (!weekStart) return;
   clearSharedScheduleDraftOverrideForWeek(weekRange);
-  clearScheduleLocalDirtyForCurrentUser(weekStart);
   const manualKey = getScheduleManualOffStorageKey(weekRange);
   if (manualKey && typeof localStorage !== "undefined") {
     try {
@@ -716,24 +740,10 @@ async function runDiscardSavedScheduleWeekDraftAndReload() {
       /* ignore */
     }
   }
-  const ref = getSchedulePublishDocRef();
-  if (ref) {
-    try {
-      await updateDoc(ref, {
-        [`weekDraftSnapshots.${weekStart}`]: deleteField(),
-        [`staffShiftFingerprints.${weekStart}`]: deleteField(),
-        updatedAt: serverTimestamp(),
-      });
-    } catch (e) {
-      console.warn("[ScheduleUI] discard week draft snapshot", e);
-      ffScheduleAppToast(
-        e?.message || "Could not clear the cloud draft. Check connection or Firestore rules.",
-        5000,
-      );
-    }
-  }
   await refreshSchedulePreview({ ignoreSavedDrafts: true, persistFreshLocalDraft: true });
-  ffScheduleAppToast("Schedule rebuilt from rules for this week.", 4000);
+  markScheduleLocalDirty(weekStart);
+  queueScheduleWeekDraftAutosave();
+  ffScheduleAppToast("New schedule built for this week. Publish when the team should see it.", 5000);
 }
 
 async function discardSavedScheduleWeekDraftAndReload() {
@@ -752,16 +762,18 @@ async function discardSavedScheduleWeekDraftAndReload() {
   const published = scheduleState.schedulePublishedMap[weekStart] === true;
   const titleEl = document.getElementById("scheduleRebuildConfirmTitle");
   const bodyEl = document.getElementById("scheduleRebuildConfirmBody");
-  if (titleEl) titleEl.textContent = `Rebuild only ${weekLabel}?`;
+  if (titleEl) titleEl.textContent = "Are you sure you want to Build this week?";
+  const okEl = document.getElementById("scheduleRebuildConfirmOk");
+  if (okEl) okEl.textContent = "Yes, Build this week";
   if (bodyEl) {
     const scopeLine =
-      `This affects <strong>only this week</strong> (${escapeScheduleHtml(weekLabel)}) at <strong>${escapeScheduleHtml(locName)}</strong>. ` +
-      `No other week and no other branch is touched.`;
+      `This builds a <strong>new auto-generated schedule</strong> for <strong>this week only</strong> (${escapeScheduleHtml(weekLabel)}) at <strong>${escapeScheduleHtml(locName)}</strong>. ` +
+      `Other weeks and other branches stay exactly as they are.`;
     const lossLine = published
-      ? `<br/><br/><span style="color:#b91c1c;font-weight:700;">Warning: this week is already published.</span> ` +
-        `Rebuilding will replace the schedule your staff currently see with a fresh auto-generated one. ` +
-        `You'll need to review it — it is already visible to staff.`
-      : `<br/><br/>Your saved edits for this week will be replaced by a new schedule generated from your coverage rules.`;
+      ? `<br/><br/><span style="color:#b91c1c;font-weight:700;">This week is already published.</span> ` +
+        `Staff keep seeing the current salon schedule until you click <strong>Save</strong>. ` +
+        `After Save, this new Build replaces what they see.`
+      : `<br/><br/>The current schedule stays in the salon until you click <strong>Save</strong>. Cancel keeps everything as it is.`;
     bodyEl.innerHTML = scopeLine + lossLine;
   }
   el.style.display = "flex";
@@ -973,7 +985,11 @@ export {
   notifyStaffScheduleChanges,
   persistScheduleDraftOverrideFromState,
   persistScheduleManualOffFromState,
+  setScheduleSaveStatus,
+  scheduleWeekHasUnsavedLocalEdits,
+  scheduleConfirmLeaveWeekIfDirty,
   queueScheduleWeekDraftAutosave,
+  flushScheduleWeekDraftToCloud,
   persistStaffShiftFingerprintsForWeek,
   pushScheduleUndoSnapshot,
   removeManualOffForStaffDay,

@@ -7,4 +7,4 @@ export {
   goToSchedule,
   refreshSchedulePreview,
   hideScheduleScreen,
-} from "./schedule-nav.js?v=20260902_sched_dual";
+} from "./schedule-nav.js?v=20260903_sched_lock2";

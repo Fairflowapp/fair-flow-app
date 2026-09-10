@@ -964,15 +964,21 @@ function goToTimeClock() {
         if (document.getElementById('timeClockScreen')
             && document.getElementById('timeClockScreen').style.display !== 'none'
             && typeof window.ffInitTimeClockUI === 'function'
-            && window.__ffTCState && window.__ffTCState.view === 'clock') {
+            && window.__ffTCState
+            && (window.__ffTCState.view === 'clock' || window.__ffTCState.view === 'myhours')) {
           window.ffInitTimeClockUI();
         }
       }).catch(() => {});
     }
   } catch (_) {}
   if (window.__ffTCState) {
-    // Always enter through the PIN view - never land straight in Confirm.
-    if (window.__ffTCState.view !== 'manage') window.__ffTCState.view = 'clock';
+    // Logged-in staff land on My hours. Shared kiosk stays on the PIN pad.
+    // Never land in Confirm. Keep Manage if they were already there.
+    if (window.__ffTCState.view !== 'manage') {
+      window.__ffTCState.view = (typeof window.ffTCHomeView === 'function')
+        ? window.ffTCHomeView()
+        : 'clock';
+    }
     window.__ffTCState.confirmStaff = null;
     window.__ffTCState.confirmOpenEntry = null;
   }
@@ -5427,9 +5433,34 @@ function sanitizeQueueGeoFenceRadius(value) {
   return num;
 }
 
-function getQueueGeoFenceSettings() {
+function fenceSettingsFromLocationDoc(loc) {
+  if (!loc || typeof loc !== 'object') return null;
+  const defaults = getDefaultQueueGeoFenceSettings();
+  return {
+    enabled: loc.enforceQueue === true,
+    enforceQueue: loc.enforceQueue === true,
+    enforceTimeClock: loc.enforceTimeClock === true,
+    lat: Number.isFinite(Number(loc.lat)) ? Number(loc.lat) : defaults.lat,
+    lng: Number.isFinite(Number(loc.lng)) ? Number(loc.lng) : defaults.lng,
+    accuracy: Number.isFinite(Number(loc.geoAccuracy)) ? Math.round(Number(loc.geoAccuracy)) : defaults.accuracy,
+    allowedRadiusMeters: sanitizeQueueGeoFenceRadius(loc.allowedRadiusMeters),
+    updatedAt: Number.isFinite(Number(loc.geoUpdatedAt))
+      ? Number(loc.geoUpdatedAt)
+      : (Number.isFinite(Number(loc.updatedAt)) ? Number(loc.updatedAt) : defaults.updatedAt),
+  };
+}
+
+function getQueueGeoFenceSettings(locationId) {
+  const locKey = String(locationId || '').trim() || _ffQueueLocKey();
+  // Cloud location doc wins. Local ff_queues_v1 is only a fallback.
+  try {
+    const byId = typeof window.ffLocationsById === 'function' ? window.ffLocationsById() : {};
+    if (byId && byId[locKey]) {
+      const fromCloud = fenceSettingsFromLocationDoc(byId[locKey]);
+      if (fromCloud) return fromCloud;
+    }
+  } catch (_) {}
   const queues = getQueuesData();
-  const locKey = _ffQueueLocKey();
   // Only read the per-branch bucket. No fallback to 'default' for non-default
   // branches - this prevents a salon-wide GeoFence set under a legacy session
   // (or by a different user who only ever used the default bucket) from
@@ -5490,10 +5521,21 @@ function saveQueueGeoFenceSettings(queueGeoFence) {
     updatedAt: Number.isFinite(Number(queueGeoFence?.updatedAt)) ? Number(queueGeoFence.updatedAt) : current.updatedAt
   };
   setQueuesData(queues);
-  // Persist to the cloud (same path as Auto Reset) so the Location Restriction
-  // toggle/radius survive refresh and don't get reverted by an in-flight
-  // snapshot. ff_queues_v1 carries queueGeoFence, so the shared writer covers it.
-  if (typeof ffPersistQueueSettingsToCloud === 'function') {
+  // Location document is the source of truth (all devices + the punch server).
+  if (typeof window.ffSaveLocationGeoFence === 'function' && locKey && locKey !== 'default') {
+    Promise.resolve(window.ffSaveLocationGeoFence(locKey, queues[locKey].settings.queueGeoFence)).then(function (res) {
+      if (res && res.ok) {
+        if (typeof window.showToast === 'function') window.showToast('Location settings saved', 2000);
+      } else {
+        console.warn('[SalonLocation] cloud save did not land:', res);
+        if (typeof window.showToast === 'function') {
+          window.showToast('Location settings NOT saved to cloud', 5000);
+        }
+      }
+    }).catch(function (e) {
+      console.warn('[SalonLocation] cloud save failed', e);
+    });
+  } else if (typeof ffPersistQueueSettingsToCloud === 'function') {
     ffPersistQueueSettingsToCloud('Location settings');
   }
 }
@@ -5530,8 +5572,13 @@ function isQueueGeoFenceActive(queueGeoFence) {
 
 /** Time Clock mirror of isQueueGeoFenceActive - shares the same geofence
  *  data (per-branch salon location) but a separate enforcement flag. */
-function isTimeClockGeoFenceActive(geoFence) {
-  const settings = geoFence || getQueueGeoFenceSettings();
+function isTimeClockGeoFenceActive(geoFenceOrLocationId) {
+  let settings;
+  if (geoFenceOrLocationId && typeof geoFenceOrLocationId === 'object') {
+    settings = geoFenceOrLocationId;
+  } else {
+    settings = getQueueGeoFenceSettings(geoFenceOrLocationId);
+  }
   return settings.enforceTimeClock === true && hasSavedQueueGeoFenceLocation(settings);
 }
 window.isTimeClockGeoFenceActive = isTimeClockGeoFenceActive;
@@ -5625,13 +5672,22 @@ function renderSalonLocationCard() {
     } else {
       const updatedLabel = formatQueueGeoFenceUpdatedAt(geo.updatedAt);
       statusEl.textContent = updatedLabel
-        ? `Saved. Last updated: ${updatedLabel}`
-        : 'Saved';
+        ? `Saved in the cloud. Last updated: ${updatedLabel}`
+        : 'Saved in the cloud';
       statusEl.style.color = '#166534';
     }
   }
 }
 window.renderSalonLocationCard = renderSalonLocationCard;
+if (!window.__ffSalonLocationCloudListenerBound) {
+  window.__ffSalonLocationCloudListenerBound = true;
+  document.addEventListener('ff-locations-updated', function () {
+    try { renderSalonLocationCard(); } catch (_) {}
+    try {
+      if (typeof renderManageQueueGeoFenceSettings === 'function') renderManageQueueGeoFenceSettings();
+    } catch (_) {}
+  });
+}
 
 /**
  * Wire the Settings - Salon Location card once. Idempotent - re-entry is a

@@ -2,7 +2,7 @@
 // Schedule UI runtime — week filter, navigation, event binding, window hooks.
 // Extracted verbatim from schedule-nav-runtime.js (nav-runtime split T2).
 
-import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260902_sched_dual";
+import { refreshSchedulePreview } from "./schedule-nav-runtime-preview.js?v=20260903_sched_lock";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   renderScheduleBoard,
@@ -11,39 +11,46 @@ import {
   setSchedulePreviewView,
 } from "./schedule-render.js?v=20260827_1258notes";
 import {
+  clearScheduleLocalDirtyForCurrentUser,
+  clearSharedScheduleDraftOverrideForWeek,
+  flushScheduleWeekDraftToCloud,
   discardSavedScheduleWeekDraftAndReload,
   notifyStaffScheduleChanges,
+  scheduleConfirmLeaveWeekIfDirty,
+  scheduleWeekHasUnsavedLocalEdits,
   saveScheduleWeekDraftToCloud,
   undoScheduleLastEdit,
-} from "./schedule-draft.js?v=20260902_sched_dual";
+} from "./schedule-draft.js?v=20260903_sched_lock";
 import {
   canViewScheduleBoardForCurrentWeek,
   ensureSchedulePublishListener,
   teardownSchedulePublishListener,
   toggleScheduleWeekPublished,
   updateSchedulePublishToggleUi,
-} from "./schedule-cloud.js?v=20260902_sched_dual";
+} from "./schedule-cloud.js?v=20260903_sched_lock";
 import {
   addDays,
   getScheduleStaffKey,
   getStartOfWeek,
+  getWeekRange,
   isTechnicianScheduleStaff,
   syncScheduleWeekFilterUi,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   ffScheduleAppToast,
   submitScheduleWeekAck,
   teardownScheduleAckListener,
   teardownScheduleChangePingListener,
-} from "./schedule-ack.js?v=20260902_sched_dual";
-import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-ack.js?v=20260903_sched_lock";
+import { getScheduleAccessContext } from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 import {
   renderScheduleCrossLocationConflictBanner,
   renderScheduleViewTabs,
   scheduleInboxUserIsFirestoreManager,
-} from "./schedule-nav-core.js?v=20260902_sched_dual";
+} from "./schedule-nav-core.js?v=20260903_sched_lock2";
 
-function applyScheduleWeekFilter() {
+async function applyScheduleWeekFilter() {
+  if (!(await scheduleConfirmLeaveWeekIfDirty())) return;
   const filterSelect = document.getElementById("scheduleWeekFilter");
   const customDateInput = document.getElementById("scheduleCustomWeekDate");
   const mode = filterSelect?.value || "current";
@@ -103,6 +110,7 @@ function hideScheduleScreen() {
   const btn = document.getElementById("scheduleBtn");
   if (btn) btn.classList.remove("active");
   if (typeof window.ffUpdateMobileHeaderTitle === "function") window.ffUpdateMobileHeaderTitle();
+  void flushScheduleWeekDraftToCloud();
 }
 
 export async function goToSchedule() {
@@ -163,6 +171,21 @@ export async function goToSchedule() {
   document.querySelectorAll(".btn-pill").forEach((button) => button.classList.remove("active"));
   const scheduleBtn = document.getElementById("scheduleBtn");
   if (scheduleBtn) scheduleBtn.classList.add("active");
+
+  try {
+    await flushScheduleWeekDraftToCloud();
+  } catch (_) {}
+  // Opening Schedule always lands on this week so phones and the computer match.
+  scheduleState.schedulePreviewWeekStart = getStartOfWeek(new Date());
+  const weekFilter = document.getElementById("scheduleWeekFilter");
+  if (weekFilter) weekFilter.value = "current";
+  syncScheduleWeekFilterUi();
+  try {
+    const openRange = getWeekRange(scheduleState.schedulePreviewWeekStart);
+    if (!scheduleWeekHasUnsavedLocalEdits(openRange.startDate)) {
+      clearSharedScheduleDraftOverrideForWeek(openRange);
+    }
+  } catch (_) {}
 
   await refreshSchedulePreview();
 
@@ -231,7 +254,7 @@ function bindScheduleUi() {
   document.getElementById("scheduleViewTechniciansBtn")?.addEventListener("click", () => setSchedulePreviewView("technicians"));
   document.getElementById("scheduleWeekFilter")?.addEventListener("change", () => {
     syncScheduleWeekFilterUi();
-    const mode = document.getElementById("scheduleWeekFilter")?.value || "next";
+    const mode = document.getElementById("scheduleWeekFilter")?.value || "current";
     if (mode !== "custom") applyScheduleWeekFilter();
   });
   document.getElementById("scheduleApplyCustomWeekBtn")?.addEventListener("click", applyScheduleWeekFilter);

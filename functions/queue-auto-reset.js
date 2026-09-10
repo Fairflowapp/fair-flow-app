@@ -226,6 +226,25 @@ async function runQueueAutoResetSweep(now, opts = {}) {
             lastUpdatedByUid: "server:queueAutoReset",
           };
           if (force) update.service = [];
+          const removed = arrLen(freshData.queue) + (force ? arrLen(freshData.service) : 0);
+          const hh = String(Math.floor(lp.minutes / 60)).padStart(2, "0");
+          const mm = String(lp.minutes % 60).padStart(2, "0");
+          const dateParts = String(lp.dateKey || "").split("-");
+          const dateMd = dateParts.length === 3 ? `${dateParts[1]}/${dateParts[2]}` : "";
+          const prevLog = Array.isArray(freshData.log) ? freshData.log : [];
+          let nextLog = prevLog.concat([{
+            date: dateMd,
+            time: `${hh}:${mm}`,
+            action: removed ? `Automatic Queue Reset (${removed} workers removed)` : "Automatic Queue Reset",
+            role: "System",
+            performedBy: "System",
+            worker: "",
+            source: "queue",
+            locationId: docId === "default" ? "" : docId,
+            ts: Date.now(),
+          }]);
+          if (nextLog.length > 1500) nextLog = nextLog.slice(-1500);
+          update.log = nextLog;
           // Stamp lastAutoResetDate inside the same per-location settings bucket.
           update[`queueSettings.${docId}.runtime.lastAutoResetDate`] = lp.dateKey;
           tx.update(qDoc.ref, update);

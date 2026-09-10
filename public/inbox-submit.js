@@ -13,6 +13,7 @@ import {
   getDoc,
   getDocs,
   addDoc,
+  writeBatch,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
@@ -560,41 +561,51 @@ export async function submitRequest(type) {
     
     const hasRecipients = sentToUids && sentToUids.some(u => u && u.trim());
     if (hasRecipients) {
-      // forUid comes directly from data-uid (Firebase UID) — no lookup needed
-      const forUid = sentToUids.find(u => u && u.trim()) || sentToUids[0];
-      const forStaffId = sentToStaffIds[0] || '';
-      const forStaffName = sentToNames[0] || '';
-
-      const forUidStr = ffInboxRuleString(forUid).trim();
-      const forStaffIdStr = ffInboxRuleString(forStaffId);
-      const forStaffNameStr = ffInboxRuleString(forStaffName);
+      const creatorUid = inboxState.currentUserProfile.uid;
       const createdByNameStr = ffInboxRuleString(
         creatorName || inboxState.currentUserProfile.name || inboxState.currentUserProfile.displayName
       );
       const createdByRoleStr = ffInboxRuleString(inboxState.currentUserProfile.role);
+      const recipients = [];
+      const seenUids = new Set();
+      sentToUids.forEach((rawUid, i) => {
+        const uid = ffInboxRuleString(rawUid).trim();
+        if (!uid || seenUids.has(uid) || uid === creatorUid) return;
+        seenUids.add(uid);
+        recipients.push({
+          uid,
+          staffId: ffInboxRuleString(sentToStaffIds[i] || ""),
+          name: ffInboxRuleString(sentToNames[i] || ""),
+        });
+      });
 
-      console.log('[Inbox] Sending request: createdByUid=', inboxState.currentUserProfile.uid, 'forUid=', forUidStr, 'forName=', forStaffNameStr);
-
-      if (forUidStr === inboxState.currentUserProfile.uid) {
+      if (recipients.length === 0) {
         showToast('Cannot send a request to yourself', 'error');
         return;
       }
 
-      const requestDoc = {
-        ...baseDoc,
-        createdByUid: inboxState.currentUserProfile.uid,
-        createdByStaffId: creatorStaffId,
-        createdByName: createdByNameStr,
-        createdByRole: createdByRoleStr,
-        forUid: forUidStr,
-        forStaffId: forStaffIdStr,
-        forStaffName: forStaffNameStr,
-        createdAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp(),
-        updatedAt: null
-      };
-      const docRef = await addDoc(collection(db, `salons/${salonId}/inboxItems`), requestDoc);
-      console.log('[Inbox] Request created with forUid=', forUidStr, 'docId=', docRef.id);
+      console.log('[Inbox] Sending request: createdByUid=', creatorUid, 'recipients=', recipients.map((r) => r.uid));
+
+      const inboxCol = collection(db, `salons/${salonId}/inboxItems`);
+      const batch = writeBatch(db);
+      recipients.forEach((recip) => {
+        const ref = doc(inboxCol);
+        batch.set(ref, {
+          ...baseDoc,
+          createdByUid: creatorUid,
+          createdByStaffId: creatorStaffId,
+          createdByName: createdByNameStr,
+          createdByRole: createdByRoleStr,
+          forUid: recip.uid,
+          forStaffId: recip.staffId,
+          forStaffName: recip.name,
+          createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          updatedAt: null
+        });
+      });
+      await batch.commit();
+      console.log('[Inbox] Request created for', recipients.length, 'manager(s)');
     } else {
       // Technician creating for self — direct Firestore (forUid = creator)
       const createdByNameStr = ffInboxRuleString(

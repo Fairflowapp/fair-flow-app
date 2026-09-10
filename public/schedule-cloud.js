@@ -17,7 +17,7 @@ import {
   deleteField,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db } from "/app.js?v=20260610_force_lp_ios";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260902_sched_dual";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260903_sched_lock";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
   _ffSchedActiveLocId,
@@ -27,16 +27,16 @@ import {
   ffScheduleStaffBroadcastToast,
   getAuthedStaffIdForSchedule,
   updateScheduleWeekAckStrip,
-} from "./schedule-ack.js?v=20260902_sched_dual";
+} from "./schedule-ack.js?v=20260903_sched_lock";
 import {
   formatWeekLabel,
   getWeekRange,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 
 // -- injected via initScheduleCloud() (wired in schedule-ui.js after storage constants initialize) --
 let SCHEDULE_DRAFT_OVERRIDE_KEY_VER;
@@ -55,6 +55,20 @@ let loadScheduleDraftOverridePayload;
 let persistStaffShiftFingerprintsForWeek;
 let notifyStaffScheduleChanges;
 let refreshSchedulePreview;
+let flushScheduleWeekDraftToCloud;
+
+function _ffSchedLocalDirtyForWeek(weekStart) {
+  const ws = String(weekStart || "").trim();
+  if (!ws || typeof localStorage === "undefined") return false;
+  try {
+    const salon = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim() || "_local";
+    const sid = getAuthedStaffIdForSchedule() || "_";
+    const dk = `ff_schedule_local_dirty_v1_${salon}_${ws}_${sid}`;
+    return localStorage.getItem(dk) === "1";
+  } catch (_) {
+    return false;
+  }
+}
 let serializeDraftDaysForStorage;
 
 export function initScheduleCloud(deps) {
@@ -69,6 +83,7 @@ export function initScheduleCloud(deps) {
     notifyStaffScheduleChanges,
     refreshSchedulePreview,
     serializeDraftDaysForStorage,
+    flushScheduleWeekDraftToCloud,
   } = deps);
   if (typeof deps.cloneStandByByDateMap === "function") {
     cloneStandByByDateMap = deps.cloneStandByByDateMap;
@@ -93,22 +108,75 @@ async function getSchedulePublishSnap(ref) {
   }
 }
 
-/** Saved by managers on Notify / publish so all devices see the same shifts (not only localStorage). */
-async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart) {
+function _ffSchedBlockHasDays(block) {
+  return !!(block && Array.isArray(block.days) && block.days.length);
+}
+
+/** Managers read the live draft. Staff read the last Publish copy. */
+function pickWeekSnapshotBlock(data, weekStart, publishedAudience) {
+  const drafts = data && data.weekDraftSnapshots && typeof data.weekDraftSnapshots === "object"
+    ? data.weekDraftSnapshots
+    : {};
+  const pubs = data && data.weekPublishedSnapshots && typeof data.weekPublishedSnapshots === "object"
+    ? data.weekPublishedSnapshots
+    : {};
+  const publishedMap = data && data.published && typeof data.published === "object" ? data.published : {};
+  if (publishedAudience) {
+    if (_ffSchedBlockHasDays(pubs[weekStart])) return pubs[weekStart];
+    if (publishedMap[weekStart] === true) return drafts[weekStart] || null;
+    return null;
+  }
+  return drafts[weekStart] || null;
+}
+
+async function seedPublishedSnapshotFromDraftIfNeeded(ref, data, weekStart) {
+  if (!ref || !weekStart || !data) return;
+  const publishedMap = data.published && typeof data.published === "object" ? data.published : {};
+  if (publishedMap[weekStart] !== true) return;
+  const pubs = data.weekPublishedSnapshots && typeof data.weekPublishedSnapshots === "object"
+    ? data.weekPublishedSnapshots
+    : {};
+  if (_ffSchedBlockHasDays(pubs[weekStart])) return;
+  const draft = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
+  if (!_ffSchedBlockHasDays(draft)) return;
+  try {
+    await updateDoc(ref, {
+      [`weekPublishedSnapshots.${weekStart}`]: {
+        savedAt: draft.savedAt || serverTimestamp(),
+        days: draft.days,
+        standByByDate: draft.standByByDate && typeof draft.standByByDate === "object" ? draft.standByByDate : {},
+        standByStaffId: typeof draft.standByStaffId === "string" ? draft.standByStaffId : "",
+      },
+      updatedAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("[ScheduleUI] seed published snapshot", e);
+  }
+}
+
+function snapshotBlockToReturn(block) {
+  const days = _ffSchedBlockHasDays(block) ? block.days : null;
+  const standByByDate =
+    block && block.standByByDate && typeof block.standByByDate === "object"
+      ? cloneStandByByDateMap(block.standByByDate)
+      : {};
+  const standByStaffId = block && typeof block.standByStaffId === "string" ? block.standByStaffId.trim() : "";
+  return { days, standByByDate, standByStaffId };
+}
+
+/** Saved draft for editors; last Publish copy for staff. */
+async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart, options) {
+  const publishedAudience = !!(options && options.publishedAudience === true);
   const ref = getSchedulePublishDocRef();
   if (!ref || !weekStart) return { days: null, standByByDate: {}, standByStaffId: "" };
   try {
     const snap = await getSchedulePublishSnap(ref);
     if (!snap || !snap.exists()) return { days: null, standByByDate: {}, standByStaffId: "" };
-    const data = snap.data();
-    const block = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
-    const days = block && Array.isArray(block.days) && block.days.length ? block.days : null;
-    const standByByDate =
-      block?.standByByDate && typeof block.standByByDate === "object"
-        ? cloneStandByByDateMap(block.standByByDate)
-        : {};
-    const standByStaffId = typeof block?.standByStaffId === "string" ? block.standByStaffId.trim() : "";
-    return { days, standByByDate, standByStaffId };
+    const data = snap.data() || {};
+    if (!publishedAudience) {
+      await seedPublishedSnapshotFromDraftIfNeeded(ref, data, weekStart);
+    }
+    return snapshotBlockToReturn(pickWeekSnapshotBlock(data, weekStart, publishedAudience));
   } catch (e) {
     console.warn("[ScheduleUI] load weekDraftSnapshots", e);
     return { days: null, standByByDate: {}, standByStaffId: "" };
@@ -120,16 +188,17 @@ async function loadWeekDraftSnapshotBlockFromPublishDoc(weekStart) {
  * block. Used by the cross-location busy map so Build Schedule in branch B
  * knows which shifts branch A already has for the same staff + same week.
  */
-async function loadOtherLocationWeekDraftDays(locationId, weekStart) {
+async function loadOtherLocationWeekDraftDays(locationId, weekStart, options) {
   const salonId = String(typeof window !== "undefined" && window.currentSalonId ? window.currentSalonId : "").trim();
   if (!salonId || !locationId || !weekStart) return null;
   try {
     const ref = doc(db, `salons/${salonId}/schedulePublish/weeks_${locationId}`);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    const data = snap.data();
-    const block = data.weekDraftSnapshots && data.weekDraftSnapshots[weekStart];
-    const days = block && Array.isArray(block.days) && block.days.length ? block.days : null;
+    const data = snap.data() || {};
+    const publishedAudience = !!(options && options.publishedAudience === true);
+    const block = pickWeekSnapshotBlock(data, weekStart, publishedAudience);
+    const days = _ffSchedBlockHasDays(block) ? block.days : null;
     return days;
   } catch (e) {
     console.warn("[ScheduleUI] load other-location weekDraftSnapshots", e);
@@ -281,8 +350,9 @@ async function loadCrossLocationBusyForWeek(weekRange) {
 /**
  * Load THIS user's own shifts across every OTHER active location for a week,
  * so the unified "My shifts" view can render all their shifts in one row
- * regardless of which branch is currently active. Same priority order as
- * cross-location busy (override > last-build cache > cloud snapshot).
+ * regardless of which branch is currently active. Display reads the last
+ * last published copy for staff, live manager draft for editors
+ * (not last-build or unsaved local drafts).
  *
  * Returns a Map<dateKey, Array<{ locationId, locationName, startTime,
  * endTime, lunchBreakEnabled, lunchBreakStart, lunchBreakEnd }>>.
@@ -294,18 +364,20 @@ async function loadMyShiftsFromOtherLocationsForWeek(weekRange) {
     const myId = String(getAuthedStaffIdForSchedule() || "").trim();
     if (!myId || !weekRange?.startDate) return empty;
     const activeLoc = _ffSchedActiveLocId();
-    const allLocs = (typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
-      ? (window.ffGetActiveLocations() || [])
-      : [];
-    const others = allLocs.filter((l) => l && l.id && String(l.id) !== String(activeLoc));
+    const allLocs = (typeof window !== "undefined" && typeof window.ffGetUserAllowedLocations === "function")
+      ? (window.ffGetUserAllowedLocations() || [])
+      : ((typeof window !== "undefined" && typeof window.ffGetActiveLocations === "function")
+        ? (window.ffGetActiveLocations() || [])
+        : []);
+    const others = allLocs.filter((l) => l && l.id && l.isActive !== false && String(l.id) !== String(activeLoc));
     if (others.length === 0) return empty;
 
     const perLoc = await Promise.all(others.map(async (loc) => {
-      const override = loadOtherLocationLocalDraftDays(loc.id, weekRange);
-      if (Array.isArray(override) && override.length > 0) return { loc, days: override };
-      const lastBuild = loadOtherLocationLastBuildCache(loc.id, weekRange);
-      if (Array.isArray(lastBuild) && lastBuild.length > 0) return { loc, days: lastBuild };
-      const cloud = await loadOtherLocationWeekDraftDays(loc.id, weekRange.startDate);
+      // Display only the last saved salon copy. Last-build / local drafts
+      // stay in the Build busy-map so unsaved hours never show as the week.
+      const cloud = await loadOtherLocationWeekDraftDays(loc.id, weekRange.startDate, {
+        publishedAudience: !scheduleUserCanManualEdit(),
+      });
       return { loc, days: Array.isArray(cloud) ? cloud : null };
     }));
 
@@ -361,8 +433,7 @@ function isAuthedUserMultiLocationForWeek() {
  * Returns Map<staffKey, Map<dateKey, Array<{ locationId, locationName,
  * startTime, endTime, lunchBreakEnabled, lunchBreakStart, lunchBreakEnd }>>>.
  * Each shift is registered under BOTH the staffId and uid so the renderer can
- * find it by either identity. Read-only; same priority order (override >
- * last-build cache > cloud snapshot) and same fail-open behavior as the others.
+ * find it by either identity. Display reads the last saved cloud snapshot only.
  */
 async function loadAllStaffShiftsFromOtherLocationsForWeek(weekRange) {
   const empty = new Map();
@@ -376,10 +447,8 @@ async function loadAllStaffShiftsFromOtherLocationsForWeek(weekRange) {
     if (others.length === 0) return empty;
 
     const perLoc = await Promise.all(others.map(async (loc) => {
-      const override = loadOtherLocationLocalDraftDays(loc.id, weekRange);
-      if (Array.isArray(override) && override.length > 0) return { loc, days: override };
-      const lastBuild = loadOtherLocationLastBuildCache(loc.id, weekRange);
-      if (Array.isArray(lastBuild) && lastBuild.length > 0) return { loc, days: lastBuild };
+      // Display only the last saved salon copy. Last-build / local drafts
+      // stay in the Build busy-map so unsaved hours never show as the week.
       const cloud = await loadOtherLocationWeekDraftDays(loc.id, weekRange.startDate);
       return { loc, days: Array.isArray(cloud) ? cloud : null };
     }));
@@ -471,9 +540,15 @@ function ensureSchedulePublishListener() {
       const publishedVisibilityChanged = prevPublishedJson !== JSON.stringify(scheduleState.schedulePublishedMap);
 
       const drafts = data.weekDraftSnapshots && typeof data.weekDraftSnapshots === "object" ? data.weekDraftSnapshots : {};
+      const publishedSnaps = data.weekPublishedSnapshots && typeof data.weekPublishedSnapshots === "object"
+        ? data.weekPublishedSnapshots
+        : {};
       const wrSnap = getWeekRange(scheduleState.schedulePreviewWeekStart);
       const wsSnap = wrSnap.startDate;
-      const block = drafts[wsSnap] && typeof drafts[wsSnap] === "object" ? drafts[wsSnap] : null;
+      const canEditSnap = scheduleUserCanManualEdit();
+      const block = canEditSnap
+        ? (drafts[wsSnap] && typeof drafts[wsSnap] === "object" ? drafts[wsSnap] : null)
+        : pickWeekSnapshotBlock(data, wsSnap, true);
       const blockJson = block
         ? JSON.stringify({
             days: block.days || null,
@@ -481,11 +556,26 @@ function ensureSchedulePublishListener() {
             standByStaffId: block.standByStaffId || "",
           })
         : "";
+      const pubWatch = publishedSnaps[wsSnap] && typeof publishedSnaps[wsSnap] === "object" ? publishedSnaps[wsSnap] : null;
+      const pubJson = pubWatch
+        ? JSON.stringify({
+            days: pubWatch.days || null,
+            standByByDate: pubWatch.standByByDate || {},
+          })
+        : "";
       const prevBlock = Object.prototype.hasOwnProperty.call(scheduleState.lastSeenWeekDraftSnapshotJsonByWeek, wsSnap)
         ? scheduleState.lastSeenWeekDraftSnapshotJsonByWeek[wsSnap]
         : undefined;
       const weekDraftSnapshotChanged = prevBlock !== undefined && blockJson !== prevBlock;
       scheduleState.lastSeenWeekDraftSnapshotJsonByWeek[wsSnap] = blockJson;
+      if (!scheduleState.lastSeenWeekPublishedSnapshotJsonByWeek) {
+        scheduleState.lastSeenWeekPublishedSnapshotJsonByWeek = {};
+      }
+      const prevPub = Object.prototype.hasOwnProperty.call(scheduleState.lastSeenWeekPublishedSnapshotJsonByWeek, wsSnap)
+        ? scheduleState.lastSeenWeekPublishedSnapshotJsonByWeek[wsSnap]
+        : undefined;
+      const weekPublishedSnapshotChanged = prevPub !== undefined && pubJson !== prevPub;
+      scheduleState.lastSeenWeekPublishedSnapshotJsonByWeek[wsSnap] = pubJson;
       const skipOwnWriteRefresh =
         scheduleState.scheduleSkipNextDraftSnapshotRefresh === true ||
         (Number(scheduleState.scheduleSkipDraftRefreshUntil) || 0) > Date.now();
@@ -512,8 +602,12 @@ function ensureSchedulePublishListener() {
       scheduleState.schedulePublishSuppressToast = false;
 
       const screen = document.getElementById("scheduleScreen");
+      const editorHasUnsaved = canEditSnap && _ffSchedLocalDirtyForWeek(wsSnap);
+      const shouldRefresh = canEditSnap
+        ? (publishedVisibilityChanged || (weekDraftSnapshotChanged && !skipOwnWriteRefresh && !editorHasUnsaved))
+        : (publishedVisibilityChanged || weekPublishedSnapshotChanged);
       if (
-        (publishedVisibilityChanged || (weekDraftSnapshotChanged && !skipOwnWriteRefresh)) &&
+        shouldRefresh &&
         screen &&
         screen.style.display !== "none" &&
         typeof refreshSchedulePreview === "function"
@@ -562,16 +656,15 @@ function updateSchedulePublishToggleUi() {
   const published = scheduleState.schedulePublishedMap[weekRange.startDate] === true;
 
   if (saveBtn) {
+    saveBtn.style.display = "none";
     saveBtn.disabled = true;
-    saveBtn.setAttribute("aria-live", "polite");
-    const showSave = canEdit && buildUi && saveBtn.classList.contains("is-error");
-    saveBtn.style.display = showSave ? "inline-flex" : "none";
   }
   const hint = document.getElementById("schedulePublishHint");
   if (notifyBtn) {
     notifyBtn.style.display = "none";
   }
   if (discardBtn) {
+    discardBtn.textContent = "Build";
     discardBtn.style.display = canEdit && buildUi ? "inline-flex" : "none";
   }
 
@@ -583,7 +676,7 @@ function updateSchedulePublishToggleUi() {
     if (canEdit) {
       btn.setAttribute("aria-pressed", published ? "true" : "false");
       btn.title = published
-        ? "The team can see this week. Click to unpublish."
+        ? "The team sees the last published week. Publish again after edits to update them."
         : "Publish this week so the team can see it.";
       if (icon) icon.textContent = "";
       if (label) label.textContent = published ? "Published" : "Publish";
@@ -594,8 +687,10 @@ function updateSchedulePublishToggleUi() {
       btn.style.borderColor = "";
       btn.style.color = "";
       if (hint) {
-        hint.textContent = published ? "" : "Team can't see this yet";
-        hint.style.display = published || !canEdit || !buildUi ? "none" : "inline";
+        hint.textContent = published
+          ? "Edits stay with managers until you Publish again."
+          : "Team can't see this yet";
+        hint.style.display = canEdit && buildUi ? "inline" : "none";
       }
     }
   }
@@ -648,9 +743,26 @@ async function toggleScheduleWeekPublished() {
         return;
       }
       const locId = _ffSchedActiveLocId();
+      if (typeof flushScheduleWeekDraftToCloud === "function") {
+        await flushScheduleWeekDraftToCloud();
+      }
+      const draft = scheduleState.schedulePreviewState && scheduleState.schedulePreviewState.draft;
+      const publishedBlock = {
+        savedAt: serverTimestamp(),
+        days: typeof serializeDraftDaysForStorage === "function" && draft
+          ? serializeDraftDaysForStorage(draft)
+          : [],
+        standByByDate:
+          scheduleState.schedulePreviewState &&
+          scheduleState.schedulePreviewState.standByByDate &&
+          typeof scheduleState.schedulePreviewState.standByByDate === "object"
+            ? cloneStandByByDateMap(scheduleState.schedulePreviewState.standByByDate)
+            : {},
+      };
       try {
         await updateDoc(ref, {
           [`published.${key}`]: true,
+          [`weekPublishedSnapshots.${key}`]: publishedBlock,
           locationId: locId || null,
           lastBroadcastAt: serverTimestamp(),
           lastBroadcastWeekKey: key,
@@ -661,6 +773,7 @@ async function toggleScheduleWeekPublished() {
           await setDoc(ref, {
             locationId: locId || null,
             published: { [key]: true },
+            weekPublishedSnapshots: { [key]: publishedBlock },
             lastBroadcastAt: serverTimestamp(),
             lastBroadcastWeekKey: key,
             updatedAt: serverTimestamp(),

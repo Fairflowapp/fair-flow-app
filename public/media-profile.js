@@ -6,7 +6,7 @@
  */
 import { getDoc, getDocs, doc, collection, setDoc } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260901_media_iso";
+import { mediaState } from "./media-state.js?v=20260910_media_seen";
 
 /** Same defaults as Staff → Permissions → Media → "To handle" in index.html */
 function legacyMediaHandleFromStaffDoc(st) {
@@ -127,7 +127,11 @@ async function loadUserProfile() {
   const sidPre = typeof window !== "undefined" && window.currentSalonId ? String(window.currentSalonId).trim() : "";
   const authedPre =
     typeof window !== "undefined" && window.__ff_authedStaffId ? String(window.__ff_authedStaffId).trim() : "";
-  const profileCacheKey = `${user.uid}|${sidPre}|${authedPre}`;
+  const rolePre =
+    typeof window !== "undefined" && window.__ff_user_role
+      ? String(window.__ff_user_role).toLowerCase().trim()
+      : "";
+  const profileCacheKey = `${user.uid}|${sidPre}|${authedPre}|${rolePre}`;
   if (mediaState.currentUserProfile && mediaState.currentUserProfile._ffMediaProfileKey === profileCacheKey) {
     return mediaState.currentUserProfile;
   }
@@ -216,14 +220,19 @@ async function loadUserProfile() {
   return null;
 }
 
-function canHandleMediaWork() {
-  if (mediaState.currentUserProfile?.mediaHandleAllowed === true) return true;
-  if (mediaState.currentUserProfile && mediaState.currentUserProfile.mediaHandleAllowed === false) return false;
+function leadershipCanHandleMedia() {
   const wr =
     typeof window !== "undefined" && window.__ff_user_role
       ? String(window.__ff_user_role).toLowerCase().trim()
       : "";
   if (["manager", "admin", "owner"].includes(wr)) return true;
+  const pr = String(mediaState.currentUserProfile?.createdByRole || "").toLowerCase().trim();
+  return ["manager", "admin", "owner"].includes(pr);
+}
+
+function canHandleMediaWork() {
+  if (leadershipCanHandleMedia()) return true;
+  if (mediaState.currentUserProfile?.mediaHandleAllowed === true) return true;
   return false;
 }
 

@@ -6,9 +6,7 @@
 // Comments were carried over from the original declarations.
 
 export const scheduleState = {
-  // Default to next week — managers usually plan/publish the upcoming week,
-  // not the one already in progress. NOTE: initialized at module-eval time in
-  // schedule-ui.js (needs addDays/getStartOfWeek which live there).
+  // Default is the current week (set at module-eval in schedule-nav-runtime-preview.js).
   schedulePreviewWeekStart: null,
   schedulePreviewState: {
     draft: null,
@@ -39,6 +37,7 @@ export const scheduleState = {
   schedulePublishLastSeenBroadcastMs: null,
   /** weekStart -> JSON string of `weekDraftSnapshots[weekStart]` from last snapshot; detect draft updates for staff. */
   lastSeenWeekDraftSnapshotJsonByWeek: {},
+  lastSeenWeekPublishedSnapshotJsonByWeek: {},
   /** Writer skips the echo refresh after its own server write (other devices still refresh). */
   scheduleSkipNextDraftSnapshotRefresh: false,
   /** Ignore own-write snapshot echoes for a short window (serverTimestamp can fire twice). */

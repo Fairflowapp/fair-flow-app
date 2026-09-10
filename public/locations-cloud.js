@@ -19,6 +19,8 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  updateDoc,
+  serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { db, auth } from "/app.js?v=20260610_force_lp_ios";
@@ -148,6 +150,41 @@ window.ffLocationsById = function () {
  * Force a fresh read from Firestore (used e.g. before opening Staff Member modal
  * if the snapshot hasn't landed yet).
  */
+/**
+ * Persist salon GPS fence onto the location doc (cloud source of truth).
+ * Queue localStorage is not authoritative — punches read this from the server.
+ */
+window.ffSaveLocationGeoFence = async function (locationId, fence) {
+  const locId = String(locationId || "").trim();
+  const sid = _salonId || (typeof window.currentSalonId === "string" ? window.currentSalonId : "");
+  if (!sid || !locId || locId === "default") {
+    return { ok: false, reason: "no-location" };
+  }
+  const lat = Number(fence && fence.lat);
+  const lng = Number(fence && fence.lng);
+  const radius = Math.round(Number(fence && fence.allowedRadiusMeters));
+  try {
+    await updateDoc(doc(db, `salons/${sid}/locations`, locId), {
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
+      allowedRadiusMeters: Number.isFinite(radius) && radius > 0 ? radius : 100,
+      enforceQueue: !!(fence && fence.enforceQueue === true),
+      enforceTimeClock: !!(fence && fence.enforceTimeClock === true),
+      geoAccuracy: Number.isFinite(Number(fence && fence.accuracy))
+        ? Math.round(Number(fence.accuracy))
+        : null,
+      geoUpdatedAt: Number.isFinite(Number(fence && fence.updatedAt))
+        ? Number(fence.updatedAt)
+        : Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    return { ok: true };
+  } catch (e) {
+    console.warn("[LocationsCloud] ffSaveLocationGeoFence failed", e);
+    return { ok: false, reason: "write-error", error: String((e && e.message) || e) };
+  }
+};
+
 window.ffLocationsForceLoad = async function () {
   if (!_salonId) return;
   try {

@@ -26,8 +26,10 @@
  * retries never duplicate entries; Admin-SDK-only writes).
  *
  * Geofence: mirrors the client gate (public/index.html
- * verifyTimeClockGeoFence). Settings live in the per-branch queueState doc:
- *   salons/{salonId}/queueState/{locKey}.queueSettings[locKey].settings.queueGeoFence
+ * verifyTimeClockGeoFence). Source of truth is the location document:
+ *   salons/{salonId}/locations/{locationId}
+ *   { lat, lng, allowedRadiusMeters, enforceTimeClock }
+ * Legacy fallback: queueState queueSettings[loc].settings.queueGeoFence.
  * Active when enforceTimeClock === true and a lat/lng is saved. Bypassed for
  * owner staff rows and permissions.time_clock_bypass_location === true.
  * Constants match the client: accuracy limit 150m, default radius 100m.
@@ -929,16 +931,7 @@ async function sendLateClockOutAlert({ salonId, entryId, staffId }) {
  * same bucket the client reads (no fallback to "default" for non-default
  * branches, matching getQueueGeoFenceSettings()).
  */
-async function loadTimeClockGeoFence(salonId, locationId) {
-  const locKey = trimStr(locationId) || "default";
-  const snap = await db().doc(`salons/${salonId}/queueState/${locKey}`).get();
-  if (!snap.exists) return { active: false };
-  const queueSettings = snap.get("queueSettings");
-  const raw =
-    queueSettings &&
-    queueSettings[locKey] &&
-    queueSettings[locKey].settings &&
-    queueSettings[locKey].settings.queueGeoFence;
+function fenceFromGeoRaw(raw) {
   if (!raw || typeof raw !== "object") return { active: false };
   const lat = Number(raw.lat);
   const lng = Number(raw.lng);
@@ -955,13 +948,38 @@ async function loadTimeClockGeoFence(salonId, locationId) {
   };
 }
 
+async function loadTimeClockGeoFence(salonId, locationId) {
+  const locKey = trimStr(locationId) || "default";
+  // Cloud source of truth: the location document. Queue localStorage is not.
+  if (locKey && locKey !== "default") {
+    try {
+      const locSnap = await db().doc(`salons/${salonId}/locations/${locKey}`).get();
+      if (locSnap.exists) {
+        const fromLoc = fenceFromGeoRaw(locSnap.data() || {});
+        if (fromLoc.active) return fromLoc;
+      }
+    } catch (e) {
+      console.warn("[timeClockPunch] location fence read failed", e && e.message);
+    }
+  }
+  const snap = await db().doc(`salons/${salonId}/queueState/${locKey}`).get();
+  if (!snap.exists) return { active: false };
+  const queueSettings = snap.get("queueSettings");
+  const raw =
+    queueSettings &&
+    queueSettings[locKey] &&
+    queueSettings[locKey].settings &&
+    queueSettings[locKey].settings.queueGeoFence;
+  return fenceFromGeoRaw(raw);
+}
+
 /**
  * Enforce the geofence for a punch. `staffData` is the TARGET staff row
  * (bypass follows the target's permissions, same as the client gate).
  * Throws failed-precondition with a machine-readable details.reason the UI
  * maps to the same messages it shows today.
  */
-async function assertWithinTimeClockFence({ salonId, locationId, staffData, coords }) {
+async function assertWithinTimeClockFence({ salonId, locationId, staffData, coords, callerKind }) {
   const mayBypass =
     staffRowIsOwner(staffData) ||
     (staffData.permissions &&
@@ -970,7 +988,19 @@ async function assertWithinTimeClockFence({ salonId, locationId, staffData, coor
   if (mayBypass) return { checked: false, bypassed: true };
 
   const fence = await loadTimeClockGeoFence(salonId, locationId);
-  if (!fence.active) return { checked: false, bypassed: false };
+  // Phone / personal app: no salon pin in the cloud = block. A missing
+  // setup must never mean "clock in from anywhere". The kiosk tablet
+  // is already at the salon, so it may punch until the pin is saved.
+  if (!fence.active) {
+    if (callerKind !== "kiosk") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Salon location is not set. Clock in from the phone is blocked until a manager saves the salon pin in Settings → Salon Location and turns on Enforce in Time Clock.",
+        { reason: "salon_location_not_configured" },
+      );
+    }
+    return { checked: false, bypassed: false };
+  }
 
   if (!coords) {
     throw new HttpsError(
@@ -1164,7 +1194,13 @@ async function timeClockPunchHandler(data, context) {
         { reason: "location_not_assigned" },
       );
     }
-    await assertWithinTimeClockFence({ salonId, locationId, staffData, coords });
+    await assertWithinTimeClockFence({
+      salonId,
+      locationId,
+      staffData,
+      coords,
+      callerKind: caller.kind,
+    });
   }
 
   // ── Kiosk photo (Stage B). Resolved AFTER all gates so a photo is never

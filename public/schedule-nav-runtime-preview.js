@@ -28,8 +28,8 @@ import {
   getEffectiveAvailabilityForDate,
   getInboxApprovalDisplayForDate,
   isApprovedRequest,
-} from "./schedule-availability.js?v=20260902_sched_dual";
-import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260902_sched_dual";
+} from "./schedule-availability.js?v=20260903_sched_lock";
+import { parseScheduleTimeToMinutes } from "./schedule-helpers.js?v=20260903_sched_lock";
 import "./format-utils.js?v=20260806_sched_12h_picker";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
 import {
@@ -74,7 +74,7 @@ import {
   ffShowMobileCalendarChoice,
   isLikelyAndroidCalendarDevice,
   isLikelyMobileCalendarDevice,
-} from "./schedule-ics.js?v=20260702_schedule_ics";
+} from "./schedule-ics.js?v=20260903_sched_lock2";
 import {
   initScheduleDnd,
   bindScheduleBoardDnD,
@@ -112,6 +112,7 @@ import {
   clearScheduleLocalDirtyForCurrentUser,
   clearScheduleUndoStack,
   clearSharedScheduleDraftOverrideForWeek,
+  flushScheduleWeekDraftToCloud,
   cloneScheduleDraft,
   computeFingerprintMapForDraft,
   computeStaffShiftFingerprintForWeek,
@@ -133,6 +134,9 @@ import {
   persistScheduleDraftOverrideFromState,
   persistScheduleManualOffFromState,
   queueScheduleWeekDraftAutosave,
+  setScheduleSaveStatus,
+  scheduleConfirmLeaveWeekIfDirty,
+  scheduleWeekHasUnsavedLocalEdits,
   persistStaffShiftFingerprintsForWeek,
   removeManualOffForStaffDay,
   runDiscardSavedScheduleWeekDraftAndReload,
@@ -142,7 +146,7 @@ import {
   simpleHashString,
   staffDayBlockedByApprovedInbox,
   syncPublishedWeekStandByToCloud,
-} from "./schedule-draft.js?v=20260902_sched_dual";
+} from "./schedule-draft.js?v=20260903_sched_lock";
 import {
   initScheduleCloud,
   canViewScheduleBoardForCurrentWeek,
@@ -163,7 +167,7 @@ import {
   teardownSchedulePublishListener,
   toggleScheduleWeekPublished,
   updateSchedulePublishToggleUi,
-} from "./schedule-cloud.js?v=20260902_sched_dual";
+} from "./schedule-cloud.js?v=20260903_sched_lock";
 import {
   SCHEDULE_COVERAGE_WARNING_CODES,
   SCHEDULE_TIME_COMPOSITE_CLASS,
@@ -207,7 +211,7 @@ import {
   syncScheduleWeekFilterUi,
   toDateKey,
   warningAppliesToStaffRow,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   _ffSchedActiveLocId,
   _ffSchedPerLocDocId,
@@ -223,7 +227,7 @@ import {
   teardownScheduleAckListener,
   teardownScheduleChangePingListener,
   updateScheduleWeekAckStrip,
-} from "./schedule-ack.js?v=20260902_sched_dual";
+} from "./schedule-ack.js?v=20260903_sched_lock";
 import {
   bindScheduleBoardManualAdd,
   bindScheduleShiftEditButtons,
@@ -237,7 +241,7 @@ import {
   openScheduleDnDOffConfirm,
   openScheduleShiftEdit,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 import {
   STAND_BY_SLOTS,
   SCHEDULE_INBOX_TYPES_FOR_AVAILABILITY,
@@ -265,7 +269,7 @@ import {
   standByDayEntryHasAny,
   standByMapsEqual,
   initScheduleNavCore,
-} from "./schedule-nav-core.js?v=20260902_sched_dual";
+} from "./schedule-nav-core.js?v=20260903_sched_lock2";
 
 // Wire nav-core back-references.
 initScheduleNavCore({ renderScheduleBoard, refreshSchedulePreview });
@@ -294,11 +298,12 @@ initScheduleCloud({
   clearSharedScheduleDraftOverrideForWeek,
   cloneStandByByDateMap,
   loadScheduleDraftOverridePayload,
-  persistStaffShiftFingerprintsForWeek,
-  notifyStaffScheduleChanges,
-  refreshSchedulePreview,
-  serializeDraftDaysForStorage,
-});
+    persistStaffShiftFingerprintsForWeek,
+    notifyStaffScheduleChanges,
+    refreshSchedulePreview,
+    serializeDraftDaysForStorage,
+    flushScheduleWeekDraftToCloud,
+  });
 
 // Wire DnD helpers (function declarations below are hoisted).
 initScheduleDnd({
@@ -307,8 +312,8 @@ initScheduleDnd({
   renderScheduleViewTabs,
 });
 
-// Default to next week — managers usually plan/publish the upcoming week, not the one already in progress.
-scheduleState.schedulePreviewWeekStart = addDays(getStartOfWeek(new Date()), 7);
+// Always open on the current week. Next/previous stay available in the Week menu.
+scheduleState.schedulePreviewWeekStart = getStartOfWeek(new Date());
 
 // Wire the ack module's back-references into this file (function declarations
 // below are hoisted, so this is safe at module-eval time).
@@ -452,7 +457,10 @@ async function refreshSchedulePreviewNow(options = {}) {
     let draftWithBusinessRules = applyBusinessSettingsToDraft(draft);
     const localPayload = loadScheduleDraftOverridePayload(weekRange);
     const localDraftDays = localPayload?.days || null;
-    const cloudBlock = await loadWeekDraftSnapshotBlockFromPublishDoc(weekRange.startDate);
+    const canEditEarly = scheduleUserCanManualEdit();
+    const cloudBlock = await loadWeekDraftSnapshotBlockFromPublishDoc(weekRange.startDate, {
+      publishedAudience: !canEditEarly,
+    });
     const cloudDraftDays = cloudBlock.days;
     const weekPublished = scheduleState.schedulePublishedMap[weekRange.startDate] === true;
     const dirtyKey = getScheduleLocalDirtyStorageKey(weekRange.startDate);
@@ -463,7 +471,8 @@ async function refreshSchedulePreviewNow(options = {}) {
     const canEdit = scheduleUserCanManualEdit();
     const hasLocal = !ignoreSavedDrafts && Array.isArray(localDraftDays) && localDraftDays.length > 0;
     const hasCloud = !ignoreSavedDrafts && Array.isArray(cloudDraftDays) && cloudDraftDays.length > 0;
-    const flushPendingLocal = canEdit && hasLocal && localDirty;
+    // Unpublished dirty drafts stay on this device only if a cloud write failed.
+    const flushPendingLocal = canEdit && hasLocal && localDirty && !weekPublished;
 
     let standByByDate = {};
 
@@ -481,7 +490,24 @@ async function refreshSchedulePreviewNow(options = {}) {
       );
     } else if (hasCloud) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, cloudDraftDays, staffList);
+      // Unsaved edits on this device overlay the cloud copy for the editor only.
+      if (canEdit && localDirty && hasLocal) {
+        draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, localDraftDays, staffList);
+      } else if (weekPublished && hasLocal && !localDirty) {
+        // Published week with no pending edits: drop stale phone cache so cloud stays authoritative.
+        clearSharedScheduleDraftOverrideForWeek(weekRange);
+      }
       standByByDate = normalizeStandByBlock(cloudBlock, draftWithBusinessRules.days);
+      if (canEdit && localDirty && hasLocal) {
+        const localSb = normalizeStandByBlock(
+          {
+            standByByDate: localPayload?.standByByDate,
+            standByStaffId: localPayload?.standByStaffId,
+          },
+          draftWithBusinessRules.days,
+        );
+        standByByDate = mergeStandByByDatePreferLocal(standByByDate, localSb, draftWithBusinessRules.days);
+      }
     } else if (canEdit && hasLocal) {
       draftWithBusinessRules = applyDraftDaysOverride(draftWithBusinessRules, localDraftDays, staffList);
       standByByDate = normalizeStandByBlock(
@@ -563,7 +589,9 @@ async function refreshSchedulePreviewNow(options = {}) {
     if (persistFreshLocalDraft && canEdit) {
       persistScheduleDraftOverrideFromState();
     } else if (flushPendingLocal) {
-      queueScheduleWeekDraftAutosave();
+      persistScheduleDraftOverrideFromState();
+    } else {
+      setScheduleSaveStatus("Saved", "ok");
     }
     if (!canViewScheduleBoardForCurrentWeek()) {
       teardownScheduleAckListener();

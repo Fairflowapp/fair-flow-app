@@ -38,7 +38,7 @@ import {
   updateInboxStaffFilterOptions,
   updateInboxBadges,
   renderInboxList,
-} from "./inbox-list-render.js?v=20260901_inbox_iso";
+} from "./inbox-list-render.js?v=20260909_to_handle_sender";
 
 /** Rows technicians should not see in Inbox (manager automations + misrouted staff-call "Other" items). */
 export function inboxTechnicianNoiseFilter(rows) {

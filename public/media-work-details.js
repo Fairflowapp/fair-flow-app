@@ -3,11 +3,10 @@
  * and Mark as Posted flow for the Media module. Extracted verbatim from media-upload.js (M6).
  */
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260901_media_iso";
-import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260901_media_iso";
+import { mediaState } from "./media-state.js?v=20260910_media_seen";
+import { canHandleMediaWork, isAdmin } from "./media-profile.js?v=20260910_media_seen";
 import {
   getContentWork,
-  mediaItemMatchesActiveLocation,
   getMediaItems,
   getPostedHistory,
   resolveMediaItemsForDisplay,
@@ -17,7 +16,7 @@ import {
   deleteContentWork,
   deleteMediaItem,
   selfDeleteContentWork,
-} from "./media-cloud.js?v=20260901_media_iso";
+} from "./media-cloud.js?v=20260910_media_seen";
 import {
   ffGetCapacitor,
   ffWithTimeout,
@@ -31,7 +30,14 @@ import {
   ffShareBlobNative,
   fetchBlobViaHttpProxy,
   triggerMediaFileDownload,
-} from "./media-native-share.js?v=20260901_media_iso";
+} from "./media-native-share.js?v=20260910_media_seen";
+import {
+  paintMediaInto,
+  isVideoMedia,
+  safeHttpUrl,
+  MEDIA_THUMB_PX,
+  MEDIA_LARGE_PX,
+} from "./media-thumbs.js?v=20260910_media_seen";
 
 // Injected from media-upload.js (main UI slab) to avoid import cycles.
 let showMediaMessage = () => {};
@@ -56,6 +62,20 @@ export function initMediaWorkDetails(deps) {
 // =====================
 // Work Details Modal
 // =====================
+
+function ffEscapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Only real http(s) URLs. Empty/relative src on <img>/<video> reloads the whole app. */
+function ffSafeHttpUrl(url) {
+  const u = String(url || "").trim();
+  return /^https?:\/\//i.test(u) ? u : "";
+}
 
 /** Firebase Storage download URLs use /o/ENCODED_PATH? — extract path for storageRef. */
 function extractStoragePathFromMediaUrl(mediaUrl) {
@@ -289,18 +309,186 @@ async function downloadMediaItem(media, workId, ui = {}) {
 // =====================
 
 let _lightboxKeyHandler = null;
+let _lightboxLoadToken = { cancelled: true };
+let _lightboxObjectUrl = null;
+let _lightboxBorrowed = null;
 
 function isMediaItemVideo(media) {
   return String(media?.mediaType || "").toLowerCase().includes("video");
 }
 
+function revokeLightboxObjectUrl() {
+  if (!_lightboxObjectUrl) return;
+  try { URL.revokeObjectURL(_lightboxObjectUrl); } catch (_) {}
+  _lightboxObjectUrl = null;
+}
+
+function returnBorrowedThumb() {
+  const borrowed = _lightboxBorrowed;
+  _lightboxBorrowed = null;
+  if (!borrowed || !borrowed.el || !borrowed.parent) return;
+  const { el, parent, next, style, controls } = borrowed;
+  try {
+    if (style != null) el.setAttribute("style", style);
+    else el.removeAttribute("style");
+    if (el.tagName === "VIDEO") {
+      el.controls = !!controls;
+      el.muted = true;
+    }
+    if (next && next.parentNode === parent) parent.insertBefore(el, next);
+    else parent.appendChild(el);
+  } catch (_) {}
+}
+
 function closeMediaLightbox() {
+  _lightboxLoadToken.cancelled = true;
+  revokeLightboxObjectUrl();
+  returnBorrowedThumb();
   const el = document.getElementById("mediaLightboxOverlay");
   if (el) el.remove();
   if (_lightboxKeyHandler) {
     document.removeEventListener("keydown", _lightboxKeyHandler);
     _lightboxKeyHandler = null;
   }
+}
+
+function styleLightboxMedia(el) {
+  el.draggable = false;
+  el.style.cssText =
+    "max-width:100%;max-height:min(72vh,720px);object-fit:contain;border-radius:8px;pointer-events:none;-webkit-touch-callout:none;user-select:none;";
+}
+
+function showLightboxMessage(dest, text) {
+  dest.innerHTML = "";
+  const msg = document.createElement("div");
+  msg.style.cssText = "color:#fff;font-size:15px;text-align:center;padding:24px;";
+  msg.textContent = text;
+  dest.appendChild(msg);
+}
+
+function findGridThumbForWork(workId) {
+  const id = String(workId || "");
+  if (!id) return null;
+  const cards = document.querySelectorAll("#mediaList .media-work-card");
+  for (const card of cards) {
+    if (String(card.getAttribute("data-work-id") || "") !== id) continue;
+    const img = card.querySelector("img");
+    if (img && thumbMediaIsReady(img)) return img;
+    return card.querySelector("img");
+  }
+  return null;
+}
+
+function paintCanvasFromDecodedImg(img) {
+  if (!img || !thumbMediaIsReady(img)) return null;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, img.naturalWidth || img.videoWidth || 200);
+    canvas.height = Math.max(1, img.naturalHeight || img.videoHeight || 200);
+    canvas.style.cssText = "width:100%;height:100%;object-fit:cover;";
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  } catch (_) {
+    return null;
+  }
+}
+
+function findWorkDetailThumbEl(mediaId) {
+  const id = String(mediaId || "");
+  if (!id) return null;
+  const nodes = document.querySelectorAll("[data-media-preview-id]");
+  for (const node of nodes) {
+    if (String(node.getAttribute("data-media-preview-id") || "") !== id) continue;
+    return node.querySelector("img, video");
+  }
+  return null;
+}
+
+function thumbMediaIsReady(el) {
+  if (!el) return false;
+  const w = Number(el.naturalWidth || el.videoWidth || 0);
+  const h = Number(el.naturalHeight || el.videoHeight || 0);
+  return w > 0 && h > 0;
+}
+
+/** Move the already-decoded thumb into the lightbox. A second Storage <img src> reloads iOS WebView. */
+function borrowThumbIntoLightbox(mediaEl, dest, isVideo) {
+  if (!mediaEl || !mediaEl.parentNode) return false;
+  returnBorrowedThumb();
+  _lightboxBorrowed = {
+    el: mediaEl,
+    parent: mediaEl.parentNode,
+    next: mediaEl.nextSibling,
+    style: mediaEl.getAttribute("style"),
+    controls: !!(mediaEl.tagName === "VIDEO" && mediaEl.controls),
+  };
+  if (isVideo) {
+    mediaEl.controls = true;
+    mediaEl.muted = false;
+    mediaEl.playsInline = true;
+    mediaEl.setAttribute("playsinline", "");
+    mediaEl.style.cssText =
+      "max-width:100%;max-height:min(72vh,720px);border-radius:8px;background:#000;";
+  } else {
+    styleLightboxMedia(mediaEl);
+  }
+  dest.appendChild(mediaEl);
+  return true;
+}
+
+async function paintLightboxFromBlob(media, dest, token) {
+  const meta = buildMediaItemMeta(media, "");
+  let blob = null;
+  try {
+    blob = await fetchBlobForMediaItem(media, meta, true);
+  } catch (e) {
+    console.warn("[Media] lightbox blob", e);
+  }
+  if (token.cancelled) return;
+  if (!blob || !blob.size) {
+    showLightboxMessage(dest, "Preview unavailable.");
+    return;
+  }
+  if (typeof createImageBitmap === "function") {
+    try {
+      const probe = await createImageBitmap(blob);
+      if (token.cancelled) {
+        try { probe.close(); } catch (_) {}
+        return;
+      }
+      const scale = Math.min(1, 1400 / Math.max(probe.width, probe.height));
+      const w = Math.max(1, Math.round(probe.width * scale));
+      const h = Math.max(1, Math.round(probe.height * scale));
+      try { probe.close(); } catch (_) {}
+      const bmp = scale < 1
+        ? await createImageBitmap(blob, { resizeWidth: w, resizeHeight: h, resizeQuality: "medium" })
+        : await createImageBitmap(blob);
+      if (token.cancelled) {
+        try { bmp.close(); } catch (_) {}
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      canvas.getContext("2d").drawImage(bmp, 0, 0);
+      try { bmp.close(); } catch (_) {}
+      dest.innerHTML = "";
+      styleLightboxMedia(canvas);
+      dest.appendChild(canvas);
+      return;
+    } catch (e) {
+      console.warn("[Media] lightbox bitmap", e);
+    }
+  }
+  if (token.cancelled) return;
+  revokeLightboxObjectUrl();
+  _lightboxObjectUrl = URL.createObjectURL(blob);
+  dest.innerHTML = "";
+  const img = document.createElement("img");
+  img.alt = "";
+  styleLightboxMedia(img);
+  img.src = _lightboxObjectUrl;
+  dest.appendChild(img);
 }
 
 /**
@@ -378,35 +566,38 @@ function openMediaLightbox(items, startIndex, workId) {
 
   function renderSlide() {
     const media = items[index];
+    _lightboxLoadToken.cancelled = true;
+    const token = { cancelled: false };
+    _lightboxLoadToken = token;
+    returnBorrowedThumb();
+    revokeLightboxObjectUrl();
     mediaWrap.innerHTML = "";
-    const url = media?.mediaUrl || "";
-    if (isMediaItemVideo(media)) {
-      if (url) {
-        const video = document.createElement("video");
-        video.src = url;
-        video.controls = true;
-        video.playsInline = true;
-        video.setAttribute("playsinline", "");
-        video.style.cssText = "max-width:100%;max-height:min(72vh,720px);border-radius:8px;background:#000;";
-        mediaWrap.appendChild(video);
-      } else {
-        const msg = document.createElement("div");
-        msg.style.cssText = "color:#fff;font-size:15px;text-align:center;padding:24px;";
-        msg.textContent = "This is a video — preview unavailable.";
-        mediaWrap.appendChild(msg);
-      }
-    } else if (url) {
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = "";
-      img.style.cssText = "max-width:100%;max-height:min(72vh,720px);object-fit:contain;border-radius:8px;";
-      mediaWrap.appendChild(img);
+
+    const isVideo = isMediaItemVideo(media);
+    const thumbEl = findWorkDetailThumbEl(media?.id);
+    if (thumbMediaIsReady(thumbEl) && borrowThumbIntoLightbox(thumbEl, mediaWrap, isVideo)) {
+      // Same decoded element — do not assign the Storage URL again.
+    } else if (thumbEl && !isVideo) {
+      showLightboxMessage(mediaWrap, "Loading…");
+      const onReady = () => {
+        if (token.cancelled) return;
+        mediaWrap.innerHTML = "";
+        if (!borrowThumbIntoLightbox(thumbEl, mediaWrap, false)) {
+          showLightboxMessage(mediaWrap, "Preview unavailable.");
+        }
+      };
+      if (thumbMediaIsReady(thumbEl)) onReady();
+      else thumbEl.addEventListener("load", onReady, { once: true });
+      thumbEl.addEventListener("error", () => {
+        if (!token.cancelled) showLightboxMessage(mediaWrap, "Preview unavailable.");
+      }, { once: true });
+    } else if (isVideo) {
+      showLightboxMessage(mediaWrap, "This is a video — preview unavailable.");
     } else {
-      const msg = document.createElement("div");
-      msg.style.cssText = "color:#fff;font-size:15px;text-align:center;padding:24px;";
-      msg.textContent = "Preview unavailable.";
-      mediaWrap.appendChild(msg);
+      showLightboxMessage(mediaWrap, "Loading…");
+      void paintLightboxFromBlob(media, mediaWrap, token);
     }
+
     counter.textContent = multi ? `${index + 1} / ${items.length}` : "";
     counter.style.display = multi ? "block" : "none";
     if (prevBtn) prevBtn.style.visibility = index > 0 ? "visible" : "hidden";
@@ -510,25 +701,178 @@ function openMediaLightbox(items, startIndex, workId) {
   renderSlide();
 }
 
+function workFromMediaCache(workId) {
+  const lists = [
+    typeof window !== "undefined" ? window.__ffMediaBootWorks : null,
+    mediaState.allWorks,
+    mediaState.userWorks,
+  ];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    const hit = list.find((w) => w && String(w.id) === String(workId));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/** Thumb URL for a media item. Never assigned to an <img src> — see media-thumbs.js. */
+function previewUrlForItem(item, work, isFirst) {
+  const candidates = [
+    item && item.thumbUrl,
+    item && item.mediaUrl,
+    item && item.previewMediaUrl,
+    isFirst && work && work.previewThumbUrl,
+    isFirst && work && work.previewMediaUrl,
+    isFirst && work && work._firstMediaUrl,
+  ];
+  for (const c of candidates) {
+    const u = safeHttpUrl(c);
+    if (u) return u;
+  }
+  return "";
+}
+
+/** Full-size URL, used only for the tap-to-enlarge preview. */
+function fullUrlForItem(item, work, isFirst) {
+  const candidates = [
+    item && item.mediaUrl,
+    isFirst && work && work.previewMediaUrl,
+    isFirst && work && work._firstMediaUrl,
+  ];
+  for (const c of candidates) {
+    const u = safeHttpUrl(c);
+    if (u) return u;
+  }
+  return "";
+}
+
+function paintWorkDetailsBody(content, work, items, workId) {
+  const thumbWrapCss =
+    "flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:22px;";
+  const previewItems = items.length ? items : [{ id: `grid-${workId}` }];
+  const previewsHtml = previewItems
+    .map((m) => {
+      const mid = String(m.id || "").replace(/"/g, "");
+      return `<div data-media-preview-id="${mid}" style="${thumbWrapCss}">\u2026</div>`;
+    })
+    .join("");
+  const statusLabelsRaw = getStatusLabels(work);
+  const statusLabels = Array.isArray(statusLabelsRaw) ? statusLabelsRaw : [];
+  const statusBadges = statusLabels.map((l) => `<span style="font-size:10px;padding:2px 6px;background:#f3f4f6;border-radius:4px;color:#6b7280;">${l}</span>`).join(" ");
+  const multiNote = items.length > 1
+    ? `<div style="font-size:11px;color:#6b7280;margin:-8px 0 12px;">${items.length} photos \u2014 tap one to see it large</div>`
+    : "";
+  content.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;">${statusBadges}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">${previewsHtml || `<div style="aspect-ratio:1;width:120px;background:#f3f4f6;border-radius:8px;"></div>`}</div>
+    ${multiNote}
+    <div style="display:grid;gap:6px;font-size:11px;">
+      <div><span style="color:#6b7280;">Categories</span> <span style="color:#111827;">${ffEscapeHtml(Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "—")}</span></div>
+      ${work.caption ? `<div><span style="color:#6b7280;">Caption</span> <span style="color:#111827;">${ffEscapeHtml(work.caption)}</span></div>` : ""}
+      <div><span style="color:#6b7280;">By</span> <span style="color:#111827;">${ffEscapeHtml(work.staffName || "—")}</span></div>
+      <div><span style="color:#6b7280;">Created</span> <span style="color:#111827;">${formatDate(work.createdAt)}</span></div>
+    </div>
+  `;
+
+  content.querySelectorAll("[data-media-preview-id]").forEach((wrap, i) => {
+    const item = previewItems[i];
+    const thumbUrl = previewUrlForItem(item, work, i === 0);
+    const fullUrl = fullUrlForItem(item, work, i === 0) || thumbUrl;
+    if (!thumbUrl) {
+      wrap.textContent = items.length > 1 ? String(i + 1) : "\u{1F4F7}";
+      return;
+    }
+    wrap.setAttribute("data-ff-media-url", fullUrl);
+    if (isVideoMedia(item) || isVideoMedia({ mediaUrl: fullUrl })) {
+      wrap.textContent = "\u25B6";
+      wrap.setAttribute("data-ff-media-video", "1");
+      return;
+    }
+    paintMediaInto(wrap, thumbUrl, {
+      px: MEDIA_THUMB_PX,
+      onFail: () => { wrap.textContent = "\u{1F4F7}"; },
+    });
+  });
+}
+
 async function openWorkDetails(workId) {
+  try {
   mediaState.selectedWorkId = workId;
   const modal = document.getElementById("workDetailsModal");
   const content = document.getElementById("workDetailsContent");
   const actions = document.getElementById("workDetailsActions");
   if (!modal || !content || !actions) return;
+  closeMediaLightbox();
+  modal.style.display = "flex";
+  actions.innerHTML = "";
 
-  const work = await getContentWork(workId);
-  if (!work) return;
-  if (!mediaItemMatchesActiveLocation(work)) {
-    console.warn("[Media] blocked work details for another location", workId);
+  let work = workFromMediaCache(workId) || { id: workId };
+  paintWorkDetailsBody(content, work, [], workId);
+
+  window.setTimeout(() => { void (async () => {
+  try {
+    if (String(mediaState.selectedWorkId) !== String(workId)) return;
+  try {
+    const fetched = await getContentWork(workId, { skipLocation: true });
+    if (fetched) work = fetched;
+  } catch (e) {
+    console.warn("[Media] getContentWork", e);
+  }
+  if (!work || !work.id) {
+    modal.style.display = "none";
+    showMediaMessage("Could not open this photo. Try again.");
     return;
   }
 
   const sid = work.salonId != null && String(work.salonId).trim() !== "" ? String(work.salonId).trim() : null;
-  let items = await getMediaItems(workId, sid);
-  items = await resolveMediaItemsForDisplay(items);
-  const history = await getPostedHistory(workId, sid);
-  await enrichWorkWithPreview(work);
+  let items = [];
+  try {
+    items = await Promise.race([
+      getMediaItems(workId, sid),
+      new Promise((resolve) => setTimeout(() => resolve([]), 5000)),
+    ]);
+  } catch (e) {
+    console.warn("[Media] getMediaItems", e);
+    items = [];
+  }
+  if (items.length) {
+    try {
+      items = await Promise.race([
+        resolveMediaItemsForDisplay(items),
+        new Promise((resolve) => setTimeout(() => resolve(items), 5000)),
+      ]);
+    } catch (e) {
+      console.warn("[Media] resolveMediaItemsForDisplay", e);
+    }
+  }
+  let history = [];
+  try {
+    history = await Promise.race([
+      getPostedHistory(workId, sid),
+      new Promise((resolve) => setTimeout(() => resolve([]), 4000)),
+    ]);
+  } catch (e) {
+    console.warn("[Media] getPostedHistory", e);
+    history = [];
+  }
+  paintWorkDetailsBody(content, work, Array.isArray(items) ? items : [], workId);
+  if (Array.isArray(history) && history.length) {
+    const hist = document.createElement("div");
+    hist.style.cssText = "margin-top:10px;font-size:11px;color:#374151;";
+    const title = document.createElement("span");
+    title.style.color = "#6b7280";
+    title.textContent = "Posted history";
+    const ul = document.createElement("ul");
+    ul.style.cssText = "margin:4px 0 0 14px;";
+    history.forEach((h) => {
+      const li = document.createElement("li");
+      li.textContent = `${h.platform || ""} ${h.format || ""} – ${h.postedDate || ""}`;
+      ul.appendChild(li);
+    });
+    hist.appendChild(title);
+    hist.appendChild(ul);
+    content.appendChild(hist);
+  }
   const canHandleMedia = canHandleMediaWork();
   const isAdminUser = isAdmin();
   const inToHandleView = mediaState.currentMediaTab === "to_handle";
@@ -591,44 +935,6 @@ async function openWorkDetails(workId) {
       pendingExtras.forEach((el) => actions.appendChild(el));
     }
   };
-
-  const thumbBtnCss =
-    "position:absolute;top:4px;font-size:12px;line-height:1;padding:2px 6px;background:rgba(0,0,0,0.5);color:#fff;border:none;border-radius:4px;cursor:pointer;z-index:1;";
-  const thumbWrapCss =
-    "flex:0 0 120px;aspect-ratio:1;background:#f3f4f6;border-radius:8px;overflow:hidden;position:relative;cursor:pointer;";
-  const previewsHtml = items
-    .map((m) => {
-      const isVideo = isMediaItemVideo(m);
-      const mid = String(m.id || "").replace(/"/g, "");
-      // Download for everyone; delete (×) stays admin-only on To handle.
-      const dlBtn =
-        `<button type="button" title="Download" aria-label="Download" style="${thumbBtnCss}${showAdminRow ? "right:28px;" : "right:4px;"}" data-media-download-id="${mid}">↓</button>`;
-      const delBtn = showAdminRow
-        ? `<button type="button" title="Delete" aria-label="Delete" style="${thumbBtnCss}right:4px;" data-media-delete-id="${mid}">×</button>`
-        : "";
-      const overlays = `${dlBtn}${delBtn}`;
-      if (isVideo) {
-        return `<div data-media-preview-id="${mid}" style="${thumbWrapCss}"><video src="${m.mediaUrl}" style="width:100%;height:100%;object-fit:cover;pointer-events:none;" muted playsinline></video>${overlays}</div>`;
-      }
-      return `<div data-media-preview-id="${mid}" style="${thumbWrapCss}"><img src="${m.mediaUrl}" alt="" style="width:100%;height:100%;object-fit:cover;pointer-events:none;" onerror="this.parentElement.innerHTML='<div style=width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af>📷</div>'">${overlays}</div>`;
-    })
-    .join("");
-
-  const statusLabelsRaw = getStatusLabels(work);
-  const statusLabels = Array.isArray(statusLabelsRaw) ? statusLabelsRaw : [];
-  const statusBadges = statusLabels.map((l) => `<span style="font-size:10px;padding:2px 6px;background:#f3f4f6;border-radius:4px;color:#6b7280;">${l}</span>`).join(" ");
-
-  content.innerHTML = `
-    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;">${statusBadges}</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">${previewsHtml || `<div style="aspect-ratio:1;width:120px;background:#f3f4f6;border-radius:8px;"></div>`}</div>
-    <div style="display:grid;gap:6px;font-size:11px;">
-      <div><span style="color:#6b7280;">Categories</span> <span style="color:#111827;">${Array.isArray(work.categoryNames) ? work.categoryNames.join(", ") : work.categoryName || work.serviceType || "—"}</span></div>
-      ${work.caption ? `<div><span style="color:#6b7280;">Caption</span> <span style="color:#111827;">${work.caption}</span></div>` : ""}
-      <div><span style="color:#6b7280;">By</span> <span style="color:#111827;">${work.staffName || "—"}</span></div>
-      <div><span style="color:#6b7280;">Created</span> <span style="color:#111827;">${formatDate(work.createdAt)}</span></div>
-      ${history.length ? `<div style="margin-top:6px;"><span style="color:#6b7280;">Posted history</span><ul style="margin:4px 0 0 14px;font-size:11px;color:#374151;">${history.map((h) => `<li>${h.platform} ${h.format} – ${h.postedDate || ""}</li>`).join("")}</ul></div>` : ""}
-    </div>
-  `;
 
   actions.innerHTML = "";
 
@@ -724,11 +1030,10 @@ async function openWorkDetails(workId) {
   downloadBtn.className = "btn-pill media-action-btn";
   downloadBtn.textContent = "Download";
   downloadBtn.style.cssText = btnStyle + "min-width:96px;white-space:nowrap;box-sizing:border-box;";
-  // Warm the share-blob prefetch so the file is ready by tap time on native too.
+  // Warm on press only. Hover-warming pulled the whole file (photos ~5 MB, videos up
+  // to 68 MB) into memory just for passing the cursor over the button.
   const warmDownload = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
   downloadBtn.addEventListener("pointerdown", warmDownload, { passive: true });
-  downloadBtn.addEventListener("touchstart", warmDownload, { passive: true });
-  downloadBtn.addEventListener("mouseenter", warmDownload);
 
   // Work-level Download still targets the first media item (same as before).
   downloadBtn.onclick = async (e) => {
@@ -748,14 +1053,13 @@ async function openWorkDetails(workId) {
   shareBtn.textContent = "Share";
   shareBtn.style.cssText = btnStyle;
 
-  // Warm the prefetch the moment the user just touches/hovers the button — gives
-  // us even more head-start before the actual click that triggers the share.
+  // Press only — see the Download button above.
   const warmShare = () => { try { if (!ffMediaFastUrlMode()) startShareBlobPrefetch(true); } catch (_) {} };
   shareBtn.addEventListener("pointerdown", warmShare, { passive: true });
-  shareBtn.addEventListener("touchstart", warmShare, { passive: true });
-  shareBtn.addEventListener("mouseenter", warmShare);
 
-  shareBtn.onclick = async () => {
+  shareBtn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!firstMedia?.mediaUrl && !firstMedia?.storagePath) {
       alert("No media to share");
       return;
@@ -969,17 +1273,25 @@ async function openWorkDetails(workId) {
 
   if (showManagerRow) {
     const markPostedBtn = document.createElement("button");
+    markPostedBtn.type = "button";
     markPostedBtn.className = "btn-pill media-action-btn";
     markPostedBtn.textContent = "Mark as Posted";
     markPostedBtn.style.cssText = btnStyle;
-    markPostedBtn.onclick = () => openMarkPostedModal(workId);
+    markPostedBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openMarkPostedModal(workId);
+    };
     addActionBtn(markPostedBtn);
 
     const featuredBtn = document.createElement("button");
+    featuredBtn.type = "button";
     featuredBtn.className = "btn-pill media-action-btn";
     featuredBtn.textContent = work.featured ? "Remove Featured" : "Mark as Featured";
     featuredBtn.style.cssText = btnStyle;
-    featuredBtn.onclick = async () => {
+    featuredBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       await updateContentWork(workId, { featured: !work.featured });
       openWorkDetails(workId);
       renderMediaList();
@@ -989,9 +1301,12 @@ async function openWorkDetails(workId) {
 
   if (showAdminRow) {
     const archiveBtn = document.createElement("button");
+    archiveBtn.type = "button";
     archiveBtn.className = "btn-pill";
     archiveBtn.textContent = "Archive Work";
-    archiveBtn.onclick = async () => {
+    archiveBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       await archiveContentWork(workId);
       closeWorkDetails();
       renderMediaList();
@@ -999,10 +1314,13 @@ async function openWorkDetails(workId) {
     addActionBtn(archiveBtn);
 
     const duplicateBtn = document.createElement("button");
+    duplicateBtn.type = "button";
     duplicateBtn.className = "btn-pill media-action-btn";
     duplicateBtn.textContent = work.duplicate ? "Remove Duplicate" : "Mark Duplicate";
     duplicateBtn.style.cssText = btnStyle;
-    duplicateBtn.onclick = async () => {
+    duplicateBtn.onclick = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       await updateContentWork(workId, { duplicate: !work.duplicate });
       openWorkDetails(workId);
       renderMediaList();
@@ -1010,6 +1328,7 @@ async function openWorkDetails(workId) {
     addActionBtn(duplicateBtn);
 
     const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
     deleteBtn.className = "btn-pill btn-danger media-action-btn";
     deleteBtn.style.cssText = btnStyle + "color:#dc2626;border-color:#fecaca;";
     deleteBtn.textContent = "Delete Work";
@@ -1065,13 +1384,25 @@ async function openWorkDetails(workId) {
     if (previewEl) {
       e.preventDefault();
       e.stopPropagation();
-      const mediaId = previewEl.dataset.mediaPreviewId;
-      const idx = items.findIndex((m) => String(m.id) === String(mediaId));
-      if (idx >= 0) openMediaLightbox(items, idx, workId);
+      if (previewEl.getAttribute("data-ff-media-video") === "1") {
+        showMediaMessage("This is a video — use Download to open it.");
+        return;
+      }
+      openLargePreview(previewEl.getAttribute("data-ff-media-url"));
     }
   };
 
   modal.style.display = "flex";
+  } catch (err) {
+    console.error("[Media] openWorkDetails fill failed", workId, err);
+  }
+  })(); }, 150);
+  } catch (err) {
+    console.error("[Media] openWorkDetails failed", workId, err);
+    try {
+      if (typeof showMediaMessage === "function") showMediaMessage("Could not open this photo. Try again.");
+    } catch (_) {}
+  }
 }
 
 function closeWorkDetails() {
@@ -1197,7 +1528,6 @@ async function saveMarkPosted() {
       });
     }
     closeMarkPostedModal();
-    if (mediaState.selectedWorkId === workId) openWorkDetails(workId);
     renderMediaList();
   } catch (e) {
     console.error("[Media] addPostedHistory failed", e);
@@ -1211,7 +1541,11 @@ function setupWorkDetailsListeners() {
 function setupMarkPostedListeners() {
   document.getElementById("markPostedModalClose")?.addEventListener("click", closeMarkPostedModal);
   document.getElementById("markPostedCancel")?.addEventListener("click", closeMarkPostedModal);
-  document.getElementById("markPostedSave")?.addEventListener("click", saveMarkPosted);
+  document.getElementById("markPostedSave")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void saveMarkPosted();
+  });
 
   const formatTrigger = document.getElementById("markPostedFormatTrigger");
   const formatDropdown = document.getElementById("markPostedFormatDropdown");
@@ -1233,6 +1567,38 @@ function setupMarkPostedListeners() {
       if (formatDd) formatDd.style.display = "none";
     }
   });
+}
+
+/**
+ * Full-screen preview, still downscaled (1280px longest edge). The original is up to
+ * 4032x3024 and costs ~48 MB decoded, which is what made Safari discard the tab.
+ */
+function openLargePreview(url) {
+  const safe = safeHttpUrl(url);
+  if (!safe) return false;
+  closeMediaLightbox();
+  const overlay = document.createElement("div");
+  overlay.id = "mediaLightboxOverlay";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-label", "Media preview");
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:16px;cursor:zoom-out;color:#fff;font-size:14px;";
+  const stage = document.createElement("div");
+  stage.style.cssText = "max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center;";
+  stage.textContent = "Loading\u2026";
+  overlay.appendChild(stage);
+  overlay.addEventListener("click", () => closeMediaLightbox());
+  document.body.appendChild(overlay);
+  paintMediaInto(stage, safe, {
+    px: MEDIA_LARGE_PX,
+    fit: "contain",
+    onFail: () => { stage.textContent = "Preview unavailable."; },
+  });
+  return true;
+}
+
+if (typeof window !== "undefined") {
+  window.openWorkDetails = openWorkDetails;
 }
 
 export {

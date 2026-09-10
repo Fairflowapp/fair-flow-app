@@ -32,6 +32,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-functions.js";
 import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-storage.js";
 import { db, auth, storage } from "/app.js?v=20260610_force_lp_ios";
+import { makeThumbnailBlob } from "./media-thumbs.js?v=20260910_media_seen";
 
 const FUNCTIONS_REGION = "us-central1";
 const INCLUDED_STORAGE_BYTES = 5 * 1024 * 1024 * 1024;
@@ -346,7 +347,10 @@ export function mediaItemMatchesActiveLocation(item) {
 }
 
 function _ffFilterContentWorksByLocation(items) {
-  return (Array.isArray(items) ? items : []).filter(mediaItemMatchesActiveLocation);
+  const arr = Array.isArray(items) ? items : [];
+  const filtered = arr.filter(mediaItemMatchesActiveLocation);
+  if (filtered.length === 0 && arr.length > 0) return arr;
+  return filtered;
 }
 
 // =====================
@@ -415,6 +419,7 @@ export async function updateContentWork(workId, updates) {
     "staffId", "staffName", "serviceType", "categoryId", "categoryName", "categoryIds", "categoryNames",
     "caption", "featured", "duplicate", "status", "postedCount",
     "previewMediaUrl", "previewStoragePath",
+    "previewThumbUrl", "previewThumbStoragePath",
     "updatedAt"
   ];
   const safe = {};
@@ -430,14 +435,65 @@ export async function updateContentWork(workId, updates) {
 /**
  * Get a single content work.
  */
-export async function getContentWork(workId) {
+export async function getContentWork(workId, opts) {
   const salonId = await getSalonId();
   if (!salonId) return null;
   const snap = await getDoc(contentWorksRef(salonId, workId));
   if (!snap.exists()) return null;
   const work = { id: snap.id, ...snap.data() };
-  if (!mediaItemMatchesActiveLocation(work)) return null;
+  if (!opts?.skipLocation && !mediaItemMatchesActiveLocation(work)) return null;
   return work;
+}
+
+function buildContentWorksQuery(coll, opts, useOrder) {
+  if (opts?.status) {
+    return useOrder
+      ? query(coll, where("status", "==", opts.status), orderBy("createdAt", "desc"))
+      : query(coll, where("status", "==", opts.status));
+  }
+  if (opts?.staffId) {
+    return useOrder
+      ? query(coll, where("staffId", "==", opts.staffId), orderBy("createdAt", "desc"))
+      : query(coll, where("staffId", "==", opts.staffId));
+  }
+  if (opts?.featured === true) {
+    return useOrder
+      ? query(coll, where("featured", "==", true), orderBy("createdAt", "desc"))
+      : query(coll, where("featured", "==", true));
+  }
+  return useOrder ? query(coll, orderBy("createdAt", "desc")) : query(coll);
+}
+
+function sortWorksByCreatedAtDesc(arr) {
+  return (Array.isArray(arr) ? arr : []).slice().sort((a, b) => {
+    const ta = a && a.createdAt && typeof a.createdAt.toMillis === "function" ? a.createdAt.toMillis() : 0;
+    const tb = b && b.createdAt && typeof b.createdAt.toMillis === "function" ? b.createdAt.toMillis() : 0;
+    return tb - ta;
+  });
+}
+
+/** One-shot read so Media is not stuck if onSnapshot never fires. Returns null on failure (do not treat as empty). */
+export async function fetchContentWorks(opts) {
+  const salonId =
+    (typeof window !== "undefined" && window.currentSalonId && String(window.currentSalonId).trim())
+    || await getSalonId();
+  if (!salonId) return null;
+  const coll = contentWorksRef(salonId);
+  try {
+    const snap = await Promise.race([
+      getDocs(coll),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("fetchContentWorks timeout")), 10000)),
+    ]);
+    let arr = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (opts && opts.staffId) {
+      const sid = String(opts.staffId);
+      arr = arr.filter((w) => String(w.staffId || "") === sid);
+    }
+    return sortWorksByCreatedAtDesc(arr);
+  } catch (e) {
+    console.warn("[MediaCloud] fetchContentWorks failed", e);
+    return null;
+  }
 }
 
 /**
@@ -464,26 +520,27 @@ export function subscribeContentWorks(opts, callback) {
       if (callback) callback([]);
       return;
     }
-    const salonId = await getSalonId();
+    const salonId =
+      (typeof window !== "undefined" && window.currentSalonId && String(window.currentSalonId).trim())
+      || await getSalonId();
     if (!salonId) {
-      if (callback) callback([]);
       return;
     }
     const coll = contentWorksRef(salonId);
-    let q;
-    if (opts?.status) {
-      q = query(coll, where("status", "==", opts.status), orderBy("createdAt", "desc"));
-    } else if (opts?.staffId) {
-      q = query(coll, where("staffId", "==", opts.staffId), orderBy("createdAt", "desc"));
-    } else if (opts?.featured === true) {
-      q = query(coll, where("featured", "==", true), orderBy("createdAt", "desc"));
-    } else {
-      q = query(coll, orderBy("createdAt", "desc"));
-    }
+    const q = buildContentWorksQuery(coll, opts, false);
     unsubSnapshot = onSnapshot(q, (snap) => {
       latestRaw = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       emit();
-    }, (err) => console.warn("[MediaCloud] subscribeContentWorks error", err));
+    }, (err) => {
+      console.warn("[MediaCloud] subscribeContentWorks error", err);
+      void fetchContentWorks(opts).then((works) => {
+        if (Array.isArray(works) && callback) callback(works);
+      });
+    });
+    void fetchContentWorks(opts).then((works) => {
+      if (latestRaw.length) return;
+      if (Array.isArray(works) && callback) callback(works);
+    });
   });
 
   // Re-emit cached list (filtered for the new branch) when the Owner
@@ -547,6 +604,8 @@ export async function addMediaItem(workId, data) {
     mediaType: data.mediaType,
     mediaUrl: data.mediaUrl,
     storagePath: data.storagePath,
+    thumbUrl: data.thumbUrl ?? null,
+    thumbStoragePath: data.thumbStoragePath ?? null,
     sizeBytes: Number(data.sizeBytes || 0),
     sortOrder: data.sortOrder ?? 0,
     createdAt: serverTimestamp(),
@@ -585,15 +644,39 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
   await uploadBytes(fileRef, file);
   const mediaUrl = await getDownloadURL(fileRef);
 
+  // Store a small companion thumbnail so viewers never pull the full-size original
+  // (~5 MB, ~48 MB once decoded) just to paint a card. Best-effort: a failure here
+  // must never fail the upload.
+  let thumbUrl = null;
+  let thumbPath = null;
+  let thumbBytes = 0;
+  try {
+    const thumbBlob = await makeThumbnailBlob(file);
+    if (thumbBlob && thumbBlob.size) {
+      thumbPath = `${path}.thumb.jpg`;
+      const thumbRef = storageRef(storage, thumbPath);
+      await uploadBytes(thumbRef, thumbBlob, { contentType: "image/jpeg" });
+      thumbUrl = await getDownloadURL(thumbRef);
+      thumbBytes = Number(thumbBlob.size || 0);
+    }
+  } catch (e) {
+    console.warn("[MediaCloud] thumbnail upload failed", e?.code, e?.message);
+    thumbUrl = null;
+    thumbPath = null;
+    thumbBytes = 0;
+  }
+
   await addMediaItem(workId, {
     mediaId,
     mediaType,
     mediaUrl,
     storagePath: path,
+    thumbUrl,
+    thumbStoragePath: thumbPath,
     sizeBytes: Number(file?.size || 0),
     sortOrder,
   });
-  await recordStorageUsageDelta(salonId, Number(file?.size || 0)).catch((e) => {
+  await recordStorageUsageDelta(salonId, Number(file?.size || 0) + thumbBytes).catch((e) => {
     console.warn("[MediaCloud] storage usage increment failed", e?.code, e?.message);
   });
 
@@ -601,10 +684,12 @@ async function uploadAndCreateMediaItem(workId, file, mediaType, sortOrder) {
     await updateContentWork(workId, {
       previewMediaUrl: mediaUrl,
       previewStoragePath: path,
+      previewThumbUrl: thumbUrl,
+      previewThumbStoragePath: thumbPath,
     }).catch((e) => console.warn("[MediaCloud] preview denorm failed", workId, e));
   }
 
-  return { mediaId, mediaUrl, storagePath: path };
+  return { mediaId, mediaUrl, storagePath: path, thumbUrl, thumbStoragePath: thumbPath };
 }
 
 /**
@@ -768,6 +853,17 @@ export async function updateMediaItem(workId, mediaId, updates) {
   await updateDoc(ref, sanitize(updates));
 }
 
+/** Best-effort removal of the companion thumbnail object. */
+async function deleteThumbObject(thumbStoragePath) {
+  const p = thumbStoragePath != null ? String(thumbStoragePath).trim() : "";
+  if (!p) return;
+  try {
+    await deleteObject(storageRef(storage, p));
+  } catch (e) {
+    console.warn("[MediaCloud] thumbnail delete failed", e?.code);
+  }
+}
+
 /**
  * Delete a media item (Firestore + Storage if storagePath exists).
  */
@@ -786,6 +882,7 @@ export async function deleteMediaItem(workId, mediaId) {
       console.warn("[MediaCloud] Storage delete failed, continuing with Firestore", e);
     }
   }
+  await deleteThumbObject(item?.thumbStoragePath);
   await deleteDoc(mediaItemsRef(salonId, workId, mediaId));
   if (storageDeleted && Number(item?.sizeBytes || 0) > 0) {
     await recordStorageUsageDelta(salonId, -Number(item.sizeBytes || 0)).catch((e) => {
@@ -812,6 +909,7 @@ export async function deleteAllMediaFromWork(workId) {
         console.warn("[MediaCloud] Storage delete failed for", item.id, e);
       }
     }
+    await deleteThumbObject(item.thumbStoragePath);
     await deleteDoc(mediaItemsRef(salonId, workId, item.id));
     if (storageDeleted && Number(item?.sizeBytes || 0) > 0) {
       await recordStorageUsageDelta(salonId, -Number(item.sizeBytes || 0)).catch((e) => {
@@ -822,6 +920,8 @@ export async function deleteAllMediaFromWork(workId) {
   await updateContentWork(workId, {
     previewMediaUrl: null,
     previewStoragePath: null,
+    previewThumbUrl: null,
+    previewThumbStoragePath: null,
   });
 }
 

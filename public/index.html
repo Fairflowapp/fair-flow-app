@@ -8,7 +8,7 @@
 <!-- Inbox module-graph preload: parallel-fetch inbox.js + all sub-modules to collapse the
      ES-module import waterfall, so the first Inbox open is not slow/blank. Keep ?v= in sync
      with the import statements in inbox.js and the script-loader entry below. -->
-<link rel="modulepreload" href="/inbox.js?v=20260901_sched_req">
+<link rel="modulepreload" href="/inbox.js?v=20260909_to_handle_sender">
 <link rel="modulepreload" href="/inbox-state.js?v=20260629_inbox_state_split">
 <link rel="modulepreload" href="/inbox-helpers.js?v=20260901_sched_req">
 <link rel="modulepreload" href="/inbox-utils.js?v=20260630_inbox_utils_split">
@@ -17,13 +17,13 @@
 <link rel="modulepreload" href="/inbox-documents.js?v=20260629_inbox_documents_split">
 <link rel="modulepreload" href="/inbox-inventory-suggestion.js?v=20260629_inbox_invsugg_split">
 <link rel="modulepreload" href="/inbox-supplies.js?v=20260629_inbox_supplies_split">
-<link rel="modulepreload" href="/inbox-list-render.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-list-render.js?v=20260909_to_handle_sender">
 <link rel="modulepreload" href="/inbox-modals-ui.js?v=20260901_inbox_iso">
-<link rel="modulepreload" href="/inbox-details.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-details.js?v=20260909_to_handle_sender">
 <link rel="modulepreload" href="/inbox-create-form.js?v=20260901_inbox_iso">
-<link rel="modulepreload" href="/inbox-submit.js?v=20260901_sched_req">
-<link rel="modulepreload" href="/inbox-actions.js?v=20260630_inbox_actions_split">
-<link rel="modulepreload" href="/inbox-listeners.js?v=20260901_inbox_iso">
+<link rel="modulepreload" href="/inbox-submit.js?v=20260909_to_handle_sender">
+<link rel="modulepreload" href="/inbox-actions.js?v=20260909_to_handle_sender">
+<link rel="modulepreload" href="/inbox-listeners.js?v=20260909_to_handle_sender">
 
 <script>
   // Robust Inbox open: inbox.js wires #inboxBtn.onclick only inside initInbox(), which runs
@@ -36,7 +36,7 @@
       if (typeof window.goToInbox === 'function') { window.goToInbox(); return; }
       if (window.__ffInboxOpening) return;
       window.__ffInboxOpening = true;
-      import('/inbox.js?v=20260901_sched_req')
+      import('/inbox.js?v=20260909_to_handle_sender')
         .then(function (m) {
           window.__ffInboxOpening = false;
           var fn = (m && typeof m.goToInbox === 'function') ? m.goToInbox : window.goToInbox;
@@ -159,13 +159,30 @@
     var queueControls=document.getElementById('queueControls');if(queueControls)queueControls.style.display='none';
     var wrap=document.querySelector('.wrap');if(wrap)wrap.style.display='none';
     var mediaScreen=document.getElementById('mediaScreen');if(mediaScreen){mediaScreen.style.display='flex';}
+    var tabsWrap=document.getElementById('mediaTabsWrap');if(tabsWrap)tabsWrap.style.setProperty('display','flex','important');
+    var toHandleBtn=document.getElementById('mediaTabToHandle');if(toHandleBtn)toHandleBtn.style.setProperty('display','flex','important');
+    var loading=document.getElementById('mediaListLoading');if(loading)loading.style.display='block';
     document.querySelectorAll('.btn-pill').forEach(function(b){b.classList.remove('active');});
     var mediaBtn=document.getElementById('mediaBtn');if(mediaBtn)mediaBtn.classList.add('active');
+  };
+  window.ffMediaPaintTab=function(tab){
+    tab=tab==='to_handle'?'to_handle':'my_uploads';
+    var screen=document.getElementById('mediaScreen');if(screen)screen.setAttribute('data-media-tab',tab);
+    var my=document.getElementById('mediaTabMyUploads');
+    var th=document.getElementById('mediaTabToHandle');
+    if(my){my.classList.toggle('active',tab==='my_uploads');my.style.background=tab==='my_uploads'?'#7c3aed':'#f9fafb';my.style.color=tab==='my_uploads'?'#fff':'#6b7280';}
+    if(th){th.classList.toggle('active',tab==='to_handle');th.style.background=tab==='to_handle'?'#7c3aed':'#f9fafb';th.style.color=tab==='to_handle'?'#fff':'#6b7280';}
+  };
+  window.setMediaTab=function(tab){
+    if(typeof window.ffMediaPaintTab==='function')window.ffMediaPaintTab(tab);
+    if(typeof window.__ffSetMediaTabReal==='function'){
+      try{window.__ffSetMediaTabReal(tab);}catch(e){}
+    }
   };
 </script>
 
 <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/main.css?v=20260827_1258notes2">
+<link rel="stylesheet" href="/main.css?v=20260909_apps_badges">
 <style id="ff-dynamic-layout-vars">
   /* Defaults until setHeaderH() / positionMenu() override via JS */
   :root {
@@ -831,7 +848,7 @@
 
         <button id="inboxBtn" class="btn-pill nav-item core-nav"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg><span class="ff-inbox-badge ff-home-tasks-badge ff-nav-icon-badge"></span></span>Inbox</button>
 
-        <button id="mediaBtn" class="btn-pill nav-item" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></span>Media</button>
+        <button id="mediaBtn" class="btn-pill nav-item" onclick="window.goToMedia && window.goToMedia()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><span id="mediaNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Media</button>
 
         <button type="button" id="inventoryNavBtn" class="btn-pill nav-item core-nav hide-4" onclick="window.goToInventory && window.goToInventory()"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg></span>Inventory</button>
 
@@ -843,7 +860,7 @@
 
       <div class="toolbar toolbar-nav-right" aria-label="Apps and account">
 
-        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>Apps</button>
+        <button id="appsBtn" class="btn-pill" style="position:relative;"><span class="nav-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg><span id="appsNavBadge" class="ff-home-tasks-badge ff-nav-icon-badge"></span></span>Apps</button>
         <div class="header-toolbar-divider" aria-hidden="true"></div>
         <div class="user-avatar-wrapper" style="position:relative;z-index:100005;">
           <button id="userAvatarBtn" class="user-avatar-trigger" aria-label="User menu" style="display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;outline:none;">
@@ -1205,7 +1222,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
                 </div>
                 <div>
-                  <div>Tickets</div>
+                  <div class="apps-item-label-row"><span>Tickets</span><span id="ticketsAppsBadge" class="apps-item-badge"></span></div>
                 </div>
               </div>
             </div>
@@ -1232,7 +1249,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                 </div>
                 <div>
-                  <div>Chat</div>
+                  <div class="apps-item-label-row"><span>Chat</span><span id="chatAppsBadge" class="apps-item-badge"></span></div>
                 </div>
               </div>
             </div>
@@ -1242,7 +1259,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
                 </div>
                 <div>
-                  <div>Inbox</div>
+                  <div class="apps-item-label-row"><span>Inbox</span><span id="inboxAppsBadge" class="apps-item-badge"></span></div>
                 </div>
               </div>
             </div>
@@ -1259,7 +1276,7 @@
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
                 </div>
                 <div>
-                  <div>Media</div>
+                  <div class="apps-item-label-row"><span>Media</span><span id="mediaAppsBadge" class="apps-item-badge"></span></div>
                 </div>
               </div>
             </div>
@@ -4817,9 +4834,17 @@ async function verifyQueueGeoFenceForAction({ action, staffId, staffName }) {
  * caller is responsible for the UI (the Time Clock kiosk already has its
  * own compact error line below the PIN pad).
  */
-async function verifyTimeClockGeoFence() {
-  const geo = getQueueGeoFenceSettings();
-  if (!isTimeClockGeoFenceActive(geo)) return { allowed: true, skipped: true };
+async function verifyTimeClockGeoFence(locationId) {
+  const loc = String(locationId || '').trim()
+    || (window.__ffTCState && window.__ffTCState.selectedLocationId)
+    || '';
+  const geo = getQueueGeoFenceSettings(loc);
+  if (!isTimeClockGeoFenceActive(geo)) {
+    try {
+      if (window.__ff_kiosk_claims) return { allowed: true, skipped: true };
+    } catch (_) {}
+    return { allowed: false, reason: 'salon_location_not_configured' };
+  }
   const allowedRadiusMeters = sanitizeQueueGeoFenceRadius(geo.allowedRadiusMeters);
   const accuracyLimit = getQueueGeoFenceActionAccuracyLimitMeters();
   let accuracy = null;
@@ -20854,7 +20879,7 @@ function setSettingsModalTab(tabName, options) {
         label.style.cursor = enabled === true ? 'pointer' : 'not-allowed';
       }
       if (persist === true) {
-        localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+        ffSaveTasksAlertWindows(alertWindows);
       }
     };
 
@@ -20870,7 +20895,7 @@ function setSettingsModalTab(tabName, options) {
         const alertWindows = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}');
         if (!alertWindows[forceTab]) alertWindows[forceTab] = {};
         alertWindows[forceTab].autoResetForce = checkbox.checked === true;
-        localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+        ffSaveTasksAlertWindows(alertWindows);
       });
     };
 
@@ -20909,7 +20934,7 @@ function setSettingsModalTab(tabName, options) {
             alertWindows[tabName] = {};
           }
           alertWindows[tabName].startTime = alertTimeInput.value;
-          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          ffSaveTasksAlertWindows(alertWindows);
           
           // Update badges immediately to reflect the change
           if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -20933,7 +20958,7 @@ function setSettingsModalTab(tabName, options) {
               alertTimeInput.value = tabName === 'opening' ? '09:00' : '18:00';
               alertWindows[tabName].startTime = alertTimeInput.value;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             setRowVisible(alertTimeInputRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
@@ -20999,7 +21024,7 @@ function setSettingsModalTab(tabName, options) {
                   alertWindows.opening.autoResetTime = '21:00';
                 }
                 
-                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                ffSaveTasksAlertWindows(alertWindows);
                 
                 // Toggle time row visibility
                 autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
@@ -21018,7 +21043,7 @@ function setSettingsModalTab(tabName, options) {
                 const timeValue = autoResetTimeInput.value;
                 if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                   alertWindows.opening.autoResetTime = timeValue;
-                  localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                  ffSaveTasksAlertWindows(alertWindows);
                 }
               });
             }
@@ -21032,7 +21057,7 @@ function setSettingsModalTab(tabName, options) {
                 const timeValue = autoResetTimeInput.value;
                 if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                   alertWindows.opening.autoResetTime = timeValue;
-                  localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                  ffSaveTasksAlertWindows(alertWindows);
                 }
               });
             }
@@ -21111,7 +21136,7 @@ function setSettingsModalTab(tabName, options) {
                   alertWindows.closing.autoResetTime = '21:00';
                 }
                 
-                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                ffSaveTasksAlertWindows(alertWindows);
                 
                 // Toggle time row visibility
                 autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
@@ -21130,7 +21155,7 @@ function setSettingsModalTab(tabName, options) {
                 const timeValue = autoResetTimeInput.value;
                 if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                   alertWindows.closing.autoResetTime = timeValue;
-                  localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                  ffSaveTasksAlertWindows(alertWindows);
                 }
               });
             }
@@ -21144,7 +21169,7 @@ function setSettingsModalTab(tabName, options) {
                 const timeValue = autoResetTimeInput.value;
                 if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                   alertWindows.closing.autoResetTime = timeValue;
-                  localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                  ffSaveTasksAlertWindows(alertWindows);
                 }
               });
             }
@@ -21198,7 +21223,7 @@ function setSettingsModalTab(tabName, options) {
             alertWindows[tabName] = {};
           }
           alertWindows[tabName].startTime = alertWeekdayTimeInput.value;
-          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+          ffSaveTasksAlertWindows(alertWindows);
           
           // Update badges immediately
           if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21222,7 +21247,7 @@ function setSettingsModalTab(tabName, options) {
               alertWeekdayTimeInput.value = '09:00';
               alertWindows[tabName].startTime = alertWeekdayTimeInput.value;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             setRowVisible(alertWeekdayTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
@@ -21297,7 +21322,7 @@ function setSettingsModalTab(tabName, options) {
                 alertWindows.weekly.autoResetTime = '21:00';
               }
               
-              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              ffSaveTasksAlertWindows(alertWindows);
               
               // Toggle time row visibility
               autoResetTimeRow.style.display = isChecked ? 'block' : 'none';
@@ -21316,7 +21341,7 @@ function setSettingsModalTab(tabName, options) {
               const timeValue = autoResetTimeInput.value;
               if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                 alertWindows.weekly.autoResetTime = timeValue;
-                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                ffSaveTasksAlertWindows(alertWindows);
               }
             });
           }
@@ -21330,7 +21355,7 @@ function setSettingsModalTab(tabName, options) {
               const timeValue = autoResetTimeInput.value;
               if (timeValue && timeValue.match(/^\d{2}:\d{2}$/)) {
                 alertWindows.weekly.autoResetTime = timeValue;
-                localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+                ffSaveTasksAlertWindows(alertWindows);
               }
             });
           }
@@ -21368,7 +21393,7 @@ function setSettingsModalTab(tabName, options) {
             if (alertWindows[tabName].startDayOfMonth !== undefined) {
               delete alertWindows[tabName].startDayOfMonth;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             
             // Update badges immediately
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21396,7 +21421,7 @@ function setSettingsModalTab(tabName, options) {
               alertDayTimeInput.value = '09:00';
               alertWindows[tabName].startTime = alertDayTimeInput.value;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             setRowVisible(alertDayTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
@@ -21446,7 +21471,7 @@ function setSettingsModalTab(tabName, options) {
               tasksMonthlyAutoResetTimeRow.style.display = tasksMonthlyAutoResetEnabled.checked ? 'block' : 'none';
               syncAutoResetForce('monthly', tasksMonthlyAutoResetForce, tasksMonthlyAutoResetEnabled.checked, false);
               
-              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              ffSaveTasksAlertWindows(alertWindows);
             });
           }
           
@@ -21458,7 +21483,7 @@ function setSettingsModalTab(tabName, options) {
                 alertWindows.monthly = {};
               }
               alertWindows.monthly.autoResetTime = tasksMonthlyAutoResetTime.value;
-              localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+              ffSaveTasksAlertWindows(alertWindows);
             });
           }
         } else {
@@ -21530,7 +21555,7 @@ function setSettingsModalTab(tabName, options) {
             tasksYearlyAutoResetTimeRow.style.display = tasksYearlyAutoResetEnabled.checked ? 'block' : 'none';
             syncAutoResetForce('yearly', tasksYearlyAutoResetForce, tasksYearlyAutoResetEnabled.checked, false);
             
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
           });
         }
         
@@ -21542,7 +21567,7 @@ function setSettingsModalTab(tabName, options) {
               alertWindows.yearly = {};
             }
             alertWindows.yearly.autoResetTime = tasksYearlyAutoResetTime.value;
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
           });
         }
       }
@@ -21568,7 +21593,7 @@ function setSettingsModalTab(tabName, options) {
             if (alertWindows[tabName].startDay !== undefined) {
               delete alertWindows[tabName].startDay;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             
             // Update badges immediately
             if (typeof window.ffUpdateTasksTabBadges === 'function') {
@@ -21596,7 +21621,7 @@ function setSettingsModalTab(tabName, options) {
               alertYearlyTimeInput.value = '09:00';
               alertWindows[tabName].startTime = alertYearlyTimeInput.value;
             }
-            localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+            ffSaveTasksAlertWindows(alertWindows);
             setRowVisible(alertYearlyTimeRow, showOnHomeCheckbox.checked, 'block');
             
             // Update both badges
@@ -22351,6 +22376,106 @@ function getTabStorageKey(tab, status) {
   return `ff_tasks_${tab}_${statusKey}_v1`;
 }
 
+function ffNormTaskTitleForHistory(s) {
+  return String(s || '').toLowerCase().replace(/\s+/g, ' ').replace(/\/+$/, '').trim();
+}
+function ffParseTasksHistoryAction(action) {
+  const a = String(action || '');
+  const sel = a.match(/^Task Selected:\s*(.+)$/i);
+  if (sel) return { kind: 'selected', title: sel[1].trim() };
+  const done = a.match(/^Task Completed:\s*(.+)$/i);
+  if (done) return { kind: 'completed', title: done[1].trim() };
+  const ret = a.match(/^Task Returned:\s*(.+)$/i);
+  if (ret) return { kind: 'returned', title: ret[1].trim() };
+  return null;
+}
+function ffSaveTasksAlertWindows(alertWindows) {
+  try {
+    localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows || {}));
+  } catch (e) {
+    console.warn('[Tasks] save alert windows failed', e);
+  }
+  if (window.__ffTasksApplyingRemote) return;
+  if (typeof window.tasksCloudWrite === 'function') {
+    window.tasksCloudWrite('alert-windows');
+  }
+}
+
+/** View-All readers often have empty tasksState pending while today's takes
+ *  already live in the shared queue history log. Overlay those rows so Alan
+ *  / Jessica see who took and who finished without waiting for a technician flush. */
+function ffHydrateTabTasksFromHistory(tab, activeTasks, pendingTasks, doneTasks) {
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  const cutoffMs = cutoff.getTime();
+  let resetAt = 0;
+  try {
+    const stamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}') || {};
+    resetAt = Number(stamps[tab] || 0) || 0;
+  } catch (_) { resetAt = 0; }
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem('ffv24_log') || '[]') || []; } catch (_) { log = []; }
+  const catalog = (window.ff_tasks_catalog_v1 && window.ff_tasks_catalog_v1[tab]) || [];
+  const roster = (activeTasks || []).concat(catalog);
+  function matchId(title, explicitId) {
+    if (explicitId) return String(explicitId).trim();
+    const nt = ffNormTaskTitleForHistory(title);
+    let best = '';
+    roster.forEach((t) => {
+      const id = String((t && (t.taskId || t.id)) || '').trim();
+      const tt = ffNormTaskTitleForHistory((t && (t.title || t.name)) || '');
+      if (id && tt && (tt === nt || nt.startsWith(tt) || tt.startsWith(nt))) best = id;
+    });
+    return best;
+  }
+  const latest = new Map();
+  log.forEach((e) => {
+    if (!e || Number(e.ts || 0) < cutoffMs) return;
+    // A reset must not be undone by older take/done rows still sitting in history.
+    if (resetAt && Number(e.ts || 0) < resetAt) return;
+    if (String(e.source || '') !== 'tasks') return;
+    const parsed = ffParseTasksHistoryAction(e.action);
+    if (!parsed) return;
+    const eventTab = (e.extra && e.extra.tab) ? String(e.extra.tab) : 'opening';
+    if (eventTab !== String(tab || 'opening')) return;
+    const id = matchId(parsed.title, e.taskId);
+    if (!id) return;
+    latest.set(id, { kind: parsed.kind, title: parsed.title, worker: String(e.worker || '').trim(), ts: Number(e.ts || 0), id });
+  });
+  if (!latest.size) return { activeTasks: activeTasks || [], pendingTasks: pendingTasks || [], doneTasks: doneTasks || [] };
+  const pendingById = new Map((pendingTasks || []).map((t) => [String((t && (t.taskId || t.id)) || '').trim(), t]));
+  const doneById = new Map((doneTasks || []).map((t) => [String((t && (t.taskId || t.id)) || '').trim(), t]));
+  let active = (activeTasks || []).map((t) => Object.assign({}, t));
+  latest.forEach((ev, id) => {
+    if (ev.kind === 'completed') {
+      if (!doneById.has(id)) {
+        doneById.set(id, { id: id, taskId: id, title: ev.title, status: 'done', completedAt: ev.ts, completedBy: ev.worker });
+      }
+      pendingById.delete(id);
+      active = active.map((row) => {
+        if (String(row.taskId || row.id) !== id) return row;
+        return Object.assign({}, row, { status: 'done', assignedTo: ev.worker, completedAt: ev.ts, completedBy: ev.worker });
+      });
+    } else if (ev.kind === 'selected') {
+      if (!doneById.has(id)) {
+        pendingById.set(id, { id: id, taskId: id, title: ev.title, status: 'pending', assignedTo: ev.worker, updatedAt: ev.ts, selectedAt: ev.ts });
+      }
+      active = active.map((row) => {
+        if (String(row.taskId || row.id) !== id) return row;
+        if (row.status === 'done' || row.completedAt) return row;
+        return Object.assign({}, row, { status: 'pending', assignedTo: ev.worker, updatedAt: ev.ts });
+      });
+    } else if (ev.kind === 'returned') {
+      pendingById.delete(id);
+    }
+  });
+  return {
+    activeTasks: active,
+    pendingTasks: Array.from(pendingById.values()).filter((t) => t && (t.taskId || t.id)),
+    doneTasks: Array.from(doneById.values())
+  };
+}
+
 // Get tasks for a specific tab and status
 function getTabTasks(tab, status) {
   try {
@@ -22558,8 +22683,12 @@ function renderTasksList(tab, opts) {
       
       // Get tasks from tab-specific storage for main screen (getTabTasks reads directly from localStorage, no cache)
       let activeTasks = getTabTasks(mainTab, 'active');
-      const doneTasks = getTabTasks(mainTab, 'done');
-      const pendingTasks = getTabTasks(mainTab, 'pending');
+      let doneTasks = getTabTasks(mainTab, 'done');
+      let pendingTasks = getTabTasks(mainTab, 'pending');
+      const hydratedFromHistory = ffHydrateTabTasksFromHistory(mainTab, activeTasks, pendingTasks, doneTasks);
+      activeTasks = hydratedFromHistory.activeTasks;
+      pendingTasks = hydratedFromHistory.pendingTasks;
+      doneTasks = hydratedFromHistory.doneTasks;
       
       // Catalog-fallback: include tasks from catalog not yet in active (Firestore sync may be delayed)
       const catalog = window.ff_tasks_catalog_v1 || {};
@@ -22620,7 +22749,7 @@ function renderTasksList(tab, opts) {
         const doneKey = (typeof getTabStorageKey === 'function')
           ? getTabStorageKey(mainTab, 'done')
           : `ff_tasks_${mainTab}_done_v1`;
-        const tabDoneList = getTabTasks(mainTab, 'done');
+        const tabDoneList = doneTasks;
         const today = new Date();
         
         doneToday = tabDoneList.filter(doneTask => {
@@ -23136,7 +23265,12 @@ function renderTasksList(tab, opts) {
       const tasksUseOk = typeof ffCurrentUserHasTasksUsePermission === 'function' && ffCurrentUserHasTasksUsePermission();
       // Get current tab for main Tasks screen
       const mainTab = currentTasksTab || 'opening';
-      const allPendingTasks = getTabTasks(mainTab, 'pending');
+      const allPendingTasks = ffHydrateTabTasksFromHistory(
+        mainTab,
+        getTabTasks(mainTab, 'active'),
+        getTabTasks(mainTab, 'pending'),
+        getTabTasks(mainTab, 'done')
+      ).pendingTasks;
       
       // For weekly tab, filter by scheduleWeekdays (only show tasks scheduled for today)
       // For monthly tab, filter by scheduleDayOfMonth (only show tasks scheduled for today)
@@ -24838,7 +24972,7 @@ function openTasksSettings(options) {
     var _wasApplyingSettings = window.__ffTasksApplyingRemote;
     window.__ffTasksApplyingRemote = true;
     try {
-      localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(alertWindows));
+      ffSaveTasksAlertWindows(alertWindows);
     } finally {
       window.__ffTasksApplyingRemote = _wasApplyingSettings;
     }
@@ -26956,6 +27090,94 @@ function initializeNavigationButtons() {
 }
 
 // Initialize Apps Launcher Panel
+function ffReadBadgeCount(sel) {
+  try {
+    const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+    if (!el) return 0;
+    const raw = String(el.textContent || '').replace('+', '').trim();
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+function ffPaintAppsCountBadge(el, count) {
+  if (!el) return;
+  const n = Number(count) || 0;
+  const next = n > 0 ? (n > 99 ? '99+' : String(n)) : '';
+  if (String(el.textContent || '') === next) {
+    if (n > 0 && el.style.display === 'none') el.style.display = 'inline-flex';
+    return;
+  }
+  if (n > 0) {
+    el.textContent = next;
+    el.style.display = 'inline-flex';
+  } else {
+    el.textContent = '';
+    el.style.display = 'none';
+  }
+}
+
+window.ffPaintAppsModuleBadge = function(appKey, count) {
+  const ids = {
+    chat: 'chatAppsBadge',
+    inbox: 'inboxAppsBadge',
+    tickets: 'ticketsAppsBadge',
+    media: 'mediaAppsBadge'
+  };
+  ffPaintAppsCountBadge(document.getElementById(ids[appKey]), count);
+  if (appKey === 'media') {
+    ffPaintAppsCountBadge(document.getElementById('mediaNavBadge'), count);
+  }
+  if (typeof window.ffRefreshAppsLauncherBadge === 'function') window.ffRefreshAppsLauncherBadge();
+};
+
+window.ffRefreshAppsLauncherBadge = function() {
+  const total =
+    ffReadBadgeCount('#chatAppsBadge') +
+    ffReadBadgeCount('#inboxAppsBadge') +
+    ffReadBadgeCount('#ticketsAppsBadge') +
+    ffReadBadgeCount('#mediaAppsBadge');
+  ffPaintAppsCountBadge(document.getElementById('appsNavBadge'), total);
+};
+
+window.ffSyncAppsPanelBadgesFromNav = function() {
+  if (typeof window.ffPaintAppsModuleBadge !== 'function') return;
+  window.ffPaintAppsModuleBadge('chat', ffReadBadgeCount('#chatNavBadge'));
+  window.ffPaintAppsModuleBadge('inbox', ffReadBadgeCount('#inboxBtn .ff-inbox-badge'));
+  window.ffPaintAppsModuleBadge('tickets', ffReadBadgeCount('#ticketsNavBadge'));
+  const mediaCount = ffReadBadgeCount('#mediaNavBadge') || ffReadBadgeCount('#mediaAppsBadge');
+  window.ffPaintAppsModuleBadge('media', mediaCount);
+};
+
+function ffBindNavBadgeMirrorsToApps() {
+  if (window.__ffAppsBadgeMirrorsBound) return;
+  window.__ffAppsBadgeMirrorsBound = true;
+  const pairs = [
+    ['#chatNavBadge', 'chat'],
+    ['#inboxBtn .ff-inbox-badge', 'inbox'],
+    ['#ticketsNavBadge', 'tickets'],
+    ['#mediaNavBadge', 'media']
+  ];
+  pairs.forEach(function(pair) {
+    const src = document.querySelector(pair[0]);
+    if (!src) return;
+    const sync = function() {
+      window.ffPaintAppsModuleBadge(pair[1], ffReadBadgeCount(src));
+    };
+    sync();
+    try {
+      new MutationObserver(sync).observe(src, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+        attributes: true
+      });
+    } catch (_) {}
+  });
+}
+
 function initializeAppsPanel() {
   const appsBtn = document.getElementById('appsBtn');
   const appsPanel = document.getElementById('appsPanel');
@@ -27021,6 +27243,9 @@ function initializeAppsPanel() {
       window.refreshTrainingNotificationsForCurrentUser().catch((err) => {
         console.warn('[Training] Failed refreshing badge from apps panel', err);
       });
+    }
+    if (typeof window.ffSyncAppsPanelBadgesFromNav === 'function') {
+      window.ffSyncAppsPanelBadgesFromNav();
     }
   }
   
@@ -27194,7 +27419,7 @@ function initializeAppsPanel() {
             if (typeof window.goToInbox === 'function') {
               window.goToInbox();
             } else {
-              import('/inbox.js?v=20260901_sched_req')
+              import('/inbox.js?v=20260909_to_handle_sender')
                 .then(function (m) {
                   if (m && typeof m.goToInbox === 'function') {
                     window.goToInbox = m.goToInbox;
@@ -27332,6 +27557,8 @@ function initializeAppsPanel() {
   if (typeof ffUpdateAppsPanelPermissionVisibility === 'function') ffUpdateAppsPanelPermissionVisibility();
   if (typeof ffUpdateScheduleAppVisibility === 'function') ffUpdateScheduleAppVisibility();
   if (typeof window.ffUpdateMediaNavVisibility === 'function') window.ffUpdateMediaNavVisibility();
+  ffBindNavBadgeMirrorsToApps();
+  if (typeof window.ffSyncAppsPanelBadgesFromNav === 'function') window.ffSyncAppsPanelBadgesFromNav();
   window.__ffAppsPanelInited = true;
   
   /* SANITY TEST CHECKLIST:
@@ -40897,6 +41124,8 @@ function initializeUserProfileMenu() {
    *   - 'manage'  : Admin/owner/manager only. Table of recent time cards
    *                 with filters (Location, Staff, Time period) and an
    *                 Add Time Card button that opens a side drawer.
+   *   - 'myhours' : Logged-in staff only (never the shared kiosk). Read-only
+   *                 view of that person's own punches and totals.
    *
    * State is stored on window.__ffTCState so returning to the Time Clock
    * screen from elsewhere restores the view consistently.
@@ -40918,7 +41147,16 @@ function initializeUserProfileMenu() {
       optionsOpen: false,
       addFormOpen: false,
     },
+    myHours: {
+      period: 'week',          // 'today' | 'week' | 'lastweek' | 'month' | 'custom'
+      customFrom: null,        // YYYY-MM-DD
+      customTo: null,
+      datesOpen: false,
+    },
   };
+  if (!window.__ffTCState.myHours) {
+    window.__ffTCState.myHours = { period: 'week', customFrom: null, customTo: null, datesOpen: false };
+  }
 
   function _ffTCCurrentUserIsAdmin() {
     try { return window.ff_is_admin_cached === true; } catch (_) { return false; }
@@ -40944,6 +41182,34 @@ function initializeUserProfileMenu() {
       return !!(row && row.permissions && row.permissions.time_clock_manage === true);
     } catch (_) { return false; }
   }
+
+  /** Logged-in staff (not a shared kiosk) can open their own hours. */
+  function _ffTCCurrentStaffIdForSelf() {
+    try {
+      if (typeof window.ffIsKioskAppMode === 'function' && window.ffIsKioskAppMode()) return '';
+    } catch (_) {}
+    try {
+      const row = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      const rid = String((row && (row.id || row.staffId)) || '').trim();
+      if (rid) return rid;
+    } catch (_) {}
+    return String(
+      window.__ff_authedStaffId ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem('ff_authedStaffId_v1') : '') ||
+      ''
+    ).trim();
+  }
+
+  function _ffTCCurrentUserCanSeeOwnHours() {
+    return !!_ffTCCurrentStaffIdForSelf();
+  }
+
+  function _ffTCHomeView() {
+    return _ffTCCurrentUserCanSeeOwnHours() ? 'myhours' : 'clock';
+  }
+  window.ffTCHomeView = _ffTCHomeView;
 
   function _ffTCDefaultLocationId() {
     const st = window.__ffTCState;
@@ -41232,6 +41498,35 @@ function initializeUserProfileMenu() {
     return mm + ' min';
   }
 
+  function _ffTCEntryWorkedMinutes(entry) {
+    if (!entry) return 0;
+    const stored = Number(entry.durationMinutes);
+    if (entry.status !== 'open' && Number.isFinite(stored) && stored >= 0) return stored;
+    const inAt = _ffTCToDate(entry.clockInAt);
+    if (!inAt) return 0;
+    const outAt = entry.clockOutAt ? _ffTCToDate(entry.clockOutAt) : new Date();
+    if (!outAt) return 0;
+    return Math.max(0, Math.round((outAt.getTime() - inAt.getTime()) / 60000));
+  }
+
+  function _ffTCCurrentStaffIdAliases() {
+    const ids = new Set();
+    const primary = _ffTCCurrentStaffIdForSelf();
+    if (primary) ids.add(primary);
+    try {
+      const row = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      if (row) {
+        [row.id, row.staffId, row.uid].forEach((x) => {
+          const s = String(x || '').trim();
+          if (s) ids.add(s);
+        });
+      }
+    } catch (_) {}
+    return ids;
+  }
+
   function _ffTCEscape(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -41246,7 +41541,7 @@ function initializeUserProfileMenu() {
   //      Re-appending the SAME module URL is safe — browsers evaluate a
   //      module URL only once, so this never double-runs the module.
   //   2. The confirm action waits (below) instead of failing immediately.
-  const _FF_TC_ENTRIES_SRC = '/time-clock-entries.js?v=20260816_dash_time';
+  const _FF_TC_ENTRIES_SRC = '/time-clock-entries.js?v=20260903_geo_nowipe';
   function _ffTCEnsurePunchApiLoading() {
     try {
       if (typeof window.ffCreateTimeEntry === 'function') return;
@@ -41282,6 +41577,8 @@ function initializeUserProfileMenu() {
       const view = (window.__ffTCState && window.__ffTCState.view) || 'clock';
       if (view === 'manage') {
         _ffTCRenderManageView(content);
+      } else if (view === 'myhours') {
+        _ffTCRenderMyHoursView(content);
       } else if (view === 'confirm') {
         _ffTCRenderConfirmView(content);
       } else {
@@ -41491,6 +41788,7 @@ function initializeUserProfileMenu() {
     const locs = _ffTCActiveLocations();
     const defLoc = _ffTCDefaultLocationId();
     const showManage = _ffTCCurrentUserCanManage();
+    const showMyHours = _ffTCCurrentUserCanSeeOwnHours();
     const hasMultipleLocations = locs.length > 1;
 
     const keyBtn = (label, val, kind) => `
@@ -41548,6 +41846,12 @@ function initializeUserProfileMenu() {
           <div id="tcKioskError" style="height:30px;margin-top:8px;font-size:11px;line-height:1.25;color:#b91c1c;text-align:center;overflow:hidden;"></div>
         </div>
 
+        ${showMyHours ? `
+          <button id="tcKioskMyHoursLink" type="button" style="background:#fff;border:1px solid #e5e7eb;font-size:13px;font-weight:700;color:#4c1d95;cursor:pointer;display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:999px;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:background 0.15s ease;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            My hours
+          </button>
+        ` : ''}
         ${showManage ? `
           <button id="tcKioskManageLink" type="button" style="background:none;border:none;font-size:12px;color:#6b7280;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:8px;transition:background 0.15s ease;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="3" y1="10" x2="21" y2="10"></line></svg>
@@ -41778,6 +42082,17 @@ function initializeUserProfileMenu() {
     _ffTCPhotoStop();
     _ffTCPhotoMaybeShowDisclosure();
 
+    // My hours (logged-in staff only)
+    const myHoursLink = container.querySelector('#tcKioskMyHoursLink');
+    if (myHoursLink) {
+      myHoursLink.addEventListener('mouseenter', () => { myHoursLink.style.background = '#f5f3ff'; });
+      myHoursLink.addEventListener('mouseleave', () => { myHoursLink.style.background = '#fff'; });
+      myHoursLink.addEventListener('click', () => {
+        window.__ffTCState.view = 'myhours';
+        ffInitTimeClockUI();
+      });
+    }
+
     // Manage link
     const manageLink = container.querySelector('#tcKioskManageLink');
     if (manageLink) {
@@ -41842,7 +42157,7 @@ function initializeUserProfileMenu() {
     // staff row does not have time_clock_bypass_location.
     if (!mayBypassLoc && typeof window.verifyTimeClockGeoFence === 'function') {
       try {
-        const fence = await window.verifyTimeClockGeoFence();
+        const fence = await window.verifyTimeClockGeoFence(locationId);
         if (fence && fence.allowed === false) {
           let msg = 'You must be at the salon to clock in.';
           if (fence.reason === 'low_accuracy') {
@@ -41851,12 +42166,16 @@ function initializeUserProfileMenu() {
             msg = 'Location access is required. Allow location in your browser and try again.';
           } else if (fence.reason === 'outside_radius') {
             msg = `You must be at the salon to clock in${fence.distanceMeters != null ? ` (you are ~${fence.distanceMeters}m away).` : '.'}`;
+          } else if (fence.reason === 'salon_location_not_configured') {
+            msg = 'Salon location is not set. Clock in from the phone is blocked until a manager saves the salon pin in Settings.';
           }
           if (errEl) errEl.textContent = msg;
           return;
         }
       } catch (e) {
         console.warn('[Time Clock] geofence check failed', e);
+        if (errEl) errEl.textContent = 'Location check failed. You must be at the salon to clock in.';
+        return;
       }
     }
     // Look up their current open entry (if any) to decide Clock In vs Out.
@@ -41907,7 +42226,7 @@ function initializeUserProfileMenu() {
     const st = window.__ffTCState;
     const staff = st && st.confirmStaff;
     if (!staff) {
-      st.view = 'clock';
+      st.view = _ffTCHomeView();
       ffInitTimeClockUI();
       return;
     }
@@ -42037,7 +42356,7 @@ function initializeUserProfileMenu() {
       window.__ffTCState.confirmStaff = null;
       window.__ffTCState.confirmPin = null;
       window.__ffTCState.confirmOpenEntry = null;
-      window.__ffTCState.view = 'clock';
+      window.__ffTCState.view = _ffTCHomeView();
       ffInitTimeClockUI();
     };
 
@@ -42113,7 +42432,7 @@ function initializeUserProfileMenu() {
         setTimeout(() => {
           window.__ffTCState.confirmStaff = null;
           window.__ffTCState.confirmOpenEntry = null;
-          window.__ffTCState.view = 'clock';
+          window.__ffTCState.view = _ffTCHomeView();
           ffInitTimeClockUI();
         }, 1400);
       };
@@ -42142,6 +42461,15 @@ function initializeUserProfileMenu() {
         }
         if (reason === 'no_scheduled_shift') {
           return 'No scheduled shift for today at this location. Ask a manager to override.';
+        }
+        if (reason === 'salon_location_not_configured') {
+          return 'Salon location is not set. Clock in from the phone is blocked until a manager saves the salon pin in Settings.';
+        }
+        if (reason === 'outside_radius') {
+          return 'You must be at the salon to clock in.';
+        }
+        if (reason === 'location_required' || reason === 'location_denied') {
+          return 'Location access is required. Allow location and try again at the salon.';
         }
         return (err && err.message) ? String(err.message) : String(err);
       };
@@ -42311,7 +42639,7 @@ function initializeUserProfileMenu() {
               setTimeout(() => {
                 window.__ffTCState.confirmStaff = null;
                 window.__ffTCState.confirmOpenEntry = null;
-                window.__ffTCState.view = 'clock';
+                window.__ffTCState.view = _ffTCHomeView();
                 ffInitTimeClockUI();
               }, 1400);
               return;
@@ -42849,6 +43177,306 @@ function initializeUserProfileMenu() {
     return out;
   }
 
+  // ---------------------- View: My hours (self only) ----------------------
+  function _ffTCRenderMyHoursView(container) {
+    if (!_ffTCCurrentUserCanSeeOwnHours()) {
+      window.__ffTCState.view = 'clock';
+      ffInitTimeClockUI();
+      return;
+    }
+    if (window.__ffTCClockTick) { try { clearInterval(window.__ffTCClockTick); } catch (_) {} window.__ffTCClockTick = null; }
+    if (window.__ffTCKbHandler) { try { document.removeEventListener('keydown', window.__ffTCKbHandler); } catch (_) {} window.__ffTCKbHandler = null; }
+
+    _ffTCSetWideLayout(false);
+    try {
+      const el = document.getElementById('timeClockScreenContent');
+      if (el) {
+        el.style.maxWidth = '560px';
+        el.style.overflowY = 'auto';
+      }
+    } catch (_) {}
+
+    if (!window.__ffTCState.myHours) {
+      window.__ffTCState.myHours = { period: 'week', customFrom: null, customTo: null, datesOpen: false };
+    }
+    const st = window.__ffTCState.myHours;
+    if (!st.period) st.period = 'week';
+
+    const salonTodayKey = (() => {
+      try {
+        const parts = _ffTCLocalPartsInSalon(new Date());
+        return (parts && parts.dateKey) || '';
+      } catch (_) { return ''; }
+    })();
+    if (!st.customFrom || !st.customTo) {
+      try {
+        const weekRange = _ffTCComputePeriodRange('week');
+        const fromKey = weekRange.from ? (_ffTCLocalPartsInSalon(weekRange.from) || {}).dateKey : '';
+        st.customFrom = st.customFrom || fromKey || salonTodayKey;
+        st.customTo = st.customTo || salonTodayKey || fromKey;
+      } catch (_) {
+        if (!st.customFrom) st.customFrom = salonTodayKey;
+        if (!st.customTo) st.customTo = salonTodayKey;
+      }
+    }
+
+    const isCustom = st.period === 'custom';
+    const showDates = isCustom || st.datesOpen === true;
+    const datesLabel = (isCustom && st.customFrom && st.customTo)
+      ? (st.customFrom === st.customTo ? st.customFrom : (st.customFrom.slice(5) + ' – ' + st.customTo.slice(5)))
+      : 'Dates';
+
+    let selfName = 'My hours';
+    try {
+      const row = typeof window.ffResolveCurrentStaffRowFromFfStaffV1 === 'function'
+        ? window.ffResolveCurrentStaffRowFromFfStaffV1()
+        : null;
+      if (row && row.name) selfName = String(row.name).trim();
+    } catch (_) {}
+
+    const periods = [
+      { id: 'today', label: 'Today' },
+      { id: 'week', label: 'This week' },
+      { id: 'lastweek', label: 'Last week' },
+      { id: 'month', label: 'This month' },
+    ];
+    const periodBtns = periods.map((p) => {
+      const on = st.period === p.id;
+      return `<button type="button" class="tc-myhours-period" data-period="${p.id}"
+        style="flex:1 1 auto;min-width:0;padding:7px 8px;border-radius:999px;border:1px solid ${on ? 'transparent' : '#e5e7eb'};background:${on ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${on ? '#fff' : '#4b5563'};font-size:11px;font-weight:700;cursor:pointer;">${_ffTCEscape(p.label)}</button>`;
+    }).join('');
+
+    const showManage = _ffTCCurrentUserCanManage();
+    container.innerHTML = `
+      <div class="ff-tc-myhours-root" style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:520px;margin:0 auto;padding-bottom:24px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button id="tcMyHoursBack" type="button" aria-label="Clock in or out"
+            style="display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid #e5e7eb;border-radius:999px;padding:6px 12px;font-size:11px;color:#374151;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+            Clock in / out
+          </button>
+          <div style="min-width:0;flex:1;">
+            <div style="font-size:16px;font-weight:800;color:#111827;letter-spacing:-0.02em;">My hours</div>
+            <div style="font-size:12px;color:#6b7280;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_ffTCEscape(selfName)}</div>
+          </div>
+          ${showManage ? `<button id="tcMyHoursManage" type="button" style="background:none;border:none;font-size:11px;font-weight:600;color:#6b7280;cursor:pointer;padding:6px 4px;flex-shrink:0;">Manage</button>` : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${periodBtns}
+          <button type="button" id="tcMyHoursDatesBtn" class="tc-myhours-period" data-period="custom"
+            style="flex:1 1 auto;min-width:0;padding:7px 8px;border-radius:999px;border:1px solid ${isCustom ? 'transparent' : '#e5e7eb'};background:${isCustom ? 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)' : '#fff'};color:${isCustom ? '#fff' : '#4b5563'};font-size:11px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            <span id="tcMyHoursDatesBtnLabel">${_ffTCEscape(datesLabel)}</span>
+          </button>
+        </div>
+        <div id="tcMyHoursDatesRow" style="${showDates ? 'display:flex;' : 'display:none;'}align-items:end;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px 12px;">
+          <label style="flex:1 1 140px;min-width:0;font-size:11px;font-weight:700;color:#6b7280;">
+            From
+            <input id="tcMyHoursFrom" type="date" value="${_ffTCEscape(st.customFrom || '')}"
+              style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;color:#111827;background:#f9fafb;box-sizing:border-box;"/>
+          </label>
+          <label style="flex:1 1 140px;min-width:0;font-size:11px;font-weight:700;color:#6b7280;">
+            To
+            <input id="tcMyHoursTo" type="date" value="${_ffTCEscape(st.customTo || '')}"
+              style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;color:#111827;background:#f9fafb;box-sizing:border-box;"/>
+          </label>
+        </div>
+        <div id="tcMyHoursSummary" style="background:#fff;border:1px solid #e5e7eb;border-radius:18px;padding:18px 16px;box-shadow:0 8px 24px -12px rgba(123,63,228,0.18);">
+          <div style="font-size:12px;color:#9ca3af;font-weight:600;">Loading…</div>
+        </div>
+        <div id="tcMyHoursList"></div>
+      </div>
+    `;
+
+    const back = container.querySelector('#tcMyHoursBack');
+    if (back) {
+      back.addEventListener('click', () => {
+        window.__ffTCState.view = 'clock';
+        ffInitTimeClockUI();
+      });
+    }
+    const manageBtn = container.querySelector('#tcMyHoursManage');
+    if (manageBtn) {
+      manageBtn.addEventListener('click', () => {
+        window.__ffTCState.view = 'manage';
+        ffInitTimeClockUI();
+      });
+    }
+    container.querySelectorAll('.tc-myhours-period').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const next = String(btn.getAttribute('data-period') || 'week');
+        window.__ffTCState.myHours.period = next;
+        window.__ffTCState.myHours.datesOpen = (next === 'custom');
+        _ffTCRenderMyHoursView(container);
+      });
+    });
+
+    const applyCustomDates = () => {
+      const fromEl = container.querySelector('#tcMyHoursFrom');
+      const toEl = container.querySelector('#tcMyHoursTo');
+      let fv = fromEl && fromEl.value;
+      let tv = toEl && toEl.value;
+      if (!fv || !tv) return;
+      if (fv > tv) { const tmp = fv; fv = tv; tv = tmp; if (fromEl) fromEl.value = fv; if (toEl) toEl.value = tv; }
+      window.__ffTCState.myHours.customFrom = fv;
+      window.__ffTCState.myHours.customTo = tv;
+      window.__ffTCState.myHours.period = 'custom';
+      window.__ffTCState.myHours.datesOpen = true;
+      _ffTCFillMyHours(container).catch((e) => {
+        console.warn('[Time Clock] My hours custom range failed', e);
+      });
+      const datesBtn = container.querySelector('#tcMyHoursDatesBtn');
+      const datesBtnLabel = container.querySelector('#tcMyHoursDatesBtnLabel');
+      if (datesBtnLabel) datesBtnLabel.textContent = fv === tv ? fv : (fv.slice(5) + ' – ' + tv.slice(5));
+      if (datesBtn) {
+        datesBtn.style.background = 'linear-gradient(135deg,#7b3fe4 0%,#5b21b6 100%)';
+        datesBtn.style.color = '#fff';
+        datesBtn.style.borderColor = 'transparent';
+      }
+      container.querySelectorAll('.tc-myhours-period:not(#tcMyHoursDatesBtn)').forEach((b) => {
+        b.style.background = '#fff';
+        b.style.color = '#4b5563';
+        b.style.borderColor = '#e5e7eb';
+      });
+    };
+    const fromInput = container.querySelector('#tcMyHoursFrom');
+    const toInput = container.querySelector('#tcMyHoursTo');
+    if (fromInput) fromInput.addEventListener('change', applyCustomDates);
+    if (toInput) toInput.addEventListener('change', applyCustomDates);
+
+    _ffTCFillMyHours(container).catch((e) => {
+      console.warn('[Time Clock] My hours load failed', e);
+      const summary = container.querySelector('#tcMyHoursSummary');
+      if (summary) {
+        summary.innerHTML = `<div style="font-size:13px;color:#b91c1c;font-weight:600;">Could not load your hours. Try again.</div>`;
+      }
+    });
+  }
+
+  async function _ffTCFillMyHours(container) {
+    const summary = container.querySelector('#tcMyHoursSummary');
+    const listEl = container.querySelector('#tcMyHoursList');
+    if (!summary || !listEl) return;
+
+    const aliases = _ffTCCurrentStaffIdAliases();
+    if (!aliases.size) {
+      window.__ffTCState.view = 'clock';
+      ffInitTimeClockUI();
+      return;
+    }
+
+    const st = window.__ffTCState.myHours || { period: 'week' };
+    const range = _ffTCComputePeriodRange(st.period, st.customFrom, st.customTo);
+    const from = range.from || undefined;
+    const to = range.to || undefined;
+
+    let rows = [];
+    try {
+      if (typeof window.ffListTimeEntriesForSalon !== 'function') {
+        await _ffTCWaitForPunchApi('ffListTimeEntriesForSalon', 8000);
+      }
+      if (typeof window.ffListTimeEntriesForSalon === 'function') {
+        const primary = _ffTCCurrentStaffIdForSelf();
+        rows = await window.ffListTimeEntriesForSalon({
+          staffId: primary || undefined,
+          from,
+          to,
+          statuses: ['open', 'closed'],
+          maxResults: 2000,
+        });
+        rows = (rows || []).filter((r) => aliases.has(String(r.staffId || '')));
+        // Roster id and punch staffId can differ (uid vs staff_*). Retry
+        // the period scan and keep only this person's aliases.
+        if (!rows.length) {
+          const scanned = await window.ffListTimeEntriesForSalon({
+            from,
+            to,
+            statuses: ['open', 'closed'],
+            maxResults: 2000,
+          });
+          rows = (scanned || []).filter((r) => aliases.has(String(r.staffId || '')));
+        }
+      }
+    } catch (e) {
+      console.warn('[Time Clock] My hours list failed', e);
+    }
+    if (to) {
+      rows = rows.filter((r) => {
+        const ts = _ffTCToDate(r && r.clockInAt);
+        return ts ? ts < to : true;
+      });
+    }
+    rows.sort((a, b) => {
+      const am = (_ffTCToDate(a && a.clockInAt) || new Date(0)).getTime();
+      const bm = (_ffTCToDate(b && b.clockInAt) || new Date(0)).getTime();
+      return bm - am;
+    });
+
+    const locs = _ffTCActiveLocations();
+    const locById = {};
+    locs.forEach((l) => { locById[String(l.id)] = l; });
+
+    let totalMin = 0;
+    let openCount = 0;
+    rows.forEach((r) => {
+      totalMin += _ffTCEntryWorkedMinutes(r);
+      if (r && r.status === 'open') openCount += 1;
+    });
+
+    const hoursNum = (totalMin / 60);
+    const hoursLabel = hoursNum > 0
+      ? (Math.abs(hoursNum - Math.round(hoursNum)) < 0.05 ? String(Math.round(hoursNum)) : hoursNum.toFixed(1))
+      : '0';
+    const durLabel = totalMin > 0 ? _ffTCFormatDuration(totalMin) : '0 min';
+
+    const openBanner = openCount
+      ? `<div style="margin-top:12px;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font-size:11px;font-weight:700;">
+           <span style="width:6px;height:6px;border-radius:50%;background:#10b981;box-shadow:0 0 0 3px #10b98122;"></span>
+           Clocked in now
+         </div>`
+      : '';
+
+    const heading = (st.period === 'custom' && st.customFrom && st.customTo)
+      ? (st.customFrom === st.customTo ? st.customFrom : (st.customFrom + ' – ' + st.customTo))
+      : (range.label || 'This period');
+    summary.innerHTML = `
+      <div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.06em;">${_ffTCEscape(heading)}</div>
+      <div style="margin-top:6px;font-size:36px;font-weight:800;color:#111827;letter-spacing:-0.03em;line-height:1;">${_ffTCEscape(hoursLabel)} <span style="font-size:16px;font-weight:700;color:#6b7280;">hr</span></div>
+      <div style="margin-top:6px;font-size:13px;color:#4b5563;">${_ffTCEscape(durLabel)} · ${rows.length} punch${rows.length === 1 ? '' : 'es'}</div>
+      ${openBanner}
+    `;
+
+    if (!rows.length) {
+      listEl.innerHTML = `
+        <div style="padding:28px 12px;text-align:center;color:#9ca3af;">
+          <div style="font-size:13px;font-weight:600;color:#6b7280;">No hours in this period</div>
+          <div style="margin-top:4px;font-size:12px;">Clock in from the PIN screen and your hours will show here.</div>
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = rows.map((r) => {
+      const loc = locById[String(r.locationId || '')];
+      const locName = (loc && loc.name) ? loc.name : (r.locationId || '');
+      const day = _ffTCFormatDay(r.clockInAt);
+      const ci = _ffTCFormatTime(r.clockInAt);
+      const isOpen = r.status === 'open';
+      const co = isOpen ? '' : (r.clockOutAt ? _ffTCFormatTime(r.clockOutAt) : '');
+      const dur = _ffTCFormatDuration(_ffTCEntryWorkedMinutes(r));
+      const outHtml = isOpen
+        ? `<span style="color:#047857;font-weight:700;">Still clocked in</span>`
+        : _ffTCEscape(co || '-');
+      return `
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px 14px;margin-bottom:8px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+            <div style="font-size:13px;font-weight:700;color:#111827;">${_ffTCEscape(day)}</div>
+            <div style="font-size:13px;font-weight:800;color:#4c1d95;">${_ffTCEscape(dur === '-' ? '0 min' : dur)}</div>
+          </div>
+          <div style="margin-top:4px;font-size:12px;color:#4b5563;">${_ffTCEscape(ci)} – ${outHtml}</div>
+          ${locName ? `<div style="margin-top:4px;font-size:11px;color:#9ca3af;">${_ffTCEscape(locName)}</div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
   // ---------------------- View 3: Manage Time Cards -----------------------
   // Redesigned to match the kiosk: gradient accents, rounded-22 cards,
   // soft shadows, and generous top spacing so nothing is pinned against
@@ -43244,7 +43872,7 @@ function initializeUserProfileMenu() {
     const backBtn = container.querySelector('#tcManageBack');
     if (backBtn) backBtn.addEventListener('click', () => {
       closeTcPrimaryMobileMenu();
-      window.__ffTCState.view = 'clock';
+      window.__ffTCState.view = _ffTCHomeView();
       ffInitTimeClockUI();
     });
 
@@ -49794,9 +50422,25 @@ window.__ffTasksCloudInit = function() {
       if (!currentLoc) {
         try { currentLoc = String(localStorage.getItem('ff_active_location_id') || '').trim(); } catch (_) {}
       }
-      if (data && Number(data.isolateClearAt || 0) > 0) {
+      if (!currentLoc) {
+        try {
+          if (typeof window.ffGetUserAllowedLocations === 'function') {
+            var allowedLocs = window.ffGetUserAllowedLocations() || [];
+            var allowedIds = allowedLocs.map(function(l) { return l && l.id ? String(l.id).trim() : ''; }).filter(Boolean);
+            if (allowedIds.length === 1) currentLoc = allowedIds[0];
+          }
+        } catch (_) {}
+      }
+      var incomingIsolate = Number((data && data.isolateClearAt) || 0) || 0;
+      var localIsolate = 0;
+      try { localIsolate = Number(localStorage.getItem('ff_tasks_isolate_clear_at_v1') || 0) || 0; } catch (_) {}
+      // Only the first apply of a newer location-isolate wipe replaces lists.
+      // After the stamp matches, merge so View-All users pick up takes/dones.
+      if (incomingIsolate > 0 && incomingIsolate > localIsolate) {
         window.__ffTasksHardReplace = true;
-        try { localStorage.setItem('ff_tasks_isolate_clear_at_v1', String(Number(data.isolateClearAt))); } catch (_) {}
+        try { localStorage.setItem('ff_tasks_isolate_clear_at_v1', String(incomingIsolate)); } catch (_) {}
+      } else if (incomingIsolate > 0) {
+        try { localStorage.setItem('ff_tasks_isolate_clear_at_v1', String(incomingIsolate)); } catch (_) {}
       }
       var applyingDoc = '';
       try { applyingDoc = String(window.__ffTasksApplyingDocId || '').trim(); } catch (_) { applyingDoc = ''; }
@@ -49882,8 +50526,12 @@ window.__ffTasksCloudInit = function() {
       try { localStamps = JSON.parse(localStorage.getItem('ff_tasks_reset_stamps_v1') || '{}'); } catch (e) {}
       var remoteStamps = (data && data.resetStamps && typeof data.resetStamps === 'object') ? data.resetStamps : {};
       var freshResetTabs = {};
+      var localWinsTabs = {};
       TABS_FOR_STAMPS.forEach(function(tab) {
-        if (Number(remoteStamps[tab] || 0) > Number(localStamps[tab] || 0)) freshResetTabs[tab] = true;
+        var remoteStamp = Number(remoteStamps[tab] || 0);
+        var localStamp = Number(localStamps[tab] || 0);
+        if (remoteStamp > localStamp) freshResetTabs[tab] = true;
+        else if (localStamp > remoteStamp) localWinsTabs[tab] = true;
       });
       function persistMergedStamps() {
         try {
@@ -49947,7 +50595,27 @@ window.__ffTasksCloudInit = function() {
           window.ff_tasks_catalog_v1 = mergedCatalog;
         }
         if (data.tombstone) localStorage.setItem('ff_tasks_active_deleted_v1', JSON.stringify(data.tombstone));
-        if (data.alertWindows) localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(data.alertWindows));
+        if (data.alertWindows) {
+          var localAw = {};
+          try { localAw = JSON.parse(localStorage.getItem('ff_tasks_alert_windows_v1') || '{}') || {}; }
+          catch (e) { localAw = {}; }
+          var mergedAw = (typeof window.__ffTasksMergeAlertWindows === 'function')
+            ? window.__ffTasksMergeAlertWindows(localAw, data.alertWindows)
+            : data.alertWindows;
+          localStorage.setItem('ff_tasks_alert_windows_v1', JSON.stringify(mergedAw));
+          var needsAwRepair = false;
+          TABS.forEach(function(tab) {
+            var localTabAw = mergedAw[tab] || {};
+            var remoteTabAw = (data.alertWindows && data.alertWindows[tab]) || {};
+            if (localTabAw.autoResetEnabled === true && remoteTabAw.autoResetEnabled !== true) needsAwRepair = true;
+            if (localTabAw.autoResetTime && !remoteTabAw.autoResetTime) needsAwRepair = true;
+          });
+          if (needsAwRepair && typeof window.tasksCloudWrite === 'function') {
+            setTimeout(function() {
+              if (typeof window.tasksCloudWrite === 'function') window.tasksCloudWrite('alert-windows-repair');
+            }, 0);
+          }
+        }
         if (data.enforceSelectSettings) localStorage.setItem('ff_tasks_enforce_select_v1', JSON.stringify(data.enforceSelectSettings));
         // Merge auto-reset state: keep the LATER lastRunDate per tab to avoid re-running a reset
         if (data.autoResetState && typeof data.autoResetState === 'object') {
@@ -50014,6 +50682,9 @@ window.__ffTasksCloudInit = function() {
             });
             return;
           }
+          // This device reset more recently than the snapshot. Keep the clean
+          // local lists — merging would resurrect the pre-reset done/pending rows.
+          if (localWinsTabs[tab]) return;
           // Same reset generation: three-list merge of remote ⇄ local so this
           // device never loses its own just-made selection AND always picks up
           // other devices' selections/completions/returns ("newest action wins").
@@ -55604,9 +56275,9 @@ function hookSettingsGuard_DISABLED(){
 <div id="mediaScreen" class="media-screen" data-media-tab="my_uploads" style="display:none;position:fixed;top:var(--header-h,60px);left:0;right:0;bottom:0;background:#f9fafb;z-index:9860;flex-direction:column;overflow:hidden;pointer-events:auto;">
   <!-- Tabs (left) | Filters + Sort + Upload (right, grouped) -->
   <div class="media-toolbar-row" style="display:flex;align-items:center;justify-content:space-between;padding:2px 20px;border-bottom:1px solid #e5e7eb;background:#fff;flex-shrink:0;gap:12px;flex-wrap:wrap;">
-    <div id="mediaTabsWrap" style="display:none;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">
-      <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;">My Uploads</button>
-      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:none;border-left:none!important;border-radius:0 8px 8px 0!important;">To handle</button>
+    <div id="mediaTabsWrap" style="display:flex;align-items:center;gap:0;position:relative;z-index:2;min-width:0;">
+      <button type="button" id="mediaTabMyUploads" class="media-tab-btn active" data-media-tab="my_uploads" style="border-right:0!important;border-radius:8px 0 0 8px!important;" onclick="window.setMediaTab('my_uploads')">My Uploads</button>
+      <button type="button" id="mediaTabToHandle" class="media-tab-btn" data-media-tab="to_handle" style="display:flex;border-left:none!important;border-radius:0 8px 8px 0!important;" onclick="window.setMediaTab('to_handle')">To handle</button>
     </div>
     <div id="mediaControlsWrap" style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-wrap:wrap;min-width:0;">
       <div class="media-dropdown-anchor" style="position:relative;flex-shrink:0;">
@@ -55659,14 +56330,14 @@ function hookSettingsGuard_DISABLED(){
     <div style="width:100%;min-width:0;box-sizing:border-box;padding-bottom:2px;">
     <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:28px;row-gap:10px;width:100%;">
       <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;">
-      <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;flex-shrink:0;white-space:nowrap;">Next week</div>
+      <div id="scheduleWeekLabel" style="font-size:13px;color:#6b7280;flex-shrink:0;white-space:nowrap;">This week</div>
       <div id="scheduleWeekAckStrip" style="display:none;align-items:center;gap:8px;flex-shrink:0;" aria-live="polite"></div>
       <span style="font-size:12px;font-weight:600;color:#6b7280;flex-shrink:0;">Week</span>
       <div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;white-space:nowrap;">
         <select id="scheduleWeekFilter">
           <option value="previous">Previous week</option>
-          <option value="current">Current week</option>
-          <option value="next" selected>Next week</option>
+          <option value="current" selected>Current week</option>
+          <option value="next">Next week</option>
           <option value="in2">In 2 weeks</option>
           <option value="in3">In 3 weeks</option>
           <option value="in4">In 4 weeks</option>
@@ -55681,10 +56352,10 @@ function hookSettingsGuard_DISABLED(){
         <span id="schedulePublishToggleLabel">Publish</span>
       </button>
       <span id="schedulePublishHint" class="ff-sched-publish-hint">Team can't see this yet</span>
-      <button type="button" id="scheduleSaveDraftBtn" class="ff-sched-save-status is-ok" disabled title="Edits save automatically." style="display:none;">Saved</button>
+      <button type="button" id="scheduleSaveDraftBtn" class="ff-sched-save-status is-ok" disabled title="" style="display:none;">Saved</button>
       <button type="button" id="scheduleUndoBtn" class="ff-sched-ghost" title="Undo the last schedule change" disabled>Undo</button>
       <button type="button" id="scheduleNotifyChangesBtn" class="ff-sched-ghost" title="Send a notice only to staff whose shifts changed" style="display:none;">Notify team</button>
-      <button type="button" id="scheduleDiscardSavedDraftBtn" class="ff-sched-ghost" title="Replace this week with a new auto-generated schedule from your coverage rules.">Rebuild</button>
+      <button type="button" id="scheduleDiscardSavedDraftBtn" class="ff-sched-ghost" title="Build a new auto-generated schedule for this week only. You must click Save before it replaces the salon copy.">Build</button>
       </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-shrink:0;margin-left:auto;">

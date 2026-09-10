@@ -35,6 +35,8 @@ Object.assign(exports, require("./billing"));
 const _queueAutoReset = require("./queue-auto-reset");
 exports.scheduledQueueAutoReset = _queueAutoReset.scheduledQueueAutoReset;
 exports.debugRunQueueAutoReset = _queueAutoReset.debugRunQueueAutoReset;
+const _queueWriteGuard = require("./queue-write-guard");
+exports.onQueueStateWrite = _queueWriteGuard.onQueueStateWrite;
 
 const _docSizeMonitor = require("./doc-size-monitor");
 exports.scheduledDocSizeMonitor = _docSizeMonitor.scheduledDocSizeMonitor;
@@ -61,6 +63,11 @@ exports.timeClockPhotosPurgeDaily = _timeClock.timeClockPhotosPurgeDaily;
 const _tasksAutoReset = require("./tasks-auto-reset");
 exports.scheduledTasksAutoReset = _tasksAutoReset.scheduledTasksAutoReset;
 exports.debugRunTasksAutoReset = _tasksAutoReset.debugRunTasksAutoReset;
+
+// Signup follow-up: 4h + 24h emails if the owner never finished billing.
+const _signupBillingReminders = require("./signup-billing-reminders");
+exports.scheduledSignupBillingReminders = _signupBillingReminders.scheduledSignupBillingReminders;
+exports.debugRunSignupBillingReminders = _signupBillingReminders.debugRunSignupBillingReminders;
 
 // Employee Onboarding — authoritative run progress from task writes.
 // Deploy: firebase deploy --only functions:onOnboardingTaskWrite --project fair-flow-staging

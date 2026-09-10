@@ -264,5 +264,44 @@ const resetLive = { queue: [], service: [], log: liveLog.concat([row("Queue Rese
 const guarded15 = ffProtectCloudData(resetLive, true);
 check("reset: both lists empty", guarded15.queue.length === 0 && guarded15.service.length === 0);
 
+// ── Scenario 16: post-reset leftover list must not come back ────────────────
+setAuthServerState([], [], srvLog);
+const leftoverBody = {
+  queue: ["Elizabeth", "Mileidys", "Margi", "Katy", "Erieliz"].map(P),
+  service: [],
+  log: srvLog,
+};
+const guarded16 = ffProtectCloudData(leftoverBody, false);
+check("post-reset leftovers: all stripped",
+  guarded16.queue.length === 0 && guarded16.service.length === 0,
+  "q=" + guarded16.queue.map((x) => x.name).join(","));
+
+// ── Scenario 17: leftovers riding on top of this morning's real joins ───────
+setAuthServerState(["Monica", "Mabel"].map(P), [], srvLog.concat([
+  row("Join", "Monica", now - 40000),
+  row("Join", "Mabel", now - 30000),
+]));
+const mixBody = {
+  queue: ["Monica", "Mabel", "Elizabeth", "Mileidys"].map(P),
+  service: [],
+  log: srvLog,
+};
+const guarded17 = ffProtectCloudData(mixBody, false);
+check("morning mix: keep Monica+Mabel, strip leftovers",
+  guarded17.queue.map((x) => x.name).sort().join(",") === "Mabel,Monica",
+  "q=" + guarded17.queue.map((x) => x.name).join(","));
+
+// ── Scenario 18: a real Join this minute is still allowed ───────────────────
+setAuthServerState(["Monica"].map(P), [], srvLog.concat([row("Join", "Monica", now - 20000)]));
+const realJoin = {
+  queue: ["Monica", "Solange"].map(P),
+  service: [],
+  log: srvLog.concat([row("Join", "Monica", now - 20000), row("Join", "Solange", now - 1000)]),
+};
+const guarded18 = ffProtectCloudData(realJoin, false);
+check("fresh join: Solange stays",
+  guarded18.queue.some((x) => x.name === "Solange") && guarded18.queue.some((x) => x.name === "Monica"),
+  "q=" + guarded18.queue.map((x) => x.name).join(","));
+
 console.log(failures ? `\n${failures} FAILURES` : "\nALL TESTS PASSED");
 process.exit(failures ? 1 : 0);

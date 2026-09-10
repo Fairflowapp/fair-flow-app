@@ -5813,6 +5813,9 @@ window.doResetCurrentTab = function doResetCurrentTab() {
                 delete clone.completedBy;
                 delete clone.assignedTo;
                 delete clone.completedAt;
+                delete clone.completed;
+                delete clone.isCompleted;
+                delete clone.isDone;
                 delete clone.selected;
                 delete clone.selectedBy;
                 delete clone.selectedAt;
@@ -5857,6 +5860,9 @@ window.doResetCurrentTab = function doResetCurrentTab() {
                 delete clone.completedBy;
                 delete clone.assignedTo;
                 delete clone.completedAt;
+                delete clone.completed;
+                delete clone.isCompleted;
+                delete clone.isDone;
                 delete clone.selected;
                 delete clone.selectedBy;
                 delete clone.selectedAt;
@@ -5867,6 +5873,14 @@ window.doResetCurrentTab = function doResetCurrentTab() {
 
             localStorage.setItem(activeKey, JSON.stringify(normalizedActive));
             console.log(`RESET: Active list normalized for tab ${tab}, count=${normalizedActive.length}`);
+        }
+
+        if (typeof writeTasksList === "function") {
+            writeTasksList(tab, "pending", []);
+            writeTasksList(tab, "done", []);
+        } else {
+            localStorage.setItem(`ff_tasks_${tab}_pending_v1`, "[]");
+            localStorage.setItem(`ff_tasks_${tab}_done_v1`, "[]");
         }
     } catch (e) {
         console.error("RESET: Error normalizing active list from catalog:", e);

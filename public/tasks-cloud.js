@@ -183,6 +183,36 @@ function readActiveLocationId() {
   return raw || readStoredActiveLocationId();
 }
 
+/** Header location, or the staff member's only allowed branch.
+ *  Brickell technicians often have no switcher; without this fallback their
+ *  takes/completions write to tasksState/default and View-All users on the
+ *  real branch never see them. */
+function resolveTasksLocationId() {
+  const active = readActiveLocationId();
+  if (active) return active;
+  try {
+    if (typeof window.ffGetUserAllowedLocations === "function") {
+      const allowed = window.ffGetUserAllowedLocations() || [];
+      const ids = allowed.map((l) => (l && l.id ? String(l.id).trim() : "")).filter(Boolean);
+      if (ids.length === 1) return ids[0];
+    }
+  } catch (_) {}
+  try {
+    if (typeof window.ffResolveCurrentStaff === "function" && typeof window.ffEnsureStaffLocationFields === "function") {
+      const staff = window.ffResolveCurrentStaff();
+      if (staff) {
+        const fields = window.ffEnsureStaffLocationFields(staff);
+        const ids = Array.isArray(fields.allowedLocationIds)
+          ? fields.allowedLocationIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : [];
+        if (ids.length === 1) return ids[0];
+        if (fields.primaryLocationId) return String(fields.primaryLocationId).trim();
+      }
+    }
+  } catch (_) {}
+  return "";
+}
+
 function userHasMultipleLocations() {
   try {
     if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
@@ -486,7 +516,9 @@ function beginLocationHardReplace() {
 let _hasSubscribedOnce = false;
 
 function subscribe(salonId, locationId) {
-  const loc = typeof locationId === "string" ? locationId.trim() : "";
+  let loc = typeof locationId === "string" ? locationId.trim() : "";
+  if (!loc) loc = resolveTasksLocationId();
+  locationId = loc;
   // Multi-location, or locations not loaded yet: never attach to the legacy
   // salon-wide "default" doc. That document is the old mixed catalog and is
   // why Key Biscayne still showed Brickell completions.
@@ -501,15 +533,27 @@ function subscribe(salonId, locationId) {
     _lastServerData = null;
     _lastCloudRev = 0;
     if (typeof window !== "undefined") window.__ffTasksApplyingDocId = "";
-    beginLocationHardReplace();
+    // Wait for the real branch id. Do not wipe — technicians already have
+    // today's takes in localStorage and View-All users need those flushed.
     if (typeof window !== "undefined") window.__ffTasksHardReplace = false;
     return;
   }
 
   const nextDocId = tasksStateDocIdFor(locationId);
+  const prevDocId = tasksStateDocIdFor(_locationId);
   const lsLoc = readTasksLsLocationId();
   const lsMismatch = !!(lsLoc && lsLoc !== nextDocId);
-  if (_salonId === salonId && tasksStateDocIdFor(_locationId) === nextDocId && _unsubscribe && !lsMismatch) return;
+  if (_salonId === salonId && prevDocId === nextDocId && _unsubscribe && !lsMismatch) return;
+  const switchingRealBranch = !!(
+    prevDocId &&
+    nextDocId &&
+    prevDocId !== TASKS_STATE_DEFAULT &&
+    nextDocId !== TASKS_STATE_DEFAULT &&
+    prevDocId !== nextDocId
+  );
+  const switchingByLs = !!(lsLoc && lsLoc !== TASKS_STATE_DEFAULT && lsLoc !== nextDocId);
+  let preservedLocal = null;
+  try { preservedLocal = _getState ? _getState() : null; } catch (_) { preservedLocal = null; }
   if (_unsubscribe) {
     _unsubscribe();
     _unsubscribe = null;
@@ -521,10 +565,15 @@ function subscribe(salonId, locationId) {
   _lastServerData = null;
   if (typeof window !== "undefined") window.__ffTasksApplyingDocId = nextDocId;
 
-  // Always wipe local Tasks state before this document's snapshot lands.
-  // Keeping cache on first paint merged leftover default/Brickell lists into
-  // Key Biscayne after the header already showed the new branch.
-  beginLocationHardReplace();
+  // Only wipe when moving between two real branches (Brickell ↔ Key Biscayne).
+  // First attach / default → Brickell must keep today's local takes so they
+  // can be written to the branch doc that View-All users actually read.
+  if (switchingRealBranch || switchingByLs) {
+    beginLocationHardReplace();
+    preservedLocal = null;
+  } else if (typeof window !== "undefined") {
+    window.__ffTasksHardReplace = false;
+  }
   _hasSubscribedOnce = true;
 
   const ref = tasksStateRef(salonId, locationId);
@@ -564,6 +613,17 @@ function subscribe(salonId, locationId) {
     // Each branch is "its own business" and starts fresh.
     if (!snap.exists()) {
       _lastServerData = null;
+      const isFirstEmpty = _firstSnapshot;
+      _firstSnapshot = false;
+      let emptyApply = emptyCloudState();
+      let flushEmpty = false;
+      if (isFirstEmpty && preservedLocal && localStateHasRecentTakes(preservedLocal)) {
+        const mergedEmpty = mergeRecentLocalTakesIntoServer(preservedLocal, emptyApply);
+        if (mergedEmpty.changed) {
+          emptyApply = mergedEmpty.state;
+          flushEmpty = true;
+        }
+      }
       try {
         if (typeof window !== "undefined") {
           window.__ffTasksApplyingRemote = true;
@@ -571,7 +631,7 @@ function subscribe(salonId, locationId) {
           window.__ffTasksApplyingDocId = nextDocId;
         }
         writeTasksLsLocationId(nextDocId);
-        _applyState(await mergeSharedTaskTemplatesIntoState(emptyCloudState(), salonId));
+        _applyState(await mergeSharedTaskTemplatesIntoState(emptyApply, salonId));
         if (typeof _onRefresh === "function") _onRefresh();
       } catch (e) {
         console.warn("[TasksCloud] clear-local-on-empty-cloud failed", e, logTag);
@@ -581,20 +641,31 @@ function subscribe(salonId, locationId) {
           window.__ffTasksHardReplace = false;
         }
       }
-      _firstSnapshot = false;
+      if (flushEmpty) writeState("flush-local-takes");
       return;
     }
     const data = snap.data();
-    if (_firstSnapshot && typeof window !== "undefined") {
-      window.__ffTasksHardReplace = true;
-      window.__ffTasksApplyingDocId = nextDocId;
-    }
+    const isFirst = _firstSnapshot;
     _firstSnapshot = false;
 
     // Always keep the freshest server doc as the write merge base + rev source,
     // even for snapshots we don't re-apply to the UI (echoes / equal rev). This
     // is what lets writes use a correct rev WITHOUT a blocking server read.
     _lastServerData = data;
+
+    let toApply = data;
+    let flushTakes = false;
+    if (isFirst && preservedLocal && localStateHasRecentTakes(preservedLocal, undefined, data.resetStamps)) {
+      const merged = mergeRecentLocalTakesIntoServer(preservedLocal, data);
+      if (merged.changed) {
+        toApply = merged.state;
+        flushTakes = true;
+      }
+    }
+    if (isFirst && typeof window !== "undefined") {
+      window.__ffTasksHardReplace = true;
+      window.__ffTasksApplyingDocId = nextDocId;
+    }
 
     // Revision gate: a snapshot whose rev we have already seen is either the
     // echo of our own transaction or a stale read — never re-apply it (this is
@@ -609,7 +680,7 @@ function subscribe(salonId, locationId) {
     }
     try {
       writeTasksLsLocationId(nextDocId);
-      _applyState(await mergeSharedTaskTemplatesIntoState(data, salonId));
+      _applyState(await mergeSharedTaskTemplatesIntoState(toApply, salonId));
       if (typeof _onRefresh === "function") _onRefresh();
     } finally {
       if (typeof window !== "undefined") {
@@ -617,6 +688,7 @@ function subscribe(salonId, locationId) {
         window.__ffTasksHardReplace = false;
       }
     }
+    if (flushTakes) writeState("flush-local-takes");
   }, (err) => {
     if (!tasksCloudScopeStillCurrent(expectedSalonId, expectedDocId, subscriptionSeq)) return;
     console.error("[TasksCloud] subscribe error", logTag, err);
@@ -755,6 +827,84 @@ function mergeTabAllLists(localTab, serverTab) {
   return { active: mergedActive, pending: mergedPending, done: mergedDone };
 }
 
+// Opening/closing reset daily. Keep same-day local takes long enough to flush
+// them to the branch doc after a reload. July leftovers from tasksState/default
+// are older than this and must not be copied onto Brickell.
+const LOCAL_TAKE_FLUSH_MAX_AGE_MS = 36 * 60 * 60 * 1000;
+
+function resetStampForTab(resetStamps, tab) {
+  return Number((resetStamps && resetStamps[tab]) || 0) || 0;
+}
+
+function takeSurvivesReset(row, tab, resetStamps) {
+  const resetAt = resetStampForTab(resetStamps, tab);
+  const t = rowActionTime(row);
+  if (resetAt && t && t < resetAt) return false;
+  return true;
+}
+
+function localStateHasRecentTakes(state, maxAgeMs, resetStamps) {
+  if (!state) return false;
+  const cutoff = Date.now() - (typeof maxAgeMs === "number" ? maxAgeMs : LOCAL_TAKE_FLUSH_MAX_AGE_MS);
+  return TABS.some((tab) => {
+    const t = state[tab];
+    if (!t) return false;
+    const rows = []
+      .concat(Array.isArray(t.pending) ? t.pending : [])
+      .concat(Array.isArray(t.done) ? t.done : [])
+      .concat((Array.isArray(t.active) ? t.active : []).filter((r) => {
+        const status = String((r && r.status) || "").toLowerCase();
+        return status === "pending" || status === "done" || !!(r && (r.assignedTo || r.completedAt));
+      }));
+    return rows.some((r) => rowActionTime(r) >= cutoff && takeSurvivesReset(r, tab, resetStamps));
+  });
+}
+
+function mergeRecentLocalTakesIntoServer(local, server, maxAgeMs) {
+  const cutoff = Date.now() - (typeof maxAgeMs === "number" ? maxAgeMs : LOCAL_TAKE_FLUSH_MAX_AGE_MS);
+  const base = (server && typeof server === "object") ? server : {};
+  const out = { ...base };
+  let changed = false;
+  TABS.forEach((tab) => {
+    const L = (local && local[tab]) || {};
+    const S = (out[tab] && typeof out[tab] === "object")
+      ? out[tab]
+      : { active: [], pending: [], done: [] };
+    const stamps = (base && base.resetStamps && typeof base.resetStamps === "object")
+      ? base.resetStamps
+      : {};
+    const recentPending = (Array.isArray(L.pending) ? L.pending : []).filter((r) => (
+      rowActionTime(r) >= cutoff && takeSurvivesReset(r, tab, stamps)
+    ));
+    const recentDone = (Array.isArray(L.done) ? L.done : []).filter((r) => (
+      rowActionTime(r) >= cutoff && takeSurvivesReset(r, tab, stamps)
+    ));
+    const recentActive = (Array.isArray(L.active) ? L.active : []).filter((r) => {
+      const status = String((r && r.status) || "").toLowerCase();
+      if (!(status === "pending" || status === "done" || (r && (r.assignedTo || r.completedAt)))) return false;
+      return rowActionTime(r) >= cutoff && takeSurvivesReset(r, tab, stamps);
+    });
+    if (!recentPending.length && !recentDone.length && !recentActive.length) return;
+    const serverPending = Array.isArray(S.pending) ? S.pending : [];
+    const serverDone = Array.isArray(S.done) ? S.done : [];
+    const missing = recentPending.some((r) => {
+      const id = rowId(r);
+      return id && !serverPending.some((s) => rowId(s) === id);
+    }) || recentDone.some((r) => {
+      const id = rowId(r);
+      return id && !serverDone.some((s) => rowId(s) === id);
+    });
+    if (!missing && !recentActive.length) return;
+    out[tab] = mergeTabAllLists(S, {
+      active: recentActive.length ? recentActive : (L.active || []),
+      pending: recentPending,
+      done: recentDone
+    });
+    changed = true;
+  });
+  return { state: out, changed };
+}
+
 function serverRev(server) {
   return (server && typeof server.rev === "number" && server.rev >= 0) ? server.rev : 0;
 }
@@ -820,7 +970,10 @@ function buildMergedWritePayload(state, server, reason, baseRevOverride) {
   if (server && typeof server === "object") {
     const serverIsolate = Number(server.isolateClearAt || 0);
     const localIsolate = Number(state.isolateClearAt || 0);
-    if (serverIsolate > 0 && serverIsolate >= localIsolate) {
+    // Only the first apply of a newer wipe replaces lists. After this device
+    // already has the same isolate stamp, merge normally — otherwise every
+    // take/done on Brickell is discarded and View-All stays empty.
+    if (serverIsolate > 0 && serverIsolate > localIsolate) {
       // A location-isolate wipe won. Do not restore the old shared catalog
       // from a device that still has Brickell leftovers in localStorage.
       out.catalog = (server.catalog && typeof server.catalog === "object") ? server.catalog : {};
@@ -846,9 +999,16 @@ function buildMergedWritePayload(state, server, reason, baseRevOverride) {
     const serverStamps = (server.resetStamps && typeof server.resetStamps === "object") ? server.resetStamps : {};
     const localStamps = (state.resetStamps && typeof state.resetStamps === "object") ? state.resetStamps : {};
     const mergedStamps = { ...localStamps };
+    const isManualReset = reason === "manual-reset";
     TABS.forEach((tab) => {
       const sv = Number(serverStamps[tab] || 0);
       const lv = Number(localStamps[tab] || 0);
+      if (isManualReset && lv >= sv) {
+        // This device just reset — keep the clean local lists. Merging here
+        // is what used to write yesterday's done rows back onto a fresh reset.
+        mergedStamps[tab] = lv;
+        return;
+      }
       if (sv > lv) {
         // Server tab was reset after our local copy — server lists win.
         out[tab] = {
@@ -937,9 +1097,23 @@ function writeState(reason) {
     console.warn("[TasksCloud] writeState skipped — location hard-replace in progress");
     return Promise.resolve();
   }
-  const lsLocForWrite = readTasksLsLocationId();
+  if (typeof window !== "undefined") window.__ffTasksLastLocalWrite = Date.now();
+  const resolvedLoc = resolveTasksLocationId();
+  if (resolvedLoc && resolvedLoc !== _locationId) {
+    _locationId = resolvedLoc;
+    _lastServerData = null;
+    _lastCloudRev = 0;
+  }
   const writeLocId = tasksStateDocIdFor(_locationId);
-  if (lsLocForWrite && writeLocId && lsLocForWrite !== writeLocId) {
+  if (mustNotUseDefaultDoc(_locationId) || (userHasMultipleLocations() && writeLocId === TASKS_STATE_DEFAULT) || (cachedActiveLocationCount() > 1 && writeLocId === TASKS_STATE_DEFAULT)) {
+    console.warn("[TasksCloud] blocked write to default on a multi-location salon", {
+      locationId: _locationId || null,
+      writeLocId
+    });
+    return Promise.resolve();
+  }
+  const lsLocForWrite = readTasksLsLocationId();
+  if (lsLocForWrite && writeLocId && lsLocForWrite !== writeLocId && !(lsLocForWrite === TASKS_STATE_DEFAULT && writeLocId !== TASKS_STATE_DEFAULT)) {
     console.warn("[TasksCloud] blocked write — localStorage belongs to another location", {
       lsLocForWrite,
       writeLocId
@@ -1047,10 +1221,49 @@ function writeState(reason) {
     if (typeof rev === "number" && rev > _lastCloudRev) _lastCloudRev = rev;
     console.log("[TasksCloud] write OK at rev", rev);
     if (isManualReset) toast("Reset saved to cloud (rev " + rev + ")", "success");
+    const listenLoc = resolveTasksLocationId() || _locationId;
+    if (_salonId && listenLoc && (!_unsubscribe || _locationId !== listenLoc)) {
+      subscribe(_salonId, listenLoc);
+    }
+    if (String(reason || "").startsWith("alert-windows")) {
+      const aw = (state && state.alertWindows) || {};
+      return syncAlertWindowsToAllLocations(_salonId, aw, writeLocId);
+    }
   }).catch((e) => {
     console.error("[TasksCloud] write FAILED", e && (e.code || e.name), e && e.message, e);
     toast("Tasks save FAILED: " + ((e && (e.code || e.message)) || "unknown error"), "error");
   });
+}
+
+async function syncAlertWindowsToAllLocations(salonId, alertWindows, currentDocId) {
+  if (!salonId || !alertWindows || typeof alertWindows !== "object") return;
+  const ids = new Set();
+  try {
+    const tsSnap = await getDocs(collection(db, `salons/${salonId}/tasksState`));
+    tsSnap.forEach((d) => { if (d.id) ids.add(d.id); });
+  } catch (e) {
+    console.warn("[TasksCloud] list tasksState for salon-wide alert windows failed", e);
+  }
+  try {
+    const locSnap = await getDocs(collection(db, `salons/${salonId}/locations`));
+    locSnap.forEach((d) => { if (d.id) ids.add(d.id); });
+  } catch (e) {
+    console.warn("[TasksCloud] list locations for salon-wide alert windows failed", e);
+  }
+  if (currentDocId) ids.delete(currentDocId);
+  if (!ids.size) return;
+  await Promise.all([...ids].map(async (id) => {
+    try {
+      await setDoc(doc(db, `salons/${salonId}/tasksState`, id), {
+        alertWindows,
+        updatedAt: serverTimestamp(),
+        lastUpdateReason: "alert-windows-salon"
+      }, { merge: true });
+    } catch (e) {
+      console.warn("[TasksCloud] salon-wide alert windows write failed", id, e && e.message);
+    }
+  }));
+  console.log("[TasksCloud] copied alert windows to", ids.size, "other location docs");
 }
 
 function scheduleWrite() {
@@ -1058,6 +1271,10 @@ function scheduleWrite() {
   if (typeof window !== "undefined" && window.__ffTasksApplyingRemote) return;
   if (typeof window !== "undefined" && window.__ffTasksHardReplace) return;
   if (typeof window !== "undefined") window.__ffTasksLastLocalWrite = Date.now();
+  const resolvedLoc = resolveTasksLocationId();
+  if (resolvedLoc && resolvedLoc !== _locationId) {
+    _locationId = resolvedLoc;
+  }
   const writeSalon = _salonId;
   const writeDocId = tasksStateDocIdFor(_locationId);
   const writeSeq = _subscriptionSeq;
@@ -1108,7 +1325,7 @@ export function initTasksCloud(opts) {
       return;
     }
     getSalonId().then((sid) => {
-      const loc = readActiveLocationId();
+      const loc = resolveTasksLocationId();
       if (sid && (sid !== _salonId || loc !== _locationId)) {
         subscribe(sid, loc);
         console.log("[TasksCloud] Subscribed to salon", sid, "location", loc || "(default)");
@@ -1135,13 +1352,16 @@ export function initTasksCloud(opts) {
   if (typeof document !== "undefined" && !window.__ffTasksCloudLocListenerBound) {
     window.__ffTasksCloudLocListenerBound = true;
     document.addEventListener("ff-active-location-changed", () => {
-      const loc = readActiveLocationId();
+      const loc = resolveTasksLocationId();
       if (!_salonId) return;
       if (loc === _locationId) return;
       subscribe(_salonId, loc);
       console.log("[TasksCloud] Re-subscribed after location switch →", loc || "(default)");
     });
     document.addEventListener("ff-locations-updated", () => {
+      tryConnect();
+    });
+    document.addEventListener("ff-staff-cloud-updated", () => {
       tryConnect();
     });
   }
@@ -1154,7 +1374,7 @@ export function tasksCloudWrite(reason) {
 export function tasksCloudReconnect() {
   if (typeof window !== "undefined" && window.__ff_waiting_for_salon_choice === true) return Promise.resolve();
   getSalonId().then((sid) => {
-    const loc = readActiveLocationId();
+    const loc = resolveTasksLocationId();
     if (sid === _salonId && loc === _locationId) return;
     if (sid) subscribe(sid, loc);
     else {
@@ -1273,6 +1493,7 @@ if (typeof window !== "undefined") {
   // Shared three-list merge so applyState (index.html) merges remote ⇄ local
   // with exactly the same "newest action wins" rules as the cloud write.
   window.__ffTasksMergeTab = mergeTabAllLists;
+  window.__ffTasksMergeAlertWindows = mergeAlertWindows;
   if (typeof window.__ffTasksCloudInit === "function") {
     window.__ffTasksCloudInit();
   }

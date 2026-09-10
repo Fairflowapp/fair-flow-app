@@ -5,18 +5,18 @@
 
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 import { auth } from "/app.js?v=20260610_force_lp_ios";
-import { mediaState } from "./media-state.js?v=20260901_media_iso";
+import { mediaState } from "./media-state.js?v=20260910_media_seen";
 import {
   subscribeContentWorks,
-  updateContentWork,
+  fetchContentWorks,
   getMediaCategories,
   subscribeMediaCategories,
   createMediaCategory,
   updateMediaCategory,
   deleteMediaCategory,
-} from "./media-cloud.js?v=20260901_media_iso";
-import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260901_media_iso";
-import { initMediaNativeShare } from "./media-native-share.js?v=20260901_media_iso";
+} from "./media-cloud.js?v=20260910_media_seen";
+import { loadUserProfile, canHandleMediaWork } from "./media-profile.js?v=20260910_media_seen";
+import { initMediaNativeShare } from "./media-native-share.js?v=20260910_media_seen";
 import {
   initMediaUploadForm,
   populateWorksDropdown,
@@ -27,14 +27,14 @@ import {
   setupModalBackdrops,
   toggleFileInputs,
   toggleNewFieldsAndExisting,
-} from "./media-upload-form.js?v=20260901_media_iso";
+} from "./media-upload-form.js?v=20260910_media_seen";
 import {
   initMediaWorkDetails,
   closeWorkDetails,
   closeMarkPostedModal,
   setupWorkDetailsListeners,
   setupMarkPostedListeners,
-} from "./media-work-details.js?v=20260901_media_iso";
+} from "./media-work-details.js?v=20260910_media_seen";
 import {
   setMediaTab,
   renderMediaFilters,
@@ -50,7 +50,7 @@ import {
   updateMediaUploadWorkButtonVisibility,
   closeMediaDropdowns,
   _positionMediaDropdownPanel,
-} from "./media-view.js?v=20260901_media_iso";
+} from "./media-view.js?v=20260910_media_seen";
 
 
 
@@ -110,34 +110,33 @@ export async function goToMedia() {
     const btn = document.getElementById("mediaBtn");
     if (btn) btn.classList.add("active");
   }
+  applyToHandleVisibility();
   updateMediaUploadWorkButtonVisibility();
-  renderMediaFilters();
-  if (auth.currentUser) {
-    renderMediaList();
-  } else {
+  try { renderMediaFilters(); } catch (e) { console.warn("[Media] renderMediaFilters", e); }
+  ffMediaMarkSeenNow();
+  paintMediaHandleBadge();
+  if (!auth.currentUser) {
     mediaState.mediaMyWorksHydrated = true;
     mediaState.mediaAllWorksHydrated = true;
-    renderMediaList();
   }
+  try { renderMediaList(); } catch (e) { console.warn("[Media] renderMediaList", e); }
+
+  try { setupMediaWorkListSubscriptions(); } catch (e) { console.warn("[Media] setup subs", e); }
 
   if (auth.currentUser) {
-    void (async () => {
-      try {
-        await loadUserProfile();
-        applyToHandleVisibility();
-        setupMediaWorkListSubscriptions();
-        updateMediaUploadWorkButtonVisibility();
-        renderMediaFilters();
-        renderMediaList();
-      } catch (e) {
-        console.warn("[Media] goToMedia profile/subscriptions", e);
-        mediaState.mediaMyWorksHydrated = true;
-        mediaState.mediaAllWorksHydrated = true;
-        renderMediaList();
-      }
-    })();
-  } else {
-    applyToHandleVisibility();
+    void loadUserProfile().then(() => {
+      applyToHandleVisibility();
+      setupMediaWorkListSubscriptions();
+      updateMediaUploadWorkButtonVisibility();
+      renderMediaFilters();
+      renderMediaList();
+    }).catch((e) => {
+      console.warn("[Media] goToMedia profile/subscriptions", e);
+      mediaState.mediaMyWorksHydrated = true;
+      mediaState.mediaAllWorksHydrated = true;
+      applyToHandleVisibility();
+      renderMediaList();
+    });
   }
 
   try {
@@ -152,13 +151,61 @@ function hideMediaScreen() {
   if (btn) btn.classList.remove("active");
 }
 
+function switchMediaTab(tab) {
+  const next = tab === "to_handle" ? "to_handle" : "my_uploads";
+  setMediaTab(next);
+  try { setupMediaWorkListSubscriptions(); } catch (_) {}
+}
+
+function bindMediaTabButtons() {
+  const tabMy = document.getElementById("mediaTabMyUploads");
+  const tabToHandle = document.getElementById("mediaTabToHandle");
+  if (tabMy) {
+    tabMy.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      switchMediaTab("my_uploads");
+    };
+  }
+  if (tabToHandle) {
+    tabToHandle.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      switchMediaTab("to_handle");
+    };
+  }
+}
+
 // Expose immediately so MEDIA button works for all users (including Admin) before auth callback
 if (typeof window !== "undefined") {
   window.goToMedia = goToMedia;
+  window.__ffSetMediaTabReal = switchMediaTab;
+  window.setMediaTab = switchMediaTab;
   window.hideUploadWorkScreen = hideMediaScreen;
+  window.__ffMediaOnBootWorks = (works) => {
+    const rows = Array.isArray(works) ? works : [];
+    if (!rows.length) return;
+    window.__ffMediaBootWorks = rows;
+    mediaState.mediaAllWorksHydrated = true;
+    mediaState.allWorks = mergeWorkPreviewCache(mediaState.allWorks, rows);
+    const staffId = String(mediaState.currentUserProfile?.staffId || window.__ff_authedStaffId || "").trim();
+    const uid = String(mediaState.currentUserProfile?.uid || auth.currentUser?.uid || "").trim();
+    const own = rows.filter((w) => {
+      if (!w || w.status === "deleted") return false;
+      const ws = String(w.staffId || "").trim();
+      const wu = String(w.createdByUid || "").trim();
+      return (staffId && ws === staffId) || (uid && wu === uid);
+    });
+    mediaState.userWorks = mergeWorkPreviewCache(mediaState.userWorks, own);
+    mediaState.mediaMyWorksHydrated = true;
+    try { paintMediaHandleBadge(); } catch (_) {}
+    try { renderMediaFilters(); } catch (_) {}
+    try { renderMediaList(); } catch (_) {}
+  };
   // Direct binding so button works even if inline onclick fails
   const mediaBtn = document.getElementById("mediaBtn");
   if (mediaBtn) mediaBtn.onclick = goToMedia;
+  bindMediaTabButtons();
 }
 
 // =====================
@@ -181,8 +228,7 @@ function initMediaModule() {
   initMediaUploadForm({ closeWorkDetails, closeMarkPostedModal });
   const tabMy = document.getElementById("mediaTabMyUploads");
   const tabToHandle = document.getElementById("mediaTabToHandle");
-  if (tabMy) tabMy.onclick = () => setMediaTab("my_uploads");
-  if (tabToHandle) tabToHandle.onclick = () => setMediaTab("to_handle");
+  bindMediaTabButtons();
 
   const filterTrigger = document.getElementById("mediaFilterTrigger");
   const sortTrigger = document.getElementById("mediaSortTrigger");
@@ -260,12 +306,122 @@ function initMediaModule() {
   renderMediaFilters();
 }
 
+/**
+ * Key for the "I have seen the Media works up to here" marker.
+ *
+ * Deliberately NOT scoped by location: the active location id is only known once
+ * the location modules have loaded, so a location-scoped key was written under one
+ * name and read under another, the read came back 0, and the badge counted every
+ * unposted work forever. Returns "" when the salon/user is not known yet, and
+ * callers must then leave the badge alone rather than counting from zero.
+ */
+function ffMediaLastSeenStorageKey() {
+  const uid = String(mediaState.currentUserProfile?.uid || auth.currentUser?.uid || "").trim();
+  const salon = String(
+    mediaState.currentUserProfile?.salonId
+    || (typeof window !== "undefined" ? window.currentSalonId : "")
+    || ""
+  ).trim();
+  if (!uid || !salon) return "";
+  return `ff_media_last_seen_ms_${salon}_${uid}`;
+}
+
+/** Newest marker written under the old location-scoped keys, so existing state carries over. */
+function ffMediaLegacyLastSeenMs(baseKey) {
+  let best = 0;
+  try {
+    const prefix = `${baseKey}_`;
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const k = localStorage.key(i);
+      if (!k || k.indexOf(prefix) !== 0) continue;
+      const n = Number(localStorage.getItem(k) || 0);
+      if (Number.isFinite(n) && n > best) best = n;
+    }
+  } catch (_) {}
+  return best;
+}
+
+/** @returns {number} marker in ms, or -1 when it cannot be determined yet. */
+function ffMediaGetLastSeenMs() {
+  const key = ffMediaLastSeenStorageKey();
+  if (!key) return -1;
+  try {
+    const n = Number(localStorage.getItem(key) || 0);
+    if (Number.isFinite(n) && n > 0) return n;
+    return ffMediaLegacyLastSeenMs(key);
+  } catch (_) {
+    return -1;
+  }
+}
+
+function ffMediaMarkSeenNow() {
+  const key = ffMediaLastSeenStorageKey();
+  if (!key) return;
+  try {
+    localStorage.setItem(key, String(Date.now()));
+  } catch (_) {}
+}
+
+function ffMediaWorkCreatedMs(work) {
+  const c = work && work.createdAt;
+  if (!c) return 0;
+  try {
+    if (typeof c.toMillis === "function") return Number(c.toMillis()) || 0;
+    if (typeof c.toDate === "function") return c.toDate().getTime() || 0;
+  } catch (_) {}
+  const n = new Date(c).getTime();
+  return Number.isFinite(n) ? n : 0;
+}
+
+function paintMediaHandleBadge() {
+  let n = 0;
+  if (canHandleMediaWork()) {
+    const seenMs = ffMediaGetLastSeenMs();
+    // Marker not resolvable yet — leave whatever is on screen instead of counting
+    // everything as unseen.
+    if (seenMs < 0) return;
+    n = (mediaState.allWorks || []).filter((w) => {
+      if (!w || w.status === "archived" || w.status === "deleted") return false;
+      if (Number(w.postedCount || 0) > 0) return false;
+      return ffMediaWorkCreatedMs(w) > seenMs;
+    }).length;
+  }
+  if (typeof window.ffPaintAppsModuleBadge === "function") {
+    window.ffPaintAppsModuleBadge("media", n);
+  } else {
+    const nav = document.getElementById("mediaNavBadge");
+    if (nav) {
+      nav.textContent = n > 0 ? (n > 99 ? "99+" : String(n)) : "";
+    }
+  }
+}
+
+function mediaWorkListSubKey() {
+  const canAll = canHandleMediaWork();
+  return `${mediaState.currentUserProfile?.uid || ""}|${mediaState.currentUserProfile?.staffId || ""}|${mediaState.currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
+}
+
+function mergeWorkPreviewCache(prevList, nextList) {
+  const prevById = new Map((Array.isArray(prevList) ? prevList : []).map((w) => [w && w.id, w]));
+  return (Array.isArray(nextList) ? nextList : []).map((w) => {
+    if (!w || !w.id) return w;
+    const prev = prevById.get(w.id);
+    if (!prev) return w;
+    const cached = prev._firstMediaUrl != null ? String(prev._firstMediaUrl).trim() : "";
+    if (cached && /^https?:\/\//i.test(cached) && !w._firstMediaUrl) {
+      return { ...w, _firstMediaUrl: cached };
+    }
+    return w;
+  });
+}
+
 function setupMediaWorkListSubscriptions() {
   const canAll = canHandleMediaWork();
-  const subKey = `${mediaState.currentUserProfile?.uid || ""}|${mediaState.currentUserProfile?.staffId || ""}|${mediaState.currentUserProfile?.salonId || ""}|${canAll ? "1" : "0"}`;
+  const subKey = mediaWorkListSubKey();
   if (mediaState.unsubMyWorks && mediaState._mediaWorkListSubKey === subKey) {
     applyToHandleVisibility();
     renderMediaList();
+    paintMediaHandleBadge();
     return;
   }
   mediaState._mediaWorkListSubKey = subKey;
@@ -279,8 +435,12 @@ function setupMediaWorkListSubscriptions() {
     mediaState.unsubAllWorks = null;
   }
 
-  mediaState.mediaMyWorksHydrated = false;
-  mediaState.mediaAllWorksHydrated = false;
+  if (!(mediaState.userWorks || []).length && !(typeof window !== "undefined" && (window.__ffMediaBootWorks || []).length)) {
+    mediaState.mediaMyWorksHydrated = false;
+  }
+  if (!(mediaState.allWorks || []).length && !(typeof window !== "undefined" && (window.__ffMediaBootWorks || []).length)) {
+    mediaState.mediaAllWorksHydrated = false;
+  }
 
   if (mediaState.currentUserProfile?.staffId || mediaState.currentUserProfile?.uid) {
     const staffIdForQuery = String(mediaState.currentUserProfile?.staffId || "").trim();
@@ -293,51 +453,73 @@ function setupMediaWorkListSubscriptions() {
         return (staffId && workStaffId === staffId) || (uid && workCreatedByUid === uid);
       });
       mediaState.mediaMyWorksHydrated = true;
-      mediaState.userWorks = ownWorks.slice();
+      mediaState.userWorks = mergeWorkPreviewCache(mediaState.userWorks, ownWorks);
       populateWorksDropdown();
       renderMediaList();
-      const toEnrich = ownWorks.slice(0, 8);
+      const toEnrich = ownWorks.filter((w) => {
+        const pre = w && w.previewMediaUrl != null ? String(w.previewMediaUrl).trim() : "";
+        const cached = w && w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        return !(/^https?:\/\//i.test(pre) || /^https?:\/\//i.test(cached));
+      }).slice(0, 8);
+      if (!toEnrich.length) return;
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      for (const w of enriched) {
-        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
-        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
-        if (url && /^https?:\/\//i.test(url) && !hasPre) {
-          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
-        }
-      }
-      mediaState.userWorks = [...enriched, ...ownWorks.slice(toEnrich.length)];
+      const byId = new Map(enriched.map((w) => [w.id, w]));
+      mediaState.userWorks = mergeWorkPreviewCache(
+        mediaState.userWorks,
+        ownWorks.map((w) => byId.get(w.id) || w)
+      );
       populateWorksDropdown();
       renderMediaList();
     });
-  } else {
+  } else if (!auth.currentUser) {
     mediaState.mediaMyWorksHydrated = true;
     mediaState.userWorks = [];
   }
 
   applyToHandleVisibility();
+  if (typeof window !== "undefined" && Array.isArray(window.__ffMediaBootWorks) && window.__ffMediaBootWorks.length) {
+    mediaState.mediaAllWorksHydrated = true;
+    mediaState.allWorks = mergeWorkPreviewCache(mediaState.allWorks, window.__ffMediaBootWorks);
+    paintMediaHandleBadge();
+    renderMediaFilters();
+    renderMediaList();
+  }
+  void fetchContentWorks({}).then((arr) => {
+    if (arr == null) return;
+    mediaState.mediaAllWorksHydrated = true;
+    mediaState.allWorks = mergeWorkPreviewCache(mediaState.allWorks, arr);
+    paintMediaHandleBadge();
+    renderMediaFilters();
+    renderMediaList();
+  }).catch(() => {});
   if (canHandleMediaWork()) {
     mediaState.unsubAllWorks = subscribeContentWorks({}, async (works) => {
       const arr = Array.isArray(works) ? works : [];
       mediaState.mediaAllWorksHydrated = true;
-      mediaState.allWorks = arr.slice();
+      mediaState.allWorks = mergeWorkPreviewCache(mediaState.allWorks, arr);
+      paintMediaHandleBadge();
       renderMediaFilters();
       renderMediaList();
-      const toEnrich = arr.slice(0, 8);
+      const toEnrich = arr.filter((w) => {
+        const pre = w && w.previewMediaUrl != null ? String(w.previewMediaUrl).trim() : "";
+        const cached = w && w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
+        return !(/^https?:\/\//i.test(pre) || /^https?:\/\//i.test(cached));
+      }).slice(0, 8);
+      if (!toEnrich.length) return;
       const enriched = await Promise.all(toEnrich.map((w) => enrichWorkWithPreview({ ...w })));
-      for (const w of enriched) {
-        const url = w._firstMediaUrl != null ? String(w._firstMediaUrl).trim() : "";
-        const hasPre = w.previewMediaUrl != null && String(w.previewMediaUrl).trim();
-        if (url && /^https?:\/\//i.test(url) && !hasPre) {
-          void updateContentWork(w.id, { previewMediaUrl: url }).catch(() => {});
-        }
-      }
-      mediaState.allWorks = [...enriched, ...arr.slice(toEnrich.length)];
+      const byId = new Map(enriched.map((w) => [w.id, w]));
+      mediaState.allWorks = mergeWorkPreviewCache(
+        mediaState.allWorks,
+        arr.map((w) => byId.get(w.id) || w)
+      );
+      paintMediaHandleBadge();
       renderMediaFilters();
       renderMediaList();
     });
   } else {
     mediaState.mediaAllWorksHydrated = true;
     mediaState.allWorks = [];
+    paintMediaHandleBadge();
   }
 }
 
@@ -352,6 +534,7 @@ export function initMediaUpload() {
       mediaState.mediaAllWorksHydrated = true;
       mediaState.userWorks = [];
       mediaState.allWorks = [];
+      paintMediaHandleBadge();
       if (mediaState.unsubMyWorks) {
         mediaState.unsubMyWorks();
         mediaState.unsubMyWorks = null;
@@ -366,10 +549,11 @@ export function initMediaUpload() {
     }
     return;
   }
-  await loadUserProfile();
-    initMediaModule();
-
-    setupMediaWorkListSubscriptions();
+  try { initMediaModule(); } catch (e) { console.warn("[Media] initMediaModule", e); }
+    try { setupMediaWorkListSubscriptions(); } catch (e) { console.warn("[Media] setup subs", e); }
+    await loadUserProfile();
+    applyToHandleVisibility();
+    try { setupMediaWorkListSubscriptions(); } catch (_) {}
 
     if (mediaState.unsubMediaCategories) {
       mediaState.unsubMediaCategories();
@@ -384,9 +568,20 @@ export function initMediaUpload() {
     setTimeout(async () => {
       try {
         await loadUserProfile();
+        applyToHandleVisibility();
         setupMediaWorkListSubscriptions();
+        if (document.getElementById("mediaScreen")?.style.display === "flex") {
+          renderMediaFilters();
+          renderMediaList();
+        }
       } catch (_) {}
     }, 700);
+
+    if (document.getElementById("mediaScreen")?.style.display === "flex") {
+      applyToHandleVisibility();
+      renderMediaFilters();
+      renderMediaList();
+    }
   });
 }
 
@@ -642,3 +837,7 @@ if (typeof window !== "undefined") {
 }
 
 initMediaUpload();
+try {
+  const screen = document.getElementById("mediaScreen");
+  if (screen && screen.style.display === "flex") void goToMedia();
+} catch (_) {}

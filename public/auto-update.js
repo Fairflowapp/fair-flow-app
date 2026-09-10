@@ -43,9 +43,24 @@
     try { sessionStorage.setItem("ff_autoupdate_done", v); } catch (_) {}
   }
 
+  // A reload while the user is looking at a photo / filling a modal loses their
+  // place and reads as "the app crashed". Wait until nothing is open.
+  function modalOpen() {
+    try {
+      if (document.getElementById("mediaLightboxOverlay")) return true;
+      var ids = ["workDetailsModal", "uploadWorkModal", "markPostedModal"];
+      for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el && el.style && el.style.display && el.style.display !== "none") return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   function safeNow() {
     if (Date.now() - loadedAt < 60000) return false;
     if (recentQueueSave()) return false;
+    if (modalOpen()) return false;
     return true;
   }
 

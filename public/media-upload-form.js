@@ -9,8 +9,8 @@ import {
   mediaState,
   MEDIA_UPLOAD_POINTS_DAILY_CAP,
   MEDIA_MAX_IMAGES_PER_UPLOAD,
-} from "./media-state.js?v=20260901_media_iso";
-import { loadUserProfile } from "./media-profile.js?v=20260901_media_iso";
+} from "./media-state.js?v=20260910_media_seen";
+import { loadUserProfile } from "./media-profile.js?v=20260910_media_seen";
 import {
   createWorkWithMedia,
   createWorkWithMediaBestEffort,
@@ -18,7 +18,7 @@ import {
   addMediaToExistingWorkBestEffort,
   getContentWork,
   mediaItemMatchesActiveLocation,
-} from "./media-cloud.js?v=20260901_media_iso";
+} from "./media-cloud.js?v=20260910_media_seen";
 
 // Injected from media-upload.js (setupModalBackdrops closes sibling modals).
 let closeWorkDetails = () => {};
@@ -621,7 +621,11 @@ function setupUploadModalListeners() {
     });
   });
   document.getElementById("uploadWorkModalClose")?.addEventListener("click", closeUploadModal);
-  document.getElementById("uploadWorkSubmitBtn")?.addEventListener("click", doUpload);
+  document.getElementById("uploadWorkSubmitBtn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void doUpload();
+  });
 
   const categoryTrigger = document.getElementById("uploadWorkCategoryTrigger");
   const categoryDropdown = document.getElementById("uploadWorkCategoryDropdown");

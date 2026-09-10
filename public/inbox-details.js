@@ -37,7 +37,7 @@ import {
   ffDocAlertStaffId,
   ffDocAlertModalFooterIds,
 } from "./inbox-documents.js?v=20260629_inbox_documents_split";
-import { updateInboxBadges } from "./inbox-list-render.js?v=20260901_inbox_iso";
+import { updateInboxBadges } from "./inbox-list-render.js?v=20260909_to_handle_sender";
 
 // =====================
 // Request Details Modal

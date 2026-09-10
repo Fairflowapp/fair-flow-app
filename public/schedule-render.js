@@ -21,13 +21,13 @@ import {
   _ffDebugLogAuthedUserWeeklyHours,
   buildMyShiftsIcsForCurrentWeek,
   downloadMyShiftsIcsForCurrentWeek,
-} from "./schedule-ics.js?v=20260702_schedule_ics";
-import { getWeekRange } from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-ics.js?v=20260903_sched_lock2";
+import { getWeekRange } from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   escapeScheduleHtml,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 import { initScheduleRenderModals } from "./schedule-render-modals.js?v=20260827_1258notes";
 import {
   initScheduleRenderBoard,

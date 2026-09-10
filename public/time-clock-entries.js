@@ -287,30 +287,12 @@ export async function ffGetTimeClockPhotoUrl(path) {
 }
 
 /**
- * Capture a fresh GPS fix for the punch, without nagging for the
- * geolocation permission when it isn't needed:
- *   - fence enforced for this branch → always attempt (the PIN gate already
- *     prompted, and the server will reject the punch without coords);
- *   - fence off/unknown → only capture silently when permission is already
- *     granted (pure forensics, never a prompt).
- * Errors never block here — the SERVER decides whether coords are required.
+ * Always capture a GPS fix on punch. The SERVER decides if coords are
+ * required (fence on the location doc). Missing coords while the fence
+ * is on is a reject — never a silent pass.
  */
 async function _ffTimeClockCaptureCoords() {
   try {
-    let fenceActive = null;
-    try {
-      if (typeof window.isTimeClockGeoFenceActive === "function") {
-        fenceActive = window.isTimeClockGeoFenceActive() === true;
-      }
-    } catch (_) {}
-    if (fenceActive !== true) {
-      try {
-        const st = await navigator.permissions.query({ name: "geolocation" });
-        if (!st || st.state !== "granted") return null;
-      } catch (_) {
-        return null;
-      }
-    }
     if (typeof window.requestCurrentBrowserLocation !== "function") return null;
     const pos = await window.requestCurrentBrowserLocation();
     if (!pos || !isFinite(Number(pos.lat)) || !isFinite(Number(pos.lng))) return null;

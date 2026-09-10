@@ -53,6 +53,14 @@ export function initScheduleAck(deps) {
  * Inbox/Chat/Media/Inventory.
  */
 function _ffSchedActiveLocId() {
+  // Staff assigned to one branch stay on that branch's schedule. Header
+  // leftovers from a shared tablet must not open the other salon.
+  try {
+    if (typeof window !== "undefined" && typeof window.ffGetUserAllowedLocations === "function") {
+      const allowed = (window.ffGetUserAllowedLocations() || []).filter((l) => l && l.id && l.isActive !== false);
+      if (allowed.length === 1) return String(allowed[0].id).trim();
+    }
+  } catch (_) { /* ignore */ }
   try {
     if (typeof window !== "undefined" && typeof window.ffGetActiveLocationId === "function") {
       const v = window.ffGetActiveLocationId();
@@ -75,11 +83,7 @@ function _ffSchedActiveLocId() {
 function _ffSchedUserHasMultipleLocations() {
   try {
     if (typeof window !== "undefined" && typeof window.ffUserHasMultipleLocations === "function") {
-      if (window.ffUserHasMultipleLocations()) return true;
-    }
-    if (typeof window !== "undefined" && typeof window.ffGetLocations === "function") {
-      const locs = (window.ffGetLocations() || []).filter((l) => l && l.isActive !== false);
-      if (locs.length > 1) return true;
+      return window.ffUserHasMultipleLocations() === true;
     }
   } catch (_) {}
   return false;

@@ -10,7 +10,7 @@ import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260902_sched_
 import {
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 
 function hhmmFromTimeInput(v) {
   const s = String(v || "").trim();

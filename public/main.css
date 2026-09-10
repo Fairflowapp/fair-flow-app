@@ -3121,6 +3121,56 @@ dialog footer button, .code-dialog footer button {
   flex: 1;
 }
 
+.apps-item-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apps-item-badge {
+  display: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  align-items: center;
+  justify-content: center;
+  line-height: 18px;
+}
+
+.apps-item-badge:not(:empty) {
+  display: inline-flex;
+}
+
+.toolbar.toolbar-nav-right #appsBtn .nav-icon {
+  position: relative;
+  overflow: visible;
+}
+
+.toolbar.toolbar-nav-right #appsBtn .nav-icon .ff-nav-icon-badge:not(:empty) {
+  position: absolute;
+  top: -5px;
+  right: -8px;
+  z-index: 3;
+  margin-left: 0 !important;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
 .apps-item-label,
 .apps-panel-item__content > div:last-child > div:first-child {
   font-size: 14px !important;
@@ -10110,27 +10160,41 @@ dialog footer button, .code-dialog footer button {
     flex-shrink: 0;
   }
   #scheduleScreen #scheduleSaveDraftBtn.ff-sched-save-status {
-    display: none;
+    display: inline-flex;
     align-items: center;
     height: 32px;
-    padding: 0 2px;
-    border: none;
-    background: transparent;
+    padding: 0 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fff;
     box-shadow: none;
     font-size: 12px;
-    font-weight: 500;
-    color: #9ca3af;
+    font-weight: 600;
+    color: #6b7280;
     cursor: default;
     white-space: nowrap;
   }
   #scheduleScreen #scheduleSaveDraftBtn.ff-sched-save-status.is-ok {
     color: #059669;
+    border-color: #bbf7d0;
+    background: #f0fdf4;
   }
   #scheduleScreen #scheduleSaveDraftBtn.ff-sched-save-status.is-busy {
     color: #7c3aed;
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+  }
+  #scheduleScreen #scheduleSaveDraftBtn.ff-sched-save-status.is-dirty {
+    color: #fff;
+    border-color: #7c3aed;
+    background: #7c3aed;
+    cursor: pointer;
   }
   #scheduleScreen #scheduleSaveDraftBtn.ff-sched-save-status.is-error {
-    color: #dc2626;
+    color: #fff;
+    border-color: #dc2626;
+    background: #dc2626;
+    cursor: pointer;
   }
   #scheduleScreen .ff-sched-ghost {
     display: none;

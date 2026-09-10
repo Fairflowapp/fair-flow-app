@@ -3,9 +3,9 @@
 // and loading state. Extracted verbatim from schedule-render.js
 // (schedule-render split T2).
 
-import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260902_sched_dual";
+import { getInboxApprovalDisplayForDate } from "./schedule-availability.js?v=20260903_sched_lock";
 import { scheduleState } from "./schedule-state.js?v=20260702_schedule_state";
-import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260902_sched_dual";
+import { getAuthedStaffIdForSchedule } from "./schedule-ack.js?v=20260903_sched_lock";
 import { bindScheduleBoardDnD } from "./schedule-dnd.js?v=20260827_1258notes";
 import {
   buildAssignmentLookup,
@@ -13,8 +13,8 @@ import {
   getAssignmentId,
   getCellNoteForStaffDay,
   staffDayBlockedByApprovedInbox,
-} from "./schedule-draft.js?v=20260902_sched_dual";
-import { _ffActiveLocationNameForIcs } from "./schedule-ics.js?v=20260702_schedule_ics";
+} from "./schedule-draft.js?v=20260903_sched_lock";
+import { _ffActiveLocationNameForIcs } from "./schedule-ics.js?v=20260903_sched_lock2";
 import {
   cellShowsScheduleWarningDot,
   compareScheduleHHMM,
@@ -26,7 +26,7 @@ import {
   getScheduleStaffKey,
   getValidationByDate,
   getWeekRange,
-} from "./schedule-format.js?v=20260806_sched_12h_picker";
+} from "./schedule-format.js?v=20260903_sched_lock2";
 import {
   bindScheduleBoardManualAdd,
   bindScheduleCellNoteButtons,
@@ -37,7 +37,7 @@ import {
   formatLunchBreakCellSubtitle,
   getScheduleAccessContext,
   scheduleUserCanManualEdit,
-} from "./schedule-shift-edit.js?v=20260817_build_hours";
+} from "./schedule-shift-edit.js?v=20260903_sched_lock2";
 import {
   bindScheduleCoverageDayClick,
   bindScheduleStandByPen,

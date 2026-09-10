@@ -275,11 +275,11 @@ function ensureScheduleRebuildConfirmModal() {
     "display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:4100;align-items:center;justify-content:center;padding:20px;";
   backdrop.innerHTML = `
     <div role="dialog" aria-modal="true" aria-labelledby="scheduleRebuildConfirmTitle" style="background:#fff;border-radius:16px;padding:24px 26px;max-width:440px;width:100%;box-shadow:0 25px 50px -12px rgba(0,0,0,0.28);">
-      <div id="scheduleRebuildConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Replace this week’s draft?</div>
-      <p id="scheduleRebuildConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;">We’ll delete the saved draft (here and online) and build a new schedule from your coverage rules.</p>
+      <div id="scheduleRebuildConfirmTitle" style="font-size:18px;font-weight:700;color:#111827;margin-bottom:10px;">Are you sure you want to Build this week?</div>
+      <p id="scheduleRebuildConfirmBody" style="margin:0 0 22px 0;font-size:14px;color:#4b5563;line-height:1.55;">This replaces the schedule on your screen for this week only. Other weeks stay as they are. Click Cancel to keep the current schedule.</p>
       <div style="display:flex;gap:12px;justify-content:flex-end;flex-wrap:wrap;">
         <button type="button" id="scheduleRebuildConfirmCancel" style="padding:10px 18px;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#374151;font-weight:600;cursor:pointer;font-size:14px;">Cancel</button>
-        <button type="button" id="scheduleRebuildConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Build schedule</button>
+        <button type="button" id="scheduleRebuildConfirmOk" style="padding:10px 18px;border-radius:10px;border:none;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;font-size:14px;">Yes, Build this week</button>
       </div>
     </div>
   `;

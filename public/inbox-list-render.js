@@ -37,6 +37,69 @@ import {
 let showRequestDetails = () => {};
 let inboxTechnicianNoiseFilter = (rows) => rows;
 
+function inboxRequestSenderName(request) {
+  return String(request?.createdByName || "").trim();
+}
+
+function inboxUniqueRecipientNames(request) {
+  const raw = Array.isArray(request?.sentToNames) ? request.sentToNames : [];
+  const names = [];
+  const seen = new Set();
+  raw.forEach((n) => {
+    const name = String(n || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(name);
+  });
+  if (names.length) return names;
+  const one = String(request?.forStaffName || "").trim();
+  return one ? [one] : [];
+}
+
+/** Only when the request went to more than one manager. */
+function inboxFormatSentToSeveral(names) {
+  if (!names || names.length < 2) return "";
+  if (names.length === 2) return `Sent to ${names[0]} and ${names[1]}`;
+  return `Sent to ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+function inboxRequestSentToSeveralLabel(request) {
+  return inboxFormatSentToSeveral(inboxUniqueRecipientNames(request));
+}
+
+/** Unique sender names for a To Handle group header (visible while collapsed). */
+function inboxToHandleSenderPreview(requests) {
+  const names = [];
+  const seen = new Set();
+  (requests || []).forEach((r) => {
+    const n = inboxRequestSenderName(r);
+    if (!n) return;
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    names.push(n);
+  });
+  if (!names.length) return "";
+  if (names.length <= 2) return names.join(", ");
+  return `${names[0]}, ${names[1]} +${names.length - 2}`;
+}
+
+function inboxToHandleSentToPreview(requests) {
+  const labels = [];
+  const seen = new Set();
+  (requests || []).forEach((r) => {
+    const label = inboxRequestSentToSeveralLabel(r);
+    if (!label) return;
+    const key = label.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    labels.push(label);
+  });
+  return labels[0] || "";
+}
+
 export function initInboxListRender(deps = {}) {
   if (typeof deps.showRequestDetails === "function") showRequestDetails = deps.showRequestDetails;
   if (typeof deps.inboxTechnicianNoiseFilter === "function") inboxTechnicianNoiseFilter = deps.inboxTechnicianNoiseFilter;
@@ -252,6 +315,9 @@ function _renderInboxListInner() {
     const typeInfo = getRequestTypeInfo(type);
     const unreadCount = showMgrUnread ? requests.filter(r => r.unreadForManagers === true).length : 0;
     const hasUnread = unreadCount > 0;
+    const showSenderOnGroup = inboxState.inboxViewMode === "to_handle";
+    const senderPreview = showSenderOnGroup ? inboxToHandleSenderPreview(requests) : "";
+    const sentToPreview = showSenderOnGroup ? inboxToHandleSentToPreview(requests) : "";
 
     // Left: icon + label. Right: (total) grey, unread count red when > 0, then arrow
     const header = document.createElement('div');
@@ -262,11 +328,15 @@ function _renderInboxListInner() {
       border-radius:8px; cursor:pointer; margin-bottom:4px; user-select:none;
     `;
     header.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
         <span style="font-size:18px;">${typeInfo.icon}</span>
-        <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
+        <div style="min-width:0;">
+          <span style="font-weight:600;font-size:14px;color:#111;">${typeInfo.label}</span>
+          ${senderPreview ? `<div style="font-size:12px;color:#6b7280;font-weight:500;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(senderPreview)}</div>` : ""}
+          ${sentToPreview ? `<div style="font-size:12px;color:#6b7280;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(sentToPreview)}</div>` : ""}
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
         <span style="color:#6b7280;font-size:13px;font-weight:500;">(${requests.length})</span>
         ${hasUnread ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;background:#ef4444;color:#fff;font-size:11px;font-weight:600;border-radius:50%;" title="Not yet opened">${unreadCount}</span>` : ''}
         <span class="inbox-group-arrow" style="color:#9ca3af;font-size:11px;transition:transform 0.2s;">▼</span>
@@ -362,7 +432,9 @@ function createRequestCard(request) {
         <div style="font-size:13px;color:#6b7280;margin-bottom:8px;">
           ${(request.type === 'staff_birthday_reminder' || request.type === 'onboarding_incomplete') && request.data?.subjectStaffName
             ? escapeHtml(request.data.subjectStaffName) + ' • ' + dateStr
-            : `${request.forStaffName} • ${dateStr}`}
+            : (inboxState.inboxViewMode === 'to_handle' && inboxRequestSenderName(request)
+              ? `${escapeHtml(inboxRequestSenderName(request))} • ${dateStr}${inboxRequestSentToSeveralLabel(request) ? `<div style="margin-top:2px;font-size:12px;">${escapeHtml(inboxRequestSentToSeveralLabel(request))}</div>` : ""}`
+              : `${escapeHtml(request.forStaffName || '')} • ${dateStr}`)}
         </div>
         <div style="font-size:13px;color:#374151;">
           ${getRequestSummary(request)}
