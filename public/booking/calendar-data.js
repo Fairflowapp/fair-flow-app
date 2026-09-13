@@ -51,10 +51,23 @@
     }
   }
 
+  function collapseName(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  function displayNameOf(staff) {
+    var named = collapseName(staff && (staff.name || staff.displayName || staff.fullName));
+    if (named) return named;
+    var combined = collapseName([
+      staff && staff.firstName,
+      staff && staff.lastName
+    ].filter(Boolean).join(" "));
+    return combined || "Staff";
+  }
+
   function firstNameOf(staff) {
-    var raw = String((staff && (staff.name || staff.firstName)) || "").trim();
-    if (!raw) return "Staff";
-    return raw.split(/\s+/)[0];
+    var raw = displayNameOf(staff);
+    return raw.split(/\s+/)[0] || "Staff";
   }
 
   function serviceTypeIds(staff) {
@@ -75,7 +88,7 @@
     if (!staff || typeof staff !== "object") return false;
     if (staff.isArchived === true || staff.archived === true) return false;
     if (staff.active === false || staff.isActive === false) return false;
-    if (!String(staff.name || staff.firstName || "").trim()) return false;
+    if (!String(staff.name || staff.displayName || staff.fullName || staff.firstName || "").trim()) return false;
     if (!serviceTypeIds(staff).length) return false;
     var loc = String(locationId || "").trim();
     if (!loc) return true;
@@ -301,7 +314,8 @@
       return {
         id: String(staff.id || staff.staffId || staff.name || ""),
         firstName: firstNameOf(staff),
-        name: String(staff.name || staff.firstName || "").trim(),
+        displayName: displayNameOf(staff),
+        name: displayNameOf(staff),
         photoURL: String(staff.avatarUrl || staff.photoURL || staff.photoUrl || staff.imageUrl || "").trim(),
         working: working
       };
@@ -316,6 +330,7 @@
   window.ffBookingCalData = {
     currentLocationId: currentLocationId,
     isBookableProvider: isBookableProvider,
+    displayNameOf: displayNameOf,
     firstNameOf: firstNameOf,
     workingWindowsFor: workingWindowsFor,
     unavailableWindows: unavailableWindows,

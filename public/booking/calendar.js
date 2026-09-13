@@ -76,15 +76,21 @@
     return rangeHtml(regions.off, axis, "ff-cal-off") + rangeHtml(regions.closed, axis, "ff-cal-closed");
   }
 
+  function providerDisplayName(emp) {
+    var dt = data();
+    if (dt && typeof dt.displayNameOf === "function") return dt.displayNameOf(emp);
+    return String((emp && (emp.displayName || emp.name || emp.firstName)) || "").trim() || "Staff";
+  }
+
   function providerAvatarHtml(emp) {
-    var firstName = String(emp.firstName || "").trim() || "Staff";
-    var initial = firstName.charAt(0).toUpperCase();
+    var displayName = providerDisplayName(emp);
+    var initial = displayName.charAt(0).toUpperCase() || "S";
     var src = "";
     if (typeof window.ffGetAvatarUrlForUser === "function") {
       try {
         src = String(window.ffGetAvatarUrlForUser({
           staffId: emp.id,
-          name: emp.name || firstName,
+          name: displayName,
           photoURL: emp.photoURL,
           avatarUrl: emp.photoURL
         }) || "").trim();
@@ -102,12 +108,13 @@
   }
 
   function providerHeaderHtml(emp) {
-    var firstName = String(emp.firstName || "").trim() || "Staff";
+    var displayName = providerDisplayName(emp);
     return '<button type="button" class="ff-cal-emp-btn" data-ff-cal-provider="' +
-      escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false">' +
+      escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false" title="' +
+      escapeHtml(displayName) + '">' +
       '<span class="ff-cal-emp-ctrl">' +
         providerAvatarHtml(emp) +
-        '<span class="ff-cal-emp-label">' + escapeHtml(firstName) + "</span>" +
+        '<span class="ff-cal-emp-label">' + escapeHtml(displayName) + "</span>" +
         '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
       "</span>" +
       "</button>";

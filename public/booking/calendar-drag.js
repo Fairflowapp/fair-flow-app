@@ -287,7 +287,7 @@
       return row && (String(row.id || "") === id || String(row.staffId || "") === id);
     });
     if (!emp) return id;
-    var name = String(emp.firstName || emp.name || emp.displayName || "").trim();
+    var name = String(emp.displayName || emp.name || emp.firstName || "").trim();
     return name || id;
   }
 
@@ -519,8 +519,21 @@
     toastError(msg);
   }
 
+  function unavailableDrop(action) {
+    var api = window.ffBookingCalDrop;
+    if (!api || typeof api.inspect !== "function") return null;
+    var result = api.inspect(action);
+    return result && result.ok === false ? result : null;
+  }
+
   function applyDrop(action) {
     if (!action) return Promise.resolve(false);
+    var blocked = unavailableDrop(action);
+    if (blocked) {
+      restoreSource();
+      toastError(blocked.message || "That time is not available.");
+      return Promise.resolve(false);
+    }
     return confirmProviderMove(action).then(function (choice) {
       if (!choice || !choice.ok) {
         restoreSource();
@@ -802,6 +815,7 @@
     providerMovePrompt: providerMovePrompt,
     requestedMoveActions: requestedMoveActions,
     moveAskResult: moveAskResult,
+    unavailableDrop: unavailableDrop,
     consumeClick: consumeClick,
     releaseOpensDetails: releaseOpensDetails,
     THRESHOLD: THRESHOLD,

@@ -373,8 +373,20 @@ body.ff-booking-area .ff-booking-main {
   right: 0;
   pointer-events: none;
   z-index: 0;
+}
+.ff-cal-closed {
   background: #F5F5F7;
   background-image: none;
+}
+.ff-cal-off {
+  background-color: #E8E4F0;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(91, 79, 122, 0.1) 0,
+    rgba(91, 79, 122, 0.1) 5px,
+    transparent 5px,
+    transparent 10px
+  );
 }
 .ff-cal-col.is-drop {
   background: #faf7ff;
