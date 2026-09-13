@@ -1,0 +1,322 @@
+# Fair Flow Booking — Master Spec
+
+Approved product direction for Fair Flow Booking.
+
+Canonical integration branch: `feature/booking`  
+Checkpoint this spec was written against: `f587bd8a27c250173b2e31ed4ce281c853ba26fa`
+
+Preserve everything already implemented unless a task explicitly requires changing it. The existing codebase is the source of truth for architecture, field names, and current behavior.
+
+---
+
+## Product goal
+
+Fair Flow Booking is an intelligent scheduling system for high-volume salons, not just a calendar.
+
+It must help a busy front desk book, move, and recover time quickly — and later recommend better slots, fill waitlist demand, and recover lost provider hours.
+
+---
+
+## Core design
+
+- Clean, fast scheduling UX inspired by the best parts of systems such as Mangomint, Mindbody, Booksy, Fresha, Boulevard, and Vagaro.
+- Do **not** copy another product's UI.
+- Keep Fair Flow visually consistent with the current Booking interface.
+- Optimize for high-volume front-desk operation and minimal clicks.
+
+Staff Booking lives inside the existing Fair Flow SPA (`public/index.html`) as a second product area (Operations ↔ Booking). It is not a separate app.
+
+---
+
+## Current architecture (source of truth)
+
+Booking is client-side JavaScript talking to Firestore. There are **no Booking Cloud Functions**.
+
+**Entitlement:** `window.ffCanAccessBooking()` in `public/booking/access.js`. Staging/localhost only. Production stays off until a Booking package exists.
+
+**Main entry:** `public/index.html` script tags → `public/booking/shell.js` → `ffGoToBooking` / `ffSetBookingSection`.
+
+**Sidebar sections:** Calendar · Sales · Clients · Reports · Services · Settings.
+
+**Services** is not a Booking-owned catalog. The Booking Services section opens the existing Operations Services screen (`goToServices()` / `#servicesScreen`).
+
+**Reuse, do not duplicate:** Fair Flow staff, locations, location schedules, special business days, staff default schedules, approved Inbox schedule exceptions, tickets service catalog (`tickets-catalog-data.js`), Live Floor FAB offset.
+
+**Firestore (salon-member only, not public):**
+
+| Path | Owner module |
+|------|-------------|
+| `salons/{salonId}/appointments/{id}` | `public/booking/appointments/` |
+| `salons/{salonId}/clients/{id}` | `public/booking/clients/` |
+| `salons/{salonId}/sales/{id}` | `public/booking/sales/` |
+| `salons/{salonId}/counters/sales` | sales numbering |
+| `salons/{salonId}/settings/main.booking` | overlap policy |
+
+**Appointment `serviceLines[]` fields in use:** `lineId`, `serviceId`, `serviceNameSnapshot`, `providerId`, `providerNameSnapshot`, `startAt`, `endAt`, `durationMinutes`, `priceSnapshot`, `guestKey`, `guestName`, `requested`.
+
+Prefer new isolated modules under `public/booking/<area>/`. Do not put substantial Booking business logic in `index.html`.
+
+---
+
+## Calendar
+
+### Direction
+
+- Day view
+- Week view
+- 15-minute grid
+- Provider columns
+- Provider **full name** and photo
+- Persistent location awareness
+- Open hours white
+- Closed hours grey
+- Provider-off periods visually distinct
+- Current-time indicator
+- Drag/drop
+- Multi-service visit remains visually understandable as **one appointment**
+- Requested-provider indicator
+- Blocked time
+- Filters
+- Print day
+
+### Currently implemented
+
+Day view, 15-minute snap, provider columns with **first name** + photo, global active-location (no calendar-local picker), open/closed overlays, provider-off bands, now-line, drag/drop (including stacked multi-service: name = whole visit, segment = one line), requested-provider heart, stacked multi-service cards.
+
+### Not implemented
+
+Week view, filters, blocked time, print day, calendar-local location selector, resources (rooms/chairs). Week/filters/block/print exist only as disabled “coming later” controls.
+
+---
+
+## Appointments
+
+### Direction
+
+- Create / edit / cancel / reschedule
+- Multi-service
+- Multi-provider
+- Requested provider
+- Any available provider
+- Notes
+- Statuses including no-show
+- Processing time
+- Buffer / finishing time
+- Configurable overlap
+- Group / party support
+- Recurring appointments later
+
+### Currently implemented
+
+Create, in-place edit, soft cancel, drag or edit to move time/provider/date (no dedicated reschedule API), independent `serviceLines`, per-line providers, per-line `requested`, appointment notes, overlap setting `booking.allowedOverlapMinutes` ∈ `{0, 15, 20, 30}`.
+
+Statuses: `scheduled`, `confirmed`, `checked_in`, `in_service`, `completed`, `cancelled`, `no_show`. Visit-flow UI exists except **no-show has no UI action**. `completed` and `no_show` still occupy calendar time (`ACTIVE_STATUSES`).
+
+Create currently hardcodes `source: "front_desk"` and `assignmentType: "specific_provider"`. Enums already include `online` and `any_provider`.
+
+Party support exists as extra people via `guestKey` / `guestName`, not a separate group-appointment type.
+
+### Not implemented
+
+Dedicated reschedule UX, any-available-provider assignment UX, processing / buffer / finishing time, recurring / series, a distinct group-appointment product.
+
+---
+
+## Services
+
+Booking consumes the Operations catalog. Duration and staff capability come from `durationMinutes` and `staffOverrides` (opt-out: capable unless `enabled === false`). Pricing snapshots onto lines.
+
+Processing, buffer, and finishing times are **not** in the catalog or appointment model yet. Add them only with an explicit task that owns the shared catalog / appointment schema.
+
+---
+
+## Availability and conflicts
+
+Canonical schedule engine: `public/booking/availability.js`.
+
+It answers: can this provider work at this location on this date/time? **Schedule only** — not appointment conflicts, Queue, or Tickets.
+
+Sources: location `businessHours` / `specialBusinessDays` / `dayShiftSegments`, staff `defaultSchedule` / location schedule, approved Inbox exceptions (`vacation`, `day_off`/`time_off`, `late_start`, `early_leave`, `schedule_change`).
+
+Appointment conflicts are separate: `appointments/data.js` `checkProviderConflict` using the overlap setting.
+
+Empty-slot click currently checks schedule availability only. Conflicts are enforced on create/update.
+
+---
+
+## Smart scheduling
+
+Fair Flow should not only determine whether a time is **available**. It should evaluate how **good** a slot is.
+
+Consider:
+
+- Gap before
+- Gap after
+- Whether those gaps can fit another service
+- Provider utilization
+- Requested-provider preference
+- Provider schedule
+- Multi-provider impact
+- Shift boundaries
+- Buffers
+- Processing time
+- Business rules
+
+Possible slot quality:
+
+- **BEST FIT**
+- **GOOD FIT**
+- **AVAILABLE**
+- **LOW FIT**
+
+Valid appointments should not necessarily be hidden just because they create a gap. Fair Flow should rank / recommend better times.
+
+**Status:** not implemented. Do not pretend ranking exists in the current create/edit flow.
+
+---
+
+## Fair Flow Scheduling Agent
+
+A future agent should continuously detect:
+
+- Gaps
+- Cancellations
+- Waitlist opportunities
+- Underutilized staff
+- Appointments that could move slightly earlier or later
+- Better provider / time combinations
+
+Example:
+
+```
+12:00–1:00 Client A
+1:00–1:30 gap
+1:30–2:30 Client B
+```
+
+Fair Flow can identify that Client B could move to 1:00 and offer:  
+“30-minute gap detected. Ask Client B to come at 1:00?”
+
+Future automation modes:
+
+- Suggest
+- Ask client and execute after acceptance
+- Auto within manager-defined rules
+
+**Never silently move an appointment without the required permission.**
+
+This agent is future work. It is not present in the current codebase.
+
+---
+
+## Waitlist
+
+Future waitlist should support:
+
+- Service
+- Preferred provider
+- Any provider
+- Date / time window
+- Flexible timing
+- Ranking based on calendar fit
+- Automatic outreach when availability appears
+
+**Status:** no Booking waitlist module. Operations Live Floor / `queueState` is a separate walk-in queue and is not wired to Booking. Do not casually merge the two without an explicit task.
+
+---
+
+## Clients
+
+Salon-level clients already exist: search (name / email / phone including `phoneKeys` / `phoneKeyPrefixes`), create, profile, bounded appointment and sales history, notes, `allowSms` / `allowEmail`, photo.
+
+Memberships and Payments tabs are empty stubs. Do not invent memberships, wallets, or cards until those products exist.
+
+---
+
+## Client messaging
+
+Future system should support:
+
+- Confirmations
+- Reminders
+- Waitlist offers
+- Earlier / later time offers
+- Cancellation openings
+- Appointment change requests
+- Rebooking
+- Review requests
+
+Respect `allowSms` / `allowEmail` and future communication policies.
+
+**Status:** prefs are stored; there is no client SMS/email sender. Staff Inbox is operations (schedule requests, supplies, etc.), not client outreach. “Confirm Appointment” is a calendar status change, not a message.
+
+---
+
+## Sales / checkout
+
+Staff can check out from an appointment or as a walk-in sale. Tax is currently 0; `method` / `processor` default to `"none"`. Product retail checkout is not real yet. Do not build POS/card processing unless the task owns it.
+
+---
+
+## Reports
+
+Reports should be **actionable**, not only descriptive.
+
+Examples:
+
+- Utilization
+- Gaps
+- Lost capacity
+- Revenue
+- Appointment counts
+- Booking source
+- New vs returning
+- Requested provider
+- Cancellations / no-show
+- Retention
+- Rebooking
+- Waitlist fill rate
+- Gaps prevented
+- Gaps recovered
+- Recovered provider hours
+
+Example insight:
+
+> 11.5 provider hours were lost to calendar gaps this week.  
+> 7.25 hours could potentially have been recovered by moving appointments 30 minutes or less.
+
+Reports should eventually provide **actions** from insights.
+
+### Currently implemented
+
+Sales Summary only (closed sales: counts, service $, product columns ready, fees/tax/tip/refunds/adjusted). Other Sales nav items are placeholders.
+
+Appointment-based analytics (utilization, gaps, source mix, no-shows, retention, waitlist) are **not** implemented. `firstVisit` exists on appointments but is unused in reports.
+
+---
+
+## Online / self-booking
+
+Not implemented. Schema foreshadowing only (`source: "online"`). Firestore clients/appointments/sales are salon-member only. A public booking surface needs its own security design and must not loosen staff rules casually.
+
+---
+
+## Staging and production
+
+| | |
+|--|--|
+| Staging | `fair-flow-staging` (`fair-flow-staging.web.app`) |
+| Production | `fairflowapp-db841` — **forbidden** unless Shiri explicitly authorizes production work |
+| Default Firebase alias | production — always pass `--project` |
+
+Deploy only when a task explicitly authorizes it. Staging hosting is static files under `public/` plus `?v=` cache-bust in `index.html`.
+
+---
+
+## Implementation rules for later work
+
+1. Read this spec before starting a Booking task.
+2. Inspect the current modules before adding files or fields.
+3. Preserve implemented calendar, appointment, client, sales, availability, and overlap behavior unless the task says otherwise.
+4. Schema changes to appointments, clients, sales, or shared catalog require an explicit task that owns those files.
+5. New features should land as isolated modules when practical. Integration into `index.html` happens after review, not from multiple parallel branches at once.
