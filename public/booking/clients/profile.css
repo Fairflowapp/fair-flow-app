@@ -525,29 +525,29 @@ body:not(.ff-booking-area) .ff-clip-drawer { display: none !important; }
   white-space: nowrap;
 }
 .ff-cli-appt-status.is-scheduled {
-  background: #fff7ed;
-  color: #c2410c;
+  background: #fdba74;
+  color: #9a3412;
 }
 .ff-cli-appt-status.is-confirmed {
-  background: #f5f3ff;
-  color: #6d28d9;
+  background: #ddd6fe;
+  color: #5b21b6;
 }
 .ff-cli-appt-status.is-checked_in {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #93c5fd;
+  color: #1e3a8a;
 }
 .ff-cli-appt-status.is-in_service {
-  background: #f0fdf4;
-  color: #15803d;
+  background: #86efac;
+  color: #166534;
 }
 .ff-cli-appt-status.is-cancelled,
 .ff-cli-appt-status.is-no_show {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: #e5e7eb;
+  color: #374151;
 }
 .ff-cli-appt-status.is-completed {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: #e5e7eb;
+  color: #374151;
 }
 .ff-cli-appt-more {
   padding: 0 12px 10px;

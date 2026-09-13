@@ -280,7 +280,7 @@ check("stack uses an inner divider only", render.stackHtml({
   ]
 }).indexOf("is-next") !== -1 && cardCss.indexOf("border-radius: 0") !== -1);
 check("one card is one appointment click target", renderSrc.indexOf("data-ff-cal-card") !== -1 && cardCss.indexOf(".ff-cal-card.is-stack") !== -1);
-check("client hover uses a rose mark", cardCss.indexOf(".ff-cal-card.is-client-on") !== -1 && cardCss.indexOf("#ffe4e6") !== -1);
+check("client hover uses a rose mark", cardCss.indexOf(".ff-cal-card.is-client-on") !== -1 && cardCss.indexOf("#fda4af") !== -1);
 check("calendar cards expose the client key", renderSrc.indexOf("data-ff-cal-client") !== -1);
 check("client highlight is exported", typeof render.highlightClient === "function");
 check("each stacked service can be focused", render.stackHtml({

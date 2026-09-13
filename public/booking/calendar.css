@@ -389,9 +389,9 @@ body.ff-booking-area .ff-booking-main {
   padding: 5px 7px;
   overflow: hidden;
   border-radius: 8px;
-  background: #f5f3ff;
-  border: 1px solid #c4b5fd;
-  border-left: 3px solid var(--ff-brand-purple, #9d68b9);
+  background: #ddd6fe;
+  border: 1px solid #8b5cf6;
+  border-left: 3px solid #6d28d9;
   color: #1f1633;
   font-size: 11px;
   font-weight: 500;

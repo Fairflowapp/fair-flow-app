@@ -65,7 +65,7 @@
     var segs = (card && card.segments) || [];
     var count = segs.length || ((card && card.serviceNames) || []).length || 1;
     var head =
-      '<span class="ff-cal-card-name">' + escapeHtml(card.clientName) +
+      '<span class="ff-cal-card-name" title="Drag to move the whole appointment">' + escapeHtml(card.clientName) +
         ' <span class="ff-cal-card-count">· ' + escapeHtml(moreLabel(count)) + "</span></span>";
     var body = segs.map(function (seg, index) {
       var share = segmentShare(seg, card.startMin, card.endMin);
@@ -79,8 +79,8 @@
         '" data-ff-cal-seg-requested="' + (seg.requested ? "1" : "0") +
         '" style="top:' + share.top + "%;height:" + share.height + '%">' +
         (index ? "" : head) +
-        '<span class="ff-cal-card-svc">' + escapeHtml(seg.serviceName) + "</span>" +
-        '<span class="ff-cal-card-time">' + escapeHtml(rangeLabel(seg.startMin, seg.endMin)) + "</span>" +
+        '<span class="ff-cal-card-svc" title="Drag to move this service">' + escapeHtml(seg.serviceName) + "</span>" +
+        '<span class="ff-cal-card-time" title="Drag to move this service">' + escapeHtml(rangeLabel(seg.startMin, seg.endMin)) + "</span>" +
       "</span>";
     }).join("");
     return '<span class="ff-cal-card-segs">' + body + "</span>";

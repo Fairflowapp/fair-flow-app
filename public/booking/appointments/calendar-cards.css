@@ -6,10 +6,10 @@
   box-sizing: border-box;
   padding: 5px 7px;
   overflow: hidden;
-  border: 1px solid #c4b5fd;
-  border-left: 3px solid var(--ff-brand-purple, #9d68b9);
+  border: 1px solid #8b5cf6;
+  border-left: 3px solid #6d28d9;
   border-radius: 8px;
-  background: #f5f3ff;
+  background: #ddd6fe;
   color: #111111;
   text-align: left;
   font: inherit;
@@ -68,8 +68,17 @@
   border-top: 1px solid rgba(17, 17, 17, 0.2);
   padding-top: 3px;
 }
-.ff-cal-card-seg.is-focus {
-  background: rgba(17, 17, 17, 0.06);
+.ff-cal-card-seg.is-focus,
+.ff-cal-card.is-stack .ff-cal-card-seg:hover {
+  background: rgba(17, 17, 17, 0.08);
+}
+.ff-cal-card.is-stack .ff-cal-card-name {
+  position: relative;
+  z-index: 1;
+}
+.ff-cal-card.is-stack .ff-cal-card-svc,
+.ff-cal-card.is-stack .ff-cal-card-time {
+  cursor: grab;
 }
 .ff-cal-card-seg .ff-cal-card-name,
 .ff-cal-card-seg .ff-cal-card-svc {
@@ -149,39 +158,39 @@
 
 .ff-cal-card.is-status-scheduled,
 .ff-cal-drag-ghost.is-status-scheduled {
-  background: #fff7ed;
-  border-color: #fdba74;
-  border-left-color: #ea580c;
+  background: #fdba74;
+  border-color: #ea580c;
+  border-left-color: #c2410c;
 }
 .ff-cal-card.is-status-confirmed,
 .ff-cal-drag-ghost.is-status-confirmed {
-  background: #f5f3ff;
-  border-color: #c4b5fd;
-  border-left-color: var(--ff-brand-purple, #9d68b9);
+  background: #ddd6fe;
+  border-color: #8b5cf6;
+  border-left-color: #6d28d9;
 }
 .ff-cal-card.is-status-checked_in,
 .ff-cal-drag-ghost.is-status-checked_in {
-  background: #eff6ff;
-  border-color: #93c5fd;
-  border-left-color: #2563eb;
+  background: #93c5fd;
+  border-color: #3b82f6;
+  border-left-color: #1d4ed8;
 }
 .ff-cal-card.is-status-in_service,
 .ff-cal-drag-ghost.is-status-in_service {
-  background: #f0fdf4;
-  border-color: #86efac;
-  border-left-color: #16a34a;
+  background: #86efac;
+  border-color: #22c55e;
+  border-left-color: #15803d;
 }
 .ff-cal-card.is-status-completed,
 .ff-cal-drag-ghost.is-status-completed {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-  border-left-color: #9ca3af;
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  border-left-color: #6b7280;
 }
 .ff-cal-card.is-status-no_show,
 .ff-cal-drag-ghost.is-status-no_show {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-  border-left-color: #6b7280;
+  background: #e5e7eb;
+  border-color: #9ca3af;
+  border-left-color: #4b5563;
 }
 .ff-cal-card-party,
 .ff-cal-hold .ff-cal-card-party {
@@ -210,9 +219,9 @@
 .ff-cal-drag-ghost.is-new-client.is-status-confirmed,
 .ff-cal-drag-ghost.is-new-client.is-status-checked_in,
 .ff-cal-drag-ghost.is-new-client.is-status-in_service {
-  background: #fdf2f8;
-  border-color: #f9a8d4;
-  border-left-color: #f472b6;
+  background: #f9a8d4;
+  border-color: #ec4899;
+  border-left-color: #be185d;
 }
 .ff-cal-card-new {
   display: inline-block;
@@ -267,8 +276,8 @@
 .ff-cal-card.is-client-on.is-new-client.is-status-confirmed,
 .ff-cal-card.is-client-on.is-new-client.is-status-checked_in,
 .ff-cal-card.is-client-on.is-new-client.is-status-in_service {
-  background: #ffe4e6;
-  border-color: #fb7185;
-  border-left-color: #e11d48;
-  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.2);
+  background: #fda4af;
+  border-color: #e11d48;
+  border-left-color: #be123c;
+  box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.28);
 }

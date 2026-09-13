@@ -103,23 +103,30 @@
     return null;
   }
 
+  function isNameHandle(fromEl) {
+    return !!(fromEl && typeof fromEl.closest === "function" && fromEl.closest(".ff-cal-card-name"));
+  }
+
   function applySolo(source, card, fromEl) {
     if (!source || !card) return source;
     var lines = source.lineIds || [];
     if (lines.length < 2) return source;
+    if (isNameHandle(fromEl)) return source;
     var seg = fromEl && fromEl.closest ? fromEl.closest("[data-ff-cal-seg]") : null;
     if (!seg) {
-      var focus = card.getAttribute("data-ff-cal-focus-line");
+      var focus = card.getAttribute ? card.getAttribute("data-ff-cal-focus-line") : "";
       seg = findSeg(card, focus);
     }
     if (!seg) return source;
     var id = String(seg.getAttribute("data-ff-cal-seg") || "").trim();
     if (!id) return source;
+    var svc = typeof seg.querySelector === "function" ? seg.querySelector(".ff-cal-card-svc") : null;
     source.lineId = id;
     source.lineIds = [id];
     source.fromStartMin = Number(seg.getAttribute("data-ff-cal-seg-start"));
     source.durationMinutes = Number(seg.getAttribute("data-ff-cal-seg-duration")) || source.durationMinutes;
     source.requested = seg.getAttribute("data-ff-cal-seg-requested") === "1";
+    source.serviceName = svc ? String(svc.textContent || "").trim() : "";
     source.solo = true;
     source.segEl = seg;
     return source;
@@ -294,13 +301,20 @@
     );
   }
 
-  function providerMovePrompt(fromName, toName, requested) {
+  function moveSubject(serviceName) {
+    var name = String(serviceName || "").trim();
+    return name || "this appointment";
+  }
+
+  function providerMovePrompt(fromName, toName, requested, serviceName) {
+    var subject = moveSubject(serviceName);
     if (requested) {
-      return "Pay attention, this is a requested appointment. Are you sure you want to move it from " +
+      return "Pay attention, this is a requested appointment. Are you sure you want to move " +
+        subject + " from " +
         String(fromName || "this provider") + " to " + String(toName || "another person") +
         "? Keep the request for " + String(toName || "another person") + ", or move without a request?";
     }
-    return "Are you sure you want to move this appointment from " +
+    return "Are you sure you want to move " + subject + " from " +
       String(fromName || "this provider") + " to " + String(toName || "this provider") + "?";
   }
 
@@ -386,20 +400,24 @@
       '<button type="button" class="ff-cal-move-go" data-ff-cal-move="yes">Move</button>';
   }
 
-  function askMoveConfirm(fromName, toName, requested) {
+  function askMoveConfirm(fromName, toName, requested, serviceName) {
     var box = ensureMoveAsk();
     box.classList.toggle("is-request", !!requested);
+    var label = String(serviceName || "").trim();
     var title = document.getElementById("ffCalMoveTitle");
-    if (title) title.textContent = requested ? "Pay attention" : "Move appointment?";
+    if (title) title.textContent = requested ? "Pay attention" : (label ? "Move service?" : "Move appointment?");
     var copy = document.getElementById("ffCalMoveCopy");
     if (copy) {
+      var subject = label
+        ? "<strong>" + escapeHtml(label) + "</strong>"
+        : "this appointment";
       copy.innerHTML = requested
-        ? "This is a requested appointment. Are you sure you want to move it from <strong>" +
+        ? "This is a requested appointment. Are you sure you want to move " + subject + " from <strong>" +
           escapeHtml(fromName || "this provider") + "</strong> to <strong>" +
           escapeHtml(toName || "another person") +
           "</strong>? Keep the request for <strong>" + escapeHtml(toName || "another person") +
           "</strong>, or move without a request?"
-        : "Are you sure you want to move this appointment from <strong>" +
+        : "Are you sure you want to move " + subject + " from <strong>" +
           escapeHtml(fromName || "this provider") + "</strong> to <strong>" +
           escapeHtml(toName || "this provider") + "</strong>?";
     }
@@ -419,7 +437,8 @@
     return askMoveConfirm(
       providerName(action.source.fromProviderId),
       providerName(action.providerId),
-      !!action.source.requested
+      !!action.source.requested,
+      action.source.solo ? action.source.serviceName : ""
     );
   }
 
@@ -775,6 +794,7 @@
     readSource: readSource,
     dropAction: dropAction,
     dragLines: dragLines,
+    applySolo: applySolo,
     focusSegment: focusSegment,
     clearSegmentFocus: clearSegmentFocus,
     previewFromDelta: previewFromDelta,

@@ -103,7 +103,11 @@ check(
 );
 check(
   "requested move prompt warns",
-  drag.providerMovePrompt("Nicole", "Ashley", true) === "Pay attention, this is a requested appointment. Are you sure you want to move it from Nicole to Ashley? Keep the request for Ashley, or move without a request?"
+  drag.providerMovePrompt("Nicole", "Ashley", true) === "Pay attention, this is a requested appointment. Are you sure you want to move this appointment from Nicole to Ashley? Keep the request for Ashley, or move without a request?"
+);
+check(
+  "solo service prompt names the service",
+  drag.providerMovePrompt("Nicole", "Ashley", false, "UV Gel Pedi") === "Are you sure you want to move UV Gel Pedi from Nicole to Ashley?"
 );
 check(
   "requested move can keep the heart",
@@ -123,6 +127,30 @@ check("a focused service drags only that line", drag.dragLines({
   lineIds: ["s1", "s2"]
 }).join(",") === "s2");
 check("readSource applies solo after the card object", fs.readFileSync(path.join(root, "public/booking/calendar-drag.js"), "utf8").indexOf("return applySolo(source, card, el);") !== -1);
+const nameHandle = { closest: function (sel) { return sel === ".ff-cal-card-name" ? nameHandle : null; } };
+const whole = drag.applySolo({ lineId: "s1", lineIds: ["s1", "s2"] }, {}, nameHandle);
+check("dragging the client name keeps the whole visit", !whole.solo && drag.dragLines(whole).join(",") === "s1,s2");
+const pediSeg = {
+  getAttribute: function (name) {
+    if (name === "data-ff-cal-seg") return "s2";
+    if (name === "data-ff-cal-seg-start") return "825";
+    if (name === "data-ff-cal-seg-duration") return "45";
+    if (name === "data-ff-cal-seg-requested") return "0";
+    return "";
+  },
+  querySelector: function (sel) {
+    return sel === ".ff-cal-card-svc" ? { textContent: "UV Gel Pedi" } : null;
+  }
+};
+const pediHandle = {
+  closest: function (sel) {
+    if (sel === ".ff-cal-card-name") return null;
+    if (sel === "[data-ff-cal-seg]") return pediSeg;
+    return null;
+  }
+};
+const solo = drag.applySolo({ lineId: "s1", lineIds: ["s1", "s2"], fromStartMin: 750, durationMinutes: 90 }, {}, pediHandle);
+check("dragging a service line moves only that service", !!(solo.solo && drag.dragLines(solo).join(",") === "s2" && solo.serviceName === "UV Gel Pedi"));
 check("without focus the whole visit moves", drag.dragLines({
   lineId: "s1",
   lineIds: ["s1", "s2"]
