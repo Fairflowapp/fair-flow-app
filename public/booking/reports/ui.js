@@ -83,6 +83,11 @@
     "/booking/reports/forward-outlook-compute.js?v=20260914_outlook",
     "/booking/reports/forward-outlook.js?v=20260914_outlook"
   ];
+  var CLIENT_RETENTION_SCRIPTS = [
+    "/booking/reports/appointment-range.js?v=20260914_apptrange",
+    "/booking/reports/client-retention-compute.js?v=20260914_retention",
+    "/booking/reports/client-retention.js?v=20260914_retention"
+  ];
 
   function intelReady() {
     return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
@@ -102,6 +107,10 @@
 
   function forwardOutlookReady() {
     return !!(window.ffBookingReportsForwardOutlookCompute && window.ffBookingReportsForwardOutlook);
+  }
+
+  function clientRetentionReady() {
+    return !!(window.ffBookingReportsClientRetentionCompute && window.ffBookingReportsClientRetention);
   }
 
   function loadScripts(list, done) {
@@ -172,6 +181,14 @@
       return;
     }
     loadScripts(FORWARD_OUTLOOK_SCRIPTS, done);
+  }
+
+  function ensureClientRetentionScripts(done) {
+    if (clientRetentionReady()) {
+      done();
+      return;
+    }
+    loadScripts(CLIENT_RETENTION_SCRIPTS, done);
   }
 
   function paintMain() {
@@ -251,6 +268,21 @@
       main.innerHTML = '<p class="ff-rpt-empty">Loading Forward Outlook…</p>';
       ensureForwardOutlookScripts(function () {
         if (window.ffBookingReportsForwardOutlook) window.ffBookingReportsForwardOutlook.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
+    if (id === "client-retention") {
+      if (window.ffBookingReportsClientRetention) {
+        window.ffBookingReportsClientRetention.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Client Retention…</p>';
+      ensureClientRetentionScripts(function () {
+        if (window.ffBookingReportsClientRetention) window.ffBookingReportsClientRetention.paint();
         else {
           var host = document.getElementById("ffRptMain");
           if (host) host.innerHTML = laterHtml(report);

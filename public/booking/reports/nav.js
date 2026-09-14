@@ -52,6 +52,11 @@
           id: "cancellations",
           label: "Cancellations",
           blurb: "Appointments scheduled in the selected period that were cancelled."
+        },
+        {
+          id: "client-retention",
+          label: "Client Retention",
+          blurb: "Of clients with a completed visit in the cohort period, how many returned within 30, 60, 90, or 180 days."
         }
       ]
     }

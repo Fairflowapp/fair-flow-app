@@ -266,7 +266,7 @@ Visible navigation today:
 
 - Intelligence → Booking Intelligence · Forward Outlook
 - Sales → Sales Summary · Service Sales · Sales by Time Period
-- Clients → Cancellations
+- Clients → Cancellations · Client Retention
 
 ### Built
 
@@ -293,6 +293,8 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 
 **Cancellations.** Appointments scheduled in the selected appointment-date range that have `status === "cancelled"`. Rate denominator is all appointments scheduled in that range. Cancelled provider time unions overlapping service-line windows per provider. Advance notice uses `startAt − cancelledAt` only when that value is ≥ 0. Within 24h is `0 <= noticeMinutes < 1440`. Same-day uses the appointment location timezone and does not imply advance notice. A later appointment indicator only looks inside the already loaded range and is not a rebook proof.
 
+**Client Retention.** Cohort-based return after qualifying visits, with 30 / 60 / 90 / 180-day closed observation windows. The selected range is the cohort period, not the return period. A qualifying visit is `status === "completed"` (checked out after Check In → Start Service → Check Out). Booked, confirmed, checked-in, in-service, cancelled, and no-show appointments are not visits. One identified `clientId` per cohort; the anchor is that client's first completed visit in the cohort. A return is another completed visit for the same `clientId` on a later salon-local civil date, already occurred as of now, inside the selected locations. Same-day multi-service appointments, future scheduled bookings, and cancelled / no-show rows are not returns. A client enters an N-day rate denominator only when `anchor date + N days` has elapsed as of now; open windows are still in observation, never counted as unretained. Rate is returned eligible clients ÷ eligible cohort clients; no closed window shows — rather than 0%. Client Behavior (in-period repeat) is not retention. New vs existing, provider ranking, and service-specific retention are not in v1.
+
 **Financial infrastructure:**
 
 - date-range-complete Sales retrieval (`ffBookingReportsSalesRange.fetchForReport`)
@@ -308,8 +310,8 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - pagination with document-snapshot cursors on `locationId + startAt`
 - per-location timezone civil bounds on appointment `startAt`
 - safety max 10,000 appointments per location per requested range
-- incomplete / error protection (no authoritative Intelligence or Cancellations totals when incomplete)
-- future civil ranges are valid; Forward Outlook uses this path; Retention is not built yet
+- incomplete / error protection (no authoritative Intelligence, Cancellations, or Client Retention totals when incomplete)
+- future civil ranges are valid; Forward Outlook uses this path; Client Retention looks forward from the cohort through `min(cohortEnd + 180 days, as-of)`
 
 ### Not yet built / blocked
 
@@ -317,7 +319,8 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - Team Sales (walk-in checkout items do not reliably include `providerId`)
 - payment-method / tender reports (`method` / `processor` still `"none"`)
 - full refund reporting (ticket-level history only; refund UI is not live)
-- true cohort retention (in-period client behavior is not retention; Cancellations is not retention)
+- New vs Existing retention (appointment `firstVisit` is frozen at create and is not full salon history)
+- provider or service retention ranking (multi-line attribution is ambiguous)
 - gift cards, memberships, packages
 - booking-source mix as owner truth
 - exports as a Reports product
