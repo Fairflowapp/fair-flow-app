@@ -56,8 +56,9 @@
   }
 
   var INTEL_SCRIPTS = [
-    "/booking/reports/intelligence-compute.js?v=20260913_intel1",
-    "/booking/reports/intelligence.js?v=20260913_intel1"
+    "/booking/reports/intelligence-compute.js?v=20260913_patterns1",
+    "/booking/reports/capacity-patterns.js?v=20260913_patterns1",
+    "/booking/reports/intelligence.js?v=20260913_patterns1"
   ];
 
   function intelReady() {
@@ -86,9 +87,16 @@
       el.onerror = cb;
       document.head.appendChild(el);
     }
-    loadOne(INTEL_SCRIPTS[0], function () {
-      loadOne(INTEL_SCRIPTS[1], done);
-    });
+    function loadAll(i) {
+      if (i >= INTEL_SCRIPTS.length) {
+        done();
+        return;
+      }
+      loadOne(INTEL_SCRIPTS[i], function () {
+        loadAll(i + 1);
+      });
+    }
+    loadAll(0);
   }
 
   function paintMain() {

@@ -234,6 +234,54 @@
     }, 0);
   }
 
+  function occupyWindows(windows, booked) {
+    var clipped = [];
+    (windows || []).forEach(function (windowRow) {
+      (booked || []).forEach(function (block) {
+        var piece = clipInterval(block, windowRow);
+        if (piece) clipped.push(piece);
+      });
+    });
+    return mergeIntervals(clipped);
+  }
+
+  function gapsInWindows(windows, occupied) {
+    var items = [];
+    (windows || []).forEach(function (windowRow) {
+      var inside = mergeIntervals((occupied || []).map(function (block) {
+        return clipInterval(block, windowRow);
+      }).filter(Boolean));
+      var g;
+      for (g = 0; g < inside.length - 1; g += 1) {
+        var startMin = inside[g].endMin;
+        var endMin = inside[g + 1].startMin;
+        if (!(endMin > startMin)) continue;
+        items.push({ startMin: startMin, endMin: endMin, minutes: endMin - startMin });
+      }
+    });
+    return items;
+  }
+
+  function capacityFromWindows(windows, booked) {
+    var mergedWindows = mergeIntervals(windows);
+    var occupied = occupyWindows(mergedWindows, mergeIntervals(booked));
+    var working = minutesOf(mergedWindows);
+    var bookedMinutes = minutesOf(occupied);
+    var idle = Math.max(0, working - bookedMinutes);
+    var gaps = gapsInWindows(mergedWindows, occupied);
+    var gapMinutes = minutesOf(gaps);
+    return {
+      windows: mergedWindows,
+      occupied: occupied,
+      gaps: gaps,
+      workingMinutes: working,
+      bookedMinutes: bookedMinutes,
+      idleMinutes: idle,
+      gapMinutes: gapMinutes,
+      openEdgeMinutes: Math.max(0, idle - gapMinutes)
+    };
+  }
+
   function scheduleWindows(entry) {
     if (!entry) return [];
     if (Array.isArray(entry)) return entry;
@@ -337,7 +385,8 @@
         estimatedDollars: null,
         averageRatePerMinute: null
       },
-      insights: []
+      insights: [],
+      patterns: { days: [], weekdays: [], hours: [], summary: null }
     };
   }
 
@@ -564,7 +613,11 @@
       );
     }
 
-    return out.slice(0, 10);
+    if (window.ffBookingReportsCapacityPatterns && typeof window.ffBookingReportsCapacityPatterns.appendInsights === "function") {
+      window.ffBookingReportsCapacityPatterns.appendInsights(out, report, phrase);
+    }
+
+    return out.slice(0, 12);
   }
 
   function hoursPhrase(minutes) {
@@ -716,52 +769,47 @@
     });
 
     var gapItems = [];
+    var dayFacts = [];
     var utilRows = providers.map(function (provider) {
       var row = emptyProviderUtil(provider);
       (provider.schedule || []).forEach(function (entry) {
         if (opts.locationIds && opts.locationIds.length && entry.locationId &&
             opts.locationIds.indexOf(entry.locationId) === -1) return;
         if (!inRange(entry.dateKey, opts.fromKey, opts.toKey)) return;
-        var windows = mergeIntervals(entry.windows);
-        row.workingMinutes += minutesOf(windows);
         var key = provider.id + "|" + entry.dateKey + "|" + trim(entry.locationId);
-        var booked = mergeIntervals(bookedByKey[key] || []);
-        var clipped = [];
-        windows.forEach(function (windowRow) {
-          booked.forEach(function (block) {
-            var piece = clipInterval(block, windowRow);
-            if (piece) clipped.push(piece);
+        var cap = capacityFromWindows(entry.windows, bookedByKey[key] || []);
+        row.workingMinutes += cap.workingMinutes;
+        row.bookedMinutes += cap.bookedMinutes;
+        row.gapCount += cap.gaps.length;
+        row.gapMinutes += cap.gapMinutes;
+        cap.gaps.forEach(function (item) {
+          gapItems.push({
+            providerId: provider.id,
+            providerName: provider.name,
+            firstName: provider.firstName,
+            dateKey: entry.dateKey,
+            locationId: entry.locationId,
+            startMin: item.startMin,
+            endMin: item.endMin,
+            minutes: item.minutes,
+            small: item.minutes <= SMALL_GAP_MAX
           });
         });
-        var occupied = mergeIntervals(clipped);
-        row.bookedMinutes += minutesOf(occupied);
-        windows.forEach(function (windowRow) {
-          var inside = mergeIntervals(occupied.map(function (block) {
-            return clipInterval(block, windowRow);
-          }).filter(Boolean));
-          var g;
-          // Gaps are holes between consecutive booked blocks in this window only.
-          for (g = 0; g < inside.length - 1; g += 1) {
-            var startMin = inside[g].endMin;
-            var endMin = inside[g + 1].startMin;
-            if (!(endMin > startMin)) continue;
-            var minutes = endMin - startMin;
-            var gap = {
-              providerId: provider.id,
-              providerName: provider.name,
-              firstName: provider.firstName,
-              dateKey: entry.dateKey,
-              locationId: entry.locationId,
-              startMin: startMin,
-              endMin: endMin,
-              minutes: minutes,
-              small: minutes <= SMALL_GAP_MAX
-            };
-            gapItems.push(gap);
-            row.gapCount += 1;
-            row.gapMinutes += minutes;
-          }
-        });
+        if (cap.workingMinutes > 0) {
+          dayFacts.push({
+            dateKey: entry.dateKey,
+            locationId: entry.locationId,
+            providerId: provider.id,
+            windows: cap.windows,
+            occupied: cap.occupied,
+            gaps: cap.gaps,
+            workingMinutes: cap.workingMinutes,
+            bookedMinutes: cap.bookedMinutes,
+            idleMinutes: cap.idleMinutes,
+            gapMinutes: cap.gapMinutes,
+            openEdgeMinutes: cap.openEdgeMinutes
+          });
+        }
       });
       finalizeProviderRow(row);
       return row;
@@ -846,6 +894,10 @@
       averageRatePerMinute: rate
     };
 
+    if (window.ffBookingReportsCapacityPatterns && typeof window.ffBookingReportsCapacityPatterns.attach === "function") {
+      window.ffBookingReportsCapacityPatterns.attach(report, dayFacts, opts);
+    }
+
     report.insights = buildInsights(report, opts);
     return report;
   }
@@ -861,6 +913,8 @@
     isBookedStatus: isBookedStatus,
     appointmentInScope: appointmentInScope,
     mergeIntervals: mergeIntervals,
+    clipInterval: clipInterval,
+    capacityFromWindows: capacityFromWindows,
     minutesOf: minutesOf,
     formatHours: formatHours,
     formatMoney: formatMoney,

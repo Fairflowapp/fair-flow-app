@@ -13,6 +13,7 @@
   var status = "idle";
   var errorText = "";
   var openMenu = "";
+  var patternView = "days";
 
   function compute() { return window.ffBookingReportsIntelligenceCompute || null; }
   function dates() { return window.ffBookingReportsCompute || null; }
@@ -304,6 +305,193 @@
     );
   }
 
+  function civilDateLabel(dateKey) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || "").trim());
+    if (!m) return String(dateKey || "");
+    var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return months[Number(m[2]) - 1] + " " + Number(m[3]);
+  }
+
+  function weekdayLabel(key) {
+    var api = window.ffBookingReportsCapacityPatterns;
+    var labels = api && api.WEEKDAY_LABELS;
+    return (labels && labels[key]) || key || "";
+  }
+
+  function patternToggleHtml() {
+    return (
+      '<div class="ff-rpt-view-toggle" role="tablist" aria-label="Capacity pattern view">' +
+        '<button type="button" role="tab" aria-selected="' + (patternView === "days" ? "true" : "false") + '"' +
+          ' class="' + (patternView === "days" ? "is-active" : "") + '" data-ff-intel-pattern="days">By day / weekday</button>' +
+        '<button type="button" role="tab" aria-selected="' + (patternView === "hours" ? "true" : "false") + '"' +
+          ' class="' + (patternView === "hours" ? "is-active" : "") + '" data-ff-intel-pattern="hours">By time of day</button>' +
+      "</div>"
+    );
+  }
+
+  function patternHighlights(summary) {
+    if (!summary) return "";
+    var cards = [];
+    if (summary.strongestDay) {
+      cards.push(kpi("Strongest day", civilDateLabel(summary.strongestDay.dateKey), summary.strongestDay.percent + "% utilized"));
+    }
+    if (summary.weakestDay) {
+      cards.push(kpi("Least utilized day", civilDateLabel(summary.weakestDay.dateKey), summary.weakestDay.percent + "% utilized"));
+    }
+    if (summary.mostGapDay) {
+      cards.push(kpi("Most gap hours", civilDateLabel(summary.mostGapDay.dateKey), hours(summary.mostGapDay.gapMinutes) + " hrs"));
+    }
+    if (summary.mostGapHour) {
+      cards.push(kpi("Most gap time", summary.mostGapHour.shortLabel || summary.mostGapHour.label, hours(summary.mostGapHour.gapMinutes) + " hrs"));
+    }
+    if (summary.weakestHour) {
+      cards.push(kpi("Lowest hour utilization", summary.weakestHour.shortLabel || summary.weakestHour.label, summary.weakestHour.percent + "%"));
+    }
+    if (!cards.length) return "";
+    return '<div class="ff-rpt-kpis">' + cards.join("") + "</div>";
+  }
+
+  function patternTable(headers, rowsHtml, extraClass) {
+    if (!rowsHtml) return "";
+    return (
+      '<div class="ff-rpt-table-wrap ff-rpt-table-wrap-compact">' +
+        '<table class="ff-rpt-table ff-rpt-table-compact' + (extraClass ? " " + extraClass : "") + '">' +
+          "<thead><tr>" + headers.map(function (h) { return "<th>" + escapeHtml(h) + "</th>"; }).join("") + "</tr></thead>" +
+          "<tbody>" + rowsHtml + "</tbody>" +
+        "</table>" +
+      "</div>"
+    );
+  }
+
+  function weekdayRowsHtml(weekdays) {
+    return (weekdays || []).map(function (row) {
+      return (
+        "<tr>" +
+          "<td>" + escapeHtml(row.label || weekdayLabel(row.weekday)) + "</td>" +
+          "<td>" + escapeHtml(String(row.dateCount || 0)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.workingMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.bookedMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.percent)) + "%</td>" +
+          "<td>" + escapeHtml(hours(row.idleMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.gapMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.gapSharePercent)) + "%</td>" +
+        "</tr>"
+      );
+    }).join("");
+  }
+
+  function dayRowsHtml(days) {
+    return (days || []).map(function (row) {
+      return (
+        "<tr>" +
+          "<td>" + escapeHtml(civilDateLabel(row.dateKey)) + "</td>" +
+          "<td>" + escapeHtml(weekdayLabel(row.weekday)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.workingMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.bookedMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.percent)) + "%</td>" +
+          "<td>" + escapeHtml(hours(row.idleMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.gapMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.openEdgeMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.gapSharePercent)) + "%</td>" +
+          "<td>" + escapeHtml(String(row.idleSharePercent)) + "%</td>" +
+        "</tr>"
+      );
+    }).join("");
+  }
+
+  function hourRowsHtml(hoursRows) {
+    return (hoursRows || []).map(function (row) {
+      return (
+        "<tr>" +
+          "<td>" + escapeHtml(row.shortLabel || row.label) + "</td>" +
+          "<td>" + escapeHtml(hours(row.workingMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.bookedMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.idleMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.gapMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.percent)) + "%</td>" +
+          "<td>" + escapeHtml(String(row.gapSharePercent)) + "%</td>" +
+        "</tr>"
+      );
+    }).join("");
+  }
+
+  function patternBars(rows, labelFn, valueFn, displayFn) {
+    var max = 0;
+    (rows || []).forEach(function (row) {
+      var value = valueFn(row);
+      if (value > max) max = value;
+    });
+    if (!max) return "";
+    return (
+      '<div class="ff-rpt-bars ff-rpt-bars-pattern">' +
+        (rows || []).map(function (row) {
+          var value = valueFn(row);
+          var width = Math.round((value / max) * 100);
+          return (
+            '<div class="ff-rpt-bar-row ff-rpt-bar-row-pattern">' +
+              '<span class="ff-rpt-bar-label">' + escapeHtml(labelFn(row)) + "</span>" +
+              '<span class="ff-rpt-bar-track"><span class="ff-rpt-bar-fill" style="width:' + width + '%"></span></span>' +
+              '<span class="ff-rpt-bar-value">' + escapeHtml(String(displayFn(row))) + "</span>" +
+            "</div>"
+          );
+        }).join("") +
+      "</div>"
+    );
+  }
+
+  function patternsHtml(report) {
+    var patterns = report && report.patterns;
+    var days = (patterns && patterns.days) || [];
+    if (!days.length) return "";
+    var weekdays = patterns.weekdays || [];
+    var hoursRows = patterns.hours || [];
+    var body = "";
+    if (patternView === "hours") {
+      body =
+        patternBars(hoursRows, function (row) {
+          return row.shortLabel || row.label;
+        }, function (row) {
+          return row.gapMinutes || 0;
+        }, function (row) {
+          return hours(row.gapMinutes);
+        }) +
+        patternTable(
+          ["Hour", "Working hrs", "Booked hrs", "Idle hrs", "Gap hrs", "Utilization", "Gap share"],
+          hourRowsHtml(hoursRows),
+          "ff-rpt-table-patterns"
+        );
+    } else {
+      var weekdayBars = patternBars(weekdays, function (row) {
+        return row.label || weekdayLabel(row.weekday);
+      }, function (row) {
+        return row.percent || 0;
+      }, function (row) {
+        return row.percent + "%";
+      });
+      body =
+        weekdayBars +
+        patternTable(
+          ["Weekday", "Days", "Working hrs", "Booked hrs", "Utilization", "Idle hrs", "Gap hrs", "Gap share"],
+          weekdayRowsHtml(weekdays),
+          "ff-rpt-table-patterns"
+        ) +
+        patternTable(
+          ["Date", "Weekday", "Working hrs", "Booked hrs", "Utilization", "Idle hrs", "Gap hrs", "Open-edge hrs", "Gap share", "Idle share"],
+          dayRowsHtml(days),
+          "ff-rpt-table-capacity"
+        );
+    }
+    return (
+      '<section class="ff-rpt-panel">' +
+        "<h2>Capacity patterns</h2>" +
+        '<p class="ff-rpt-fine">When unused capacity occurred. Utilization is booked hours divided by working hours. Closed days are omitted. Hours are provider hours, not salon wall-clock hours.</p>' +
+        patternHighlights(patterns.summary) +
+        patternToggleHtml() +
+        body +
+      "</section>"
+    );
+  }
+
   function utilizationHtml(report) {
     var u = report.utilization;
     var rows = (u.providers || []).map(function (row) {
@@ -399,6 +587,7 @@
         clientsHtml(result) +
         requestedHtml(result) +
         utilizationHtml(result) +
+        patternsHtml(result) +
         gapsHtml(result) +
         sourcesHtml(result) +
       "</div>"
@@ -588,6 +777,16 @@
       filters.date = dateOpt.getAttribute("data-ff-intel-date") || "this_week";
       openMenu = filters.date === "custom" ? "date" : "";
       paint();
+      return;
+    }
+    var patternBtn = t.closest("[data-ff-intel-pattern]");
+    if (patternBtn) {
+      ev.preventDefault();
+      var nextView = patternBtn.getAttribute("data-ff-intel-pattern") || "days";
+      if (nextView !== patternView) {
+        patternView = nextView;
+        paint();
+      }
       return;
     }
     var go = t.closest("[data-ff-intel-generate]");

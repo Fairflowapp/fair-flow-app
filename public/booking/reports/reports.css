@@ -462,6 +462,39 @@
 .ff-rpt-table-capacity {
   min-width: 760px;
 }
+.ff-rpt-table-patterns {
+  min-width: 640px;
+}
+.ff-rpt-view-toggle {
+  display: inline-flex;
+  margin: 14px 0 12px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #f3effa;
+}
+.ff-rpt-view-toggle button {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5b4b78;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.ff-rpt-view-toggle button.is-active {
+  background: #fff;
+  color: #5b21b6;
+  box-shadow: 0 0 0 1px #ddd6ee;
+}
+.ff-rpt-bar-row-pattern {
+  grid-template-columns: 110px 1fr 52px;
+}
+.ff-rpt-bars-pattern {
+  margin: 4px 0 12px;
+}
 .ff-rpt-estimate {
   margin-top: 14px;
   padding: 12px 14px;

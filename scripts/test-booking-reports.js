@@ -46,7 +46,7 @@ check("sales tabs include service, product, and period", navSrc.indexOf("service
 check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID = "booking-intelligence"') !== -1);
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
 check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
-check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
+check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/capacity-patterns.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
