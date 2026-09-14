@@ -21,7 +21,10 @@
   function math() { return window.ffBookingReportsCancellationsCompute || null; }
   function repo() { return window.ffBookingAppointments || null; }
   function time() { return window.ffBookingTime || null; }
-  function rangeApi() { return window.ffBookingReportsSalesRange || null; }
+  function rangeApi() {
+    return window.ffBookingReportsAppointmentRange || window.ffBookingReportsSalesRange || null;
+  }
+  function apptRange() { return window.ffBookingReportsAppointmentRange || null; }
   function nav() { return window.ffBookingReportsNav || null; }
 
   function isActive() {
@@ -388,6 +391,10 @@
   function resultHtml() {
     if (status === "idle") return '<p class="ff-rpt-empty">Choose locations and a date, then Generate.</p>';
     if (status === "loading") return '<p class="ff-rpt-empty">Reading appointments…</p>';
+    if (status === "incomplete") {
+      return '<p class="ff-rpt-warn">' + escapeHtml(errorText || (apptRange() && apptRange().INCOMPLETE_MESSAGE) ||
+        "Appointment data for this range is incomplete. Narrow the date range and try again.") + "</p>";
+    }
     if (status === "error" || errorText) {
       return '<p class="ff-rpt-empty">' + escapeHtml(errorText || (math() && math().LOAD_ERROR_MESSAGE) || "This report could not load.") + "</p>";
     }
@@ -422,40 +429,6 @@
     if (canPaint(requestId)) paint();
   }
 
-  async function loadAppointments(ids, fromKey, toKey) {
-    var api = repo();
-    var cancelMath = math();
-    if (!api) throw new Error("Appointments are not loaded.");
-    if (typeof api.getAppointmentsForDate !== "function") {
-      throw new Error("Appointment range reads are not available.");
-    }
-    var keys = cancelMath && typeof cancelMath.dateKeysBetween === "function"
-      ? cancelMath.dateKeysBetween(fromKey, toKey)
-      : [fromKey];
-    var seen = {};
-    var rows = [];
-    var i;
-    for (i = 0; i < keys.length; i += 6) {
-      var slice = keys.slice(i, i + 6);
-      var batch = [];
-      slice.forEach(function (dateKey) {
-        ids.forEach(function (loc) {
-          batch.push(api.getAppointmentsForDate(dateKey, loc));
-        });
-      });
-      var parts = await Promise.all(batch);
-      parts.forEach(function (list) {
-        (list || []).forEach(function (row) {
-          var id = row && String(row.appointmentId || row.id || "").trim();
-          if (!id || seen[id]) return;
-          seen[id] = true;
-          rows.push(row);
-        });
-      });
-    }
-    return rows;
-  }
-
   async function generate() {
     var dates = compute();
     var cancelMath = math();
@@ -463,6 +436,7 @@
     var range = dates && typeof dates.rangeForPreset === "function"
       ? dates.rangeForPreset(filters.date, todayKey(), filters.customFrom, filters.customTo)
       : { fromKey: todayKey(), toKey: todayKey() };
+    var rangeHelp = apptRange();
     var requestId = (loadGen += 1);
     openMenu = "";
     status = "loading";
@@ -477,17 +451,36 @@
       finish(requestId, "error", "Choose a start and end date.", null);
       return;
     }
-    var appointments = [];
+    var fetched = null;
     try {
-      appointments = await loadAppointments(ids, range.fromKey, range.toKey);
+      if (!rangeHelp || typeof rangeHelp.fetchForReport !== "function") {
+        throw new Error("Appointment range lookup is not available.");
+      }
+      fetched = await rangeHelp.fetchForReport(repo(), {
+        locationIds: ids,
+        fromKey: range.fromKey,
+        toKey: range.toKey
+      });
     } catch (err) {
-      finish(requestId, "error", (rangeApi() && typeof rangeApi().userSafeError === "function")
-        ? rangeApi().userSafeError(err && err.message)
+      finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
+        ? rangeHelp.userSafeError(err && err.message)
         : "This report could not load.", null);
       return;
     }
+    var fetchView = rangeHelp && typeof rangeHelp.viewState === "function"
+      ? rangeHelp.viewState(fetched)
+      : { kind: "error", message: "This report could not load.", appointments: [] };
+    if (fetchView.kind === "error") {
+      finish(requestId, "error", fetchView.message || "This report could not load.", null);
+      return;
+    }
+    if (fetchView.kind === "incomplete") {
+      finish(requestId, "incomplete", fetchView.message ||
+        "Appointment data for this range is incomplete. Narrow the date range and try again.", null);
+      return;
+    }
     var summary = cancelMath && typeof cancelMath.summarizeCancellations === "function"
-      ? cancelMath.summarizeCancellations(appointments, {
+      ? cancelMath.summarizeCancellations(fetchView.appointments || [], {
         fromKey: range.fromKey,
         toKey: range.toKey,
         locationIds: ids

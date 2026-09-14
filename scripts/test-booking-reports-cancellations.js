@@ -238,7 +238,23 @@ const confirmedKept = api.summarizeCancellations([
 ], opts);
 check("confirmed appointments are denominator only", confirmedKept.totals.scheduled === 1 && confirmedKept.totals.cancelled === 0);
 
-check("ui uses appointment date retrieval", ui.indexOf("getAppointmentsForDate") !== -1);
+check("A: Cancellations uses range-complete loader", ui.indexOf("fetchForReport") !== -1 && ui.indexOf("ffBookingReportsAppointmentRange") !== -1 && ui.indexOf("getAppointmentsForDate") === -1);
+check("C: incomplete appointment retrieval suppresses totals", ui.indexOf('status === "incomplete"') !== -1 && ui.indexOf("ff-rpt-warn") !== -1 && ui.indexOf("Appointment data for this range is incomplete") !== -1);
+check("D: retrieval error is not treated as empty data", ui.indexOf("This report could not load.") !== -1 && ui.indexOf('kind === "error"') !== -1);
+
+const afterStart = api.summarizeCancellations([
+  appt({ appointmentId: "late", cancelledAt: new Date("2026-09-10T16:00:00.000Z") }),
+  appt({ appointmentId: "ok", clientId: "c2", cancelledAt: new Date("2026-09-10T14:00:00.000Z") })
+], opts);
+check("E: negative notice is excluded from advance-notice average", afterStart.totals.averageNoticeMinutes === 60 && afterStart.totals.noticeSample === 1 && afterStart.totals.afterStartCount === 1);
+check("F: negative notice is excluded from within 24h", afterStart.totals.within24h === 1 && afterStart.rows.find(function (row) { return row.appointmentId === "late"; }).within24h === false);
+
+const exactDay = api.summarizeCancellations([
+  appt({ appointmentId: "edge", cancelledAt: new Date("2026-09-09T15:00:00.000Z") }),
+  appt({ appointmentId: "short", clientId: "c2", cancelledAt: new Date("2026-09-10T15:00:00.000Z") })
+], opts);
+check("G: zero notice counts as within 24h", exactDay.rows.find(function (row) { return row.appointmentId === "short"; }).within24h === true && exactDay.totals.within24h === 1);
+check("H: exactly 1440 minutes does not count under within 24h", exactDay.rows.find(function (row) { return row.appointmentId === "edge"; }).noticeMinutes === 1440 && exactDay.rows.find(function (row) { return row.appointmentId === "edge"; }).within24h === false);
 check("ui isolates stale generate", ui.indexOf("shouldPaintReportResult") !== -1 && ui.indexOf("loadGen") !== -1 && ui.indexOf("isActive") !== -1);
 check("ui does not show phone or email columns", ui.indexOf("phone") === -1 && ui.indexOf("email") === -1);
 check("ui does not call no-show a headline KPI", ui.indexOf('kpi("No-show"') === -1);

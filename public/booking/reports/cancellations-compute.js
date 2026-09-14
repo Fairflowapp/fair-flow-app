@@ -6,7 +6,8 @@
  * completed, no_show, and cancelled). Not completed-only.
  *
  * Cancelled provider time unions overlapping line windows per provider.
- * Notice uses startAt - cancelledAt. Same-day uses location-local dates.
+ * Notice uses startAt - cancelledAt. Advance notice is noticeMinutes >= 0.
+ * Within 24h is 0 <= noticeMinutes < 1440. Same-day uses location-local dates.
  * Later appointments are only those already in the loaded range.
  * This is not rebooking, recovery, retention, or lost revenue.
  */
@@ -265,9 +266,13 @@
     return Number.isFinite(n) ? money2(n) : null;
   }
 
+  function isAdvanceNotice(noticeMinutes) {
+    return noticeMinutes != null && Number.isFinite(Number(noticeMinutes)) && Number(noticeMinutes) >= 0;
+  }
+
   function isWithin24h(noticeMinutes) {
-    if (noticeMinutes == null) return false;
-    return Math.abs(Number(noticeMinutes)) < NOTICE_DAY_MINUTES;
+    if (!isAdvanceNotice(noticeMinutes)) return false;
+    return Number(noticeMinutes) < NOTICE_DAY_MINUTES;
   }
 
   function isSameDay(appt) {
@@ -388,7 +393,8 @@
       sameDay: 0,
       withReason: 0,
       repeatClients: 0,
-      unattributedLines: 0
+      unattributedLines: 0,
+      afterStartCount: 0
     };
     loaded.forEach(function (appt) {
       totals.scheduled += 1;
@@ -401,9 +407,11 @@
       daysMap[dayKey].cancelled += 1;
       if (trim(appt.cancellationReason)) totals.withReason += 1;
       var notice = noticeMinutesOf(appt);
-      if (notice != null) {
+      if (isAdvanceNotice(notice)) {
         notices.push(notice);
         if (isWithin24h(notice)) totals.within24h += 1;
+      } else if (notice != null) {
+        totals.afterStartCount += 1;
       }
       if (isSameDay(appt)) totals.sameDay += 1;
       var clientId = trim(appt.clientId);
@@ -429,7 +437,7 @@
         providerAgg[key].lineCount += piece.lineCount;
         providerAgg[key].appointmentIds[appointmentIdOf(appt)] = true;
         providerAgg[key].minutes = money2(providerAgg[key].minutes + piece.minutes);
-        if (notice != null) providerAgg[key].notices.push(notice);
+        if (isAdvanceNotice(notice)) providerAgg[key].notices.push(notice);
         if (piece.name && piece.attributed) providerAgg[key].name = piece.name;
       });
       daysMap[dayKey].minutes = money2(daysMap[dayKey].minutes + apptMinutes);
@@ -583,6 +591,7 @@
     dateKeysBetween: dateKeysBetween,
     weekdayFromDateKey: weekdayFromDateKey,
     noticeMinutesOf: noticeMinutesOf,
+    isAdvanceNotice: isAdvanceNotice,
     isWithin24h: isWithin24h,
     isSameDay: isSameDay,
     providerMinutesFromLines: providerMinutesFromLines,

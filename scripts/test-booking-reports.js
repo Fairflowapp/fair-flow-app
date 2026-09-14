@@ -51,11 +51,13 @@ check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/rep
 check("reports ui loads service sales modules", ui.indexOf("/booking/reports/service-sales-compute.js") !== -1 && ui.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui loads sales by time period modules", ui.indexOf("/booking/reports/sales-time-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-time.js") !== -1);
 check("reports ui loads cancellations modules", ui.indexOf("/booking/reports/cancellations-compute.js") !== -1 && ui.indexOf("/booking/reports/cancellations.js") !== -1);
+check("reports ui loads appointment range helper", ui.indexOf("/booking/reports/appointment-range.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
 check("index.html loads reports nav and sales summary", html.indexOf("/booking/reports/nav.js") !== -1 && html.indexOf("/booking/reports/sales-summary.js") !== -1 && html.indexOf("/booking/reports/ui.js") !== -1);
 check("index.html loads sales range retrieval", html.indexOf("/booking/reports/sales-range.js") !== -1);
+check("index.html loads appointment range retrieval", html.indexOf("/booking/reports/appointment-range.js") !== -1);
 check("index.html is not required for intelligence scripts", html.indexOf("/booking/reports/intelligence.js") === -1);
 
 const store = {};

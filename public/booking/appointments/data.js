@@ -14,6 +14,7 @@ import {
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
@@ -494,6 +495,69 @@ async function getAppointmentsForRange(startDateTime, endDateTime, locationId) {
   return queryStartRange(requireSalon(), startDateTime, endDateTime, { locationId: loc });
 }
 
+function reportsRangeApi() {
+  return window.ffBookingReportsAppointmentRange || null;
+}
+
+function reportsRangeUnavailable() {
+  const api = reportsRangeApi();
+  if (api && typeof api.failResult === "function") {
+    return api.failResult("Appointment range lookup is not available.");
+  }
+  return {
+    appointments: [],
+    complete: false,
+    fetchedCount: 0,
+    truncated: false,
+    error: "Appointment range lookup is not available.",
+  };
+}
+
+async function listAppointmentsForLocationRange(locationId, fromKey, toKey, options) {
+  const api = reportsRangeApi();
+  if (!api || typeof api.paginateRange !== "function" || typeof api.boundsForLocation !== "function") {
+    return reportsRangeUnavailable();
+  }
+  const loc = String(locationId || "").trim();
+  if (!loc) return api.failResult("Choose a location.");
+  const bounds = api.boundsForLocation(fromKey, toKey, loc);
+  if (!bounds) return api.failResult("Choose a start and end date.");
+  const sid = requireSalon();
+  const startTs = Timestamp.fromDate(bounds.start);
+  const endTs = Timestamp.fromDate(bounds.endExclusive);
+  async function fetchPage(cursor, pageSize) {
+    const parts = [
+      where("locationId", "==", loc),
+      where("startAt", ">=", startTs),
+      where("startAt", "<", endTs),
+      orderBy("startAt", "asc"),
+    ];
+    if (cursor) parts.push(startAfter(cursor));
+    parts.push(limit(pageSize));
+    const snap = await getDocs(query(appointmentsRef(sid), ...parts));
+    return {
+      rows: snap.docs.map((docSnap) => ({
+        appointment: toAppointment(docSnap),
+        cursor: docSnap,
+      })),
+    };
+  }
+  return api.paginateRange(fetchPage, options);
+}
+
+async function listAppointmentsForLocationsRange(locationIds, fromKey, toKey, options) {
+  const api = reportsRangeApi();
+  if (!api || typeof api.combineLocationResults !== "function") {
+    return reportsRangeUnavailable();
+  }
+  const ids = typeof api.uniqueLocationIds === "function"
+    ? api.uniqueLocationIds(locationIds)
+    : (Array.isArray(locationIds) ? locationIds : []).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!ids.length) return api.failResult("Choose a location.");
+  const parts = await Promise.all(ids.map((id) => listAppointmentsForLocationRange(id, fromKey, toKey, options)));
+  return api.combineLocationResults(parts);
+}
+
 const CLIENT_HISTORY_LIMIT = 20;
 
 async function getClientAppointments(clientId, options) {
@@ -618,6 +682,8 @@ const api = {
   getAppointmentById,
   getAppointmentsForDate,
   getAppointmentsForRange,
+  listAppointmentsForLocationRange,
+  listAppointmentsForLocationsRange,
   getClientAppointments,
   getProviderAppointments,
   updateAppointment,
@@ -632,6 +698,8 @@ export {
   getAppointmentById,
   getAppointmentsForDate,
   getAppointmentsForRange,
+  listAppointmentsForLocationRange,
+  listAppointmentsForLocationsRange,
   getClientAppointments,
   getProviderAppointments,
   updateAppointment,

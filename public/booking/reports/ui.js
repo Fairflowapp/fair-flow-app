@@ -64,16 +64,18 @@
     "/booking/reports/sales-time.js?v=20260914_salestime"
   ];
   var CANCELLATIONS_SCRIPTS = [
-    "/booking/reports/cancellations-compute.js?v=20260914_cancels",
-    "/booking/reports/cancellations.js?v=20260914_cancels"
+    "/booking/reports/appointment-range.js?v=20260914_apptrange",
+    "/booking/reports/cancellations-compute.js?v=20260914_apptrange",
+    "/booking/reports/cancellations.js?v=20260914_apptrange"
   ];
   var INTEL_SCRIPTS = [
+    "/booking/reports/appointment-range.js?v=20260914_apptrange",
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/capacity-patterns.js?v=20260913_ui1",
     "/booking/reports/service-demand.js?v=20260913_ui1",
     "/booking/reports/client-behavior.js?v=20260913_ui1",
     "/booking/reports/insight-priority.js?v=20260913_ui1",
-    "/booking/reports/intelligence.js?v=20260913_ui1"
+    "/booking/reports/intelligence.js?v=20260914_apptrange"
   ];
 
   function intelReady() {

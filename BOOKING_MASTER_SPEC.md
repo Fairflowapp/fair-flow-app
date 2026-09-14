@@ -289,7 +289,7 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - Service Sales (service-item amounts; tips and ticket-level refunds are not allocated to services)
 - Sales by Time Period
 
-**Cancellations.** Appointments scheduled in the selected appointment-date range that have `status === "cancelled"`. Rate denominator is all appointments scheduled in that range. Cancelled provider time unions overlapping service-line windows per provider. Notice uses `startAt − cancelledAt`. Same-day uses the appointment location timezone. A later appointment indicator only looks inside the already loaded range and is not a rebook proof.
+**Cancellations.** Appointments scheduled in the selected appointment-date range that have `status === "cancelled"`. Rate denominator is all appointments scheduled in that range. Cancelled provider time unions overlapping service-line windows per provider. Advance notice uses `startAt − cancelledAt` only when that value is ≥ 0. Within 24h is `0 <= noticeMinutes < 1440`. Same-day uses the appointment location timezone and does not imply advance notice. A later appointment indicator only looks inside the already loaded range and is not a rebook proof.
 
 **Financial infrastructure:**
 
@@ -298,6 +298,16 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - multi-location timezone-aware civil ranges via sale `closedAt`
 - incomplete / error protection (no authoritative totals when incomplete)
 - shared ticket / refund / item math and cross-report reconciliation
+
+**Appointment infrastructure:**
+
+- date-range-complete appointment retrieval (`ffBookingReportsAppointmentRange.fetchForReport`)
+- repository methods `listAppointmentsForLocationRange` / `listAppointmentsForLocationsRange` (additive; Calendar still uses `getAppointmentsForDate` and the 500-row overlap `getAppointmentsForRange`)
+- pagination with document-snapshot cursors on `locationId + startAt`
+- per-location timezone civil bounds on appointment `startAt`
+- safety max 10,000 appointments per location per requested range
+- incomplete / error protection (no authoritative Intelligence or Cancellations totals when incomplete)
+- future civil ranges are valid; this is not Forward Outlook or Retention yet
 
 ### Not yet built / blocked
 

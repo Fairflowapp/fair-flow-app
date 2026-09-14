@@ -427,7 +427,9 @@ const navSrc = fs.readFileSync(path.join(root, "public/booking/reports/nav.js"),
 const css = fs.readFileSync(path.join(root, "public/booking/reports/reports.css"), "utf8");
 check("intelligence ui keeps sales summary out of its own paint", uiSrc.indexOf("Sales Summary stays") !== -1);
 check("intelligence ui does not read Firestore", uiSrc.indexOf("getFirestore") === -1 && uiSrc.indexOf("collection(") === -1);
-check("intelligence ui uses existing appointment reads", uiSrc.indexOf("getAppointmentsForDate") !== -1);
+check("intelligence ui uses range-complete appointment reads", uiSrc.indexOf("fetchForReport") !== -1 && uiSrc.indexOf("ffBookingReportsAppointmentRange") !== -1 && uiSrc.indexOf("getAppointmentsForDate") === -1);
+check("intelligence incomplete retrieval suppresses totals", uiSrc.indexOf('status === "incomplete"') !== -1 && uiSrc.indexOf("ff-rpt-warn") !== -1 && uiSrc.indexOf("Appointment data for this range is incomplete") !== -1);
+check("intelligence isolates stale generate", uiSrc.indexOf("shouldPaintReportResult") !== -1 && uiSrc.indexOf("loadGen") !== -1 && uiSrc.indexOf("isActive") !== -1);
 check("intelligence ui uses existing calendar employees for hours", uiSrc.indexOf("loadCalendarEmployees") !== -1);
 check("nav includes booking intelligence", navSrc.indexOf('id: "booking-intelligence"') !== -1);
 check("dashboard styles stay in reports css", css.indexOf(".ff-rpt-insights") !== -1 && css.indexOf(".ff-rpt-estimate-label") !== -1);

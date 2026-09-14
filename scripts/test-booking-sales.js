@@ -179,6 +179,9 @@ check("filters do not invent Point or MangoMint", options.indexOf("Point") === -
 check("sales can list the whole salon", data.indexOf("listForSalon") !== -1);
 check("sales keep the 80-row list APIs", data.indexOf("const LIST_LIMIT = 80") !== -1);
 check("sales add reports range APIs", data.indexOf("listForLocationRange") !== -1 && data.indexOf("listForLocationsRange") !== -1);
+check("appointments keep calendar day and overlap reads", apptData.indexOf("async function getAppointmentsForDate") !== -1 && apptData.indexOf("async function getAppointmentsForRange") !== -1 && apptData.indexOf("async function queryStartRange") !== -1);
+check("appointments add reports range APIs", apptData.indexOf("listAppointmentsForLocationRange") !== -1 && apptData.indexOf("listAppointmentsForLocationsRange") !== -1 && apptData.indexOf("startAfter") !== -1);
+check("calendar appointment range still uses the 500-row overlap query", /async function queryStartRange[\s\S]*limit\(500\)/.test(apptData));
 check("shell closes sales filters", shell.indexOf("ffBookingSalesOptions") !== -1);
 const checkout = read("public/booking/sales/checkout.js");
 const details = read("public/booking/appointments/details.js");

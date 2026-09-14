@@ -3,6 +3,7 @@
  */
 (function () {
   var HOST_ID = "ffRptMain";
+  var REPORT_ID = "booking-intelligence";
   var filters = {
     locationIds: null,
     date: "this_week",
@@ -14,6 +15,7 @@
   var errorText = "";
   var openMenu = "";
   var patternView = "days";
+  var loadGen = 0;
 
   function compute() { return window.ffBookingReportsIntelligenceCompute || null; }
   function dates() { return window.ffBookingReportsCompute || null; }
@@ -21,6 +23,16 @@
   function cal() { return window.ffBookingCalData || null; }
   function time() { return window.ffBookingTime || null; }
   function salesModel() { return window.ffBookingSalesModel || null; }
+  function nav() { return window.ffBookingReportsNav || null; }
+  function rangeApi() {
+    return window.ffBookingReportsAppointmentRange || window.ffBookingReportsSalesRange || null;
+  }
+  function apptRange() { return window.ffBookingReportsAppointmentRange || null; }
+
+  function isActive() {
+    var api = nav();
+    return !!(api && typeof api.getSelectedId === "function" && api.getSelectedId() === REPORT_ID);
+  }
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -628,6 +640,10 @@
   }
 
   function resultHtml() {
+    if (status === "incomplete") {
+      return '<p class="ff-rpt-warn">' + escapeHtml(errorText || (apptRange() && apptRange().INCOMPLETE_MESSAGE) ||
+        "Appointment data for this range is incomplete. Narrow the date range and try again.") + "</p>";
+    }
     if (errorText) return '<p class="ff-rpt-empty">' + escapeHtml(errorText) + "</p>";
     if (status === "idle") {
       return '<p class="ff-rpt-empty">Choose locations and a date, then Generate to see Booking Intelligence.</p>';
@@ -664,40 +680,28 @@
     );
   }
 
-  async function loadAppointments(ids, fromKey, toKey) {
-    var api = repo();
-    var intel = compute();
-    if (!api) throw new Error("Appointments are not loaded.");
-    if (!ids.length) return [];
-    var keys = intel && typeof intel.dateKeysBetween === "function"
-      ? intel.dateKeysBetween(fromKey, toKey)
-      : [fromKey];
-    if (!keys.length) return [];
-    var seen = {};
-    var rows = [];
-    if (typeof api.getAppointmentsForDate !== "function") {
-      throw new Error("Appointment range reads are not available.");
+  function canStore(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldStoreReportResult === "function") {
+      return api.shouldStoreReportResult(requestId, loadGen);
     }
-    var i;
-    for (i = 0; i < keys.length; i += 6) {
-      var slice = keys.slice(i, i + 6);
-      var batch = [];
-      slice.forEach(function (dateKey) {
-        ids.forEach(function (loc) {
-          batch.push(api.getAppointmentsForDate(dateKey, loc));
-        });
-      });
-      var parts = await Promise.all(batch);
-      parts.forEach(function (list) {
-        (list || []).forEach(function (row) {
-          var id = row && String(row.appointmentId || "").trim();
-          if (!id || seen[id]) return;
-          seen[id] = true;
-          rows.push(row);
-        });
-      });
+    return requestId === loadGen;
+  }
+
+  function canPaint(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldPaintReportResult === "function") {
+      return api.shouldPaintReportResult(requestId, loadGen, isActive());
     }
-    return rows;
+    return requestId === loadGen && isActive();
+  }
+
+  function finish(requestId, nextStatus, nextError, nextResult) {
+    if (!canStore(requestId)) return;
+    status = nextStatus;
+    errorText = nextError || "";
+    result = nextResult || null;
+    if (canPaint(requestId)) paint();
   }
 
   function loadProviders(ids, fromKey, toKey) {
@@ -744,37 +748,59 @@
     var math = compute();
     var ids = selectedLocationIds();
     var range = currentRange();
+    var rangeHelp = apptRange();
+    var requestId = (loadGen += 1);
     openMenu = "";
     status = "loading";
     errorText = "";
     result = null;
-    paint();
+    if (canPaint(requestId)) paint();
     if (!ids.length) {
-      status = "ready";
-      errorText = "Choose a location.";
-      paint();
+      finish(requestId, "error", "Choose a location.", null);
       return;
     }
     if (filters.date === "custom" && !(range.fromKey && range.toKey)) {
-      status = "ready";
-      errorText = "Choose a start and end date.";
-      paint();
+      finish(requestId, "error", "Choose a start and end date.", null);
       return;
     }
-    var appointments = [];
+    var fetched = null;
+    try {
+      if (!rangeHelp || typeof rangeHelp.fetchForReport !== "function") {
+        throw new Error("Appointment range lookup is not available.");
+      }
+      fetched = await rangeHelp.fetchForReport(repo(), {
+        locationIds: ids,
+        fromKey: range.fromKey,
+        toKey: range.toKey
+      });
+    } catch (err) {
+      finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
+        ? rangeHelp.userSafeError(err && err.message)
+        : "This report could not load.", null);
+      return;
+    }
+    var fetchView = rangeHelp && typeof rangeHelp.viewState === "function"
+      ? rangeHelp.viewState(fetched)
+      : { kind: "error", message: "This report could not load.", appointments: [] };
+    if (fetchView.kind === "error") {
+      finish(requestId, "error", fetchView.message || "This report could not load.", null);
+      return;
+    }
+    if (fetchView.kind === "incomplete") {
+      finish(requestId, "incomplete", fetchView.message ||
+        "Appointment data for this range is incomplete. Narrow the date range and try again.", null);
+      return;
+    }
     var providers = [];
     try {
-      appointments = await loadAppointments(ids, range.fromKey, range.toKey);
       providers = loadProviders(ids, range.fromKey, range.toKey);
     } catch (err) {
-      status = "ready";
-      errorText = err && err.message ? err.message : "This report could not load.";
-      paint();
+      finish(requestId, "error", "This report could not load.", null);
       return;
     }
-    result = math && typeof math.buildReport === "function"
+    var report = math && typeof math.buildReport === "function"
       ? math.buildReport({
-        appointments: appointments,
+        appointments: fetchView.appointments || [],
         providers: providers,
         fromKey: range.fromKey,
         toKey: range.toKey,
@@ -782,8 +808,7 @@
         todayKey: todayKey()
       })
       : null;
-    status = "ready";
-    paint();
+    finish(requestId, "ready", "", report);
   }
 
   function setLocationIds(ids) {
@@ -801,6 +826,7 @@
   }
 
   function onHostClick(ev) {
+    if (!isActive()) return;
     var t = ev.target;
     if (!t || typeof t.closest !== "function") return;
     var locRow = t.closest("[data-ff-intel-loc]");
@@ -867,6 +893,7 @@
   }
 
   function onHostChange(ev) {
+    if (!isActive()) return;
     var t = ev.target;
     if (!t) return;
     var custom = t.getAttribute && t.getAttribute("data-ff-intel-custom");
@@ -875,6 +902,7 @@
   }
 
   function paint() {
+    if (!isActive()) return;
     var host = document.getElementById(HOST_ID);
     if (!host) return;
     if (!Array.isArray(filters.locationIds)) {
