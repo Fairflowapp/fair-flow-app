@@ -6,6 +6,17 @@
   var DEFAULT_ID = "sales-summary";
   var GROUPS = [
     {
+      id: "intelligence",
+      label: "Intelligence",
+      items: [
+        {
+          id: "booking-intelligence",
+          label: "Booking Intelligence",
+          blurb: "Appointments, utilization, calendar gaps, and unused capacity from live booking data."
+        }
+      ]
+    },
+    {
       id: "sales",
       label: "Sales",
       items: [

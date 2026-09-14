@@ -55,11 +55,62 @@
     );
   }
 
+  var INTEL_SCRIPTS = [
+    "/booking/reports/intelligence-compute.js?v=20260913_intel1",
+    "/booking/reports/intelligence.js?v=20260913_intel1"
+  ];
+
+  function intelReady() {
+    return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
+  }
+
+  function ensureIntelScripts(done) {
+    if (intelReady()) {
+      done();
+      return;
+    }
+    if (typeof document === "undefined" || !document.head) {
+      done();
+      return;
+    }
+    function loadOne(src, cb) {
+      var existing = document.querySelector('script[src="' + src + '"]');
+      if (existing) {
+        cb();
+        return;
+      }
+      var el = document.createElement("script");
+      el.async = false;
+      el.src = src;
+      el.onload = cb;
+      el.onerror = cb;
+      document.head.appendChild(el);
+    }
+    loadOne(INTEL_SCRIPTS[0], function () {
+      loadOne(INTEL_SCRIPTS[1], done);
+    });
+  }
+
   function paintMain() {
     var main = document.getElementById("ffRptMain");
     if (!main) return;
     var report = nav() && nav().getSelected();
     var id = report && report.id;
+    if (id === "booking-intelligence") {
+      if (window.ffBookingReportsIntelligence) {
+        window.ffBookingReportsIntelligence.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Booking Intelligence…</p>';
+      ensureIntelScripts(function () {
+        if (window.ffBookingReportsIntelligence) window.ffBookingReportsIntelligence.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
     if (id === "sales-summary" && window.ffBookingReportsSalesSummary) {
       window.ffBookingReportsSalesSummary.paint();
       return;
@@ -70,7 +121,7 @@
   function html() {
     return (
       '<div class="ff-rpt">' +
-        '<aside class="ff-rpt-nav" aria-label="Sales reports">' + navHtml() + "</aside>" +
+        '<aside class="ff-rpt-nav" aria-label="Booking reports">' + navHtml() + "</aside>" +
         '<div class="ff-rpt-main" id="ffRptMain" aria-label="' + escapeHtml((nav() && nav().getSelected() && nav().getSelected().label) || "Report") + '"></div>' +
       "</div>"
     );

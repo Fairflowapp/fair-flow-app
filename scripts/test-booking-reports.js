@@ -40,14 +40,18 @@ check("reports sits after clients in the sidebar", /itemHtml\("clients"[\s\S]*it
 check("shell paints a Reports page", shell.indexOf('data-ff-booking-page="reports"') !== -1);
 check("shell refreshes reports", shell.indexOf("ffRefreshBookingReports") !== -1);
 check("reports has a Sales group", navSrc.indexOf('label: "Sales"') !== -1);
-check("sales summary is the first report", navSrc.indexOf('id: "sales-summary"') !== -1);
+check("reports has an Intelligence group", navSrc.indexOf('label: "Intelligence"') !== -1 && navSrc.indexOf('id: "booking-intelligence"') !== -1);
+check("sales summary remains a report", navSrc.indexOf('id: "sales-summary"') !== -1);
 check("sales tabs include service, product, and period", navSrc.indexOf("service-sales") !== -1 && navSrc.indexOf("product-sales") !== -1 && navSrc.indexOf("sales-by-period") !== -1);
 check("sales summary is the default report", navSrc.indexOf('DEFAULT_ID = "sales-summary"') !== -1);
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
+check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
+check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
 check("index.html loads reports nav and sales summary", html.indexOf("/booking/reports/nav.js") !== -1 && html.indexOf("/booking/reports/sales-summary.js") !== -1 && html.indexOf("/booking/reports/ui.js") !== -1);
+check("index.html is not required for intelligence scripts", html.indexOf("/booking/reports/intelligence.js") === -1);
 
 const store = {};
 const windowObj = {
@@ -61,6 +65,7 @@ load("public/booking/reports/compute.js", windowObj);
 const nav = windowObj.ffBookingReportsNav;
 const compute = windowObj.ffBookingReportsCompute;
 check("nav defaults to sales summary", nav.getSelectedId() === "sales-summary");
+check("nav can select booking intelligence", nav.setSelectedId("booking-intelligence") === "booking-intelligence" && nav.getSelected().label === "Booking Intelligence");
 check("nav can select service sales", nav.setSelectedId("service-sales") === "service-sales" && nav.getSelected().label === "Service Sales");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
