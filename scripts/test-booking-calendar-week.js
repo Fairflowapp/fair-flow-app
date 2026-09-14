@@ -230,13 +230,14 @@ st.setView("week");
 check("exactly one visible/focused provider becomes the Week provider", st.getWeekProviderId() === "nicole");
 
 st.setView("day");
-check("Print Day remains available in Day view", printApi.canPrintDay() === true);
+check("Print Day remains available in Day view", printApi.canPrintDay() === true && printApi.printButtonLabel() === "Print Day");
 st.setView("week");
-check("Print Day is blocked while Week View is active", printApi.canPrintDay() === false);
-const blockedPrint = printApi.printCurrent();
-check("Print Day does not print a Week layout", blockedPrint && blockedPrint.ok === false && blockedPrint.reason === "week_view");
+check("Print Week is available while Week View is active", printApi.canPrintWeek() === true && printApi.canPrintDay() === false && printApi.printButtonLabel() === "Print Week");
+const weekPrint = printApi.printCurrent();
+check("toolbar print prints the current Week provider", !!(weekPrint && weekPrint.header && weekPrint.header.title === "Booking Week Schedule" && weekPrint.providerIds.join(",") === st.getWeekProviderId()));
+if (printApi.exitPrintMode) printApi.exitPrintMode();
 st.setView("day");
-check("returning to Day restores Print Day", printApi.canPrintDay() === true);
+check("returning to Day restores Print Day", printApi.canPrintDay() === true && printApi.printButtonLabel() === "Print Day");
 
 const calSrc = fs.readFileSync(path.join(root, "public/booking/calendar.js"), "utf8");
 const weekSrc = fs.readFileSync(path.join(root, "public/booking/calendar-week.js"), "utf8");

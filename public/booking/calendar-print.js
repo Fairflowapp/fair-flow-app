@@ -1,7 +1,8 @@
 /**
- * Print Day for the Booking Day Calendar.
- * Reuses the painted day view and browser printing. Does not mutate
- * filters, appointments, blocks, schedules, or location.
+ * Browser print for the Booking Calendar.
+ * Day prints the visible Day providers. Week prints the selected Week
+ * provider's Monday–Sunday board. Does not mutate filters, appointments,
+ * blocks, schedules, or location.
  */
 (function () {
   var PRINTING_CLASS = "ff-cal-printing";
@@ -18,6 +19,11 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
+  }
+
+  function isWeekView() {
+    var st = state();
+    return !!(st && st.isWeek && st.isWeek());
   }
 
   function weekdayLabel(dateKey) {
@@ -53,7 +59,12 @@
     return String((hit && (hit.name || hit.locationName)) || "").trim() || loc;
   }
 
-  function headerMeta() {
+  function providerDisplayName(emp, fallback) {
+    var name = String((emp && (emp.displayName || emp.name || emp.firstName)) || "").trim();
+    return name || String(fallback || "").trim();
+  }
+
+  function dayHeaderMeta() {
     var st = state();
     var tm = time();
     var dateKey = st && typeof st.getSelectedDateKey === "function" ? st.getSelectedDateKey() : "";
@@ -67,6 +78,37 @@
       dateLabel: tm && typeof tm.formatDisplayDate === "function" ? tm.formatDisplayDate(dateKey) : dateKey,
       weekday: weekdayLabel(dateKey)
     };
+  }
+
+  function weekHeaderMeta() {
+    var st = state();
+    var tm = time();
+    var locationId = st && typeof st.getLocationId === "function" ? st.getLocationId() : "";
+    var providerId = st && typeof st.getWeekProviderId === "function" ? st.getWeekProviderId() : "";
+    var emp = st && typeof st.getWeekEmployee === "function" ? st.getWeekEmployee() : null;
+    var keys = st && typeof st.getWeekDateKeys === "function" ? st.getWeekDateKeys() : [];
+    var range = tm && typeof tm.formatWeekRange === "function"
+      ? tm.formatWeekRange(st.getWeekAnchorKey ? st.getWeekAnchorKey() : keys[0])
+      : "";
+    return {
+      brand: "Fair Flow",
+      title: "Booking Week Schedule",
+      locationId: locationId,
+      locationName: locationNameOf(locationId),
+      providerId: providerId,
+      providerName: providerDisplayName(emp, providerId),
+      weekStartKey: keys[0] || "",
+      weekEndKey: keys.length ? keys[keys.length - 1] : "",
+      weekDateKeys: keys.slice(),
+      weekRange: range,
+      dateKey: keys[0] || "",
+      dateLabel: range,
+      weekday: ""
+    };
+  }
+
+  function headerMeta() {
+    return isWeekView() ? weekHeaderMeta() : dayHeaderMeta();
   }
 
   function visibleEmployees() {
@@ -108,6 +150,11 @@
         window.ffBookingCalFilters.close();
       }
     } catch (_) {}
+    try {
+      if (window.ffBookingCalWeek && typeof window.ffBookingCalWeek.closePicker === "function") {
+        window.ffBookingCalWeek.closePicker();
+      }
+    } catch (_) {}
   }
 
   function markPrintKeep(root, scopeId) {
@@ -123,13 +170,19 @@
   }
 
   function headerHtml(meta) {
+    var bits = ['<span data-ff-cal-print-location>' + escapeHtml(meta.locationName) + "</span>"];
+    if (meta.providerName) {
+      bits.push('<span data-ff-cal-print-provider>' + escapeHtml(meta.providerName) + "</span>");
+    }
+    if (meta.weekday) {
+      bits.push('<span data-ff-cal-print-weekday>' + escapeHtml(meta.weekday) + "</span>");
+    }
+    if (meta.dateLabel) {
+      bits.push('<span data-ff-cal-print-date>' + escapeHtml(meta.dateLabel) + "</span>");
+    }
     return '<div class="ff-cal-print-brand">' + escapeHtml(meta.brand) +
       ' / ' + escapeHtml(meta.title) + "</div>" +
-      '<div class="ff-cal-print-meta">' +
-        '<span data-ff-cal-print-location>' + escapeHtml(meta.locationName) + "</span>" +
-        '<span data-ff-cal-print-weekday>' + escapeHtml(meta.weekday) + "</span>" +
-        '<span data-ff-cal-print-date>' + escapeHtml(meta.dateLabel) + "</span>" +
-      "</div>";
+      '<div class="ff-cal-print-meta">' + bits.join("") + "</div>";
   }
 
   function ensureHeader(cal) {
@@ -147,7 +200,7 @@
     return el;
   }
 
-  function applyDom(scopeId) {
+  function applyDom(scopeId, week) {
     if (typeof document !== "undefined" && document.body && document.body.classList) {
       document.body.classList.add(PRINTING_CLASS);
     }
@@ -156,10 +209,16 @@
     var cal = root.querySelector ? root.querySelector(".ff-cal") : null;
     if (cal && cal.classList) cal.classList.add("is-printing");
     if (cal && cal.setAttribute) {
-      if (scopeId) cal.setAttribute("data-ff-cal-print-only", scopeId);
-      else cal.removeAttribute("data-ff-cal-print-only");
+      if (week) {
+        cal.setAttribute("data-ff-cal-print-view", "week");
+        cal.removeAttribute("data-ff-cal-print-only");
+      } else {
+        cal.removeAttribute("data-ff-cal-print-view");
+        if (scopeId) cal.setAttribute("data-ff-cal-print-only", scopeId);
+        else cal.removeAttribute("data-ff-cal-print-only");
+      }
     }
-    markPrintKeep(root, scopeId);
+    markPrintKeep(root, week ? "" : scopeId);
     ensureHeader(cal || root);
   }
 
@@ -171,7 +230,10 @@
     if (!root) return;
     var cal = root.querySelector ? root.querySelector(".ff-cal") : null;
     if (cal && cal.classList) cal.classList.remove("is-printing");
-    if (cal && cal.removeAttribute) cal.removeAttribute("data-ff-cal-print-only");
+    if (cal && cal.removeAttribute) {
+      cal.removeAttribute("data-ff-cal-print-only");
+      cal.removeAttribute("data-ff-cal-print-view");
+    }
     markPrintKeep(root, "");
   }
 
@@ -182,18 +244,33 @@
     return { printing: false, printScopeId: "" };
   }
 
+  function weekProviderIds() {
+    var st = state();
+    var id = st && typeof st.getWeekProviderId === "function" ? String(st.getWeekProviderId() || "").trim() : "";
+    return id ? [id] : [];
+  }
+
   function enterPrintMode(opts) {
     var options = opts && typeof opts === "object" ? opts : {};
+    var week = options.view === "week" || (options.view == null && isWeekView());
     closePopovers();
     printing = true;
-    printScopeId = String(options.providerId || "").trim();
-    applyDom(printScopeId);
-    return {
+    printScopeId = week
+      ? (weekProviderIds()[0] || "")
+      : String(options.providerId || "").trim();
+    applyDom(printScopeId, week);
+    var snap = {
       printing: true,
       printScopeId: printScopeId,
       header: headerMeta(),
-      providerIds: providerIdsToPrint(printScopeId)
+      providerIds: week ? weekProviderIds() : providerIdsToPrint(printScopeId)
     };
+    if (week) {
+      snap.view = "week";
+      snap.weekDateKeys = snap.header.weekDateKeys || [];
+      snap.locationId = snap.header.locationId || "";
+    }
+    return snap;
   }
 
   function bindAfterPrint() {
@@ -221,18 +298,32 @@
   }
 
   function canPrintDay() {
+    return !isWeekView();
+  }
+
+  function canPrintWeek() {
     var st = state();
-    return !(st && st.isWeek && st.isWeek());
+    return !!(isWeekView() && st && st.getWeekEmployee && st.getWeekEmployee());
+  }
+
+  function printButtonLabel() {
+    return isWeekView() ? "Print Week" : "Print Day";
   }
 
   function printCurrent() {
-    if (!canPrintDay()) return { ok: false, reason: "week_view", printing: false };
+    if (isWeekView()) {
+      if (!canPrintWeek()) return { ok: false, reason: "week_provider", printing: false };
+      var weekSnap = enterPrintMode({ view: "week" });
+      triggerBrowserPrint();
+      return weekSnap;
+    }
     var snapshot = enterPrintMode({});
     triggerBrowserPrint();
     return snapshot;
   }
 
   function printProvider(providerId) {
+    if (isWeekView()) return { ok: false, reason: "week_view", printing: false };
     var snapshot = enterPrintMode({ providerId: providerId });
     triggerBrowserPrint();
     return snapshot;
@@ -242,6 +333,8 @@
     printCurrent: printCurrent,
     printProvider: printProvider,
     canPrintDay: canPrintDay,
+    canPrintWeek: canPrintWeek,
+    printButtonLabel: printButtonLabel,
     enterPrintMode: enterPrintMode,
     exitPrintMode: exitPrintMode,
     isPrintMode: function () { return printing; },

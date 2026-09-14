@@ -427,7 +427,11 @@
                 ? window.ffBookingCalFilters.buttonLabel()
                 : "Filters") +
             "</button>" +
-            '<button type="button" class="ff-cal-print" data-ff-cal-act="print" disabled title="Print Day is available in Day view">Print Day</button>' +
+            '<button type="button" class="ff-cal-print" data-ff-cal-act="print"' +
+              (needsChoice ? ' disabled title="Choose a provider to print their week"' : '') +
+              '>' + escapeHtml(window.ffBookingCalPrint && window.ffBookingCalPrint.printButtonLabel
+                ? window.ffBookingCalPrint.printButtonLabel()
+                : "Print Week") + "</button>" +
             '<div class="ff-cal-view" role="group" aria-label="Calendar view">' +
               '<button type="button" class="ff-cal-view-btn" data-ff-cal-act="view-day">Day</button>' +
               '<button type="button" class="ff-cal-view-btn is-active" data-ff-cal-act="view-week">Week</button>' +

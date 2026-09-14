@@ -859,6 +859,9 @@ body.ff-booking-area .ff-booking-main {
   body.ff-cal-printing .ff-product-switch,
   body.ff-cal-printing .ff-cal-menu,
   body.ff-cal-printing .ff-cal-filter-menu,
+  body.ff-cal-printing #ffBookingCalWeekPicker,
+  body.ff-cal-printing .ff-cal-week-provider,
+  body.ff-cal-printing .ff-cal-week-pick,
   body.ff-cal-printing .ff-cal-move,
   body.ff-cal-printing .ff-cal-drag-ghost,
   body.ff-cal-printing .ff-cal-hold,
@@ -1010,5 +1013,47 @@ body.ff-booking-area .ff-booking-main {
   body.ff-cal-printing .ff-cal-card {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  body.ff-cal-printing .ff-cal-col.is-drop,
+  body.ff-cal-printing .ff-cal-card.is-dragging,
+  body.ff-cal-printing .ff-cal-hold.is-dragging {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-board,
+  body.ff-cal-printing .ff-cal[data-ff-cal-print-view="week"] .ff-cal-board {
+    width: 100% !important;
+    max-width: 100% !important;
+    --ff-cal-col-w: calc((100% - var(--ff-cal-time-w, 56px)) / 7);
+    --ff-cal-cols-w: calc(100% - var(--ff-cal-time-w, 56px));
+    --ff-cal-canvas-w: calc(100% - var(--ff-cal-time-w, 56px));
+  }
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-head,
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-emp-head,
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-cols {
+    display: flex !important;
+    width: 100% !important;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-col,
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-day-head {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+  }
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-day-head {
+    border-bottom: 1px solid #111;
+    background: #fff !important;
+    color: #111 !important;
+  }
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-day-head.is-today {
+    box-shadow: inset 0 0 0 1px #111;
+  }
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-day-wd,
+  body.ff-cal-printing .ff-cal.is-week .ff-cal-day-num {
+    color: #111 !important;
   }
 }

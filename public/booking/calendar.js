@@ -565,7 +565,12 @@
         }
         return;
       }
-      else if (act === "print") return;
+      else if (act === "print") {
+        if (window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printCurrent === "function") {
+          window.ffBookingCalPrint.printCurrent();
+        }
+        return;
+      }
       else if (act === "clear-focus") {
         if (st.clearVisibleProviders) st.clearVisibleProviders();
         render({ keepScroll: true });
