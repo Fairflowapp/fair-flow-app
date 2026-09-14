@@ -19,8 +19,10 @@ const {
 } = require("../../helpers/client-admin");
 const ui = require("../../helpers/client-ui");
 const { attachDiagnostics, printDiagnostics } = require("../../helpers/diagnostics");
+const { maybeAcquireWriteLock, maybeReleaseWriteLock } = require("../../helpers/write-lock");
 
 let RUN_ID = "";
+let WRITE_LOCK = null;
 
 function fieldsFor(scenario, phone) {
   return {
@@ -50,15 +52,24 @@ async function createQaClient(page, scenario, phone) {
 
 test.beforeAll(async () => {
   RUN_ID = makeRunId();
-  await cleanupQaClients();
+  WRITE_LOCK = await maybeAcquireWriteLock({
+    runId: "FF-QA-CLIENT-" + RUN_ID,
+    targetLabel: process.env.FF_QA_TARGET_LABEL || "clients",
+    targetSha: process.env.FF_QA_TARGET_SHA || "",
+  });
+  await cleanupQaClients(RUN_ID);
 });
 
 test.beforeEach(async () => {
-  await cleanupQaClients();
+  await cleanupQaClients(RUN_ID);
 });
 
 test.afterAll(async () => {
-  await cleanupQaClients();
+  try {
+    if (RUN_ID) await cleanupQaClients(RUN_ID);
+  } finally {
+    await maybeReleaseWriteLock(WRITE_LOCK);
+  }
 });
 
 test.describe("Booking client lifecycle", () => {
@@ -74,8 +85,10 @@ test.describe("Booking client lifecycle", () => {
     await readyClientsPage(page);
     await ui.searchClients(page, ui.FIXTURE.searchName);
     await ui.waitForClientRow(page, ui.FIXTURE.clientId);
-    const rows = await ui.currentClientRows(page);
-    expect(rows.some((row) => row.clientId === ui.FIXTURE.clientId)).toBe(true);
+    await expect.poll(async () => {
+      const rows = await ui.currentClientRows(page);
+      return rows.some((row) => row.clientId === ui.FIXTURE.clientId);
+    }).toBe(true);
     await ui.openClientRow(page, ui.FIXTURE.clientId);
     const header = await ui.readProfileHeader(page);
     expect(header.name).toMatch(/QA Appointment Client/i);
@@ -167,6 +180,10 @@ test.describe("Booking client lifecycle", () => {
     await ui.closeProfile(page);
     await ui.searchClients(page, nextPhone);
     await ui.waitForClientRow(page, created.clientId);
+    await expect.poll(async () => {
+      const rows = await ui.currentClientRows(page);
+      return rows.some((row) => row.clientId === created.clientId);
+    }).toBe(true);
     const rows = await ui.currentClientRows(page);
     const matches = rows.filter((row) => row.clientId === created.clientId);
     expect(matches.length).toBe(1);

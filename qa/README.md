@@ -39,7 +39,7 @@ Optional:
 FF_BASE_URL=https://fair-flow-staging.web.app
 ```
 
-Browser QA always uses `https://fair-flow-staging.web.app/?env=staging` so staging Auth accepts the Referer. Playwright fulfills that origin from this worktree's `public/` and does **not** load the remotely deployed staging build. `FF_BASE_URL` pointing at `127.0.0.1` is upgraded to the staging origin for the same reason. Production hosts are rejected.
+Browser QA always uses `https://fair-flow-staging.web.app/?env=staging` so staging Auth accepts the Referer. Playwright fulfills that origin from the application-under-test `public/` (`FF_QA_APP_ROOT` or this worktree) and does **not** load the remotely deployed staging build. `FF_BASE_URL` pointing at `127.0.0.1` is upgraded to the staging origin for the same reason. Production hosts are rejected.
 
 Authenticated login runs in a dedicated Playwright setup project with tracing, screenshots, and video **off**. Saved session files under `qa/.auth/` are gitignored credential artifacts. Do not print or commit them.
 
@@ -67,6 +67,9 @@ npm run test:booking:clients
 
 # Smoke then appointment + client write suites. Smoke itself stays read-only.
 npm run test:booking:staging-write
+
+# Cross-worktree regression (QA harness stays here; target public/ is served)
+npm run test:booking:regression -- --worktree /absolute/path --label name --mode smoke
 ```
 
 First Playwright run also needs browsers:
@@ -148,9 +151,61 @@ Known frozen **CLASS A — PRE-EXISTING AT c2ba63e** static clients-ui failures 
 
 Browser Client Lifecycle currently **PASSES** and does **not** independently reproduce those static failures as a broken Clients search/create/profile/edit flow. The static CLASS A set and the browser suite are separate evidence.
 
+## Cross-worktree regression
+
+The QA harness stays in this worktree. The application-under-test is another Booking worktree's `public/`. Nothing is deployed. Browser origin remains `https://fair-flow-staging.web.app/?env=staging`; Playwright fulfills product assets from `--worktree …/public`. Missing local target assets fail closed (no remote staging fallback).
+
+```bash
+# READ-ONLY: static + smoke against the target worktree
+npm run test:booking:regression -- \
+  --worktree /absolute/path \
+  --label name \
+  --mode smoke
+
+# FULL: static + smoke + appointment lifecycle + client lifecycle
+# Writes isolated FF-QA-* data to fair-flow-staging / ffBookingQa only. Never production.
+npm run test:booking:regression -- \
+  --worktree /absolute/path \
+  --label name \
+  --mode full
+```
+
+Default `--mode` is `smoke`. Do not use `full` casually.
+
+`full` acquires an Admin write lease at `salons/ffBookingQa/qaLocks/booking-write-suite`. If another unexpired lease exists, the runner fails as **CLASS D / QA contention**, not a product regression. Expired leases may be replaced. The lease is released in `finally`.
+
+```bash
+# Live lock contention (staging qaLocks only; no product lifecycle)
+npm run test:booking:regression:lock
+
+# Exact-runId cleanup matching (no Firestore)
+npm run test:booking:regression:cleanup-scope
+```
+
+Ordinary appointment/client cleanup deletes only records whose notes contain that run's unique `runId`. It does **not** delete every `FF-QA-*` document. Interrupted leftovers need an explicit stale pass:
+
+```bash
+npm run test:booking:cleanup-stale
+```
+
+That command only deletes QA-marked `ffBookingQa` appointments/clients older than 6 hours (override with `FF_QA_STALE_MS`). Never `qaAppointmentClient` / `FF-QA-FIXTURE`.
+
+Machine-readable output: `qa/regression-results/` (gitignored).
+
+If the target worktree is dirty, the report prints `HEAD SHA + DIRTY WORKTREE`. Files served from disk are authoritative.
+
 ## Classification
 
 - **A** — pre-existing at `c2ba63e`
 - **B** — introduced by a product branch
 - **C** — flaky / environmental (timezone, missing location, network)
-- **D** — QA infrastructure (wrong project, missing creds, server, selectors we own)
+- **D** — QA infrastructure (wrong project, missing creds, server, selectors we own, lock contention, target path)
+
+Regression comparison labels:
+
+- `UNCHANGED_PASS`
+- `PRE_EXISTING`
+- `NEW_REGRESSION`
+- `FIXED_VS_BASELINE`
+- `FLAKY`
+- `QA_INFRA_FAILURE`

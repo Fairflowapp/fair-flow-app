@@ -16,6 +16,30 @@ const PRODUCTION_HOST_MARKERS = [
 const QA_ROOT = path.resolve(__dirname, "..");
 const REPO_ROOT = path.resolve(QA_ROOT, "..");
 
+function appRoot() {
+  const raw = String(process.env.FF_QA_APP_ROOT || "").trim();
+  if (!raw) return REPO_ROOT;
+  const resolved = path.resolve(raw);
+  if (resolved === path.parse(resolved).root) {
+    throw new Error("QA SAFETY STOP: FF_QA_APP_ROOT must not be a filesystem root.");
+  }
+  return resolved;
+}
+
+function autIdentity() {
+  const explicit = String(process.env.FF_QA_AUT_ID || "").trim();
+  if (explicit) return explicit;
+  return CHECKPOINT_SHA;
+}
+
+function targetLabel() {
+  return String(process.env.FF_QA_TARGET_LABEL || "").trim();
+}
+
+function targetDirty() {
+  return String(process.env.FF_QA_TARGET_DIRTY || "") === "1";
+}
+
 function loadOptionalEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
   const text = fs.readFileSync(filePath, "utf8");
@@ -133,6 +157,10 @@ module.exports = {
   STAGING_APP_ORIGIN,
   QA_ROOT,
   REPO_ROOT,
+  appRoot,
+  autIdentity,
+  targetLabel,
+  targetDirty,
   loadQaEnv,
   appUrl,
   appOrigin,

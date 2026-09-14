@@ -18,8 +18,10 @@ const {
 } = require("../../helpers/appointment-admin");
 const ui = require("../../helpers/appointment-ui");
 const { attachDiagnostics, printDiagnostics } = require("../../helpers/diagnostics");
+const { maybeAcquireWriteLock, maybeReleaseWriteLock } = require("../../helpers/write-lock");
 
 let RUN_ID = "";
+let WRITE_LOCK = null;
 const DAYS_AHEAD = 2;
 const SLOT = {
   create: 10 * 60,
@@ -73,15 +75,24 @@ async function createBasicQaAppointment(page, startMin, scenario, extras) {
 
 test.beforeAll(async () => {
   RUN_ID = makeRunId();
-  await cleanupQaAppointments();
+  WRITE_LOCK = await maybeAcquireWriteLock({
+    runId: RUN_ID,
+    targetLabel: process.env.FF_QA_TARGET_LABEL || "lifecycle",
+    targetSha: process.env.FF_QA_TARGET_SHA || "",
+  });
+  await cleanupQaAppointments(RUN_ID);
 });
 
 test.beforeEach(async () => {
-  await cleanupQaAppointments();
+  await cleanupQaAppointments(RUN_ID);
 });
 
 test.afterAll(async () => {
-  await cleanupQaAppointments();
+  try {
+    if (RUN_ID) await cleanupQaAppointments(RUN_ID);
+  } finally {
+    await maybeReleaseWriteLock(WRITE_LOCK);
+  }
 });
 
 test.describe("Booking appointment lifecycle", () => {

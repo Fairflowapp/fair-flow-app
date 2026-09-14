@@ -28,14 +28,23 @@ async function closeProfile(page) {
   await profile.waitFor({ state: "hidden", timeout: 10000 });
 }
 
+async function waitForClientsSearchIdle(page) {
+  await page.waitForFunction(() => {
+    const empty = document.querySelector("#ffBookingClientsRoot .ff-cli-empty");
+    const text = empty ? String(empty.textContent || "").trim() : "";
+    return !/Searching|Loading/i.test(text);
+  }, null, { timeout: 20000 });
+}
+
 async function searchClients(page, query) {
   const input = page.locator("#ffCliSearch");
   await input.fill("");
   await input.fill(query);
-  await page.waitForTimeout(400);
+  await waitForClientsSearchIdle(page);
 }
 
 async function waitForClientRow(page, clientId) {
+  await waitForClientsSearchIdle(page);
   const row = page.locator('#ffBookingClientsRoot [data-ff-cli-id="' + clientId + '"]');
   await row.waitFor({ state: "visible", timeout: 20000 });
   return row;
@@ -104,6 +113,7 @@ module.exports = {
   FIXTURE,
   openClients,
   closeProfile,
+  waitForClientsSearchIdle,
   searchClients,
   waitForClientRow,
   openClientRow,

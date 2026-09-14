@@ -4,7 +4,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const ROOT = path.resolve(__dirname, "../../public");
+const { appRoot } = require("./env");
+const ROOT = path.resolve(appRoot(), "public");
 const PORT = Number(process.env.FF_QA_PORT || 4173);
 const HOST = "127.0.0.1";
 

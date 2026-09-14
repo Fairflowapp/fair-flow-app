@@ -3,15 +3,20 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { CHECKPOINT_SHA, REPO_ROOT, REQUIRED_PROJECT_ID } = require("./env");
+const { REQUIRED_PROJECT_ID, appRoot, autIdentity, targetDirty } = require("./env");
 
 const STAGING_APP_HOST = "fair-flow-staging.web.app";
 const STAGING_APP_ORIGIN = "https://fair-flow-staging.web.app";
-const PUBLIC_ROOT = path.resolve(REPO_ROOT, "public");
 const LOCAL_PROOF_ASSET = "booking/shell.js";
 const QA_CHECKPOINT_META = "ff-qa-local-checkpoint";
 const QA_SERVED_META = "ff-qa-served-from";
 const QA_SERVED_VALUE = "local-worktree-public";
+const QA_APP_ROOT_META = "ff-qa-app-root";
+const QA_DIRTY_META = "ff-qa-target-dirty";
+
+function publicRoot() {
+  return path.resolve(appRoot(), "public");
+}
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -48,9 +53,10 @@ function localAssetHash(relPath) {
 function resolveExistingFile(relPath) {
   const rel = String(relPath || "").replace(/^\/+/, "");
   if (!rel || rel.includes("\0")) return null;
-  const abs = path.normalize(path.join(PUBLIC_ROOT, rel));
-  const rootWithSep = PUBLIC_ROOT.endsWith(path.sep) ? PUBLIC_ROOT : PUBLIC_ROOT + path.sep;
-  if (abs !== PUBLIC_ROOT && !abs.startsWith(rootWithSep)) return null;
+  const root = publicRoot();
+  const abs = path.normalize(path.join(root, rel));
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (abs !== root && !abs.startsWith(rootWithSep)) return null;
   if (fs.existsSync(abs) && fs.statSync(abs).isFile()) return abs;
   return null;
 }
@@ -66,17 +72,18 @@ function resolveAppRequest(urlPath) {
     return { kind: "invalid", reason: "nul-path" };
   }
   const rel = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
-  const abs = path.normalize(path.join(PUBLIC_ROOT, rel));
-  const rootWithSep = PUBLIC_ROOT.endsWith(path.sep) ? PUBLIC_ROOT : PUBLIC_ROOT + path.sep;
-  if (abs !== PUBLIC_ROOT && !abs.startsWith(rootWithSep)) {
+  const root = publicRoot();
+  const abs = path.normalize(path.join(root, rel));
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (abs !== root && !abs.startsWith(rootWithSep)) {
     return { kind: "invalid", reason: "path-traversal" };
   }
   if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
-    return { kind: "file", abs, rel: path.relative(PUBLIC_ROOT, abs) };
+    return { kind: "file", abs, rel: path.relative(root, abs) };
   }
   const ext = path.extname(rel);
   if (!ext) {
-    const indexAbs = path.join(PUBLIC_ROOT, "index.html");
+    const indexAbs = path.join(root, "index.html");
     return { kind: "spa", abs: indexAbs, rel: "index.html" };
   }
   return { kind: "missing", rel };
@@ -85,8 +92,10 @@ function resolveAppRequest(urlPath) {
 function injectLocalProof(htmlBuffer) {
   const html = htmlBuffer.toString("utf8");
   const tags =
-    '<meta name="' + QA_CHECKPOINT_META + '" content="' + CHECKPOINT_SHA + '">' +
-    '<meta name="' + QA_SERVED_META + '" content="' + QA_SERVED_VALUE + '">';
+    '<meta name="' + QA_CHECKPOINT_META + '" content="' + autIdentity() + '">' +
+    '<meta name="' + QA_SERVED_META + '" content="' + QA_SERVED_VALUE + '">' +
+    '<meta name="' + QA_APP_ROOT_META + '" content="' + publicRoot() + '">' +
+    '<meta name="' + QA_DIRTY_META + '" content="' + (targetDirty() ? "1" : "0") + '">';
   if (/<head[^>]*>/i.test(html)) {
     return Buffer.from(html.replace(/<head[^>]*>/i, (open) => open + tags), "utf8");
   }
@@ -136,8 +145,8 @@ function isStagingAppHost(hostname) {
 }
 
 async function installLocalAppRoute(context) {
-  if (!fs.existsSync(path.join(PUBLIC_ROOT, "index.html"))) {
-    throw new Error("QA LOCAL ASSET MISSING: public/index.html is required in this worktree.");
+  if (!fs.existsSync(path.join(publicRoot(), "index.html"))) {
+    throw new Error("QA LOCAL ASSET MISSING: public/index.html is required in the application-under-test worktree.");
   }
   if (!resolveExistingFile(LOCAL_PROOF_ASSET)) {
     throw new Error("QA LOCAL ASSET MISSING: public/" + LOCAL_PROOF_ASSET);
@@ -184,10 +193,11 @@ async function assertLocalAppUnderTest(page) {
       "QA SAFETY STOP: Local AUT check saw projectId " + JSON.stringify(marker.projectId)
     );
   }
-  if (marker.checkpoint !== CHECKPOINT_SHA) {
+  const expectedId = autIdentity();
+  if (marker.checkpoint !== expectedId) {
     throw new Error(
-      "QA SAFETY STOP: Missing local checkpoint marker. This page is not the QA-served worktree build. " +
-        "Expected " + CHECKPOINT_SHA + " got " + JSON.stringify(marker.checkpoint)
+      "QA SAFETY STOP: Missing local AUT marker. This page is not the QA-served target public/. " +
+        "Expected " + expectedId + " got " + JSON.stringify(marker.checkpoint)
     );
   }
   if (marker.served !== QA_SERVED_VALUE) {
@@ -225,6 +235,8 @@ async function assertLocalAppUnderTest(page) {
     origin: marker.origin,
     projectId: marker.projectId,
     checkpointSha: marker.checkpoint,
+    appRoot: publicRoot(),
+    dirty: targetDirty(),
     proofAsset: LOCAL_PROOF_ASSET,
     proofHash: expectedHash,
   };
@@ -233,11 +245,11 @@ async function assertLocalAppUnderTest(page) {
 module.exports = {
   STAGING_APP_HOST,
   STAGING_APP_ORIGIN,
-  PUBLIC_ROOT,
   LOCAL_PROOF_ASSET,
   QA_CHECKPOINT_META,
   QA_SERVED_META,
   QA_SERVED_VALUE,
+  publicRoot,
   installLocalAppRoute,
   assertLocalAppUnderTest,
   localAssetHash,

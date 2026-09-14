@@ -1,6 +1,6 @@
 "use strict";
 
-const path = require("path");
+const crypto = require("crypto");
 const { REPO_ROOT } = require("./env");
 const {
   REQUIRED_PROJECT,
@@ -97,7 +97,15 @@ async function waitForQaClientByNote(note, timeoutMs) {
   abort("Timed out waiting for QA client note " + note);
 }
 
-async function cleanupQaClients() {
+function clientNoteBelongsToRun(notes, runId) {
+  const text = String(notes || "");
+  const token = "FF-QA-CLIENT-" + String(runId || "");
+  return text === token || text.indexOf(token + " ") === 0;
+}
+
+async function cleanupQaClients(runId) {
+  const id = String(runId || "").trim();
+  if (!id) abort("cleanupQaClients requires a runId so concurrent QA runs are not deleted.");
   return withAdmin(async (db) => {
     const snap = await db.collection("salons/" + SALON_ID + "/clients").limit(400).get();
     const deleted = [];
@@ -106,6 +114,29 @@ async function cleanupQaClients() {
       const data = docSnap.data() || {};
       if (String(data.notes || "").trim() === FIXTURE_NOTE) continue;
       if (!isQaLifecycleNote(data.notes)) continue;
+      if (!clientNoteBelongsToRun(data.notes, id)) continue;
+      const docPath = CLIENTS_PREFIX + docSnap.id;
+      assertQaSalonPath(docPath);
+      await db.doc(docPath).delete();
+      deleted.push(docSnap.id);
+    }
+    return deleted;
+  });
+}
+
+async function cleanupStaleQaClients(maxAgeMs) {
+  const age = Number(maxAgeMs) || 6 * 60 * 60 * 1000;
+  const cutoff = Date.now() - age;
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/clients").limit(400).get();
+    const deleted = [];
+    for (const docSnap of snap.docs) {
+      if (docSnap.id === FIXTURE_CLIENT_ID) continue;
+      const data = docSnap.data() || {};
+      if (String(data.notes || "").trim() === FIXTURE_NOTE) continue;
+      if (!isQaLifecycleNote(data.notes)) continue;
+      const updated = docSnap.updateTime && docSnap.updateTime.toMillis ? docSnap.updateTime.toMillis() : 0;
+      if (!updated || updated > cutoff) continue;
       const docPath = CLIENTS_PREFIX + docSnap.id;
       assertQaSalonPath(docPath);
       await db.doc(docPath).delete();
@@ -116,7 +147,9 @@ async function cleanupQaClients() {
 }
 
 function makeRunId() {
-  return Date.now().toString(36) + path.basename(REPO_ROOT).replace(/[^A-Za-z0-9]/g, "").slice(0, 6);
+  if (process.env.FF_QA_CLIENT_RUN_ID) return String(process.env.FF_QA_CLIENT_RUN_ID);
+  if (process.env.FF_QA_RUN_ID) return String(process.env.FF_QA_RUN_ID).replace(/^FF-QA-/, "");
+  return Date.now().toString(36) + process.pid.toString(36) + crypto.randomBytes(3).toString("hex");
 }
 
 function noteFor(runId, scenario) {
@@ -132,8 +165,10 @@ module.exports = {
   listQaLifecycleClients,
   waitForQaClientByNote,
   cleanupQaClients,
+  cleanupStaleQaClients,
   makeRunId,
   noteFor,
   summarizeClient,
   isQaLifecycleNote,
+  clientNoteBelongsToRun,
 };

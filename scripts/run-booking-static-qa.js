@@ -12,6 +12,11 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
 const CHECKPOINT_SHA = "c2ba63ed92faec884e5ab4e2beb0b76829ced251";
+
+function productRoot() {
+  const raw = String(process.env.FF_QA_APP_ROOT || "").trim();
+  return raw ? path.resolve(raw) : ROOT;
+}
 const KNOWN_A = {
   "scripts/test-booking-clients-ui.js": [
     "recent list is bounded to 50",
@@ -58,17 +63,21 @@ function assessCollectedTests(tests) {
   return { failKeys: failKeys.slice().sort(), expected, extra, missing, unexpected };
 }
 
-function listStaticTests() {
+function listStaticTests(root) {
+  const base = root || productRoot();
+  const dir = path.join(base, "scripts");
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(path.join(ROOT, "scripts"))
+    .readdirSync(dir)
     .filter((name) => /^test-booking-.*\.js$/.test(name))
     .sort()
     .map((name) => path.join("scripts", name));
 }
 
-function runOne(rel) {
-  const result = spawnSync(process.execPath, [path.join(ROOT, rel)], {
-    cwd: ROOT,
+function runOne(rel, root) {
+  const base = root || productRoot();
+  const result = spawnSync(process.execPath, [path.join(base, rel)], {
+    cwd: base,
     encoding: "utf8",
   });
   return result;
@@ -134,22 +143,23 @@ function collectFromSpawn(rel, result) {
   return { rows, stdout };
 }
 
-function main() {
+function runStaticSuite(options) {
   const started = new Date().toISOString();
-  const files = listStaticTests();
+  const root = options && options.productRoot ? path.resolve(options.productRoot) : productRoot();
+  const files = listStaticTests(root);
   const tests = [];
-
-  console.log("Booking static QA @ checkpoint " + CHECKPOINT_SHA);
-  console.log("Exit 0 only if failures exactly match the frozen c2ba63e baseline.\n");
+  const ranScripts = files.slice();
 
   files.forEach((rel) => {
-    const result = runOne(rel);
+    const result = runOne(rel, root);
     const collected = collectFromSpawn(rel, result);
-    process.stdout.write(collected.stdout);
-    if (!collected.stdout.endsWith("\n")) process.stdout.write("\n");
+    if (!(options && options.silent)) {
+      process.stdout.write(collected.stdout);
+      if (!collected.stdout.endsWith("\n")) process.stdout.write("\n");
+    }
     collected.rows.forEach((row) => {
       row.timestamp = new Date().toISOString();
-      if (row.status === "fail") {
+      if (row.status === "fail" && !(options && options.silent)) {
         const label = row.classification === "A"
           ? "CLASS A — PRE-EXISTING AT c2ba63e"
           : "CLASS unknown";
@@ -160,15 +170,32 @@ function main() {
   });
 
   const assessment = assessCollectedTests(tests);
+  return {
+    productRoot: root,
+    startedAt: started,
+    finishedAt: new Date().toISOString(),
+    ranScripts,
+    tests,
+    assessment,
+  };
+}
+
+function main() {
+  console.log("Booking static QA @ checkpoint " + CHECKPOINT_SHA);
+  console.log("Product root: " + productRoot());
+  console.log("Exit 0 only if failures exactly match the frozen c2ba63e baseline.\n");
+  const result = runStaticSuite();
+  const assessment = result.assessment;
   const out = {
     checkpointSha: CHECKPOINT_SHA,
-    generatedAt: started,
-    finishedAt: new Date().toISOString(),
+    generatedAt: result.startedAt,
+    finishedAt: result.finishedAt,
     suite: "booking-static",
+    productRoot: result.productRoot,
     unexpectedFails: assessment.unexpected,
     extra: assessment.extra,
     missing: assessment.missing,
-    tests,
+    tests: result.tests,
   };
   const dest = path.join(ROOT, "qa", "baselines", "last-static.json");
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -191,6 +218,8 @@ module.exports = {
   classifyFail,
   assessCollectedTests,
   collectFromSpawn,
+  listStaticTests,
+  runStaticSuite,
 };
 
 if (require.main === module) {
