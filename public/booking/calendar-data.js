@@ -271,6 +271,8 @@
         intervals: axis.intervals || [],
         source: axis.source || "",
         note: axis.note || "",
+        dateKey: dateKey,
+        locationId: loc,
         usedDefault: false
       };
     }
@@ -304,6 +306,8 @@
       intervals: isOpen ? [{ startMin: salonStart, endMin: salonEnd }] : [],
       source: "business_hours",
       note: "",
+      dateKey: dateKey,
+      locationId: loc,
       usedDefault: start == null || end == null
     };
   }
@@ -318,7 +322,9 @@
       salonEndMin: next.salonEndMin,
       intervals: Array.isArray(next.intervals) ? next.intervals : [],
       source: next.source || "",
-      note: next.note || ""
+      note: next.note || "",
+      dateKey: next.dateKey || "",
+      locationId: next.locationId || ""
     };
   }
 

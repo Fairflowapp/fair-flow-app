@@ -372,6 +372,11 @@
 
   function paintOverlays(root) {
     try {
+      if (window.ffBookingCalBlocks && typeof window.ffBookingCalBlocks.paint === "function") {
+        window.ffBookingCalBlocks.paint(root);
+      }
+    } catch (_) {}
+    try {
       if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
     } catch (_) {}
     try {

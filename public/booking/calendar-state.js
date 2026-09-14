@@ -128,7 +128,9 @@
       salonEndMin: salonEndMin,
       intervals: salonIntervals,
       source: businessHours && businessHours.source ? businessHours.source : "",
-      note: businessHours && businessHours.note ? businessHours.note : ""
+      note: businessHours && businessHours.note ? businessHours.note : "",
+      dateKey: selectedDateKey || "",
+      locationId: locationId || ""
     };
   }
 

@@ -602,12 +602,19 @@
     return resolveEffectiveProviderAvailability(providerId, date, locationId);
   }
 
+  function calendarBlockOverlaps(providerId, dateKey, locationId, startMin, endMin) {
+    var api = window.ffBookingCalBlocks;
+    return !!(api && typeof api.overlaps === "function"
+      && api.overlaps(dateKey, locationId, providerId, startMin, endMin));
+  }
+
   function isProviderAvailableAt(providerId, dateTime, locationId) {
     var locId = resolveLocationId(locationId);
     var when = resolveDateTime(dateTime, locId);
     if (!when) return false;
     var availability = resolveEffectiveProviderAvailability(providerId, when.dateKey, locId);
-    return containsMinutes(availability.intervals, when.minutes);
+    if (!containsMinutes(availability.intervals, when.minutes)) return false;
+    return !calendarBlockOverlaps(providerId, when.dateKey, locId, when.minutes, when.minutes + 1);
   }
 
   function canProviderFitDuration(providerId, startDateTime, durationMinutes, locationId) {
@@ -617,9 +624,11 @@
     if (!when || !Number.isFinite(duration) || duration <= 0) return false;
     var availability = resolveEffectiveProviderAvailability(providerId, when.dateKey, locId);
     var endMin = when.minutes + duration;
-    return (availability.intervals || []).some(function (win) {
+    var fits = (availability.intervals || []).some(function (win) {
       return when.minutes >= win.startMin && endMin <= win.endMin;
     });
+    if (!fits) return false;
+    return !calendarBlockOverlaps(providerId, when.dateKey, locId, when.minutes, endMin);
   }
 
   function businessAxis(date, locationId) {

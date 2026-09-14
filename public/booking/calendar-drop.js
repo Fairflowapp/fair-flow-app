@@ -5,7 +5,8 @@
 (function () {
   var MESSAGES = Object.freeze({
     salon_closed: "The salon is closed at that time.",
-    provider_off: "This provider is not available at that time."
+    provider_off: "This provider is not available at that time.",
+    provider_blocked: "This time is blocked for this provider."
   });
 
   function availability() {
@@ -80,6 +81,9 @@
     if (rangeOverlaps(regions.off, startMin, endMin)) {
       return { ok: false, reason: "provider_off", message: MESSAGES.provider_off };
     }
+    if (rangeOverlaps(regions.blocked, startMin, endMin)) {
+      return { ok: false, reason: "provider_blocked", message: MESSAGES.provider_blocked };
+    }
     return { ok: true };
   }
 
@@ -90,7 +94,9 @@
       startMin: next.startMin,
       durationMinutes: Number(next.durationMinutes) > 0 ? Number(next.durationMinutes) : 30,
       axis: next.axis,
-      employee: next.employee
+      employee: next.employee,
+      dateKey: next.dateKey,
+      locationId: next.locationId
     });
   }
 
