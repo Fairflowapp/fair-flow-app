@@ -52,8 +52,7 @@
       {
         id: "block",
         label: "Block time",
-        enabled: false,
-        hint: "Coming later"
+        enabled: true
       },
       {
         id: "unavailable",
@@ -90,6 +89,10 @@
     }
     if (id === "hours" && canManageHours() && hasScheduleTab()) {
       window.openStaffMemberScheduleTab(ctx.providerId);
+      return;
+    }
+    if (id === "block" && window.ffBookingCalBlockUi && typeof window.ffBookingCalBlockUi.openCreateFromMenu === "function") {
+      window.ffBookingCalBlockUi.openCreateFromMenu(ctx);
       return;
     }
     if (id === "profile" && hasProfile()) {

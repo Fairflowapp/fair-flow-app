@@ -215,7 +215,8 @@ check("block style is not the provider-off hatch", !/\.ff-cal-block\s*\{[^}]*rep
 check("salon closed grey is unchanged", /\.ff-cal-closed\s*\{[^}]*background:\s*#F5F5F7/.test(css));
 
 const menuSrc = fs.readFileSync(path.join(root, "public/booking/calendar-menu.js"), "utf8");
-check("Block time menu stays a later creation flow", menuSrc.indexOf('id: "block"') !== -1 && menuSrc.indexOf("Coming later") !== -1);
+check("Block time menu is enabled", /id:\s*"block"[\s\S]*?enabled:\s*true/.test(menuSrc));
+check("Mark unavailable today stays later", menuSrc.indexOf("Mark unavailable today") !== -1 && menuSrc.indexOf("Coming later") !== -1);
 
 if (failed) {
   console.error(failed + " calendar blocked-time tests failed.");
