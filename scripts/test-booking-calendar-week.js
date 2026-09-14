@@ -244,7 +244,7 @@ const menuSrc = fs.readFileSync(path.join(root, "public/booking/calendar-menu.js
 check("toolbar Week control is enabled", calSrc.indexOf('data-ff-cal-act="view-week"') !== -1 && calSrc.indexOf("Week view coming later") === -1);
 check("provider menu can open Week without mutating Day filters", menuSrc.indexOf("setWeekProviderId") !== -1 && menuSrc.indexOf("View provider week") !== -1);
 check("Week paint does not reuse provider photos on each day", weekSrc.indexOf("ff-cal-day-head") !== -1 && weekSrc.indexOf("providerBarHtml") !== -1);
-check("Week empty-slot create is not wired in Phase 1", calSrc.indexOf("if (st && st.isWeek && st.isWeek()) return;") !== -1);
+check("Week empty-slot create reuses Day openAppointmentFromHit", calSrc.indexOf("rememberWeekSlot") !== -1 && calSrc.indexOf("openAppointmentFromHit(rememberWeekSlot") !== -1);
 
 load("public/booking/schedule-board.js", windowObj);
 const board = windowObj.ffBookingScheduleBoard;

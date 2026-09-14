@@ -146,6 +146,72 @@
       escapeHtml(label) + "</span>";
   }
 
+  function createHit(dateKey, startMin) {
+    var st = state();
+    var loc = st ? st.getLocationId() : "";
+    var providerId = st && typeof st.getWeekProviderId === "function" ? st.getWeekProviderId() : "";
+    var day = String(dateKey || "").trim();
+    var start = Number(startMin);
+    if (!st || !st.isWeek || !st.isWeek() || !providerId || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(start)) {
+      return null;
+    }
+    var emp = employeeForDay(providerId, day, loc);
+    return {
+      slot: {
+        providerId: providerId,
+        dateKey: day,
+        startMin: start
+      },
+      employees: [emp],
+      axis: axisForDate(day),
+      locationId: loc
+    };
+  }
+
+  function inspectCreate(dateKey, startMin) {
+    var hit = createHit(dateKey, startMin);
+    if (!hit) return { ok: false, reason: "no_hit" };
+    var emp = hit.employees[0];
+    var create = window.ffBookingCalendarCreate;
+    var blocked = create && typeof create.blockedCreate === "function"
+      ? create.blockedCreate(hit, emp)
+      : null;
+    if (blocked) {
+      return {
+        ok: false,
+        reason: blocked.reason || "unavailable",
+        message: blocked.message || "",
+        hit: hit
+      };
+    }
+    var open = create && typeof create.slotIsOpen === "function"
+      ? create.slotIsOpen(emp, hit.axis, hit.slot.startMin)
+      : (availability() && availability().reasonAt(emp, hit.axis, hit.slot.startMin) === "available");
+    return {
+      ok: !!open,
+      reason: open ? "available" : "not_bookable",
+      hit: hit
+    };
+  }
+
+  function hitTestFromPoint(surfaceX, surfaceY, columnWidth) {
+    var st = state();
+    var lay = layout();
+    if (!st || !lay || !st.isWeek || !st.isWeek()) return null;
+    var providerId = st.getWeekProviderId();
+    var dates = st.getWeekDateKeys ? st.getWeekDateKeys() : [];
+    if (!providerId || !dates.length) return null;
+    var slot = lay.hitTest(surfaceX, surfaceY, {
+      employees: dates.map(function (dateKey) {
+        return { id: providerId, dateKey: dateKey };
+      }),
+      axis: sharedAxis(),
+      columnWidth: columnWidth
+    });
+    if (!slot || !slot.dateKey) return null;
+    return createHit(slot.dateKey, slot.startMin);
+  }
+
   function nowLineDayKey() {
     var st = state();
     var tm = time();
@@ -406,6 +472,9 @@
     updateNowLine: updateNowLine,
     openPicker: openPicker,
     closePicker: closePicker,
-    chooseProvider: chooseProvider
+    chooseProvider: chooseProvider,
+    createHit: createHit,
+    inspectCreate: inspectCreate,
+    hitTestFromPoint: hitTestFromPoint
   };
 })();

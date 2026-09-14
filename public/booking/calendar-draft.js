@@ -82,9 +82,16 @@
     root.querySelectorAll("[data-ff-cal-hold]").forEach(function (el) { el.remove(); });
   }
 
-  function findCol(root, providerId) {
+  function findCol(root, providerId, dateKey) {
     var id = String(providerId || "");
-    if (!root || !id) return null;
+    if (!root) return null;
+    var st = calState();
+    if (st && st.isWeek && st.isWeek()) {
+      var day = String(dateKey || (draft && draft.dateKey) || "");
+      if (!day || !root.querySelector) return null;
+      return root.querySelector('[data-ff-cal-day="' + day + '"]');
+    }
+    if (!id) return null;
     var cols = root.querySelectorAll("[data-ff-cal-emp]");
     for (var i = 0; i < cols.length; i += 1) {
       if (cols[i].getAttribute("data-ff-cal-emp") === id) return cols[i];
@@ -117,7 +124,7 @@
   }
 
   function paintLine(root, axis, lay, line, partySize, item) {
-    var col = findCol(root, line.providerId);
+    var col = findCol(root, line.providerId, draft && draft.dateKey);
     if (!col) return;
     var rect = lay.windowToRect(line.startMin, line.startMin + line.durationMinutes, axis.startMin, axis.endMin);
     if (!rect) return;
@@ -150,8 +157,21 @@
     var st = calState();
     var lay = layout();
     if (!st || !lay) return;
-    if (st.getSelectedDateKey() !== draft.dateKey) return;
-    var axis = st.getAxis();
+    var axis = null;
+    if (st.isWeek && st.isWeek()) {
+      var keys = st.getWeekDateKeys ? st.getWeekDateKeys() : [];
+      if (keys.indexOf(draft.dateKey) === -1) return;
+      var weekId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+      if (weekId && draft.lines.every(function (line) {
+        return String(line.providerId) !== String(weekId);
+      })) return;
+      axis = window.ffBookingCalWeek && typeof window.ffBookingCalWeek.sharedAxis === "function"
+        ? window.ffBookingCalWeek.sharedAxis()
+        : st.getAxis();
+    } else {
+      if (st.getSelectedDateKey() !== draft.dateKey) return;
+      axis = st.getAxis();
+    }
     if (!axis) return;
     var partySize = draftPartySize(draft.lines);
     var items = (built && built.items) || [];

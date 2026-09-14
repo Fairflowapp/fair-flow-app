@@ -219,9 +219,17 @@
       if (week) {
         var weekId = st.getWeekProviderId ? st.getWeekProviderId() : "";
         var loc = st.getLocationId();
+        var snap = draftApi() && typeof draftApi().get === "function" ? draftApi().get() : null;
         (st.getWeekDateKeys ? st.getWeekDateKeys() : []).forEach(function (dateKey) {
           var dayCards = cardsForWeekDay(api, dateKey, loc, weekId);
-          paintItems(root, buildItems(dayCards, []).items, axis, true);
+          var holds = snap && snap.dateKey === dateKey && (!weekId || snap.providerId === weekId)
+            ? holdsFromDraft()
+            : [];
+          var built = buildItems(dayCards, holds);
+          paintItems(root, built.items, axis, true);
+          if (holds.length && draftApi() && typeof draftApi().paintFromBoard === "function") {
+            draftApi().paintFromBoard(root, built);
+          }
         });
       } else {
         var cards = api.cardsForView(st.getSelectedDateKey(), st.getLocationId());

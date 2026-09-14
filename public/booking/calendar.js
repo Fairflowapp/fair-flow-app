@@ -186,6 +186,21 @@
     return slot ? { slot: slot, employees: employees, axis: st.getAxis(), locationId: st.getLocationId() } : null;
   }
 
+  function rememberWeekSlot(ev, surface) {
+    var st = state();
+    var week = window.ffBookingCalWeek;
+    if (!st || !week || !surface || !ev) return null;
+    if (typeof week.hitTestFromPoint !== "function") return null;
+    var rect = surface.getBoundingClientRect();
+    var hit = week.hitTestFromPoint(
+      ev.clientX - rect.left,
+      ev.clientY - rect.top,
+      columnWidth(surface)
+    );
+    window.ffBookingCalLastSlot = hit && hit.slot ? hit.slot : null;
+    return hit;
+  }
+
   function slotIsOpen(emp, axis, minutes) {
     var av = availability();
     if (!av) return false;
@@ -588,6 +603,10 @@
         ev.preventDefault();
         return;
       }
+      if (t.closest("[data-ff-cal-block]")) {
+        ev.preventDefault();
+        return;
+      }
       var card = t.closest("[data-ff-cal-card]");
       if (card) {
         ev.preventDefault();
@@ -621,8 +640,12 @@
         });
         return;
       }
-      if (st && st.isWeek && st.isWeek()) return;
-      openAppointmentFromHit(rememberSlot(ev, t.closest("[data-ff-cal-surface]")));
+      var surface = t.closest("[data-ff-cal-surface]");
+      if (st && st.isWeek && st.isWeek()) {
+        openAppointmentFromHit(rememberWeekSlot(ev, surface));
+        return;
+      }
+      openAppointmentFromHit(rememberSlot(ev, surface));
     });
     document.addEventListener("ff-staff-cloud-updated", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
