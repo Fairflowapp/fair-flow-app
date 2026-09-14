@@ -191,6 +191,17 @@
     });
   }
 
+  function notifyDraftChanged() {
+    if (typeof document === "undefined" || typeof document.dispatchEvent !== "function") return;
+    var ev;
+    try {
+      ev = new CustomEvent("ff-booking-calendar-draft-changed", { detail: { draft: snapshot() } });
+    } catch (_) {
+      ev = { type: "ff-booking-calendar-draft-changed", detail: { draft: snapshot() } };
+    }
+    document.dispatchEvent(ev);
+  }
+
   function sync(root) {
     var render = window.ffBookingCalCardRender;
     if (render && typeof render.paint === "function" && !window.__ffPaintingBoard) {
@@ -205,7 +216,8 @@
     var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
     if (!dateKey || !lines.length) {
       draft = null;
-      sync();
+      paintFromBoard();
+      notifyDraftChanged();
       return;
     }
     draft = {
@@ -214,11 +226,13 @@
       lines: lines
     };
     sync();
+    notifyDraftChanged();
   }
 
   function clear() {
     draft = null;
-    sync();
+    paintFromBoard();
+    notifyDraftChanged();
   }
 
   function snapshot() {

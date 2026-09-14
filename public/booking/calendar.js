@@ -686,6 +686,10 @@
     document.addEventListener("ff-booking-appointment-cancelled", function () {
       if (isCalendarVisible()) syncAppointmentCards();
     });
+    document.addEventListener("ff-booking-calendar-draft-changed", function () {
+      var root = document.getElementById(ROOT_ID);
+      if (root && isCalendarVisible()) paintOverlays(root);
+    });
     if (!resizeBound) {
       resizeBound = true;
       window.addEventListener("resize", function () {

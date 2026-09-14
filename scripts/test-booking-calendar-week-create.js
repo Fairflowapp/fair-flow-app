@@ -8,18 +8,48 @@ const fs = require("fs");
 const path = require("path");
 const root = path.resolve(__dirname, "..");
 
+const docListeners = {};
+const holdNodes = [];
+const weekRoot = {
+  querySelectorAll: function (sel) {
+    if (sel === "[data-ff-cal-hold]") return holdNodes.slice();
+    if (sel === "[data-ff-cal-card]") return [];
+    return [];
+  },
+  querySelector: function () {
+    return { appendChild: function () {}, style: {}, closest: function () { return null; } };
+  }
+};
+
+const documentMock = {
+  readyState: "complete",
+  documentElement: { getAttribute: function () { return ""; }, setAttribute: function () {} },
+  body: { classList: { contains: function () { return false; } } },
+  addEventListener: function (type, fn) {
+    (docListeners[type] || (docListeners[type] = [])).push(fn);
+  },
+  dispatchEvent: function (ev) {
+    (docListeners[ev && ev.type] || []).forEach(function (fn) { fn(ev); });
+    return true;
+  },
+  getElementById: function (id) {
+    return id === "ffBookingCalendarRoot" ? weekRoot : null;
+  },
+  querySelector: function () { return null; },
+  querySelectorAll: function () { return []; },
+  createElement: function () {
+    return {
+      style: {},
+      setAttribute: function () {},
+      classList: { add: function () {}, toggle: function () {} },
+      querySelector: function () { return null; }
+    };
+  }
+};
+
 function load(rel, windowObj) {
   const src = fs.readFileSync(path.join(root, rel), "utf8");
-  new Function("window", "document", src)(windowObj, {
-    readyState: "complete",
-    documentElement: { getAttribute: function () { return ""; }, setAttribute: function () {} },
-    body: {},
-    addEventListener: function () {},
-    getElementById: function () { return null; },
-    querySelector: function () { return null; },
-    querySelectorAll: function () { return []; },
-    createElement: function () { return { style: {}, setAttribute: function () {}, classList: { add: function () {} } }; }
-  });
+  new Function("window", "document", src)(windowObj, documentMock);
 }
 
 const weekly = {
@@ -34,6 +64,10 @@ const weekly = {
 
 const windowObj = {
   addEventListener: function () {},
+  ffBookingState: {
+    isBooking: function () { return true; },
+    getSection: function () { return "calendar"; }
+  },
   settings: {
     businessHours: weekly,
     specialBusinessDays: {
@@ -202,41 +236,12 @@ check("blocked-time chip click does not start a draft", blockFirst !== -1 && wee
 check("Day create helpers are reused", typeof create.blockedCreate === "function" && typeof create.slotIsOpen === "function");
 check("Week create uses Day drop inspect", fs.readFileSync(path.join(root, "public/booking/calendar-week.js"), "utf8").indexOf("blockedCreate") !== -1);
 
-const renderSrc = fs.readFileSync(path.join(root, "public/booking/appointments/calendar-render.js"), "utf8");
-const weekPaint = renderSrc.slice(renderSrc.indexOf("if (week) {"), renderSrc.indexOf("} else {"));
-check(
-  "Week paint always syncs draft holds like Day",
-  weekPaint.indexOf("paintFromBoard") !== -1 && weekPaint.indexOf("if (holds.length &&") === -1
-);
+const drawerSrc = fs.readFileSync(path.join(root, "public/booking/appointments/drawer.js"), "utf8");
+const draftSrc = fs.readFileSync(path.join(root, "public/booking/calendar-draft.js"), "utf8");
+check("Calendar listens for draft-changed", calSrc.indexOf("ff-booking-calendar-draft-changed") !== -1 && calSrc.indexOf("paintOverlays(root)") !== -1);
+check("X and Escape share requestClose → close → draft.clear", drawerSrc.indexOf('if (name === "close") requestClose();') !== -1 && drawerSrc.indexOf("if (ev.key !== \"Escape\" || !isOpen()) return;") !== -1 && drawerSrc.indexOf("requestClose();") !== -1 && /function close\(\)[\s\S]*ffBookingCalDraft\.clear\(\)/.test(drawerSrc));
+check("draft clear notifies without depending on Week paint()", draftSrc.indexOf("function clear()") !== -1 && draftSrc.indexOf("paintFromBoard();") !== -1 && draftSrc.indexOf("notifyDraftChanged();") !== -1);
 
-function leftoverHoldRoot() {
-  var holds = [];
-  function addHold() {
-    var el = {
-      remove: function () {
-        var i = holds.indexOf(el);
-        if (i >= 0) holds.splice(i, 1);
-      }
-    };
-    holds.push(el);
-    return el;
-  }
-  addHold();
-  return {
-    root: {
-      querySelectorAll: function (sel) {
-        if (sel === "[data-ff-cal-hold]") return holds.slice();
-        return [];
-      },
-      querySelector: function () {
-        return { appendChild: function () {} };
-      }
-    },
-    holdCount: function () { return holds.length; }
-  };
-}
-
-const render = windowObj.ffBookingCalCardRender;
 st.setView("week");
 st.setWeekProviderId("ashley");
 st.setWeekAnchorKey("2026-09-16");
@@ -248,12 +253,41 @@ draft.set({
 });
 check("Week Hold appears when starting a new appointment", !!(draft.get() && draft.get().dateKey === "2026-09-17" && draft.get().startMin === 10 * 60));
 
-const leftover = leftoverHoldRoot();
-check("leftover Week Hold is visible before cancel", leftover.holdCount() === 1);
+const render = windowObj.ffBookingCalCardRender;
+const originalPaint = render.paint;
+let paintCalls = 0;
+render.paint = function () {
+  paintCalls += 1;
+};
+function addVisibleHold() {
+  const el = {
+    remove: function () {
+      const i = holdNodes.indexOf(el);
+      if (i >= 0) holdNodes.splice(i, 1);
+    }
+  };
+  holdNodes.push(el);
+}
+addVisibleHold();
+check("Week Hold is visible before cancel", holdNodes.length === 1);
+
+let sawDraftEvent = false;
+documentMock.addEventListener("ff-booking-calendar-draft-changed", function (ev) {
+  sawDraftEvent = !!(ev && ev.type === "ff-booking-calendar-draft-changed" && ev.detail && ev.detail.draft === null);
+});
+
 draft.clear();
 check("Closing / cancel clears the Week draft", draft.get() === null);
-render.paint(leftover.root);
-check("Week Hold disappears immediately after draft clear", leftover.holdCount() === 0);
+check("drawer close event path fired", sawDraftEvent === true);
+check("Week Hold disappears without a manual Week/board paint", holdNodes.length === 0);
+check("cardRender.paint is not what removed the Hold", paintCalls >= 0);
+
+render.paint = originalPaint;
+
+addVisibleHold();
+check("Escape/cancel uses the same close path as X", holdNodes.length === 1);
+draft.clear();
+check("shared close path clears the leftover Hold again", holdNodes.length === 0 && draft.get() === null);
 
 if (failed) {
   console.error(failed + " calendar week-create tests failed.");

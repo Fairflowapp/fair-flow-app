@@ -130,7 +130,7 @@
 
   function clear(root) {
     if (!root) return;
-    root.querySelectorAll("[data-ff-cal-card]").forEach(function (el) { el.remove(); });
+    root.querySelectorAll("[data-ff-cal-card], [data-ff-cal-hold]").forEach(function (el) { el.remove(); });
   }
 
   function cardsForWeekDay(api, dateKey, locationId, providerId) {
