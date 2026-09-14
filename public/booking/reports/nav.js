@@ -23,22 +23,22 @@
         {
           id: "sales-summary",
           label: "Sales Summary",
-          blurb: "Shows quantities and sales totals of services for each day."
+          blurb: "Overall closed checkout sales."
         },
         {
           id: "service-sales",
           label: "Service Sales",
-          blurb: "Gross totals by service from closed checkout items."
-        },
-        {
-          id: "product-sales",
-          label: "Product Sales",
-          blurb: "Retail product sales. This report waits until checkout includes products."
+          blurb: "Service-item sales from closed checkout tickets. Tips and ticket-level refunds are not allocated to services."
         },
         {
           id: "sales-by-period",
           label: "Sales by Time Period",
-          blurb: "Closed checkout sales by day and weekday."
+          blurb: "Closed checkout sales grouped by sale date."
+        },
+        {
+          id: "product-sales",
+          label: "Product Sales",
+          blurb: "Available when product checkout is supported."
         }
       ]
     }

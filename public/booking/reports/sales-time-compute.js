@@ -126,6 +126,8 @@
   }
 
   function dedupeSales(sales) {
+    var api = shared();
+    if (api && typeof api.dedupeSales === "function") return api.dedupeSales(sales);
     var seen = {};
     var out = [];
     (sales || []).forEach(function (sale) {

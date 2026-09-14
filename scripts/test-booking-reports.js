@@ -71,8 +71,12 @@ check("nav defaults to booking intelligence", nav.getSelectedId() === "booking-i
 check("nav can still open sales summary", nav.setSelectedId("sales-summary") === "sales-summary" && nav.getSelected().label === "Sales Summary");
 check("nav can select booking intelligence", nav.setSelectedId("booking-intelligence") === "booking-intelligence" && nav.getSelected().label === "Booking Intelligence");
 check("nav can select service sales", nav.setSelectedId("service-sales") === "service-sales" && nav.getSelected().label === "Service Sales");
-check("nav can select sales by time period", nav.setSelectedId("sales-by-period") === "sales-by-period" && nav.getSelected().blurb.indexOf("weekday") !== -1);
+check("nav can select sales by time period", nav.setSelectedId("sales-by-period") === "sales-by-period" && nav.getSelected().blurb.indexOf("sale date") !== -1);
 check("service sales is no longer a placeholder blurb only", nav.find("service-sales").blurb.indexOf("closed checkout") !== -1);
+check("sales summary blurb is overall checkout sales", nav.find("sales-summary").blurb.indexOf("Overall closed checkout sales") !== -1);
+check("product sales stays a placeholder", nav.find("product-sales").blurb.indexOf("product checkout") !== -1);
+const salesIds = nav.GROUPS.find(function (group) { return group.id === "sales"; }).items.map(function (row) { return row.id; });
+check("financial report order is summary, service, time, product", salesIds.join(",") === "sales-summary,service-sales,sales-by-period,product-sales");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },
@@ -116,8 +120,10 @@ const summarySrc = read("public/booking/reports/sales-summary.js");
 check("location row is a clickable label", summarySrc.indexOf('data-ff-rpt-loc="') !== -1 && summarySrc.indexOf("toggleLocation") !== -1);
 check("empty location list does not lock the picker", summarySrc.indexOf("if (all.length) filters.locationIds = all") !== -1);
 check("open location menu stacks above the report", css.indexOf(".ff-rpt-dd.is-open") !== -1 && css.indexOf("z-index: 6") !== -1);
-check("sales summary shows checkout fields we have", summarySrc.indexOf("# Sales") !== -1 && summarySrc.indexOf("Service Sales") !== -1 && summarySrc.indexOf("Tips") !== -1);
-check("sales summary keeps later columns", summarySrc.indexOf("Product Sales") !== -1 && summarySrc.indexOf("Custom Fees") !== -1 && summarySrc.indexOf("Taxes") !== -1 && summarySrc.indexOf("Refunds") !== -1 && summarySrc.indexOf("Adjusted Total") !== -1);
+check("sales summary shows checkout fields we have", summarySrc.indexOf("Closed tickets") !== -1 && summarySrc.indexOf("Gross service sales") !== -1 && summarySrc.indexOf("Tips") !== -1);
+check("sales summary keeps later columns", summarySrc.indexOf("Product Sales") !== -1 && summarySrc.indexOf("Custom Fees") !== -1 && summarySrc.indexOf("Taxes") !== -1 && summarySrc.indexOf("Refunded amount") !== -1 && summarySrc.indexOf("Adjusted sales") !== -1);
+check("sales summary uses shared financial terms", summarySrc.indexOf("Gross checkout sales") !== -1 && summarySrc.indexOf("Revenue") === -1);
+check("sales summary uses ownerView isolation", summarySrc.indexOf("ownerView") !== -1);
 check("sales summary does not add gift cards or memberships", summarySrc.indexOf("Gift Card") === -1 && summarySrc.indexOf("Membership") === -1);
 check("sales summary names the location and period", summarySrc.indexOf("Location(s):") !== -1 && summarySrc.indexOf("Period:") !== -1);
 check("sales summary uses range-complete retrieval", summarySrc.indexOf("fetchForReport") !== -1 && summarySrc.indexOf("listForSalon") === -1 && summarySrc.indexOf("limit: 80") === -1);

@@ -60,7 +60,15 @@
   }
 
   function isServiceItem(item) {
+    var api = shared();
+    if (api && typeof api.isServiceItem === "function") return api.isServiceItem(item);
     return !!(item && item.kind !== "product");
+  }
+
+  function dedupeSales(sales) {
+    var api = shared();
+    if (api && typeof api.dedupeSales === "function") return api.dedupeSales(sales);
+    return sales || [];
   }
 
   function itemAmount(item) {
@@ -103,21 +111,30 @@
   function serviceItemsFromSale(sale) {
     var items = (sale && sale.items) || [];
     var out = [];
+    var products = 0;
     items.forEach(function (item) {
+      if (item && item.kind === "product") {
+        products += 1;
+        return;
+      }
       if (!isServiceItem(item)) return;
       out.push(item);
     });
-    if (!items.length) {
+    var serviceSales = 0;
+    out.forEach(function (item) {
+      serviceSales = money2(serviceSales + itemAmount(item));
+    });
+    if (serviceSales === 0 && products === 0) {
       var subtotal = money2(sale && sale.subtotal);
       if (subtotal) {
-        out.push({
+        return [{
           kind: "service",
           name: "",
           serviceId: "",
           providerId: "",
           providerName: "",
           amount: subtotal
-        });
+        }];
       }
     }
     return out;
@@ -174,7 +191,7 @@
     var services = {};
     var providers = {};
     var days = {};
-    (sales || []).forEach(function (sale) {
+    dedupeSales(sales).forEach(function (sale) {
       if (!isEligibleSale(sale, options)) return;
       totals.tickets += 1;
       if (saleHasTicketRefund(sale)) totals.hasTicketRefunds = true;

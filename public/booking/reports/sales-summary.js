@@ -190,19 +190,37 @@
   var MONEY_KEYS = ["serviceSales", "productSales", "subtotal", "customFees", "tax", "tip", "grossTotal", "refunds", "adjustedTotal"];
   var COLS = [
     { key: "date", label: "Date" },
-    { key: "sales", label: "# Sales" },
+    { key: "sales", label: "Closed tickets" },
     { key: "services", label: "# Services" },
-    { key: "serviceSales", label: "Service Sales" },
+    { key: "serviceSales", label: "Gross service sales" },
     { key: "products", label: "# Products" },
     { key: "productSales", label: "Product Sales" },
     { key: "subtotal", label: "Subtotal" },
     { key: "customFees", label: "Custom Fees" },
     { key: "tax", label: "Taxes" },
     { key: "tip", label: "Tips" },
-    { key: "grossTotal", label: "Gross Total" },
-    { key: "refunds", label: "Refunds" },
-    { key: "adjustedTotal", label: "Adjusted Total" }
+    { key: "grossTotal", label: "Gross checkout sales" },
+    { key: "refunds", label: "Refunded amount" },
+    { key: "adjustedTotal", label: "Adjusted sales" }
   ];
+
+  function kpi(label, value, note) {
+    return (
+      '<div class="ff-rpt-kpi">' +
+        '<p class="ff-rpt-kpi-value">' + escapeHtml(value) + "</p>" +
+        '<p class="ff-rpt-kpi-label">' + escapeHtml(label) + "</p>" +
+        (note ? '<p class="ff-rpt-kpi-note">' + escapeHtml(note) + "</p>" : "") +
+      "</div>"
+    );
+  }
+
+  function averageClosedTicket(totals) {
+    var tickets = Number(totals && totals.sales) || 0;
+    var gross = Number(totals && totals.grossTotal) || 0;
+    if (!tickets) return 0;
+    var n = gross / tickets;
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  }
 
   function cellValue(row, col) {
     if (col.key === "date") return formatDay(row.dateKey);
@@ -227,16 +245,28 @@
       return "<th>" + escapeHtml(cellValue(t, col)) + "</th>";
     }).join("");
     return (
-      '<div class="ff-rpt-meta">' +
-        "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
-        "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
-      "</div>" +
-      '<div class="ff-rpt-table-wrap">' +
-        '<table class="ff-rpt-table">' +
-          "<thead><tr>" + head + "</tr></thead>" +
-          "<tbody>" + rows + "</tbody>" +
-          "<tfoot><tr>" + foot + "</tr></tfoot>" +
-        "</table>" +
+      '<div class="ff-rpt-intel">' +
+        '<div class="ff-rpt-meta">' +
+          "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
+          "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
+          '<p class="ff-rpt-fine">Overall closed checkout sales. Gross service sales is service items only and does not include tips, tax, or fees.</p>' +
+        "</div>" +
+        '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +
+          kpi("Gross checkout sales", money(t.grossTotal)) +
+          kpi("Adjusted sales", money(t.adjustedTotal), t.refunds ? "After ticket-level refunds" : "") +
+          kpi("Closed tickets", String(t.sales || 0)) +
+          kpi("Average closed ticket", money(averageClosedTicket(t))) +
+        "</div>" +
+        '<section class="ff-rpt-panel">' +
+          "<h2>By day</h2>" +
+          '<div class="ff-rpt-table-wrap">' +
+            '<table class="ff-rpt-table ff-rpt-table-summary">' +
+              "<thead><tr>" + head + "</tr></thead>" +
+              "<tbody>" + rows + "</tbody>" +
+              "<tfoot><tr>" + foot + "</tr></tfoot>" +
+            "</table>" +
+          "</div>" +
+        "</section>" +
       "</div>"
     );
   }
@@ -249,7 +279,7 @@
         "Sales data for this range is incomplete. Narrow the date range and try again.") + "</p>";
     }
     if (status === "error" || errorText) {
-      return '<p class="ff-rpt-empty">' + escapeHtml(errorText) + "</p>";
+      return '<p class="ff-rpt-empty">' + escapeHtml(errorText || "This report could not load.") + "</p>";
     }
     return tableHtml(result);
   }
@@ -320,20 +350,32 @@
         : "This report could not load.", null);
       return;
     }
-    var view = rangeHelp && typeof rangeHelp.viewState === "function"
+    var fetchView = rangeHelp && typeof rangeHelp.viewState === "function"
       ? rangeHelp.viewState(fetched)
       : { kind: "error", message: "This report could not load.", sales: [] };
+    var summary = null;
+    if (fetchView.kind === "ok" || fetchView.kind === "empty") {
+      summary = math && typeof math.summarize === "function"
+        ? math.summarize(fetchView.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
+        : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } };
+    }
+    var view = math && typeof math.ownerView === "function"
+      ? math.ownerView(fetchView, summary)
+      : (fetchView.kind === "incomplete"
+        ? { kind: "incomplete", message: fetchView.message, summary: null }
+        : fetchView.kind === "error"
+          ? { kind: "error", message: fetchView.message, summary: null }
+          : { kind: "ok", summary: summary });
     if (view.kind === "error") {
-      finish(requestId, "error", view.message, null);
+      finish(requestId, "error", view.message || "This report could not load.", null);
       return;
     }
     if (view.kind === "incomplete") {
-      finish(requestId, "incomplete", view.message, null);
+      finish(requestId, "incomplete", view.message ||
+        "Sales data for this range is incomplete. Narrow the date range and try again.", null);
       return;
     }
-    finish(requestId, "ready", "", math && typeof math.summarize === "function"
-      ? math.summarize(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
-      : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } });
+    finish(requestId, "ready", "", view.summary || summary);
   }
 
   function setLocationIds(ids) {

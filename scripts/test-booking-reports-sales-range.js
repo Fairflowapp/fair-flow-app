@@ -269,7 +269,8 @@ check("stale request is not stored", range.shouldStoreReportResult(1, 2) === fal
 check("inactive report does not paint", range.shouldPaintReportResult(2, 2, false) === false);
 check("only the latest active request paints", range.shouldPaintReportResult(2, 2, true) === true && range.shouldPaintReportResult(1, 2, true) === false);
 const svcSrc = read("public/booking/reports/service-sales.js");
-check("both sales reports isolate active paint", summarySrc.indexOf("shouldPaintReportResult") !== -1 && svcSrc.indexOf("shouldPaintReportResult") !== -1 && summarySrc.indexOf("isActive") !== -1 && svcSrc.indexOf("isActive") !== -1);
+const timeSrc = read("public/booking/reports/sales-time.js");
+check("all three financial reports isolate active paint", summarySrc.indexOf("shouldPaintReportResult") !== -1 && svcSrc.indexOf("shouldPaintReportResult") !== -1 && timeSrc.indexOf("shouldPaintReportResult") !== -1 && summarySrc.indexOf("isActive") !== -1 && svcSrc.indexOf("isActive") !== -1 && timeSrc.indexOf("isActive") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking sales-range checks passed.");

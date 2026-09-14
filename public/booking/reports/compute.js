@@ -1,5 +1,15 @@
 /**
- * Sales Summary numbers and date ranges. No Firestore.
+ * Shared checkout Sales facts for Sales Summary, Service Sales,
+ * and Sales by Time Period. No Firestore.
+ *
+ * Gross checkout sales = item amounts + fees + tax + tip (breakdown.grossTotal).
+ * Gross service sales = service-item amounts only (kind !== "product").
+ * Those two totals are not expected to match: tips, tax, fees, and
+ * future product sales stay on the ticket, not on the service.
+ * Refunded amount = ticket-level history type === "refunded".
+ * Adjusted sales = gross checkout sales minus refunded amount.
+ * Sales by Time Period daily totals must equal these Summary totals
+ * for the same complete dataset.
  */
 (function () {
   var MONTHS = ["January", "February", "March", "April", "May", "June",
@@ -154,8 +164,35 @@
     return longDate(fromKey) + " - " + longDate(toKey);
   }
 
+  function money2(value) {
+    var n = Math.round((Number(value) || 0) * 100) / 100;
+    return Number.isFinite(n) ? n : 0;
+  }
+
   function itemAmount(item) {
-    return Number(item && item.amount) || 0;
+    return money2(item && item.amount);
+  }
+
+  function saleIdOf(sale) {
+    return trim(sale && (sale.saleId || sale.id));
+  }
+
+  function dedupeSales(sales) {
+    var seen = {};
+    var out = [];
+    (sales || []).forEach(function (sale) {
+      var id = saleIdOf(sale);
+      if (id) {
+        if (seen[id]) return;
+        seen[id] = true;
+      }
+      if (sale) out.push(sale);
+    });
+    return out;
+  }
+
+  function isServiceItem(item) {
+    return !!(item && item.kind !== "product");
   }
 
   function refundAmount(sale) {
@@ -199,19 +236,20 @@
         productSales += amt;
         return;
       }
+      if (!isServiceItem(item)) return;
       services += 1;
       serviceSales += amt;
     });
     if (serviceSales === 0 && products === 0) {
-      serviceSales = Number(sale && sale.subtotal) || 0;
+      serviceSales = money2(sale && sale.subtotal);
     }
-    var customFees = Number(sale && (sale.customFees || sale.fees)) || 0;
-    var tax = Number(sale && sale.tax) || 0;
-    var tip = Number(sale && sale.tip) || 0;
-    var subtotal = serviceSales + productSales;
-    var grossTotal = subtotal + customFees + tax + tip;
-    var refunds = refundAmount(sale);
-    var adjustedTotal = Math.round((grossTotal - refunds) * 100) / 100;
+    var customFees = money2(sale && (sale.customFees || sale.fees));
+    var tax = money2(sale && sale.tax);
+    var tip = money2(sale && sale.tip);
+    var subtotal = money2(serviceSales + productSales);
+    var grossTotal = money2(subtotal + customFees + tax + tip);
+    var refunds = money2(refundAmount(sale));
+    var adjustedTotal = money2(grossTotal - refunds);
     return {
       services: services,
       serviceSales: serviceSales,
@@ -230,17 +268,17 @@
   function addRow(row, parts) {
     row.sales += 1;
     row.services += parts.services;
-    row.serviceSales += parts.serviceSales;
+    row.serviceSales = money2(row.serviceSales + parts.serviceSales);
     row.products += parts.products;
-    row.productSales += parts.productSales;
-    row.subtotal += parts.subtotal;
-    row.customFees += parts.customFees;
-    row.tax += parts.tax;
-    row.tip += parts.tip;
-    row.grossTotal += parts.grossTotal;
-    row.refunds += parts.refunds;
-    row.adjustedTotal += parts.adjustedTotal;
-    row.total += parts.adjustedTotal;
+    row.productSales = money2(row.productSales + parts.productSales);
+    row.subtotal = money2(row.subtotal + parts.subtotal);
+    row.customFees = money2(row.customFees + parts.customFees);
+    row.tax = money2(row.tax + parts.tax);
+    row.tip = money2(row.tip + parts.tip);
+    row.grossTotal = money2(row.grossTotal + parts.grossTotal);
+    row.refunds = money2(row.refunds + parts.refunds);
+    row.adjustedTotal = money2(row.adjustedTotal + parts.adjustedTotal);
+    row.total = money2(row.total + parts.adjustedTotal);
   }
 
   function inRange(dateKey, fromKey, toKey) {
@@ -267,7 +305,7 @@
     var toKey = trim(options.toKey);
     var days = {};
     var order = [];
-    (sales || []).forEach(function (sale) {
+    dedupeSales(sales).forEach(function (sale) {
       if (!sale || sale.status === "void" || sale.status === "open") return;
       if (!locationAllowed(sale, options)) return;
       var key = dateKeyOf(sale);
@@ -283,20 +321,35 @@
     var totals = list.reduce(function (sum, row) {
       sum.sales += row.sales;
       sum.services += row.services;
-      sum.serviceSales += row.serviceSales;
+      sum.serviceSales = money2(sum.serviceSales + row.serviceSales);
       sum.products += row.products;
-      sum.productSales += row.productSales;
-      sum.subtotal += row.subtotal;
-      sum.customFees += row.customFees;
-      sum.tax += row.tax;
-      sum.tip += row.tip;
-      sum.grossTotal += row.grossTotal;
-      sum.refunds += row.refunds;
-      sum.adjustedTotal += row.adjustedTotal;
-      sum.total += row.total;
+      sum.productSales = money2(sum.productSales + row.productSales);
+      sum.subtotal = money2(sum.subtotal + row.subtotal);
+      sum.customFees = money2(sum.customFees + row.customFees);
+      sum.tax = money2(sum.tax + row.tax);
+      sum.tip = money2(sum.tip + row.tip);
+      sum.grossTotal = money2(sum.grossTotal + row.grossTotal);
+      sum.refunds = money2(sum.refunds + row.refunds);
+      sum.adjustedTotal = money2(sum.adjustedTotal + row.adjustedTotal);
+      sum.total = money2(sum.total + row.total);
       return sum;
     }, emptyRow(""));
     return { days: list, totals: totals };
+  }
+
+  function ownerView(fetchView, summary) {
+    var view = fetchView && typeof fetchView === "object" ? fetchView : {};
+    var range = window.ffBookingReportsSalesRange;
+    var incompleteMsg = (range && range.INCOMPLETE_MESSAGE) ||
+      "Sales data for this range is incomplete. Narrow the date range and try again.";
+    var errorMsg = (range && range.LOAD_ERROR_MESSAGE) || "This report could not load.";
+    if (view.kind === "incomplete") {
+      return { kind: "incomplete", message: view.message || incompleteMsg, summary: null };
+    }
+    if (view.kind === "error") {
+      return { kind: "error", message: view.message || errorMsg, summary: null };
+    }
+    return { kind: "ok", message: "", summary: summary || null };
   }
 
   window.ffBookingReportsCompute = {
@@ -313,6 +366,10 @@
     monthPresets: monthPresets,
     refundAmount: refundAmount,
     breakdown: breakdown,
-    summarize: summarize
+    isServiceItem: isServiceItem,
+    saleIdOf: saleIdOf,
+    dedupeSales: dedupeSales,
+    summarize: summarize,
+    ownerView: ownerView
   };
 })();

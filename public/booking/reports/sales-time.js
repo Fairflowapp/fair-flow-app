@@ -242,10 +242,10 @@
     var dayCols = [
       { label: "Date", value: function (row) { return formatDay(row.dateKey); }, foot: function () { return "Total"; } },
       { label: "Tickets", value: function (row) { return String(row.tickets); }, foot: function (t) { return String(t.tickets); } },
-      { label: "Gross sales", value: function (row) { return money(row.grossSales); }, foot: function (t) { return money(t.grossSales); } },
-      { label: "Refunds", value: function (row) { return money(row.refunds); }, foot: function (t) { return money(t.refunds); } },
+      { label: "Gross checkout sales", value: function (row) { return money(row.grossSales); }, foot: function (t) { return money(t.grossSales); } },
+      { label: "Refunded amount", value: function (row) { return money(row.refunds); }, foot: function (t) { return money(t.refunds); } },
       { label: "Adjusted sales", value: function (row) { return money(row.adjustedSales); }, foot: function (t) { return money(t.adjustedSales); } },
-      { label: "Service sales", value: function (row) { return money(row.serviceSales); }, foot: function (t) { return money(t.serviceSales); } },
+      { label: "Gross service sales", value: function (row) { return money(row.serviceSales); }, foot: function (t) { return money(t.serviceSales); } },
       { label: "Tips", value: function (row) { return money(row.tip); }, foot: function (t) { return money(t.tip); } },
       { label: "Average ticket", value: function (row) { return money(row.averageTicket); }, foot: function (t) { return money(t.averageTicket); } }
     ];
@@ -253,7 +253,7 @@
       { label: "Weekday", value: function (row) { return row.label; } },
       { label: "Dates represented", value: function (row) { return String(row.dateCount); } },
       { label: "Tickets", value: function (row) { return String(row.tickets); } },
-      { label: "Gross sales", value: function (row) { return money(row.grossSales); } },
+      { label: "Gross checkout sales", value: function (row) { return money(row.grossSales); } },
       { label: "Avg sales / date", value: function (row) { return money(row.averagePerDate); } },
       { label: "Avg ticket", value: function (row) { return money(row.averageTicket); } },
       { label: "Sales mix", value: function (row) { return mixText(row.mix); } }
@@ -269,7 +269,7 @@
         '<div class="ff-rpt-meta">' +
           "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
           "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
-          '<p class="ff-rpt-fine">Closed checkout tickets by sale close date. Booked service value stays in Booking Intelligence.</p>' +
+          '<p class="ff-rpt-fine">Closed checkout sales grouped by sale date. Booked service value stays in Booking Intelligence.</p>' +
         "</div>" +
         emptyNote +
         '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +

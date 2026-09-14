@@ -269,7 +269,8 @@
         '<div class="ff-rpt-meta">' +
           "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
           "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
-          '<p class="ff-rpt-fine">Closed checkout service items only. Booked service value stays in Booking Intelligence.</p>' +
+          '<p class="ff-rpt-fine">Service-item sales from closed checkout tickets. Tips and ticket-level refunds are not allocated to services.</p>' +
+          '<p class="ff-rpt-fine">Booked service value stays in Booking Intelligence.</p>' +
         "</div>" +
         '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +
           kpi("Gross service sales", money(totals.grossSales)) +
