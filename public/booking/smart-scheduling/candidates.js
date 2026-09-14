@@ -65,6 +65,41 @@
     return best;
   }
 
+  function containingIntervalIndex(intervals, startMin, endMin) {
+    var i;
+    for (i = 0; i < (intervals || []).length; i += 1) {
+      var win = intervals[i];
+      if (win && startMin >= win.startMin && endMin <= win.endMin) return i;
+    }
+    return -1;
+  }
+
+  function describePlacement(day, startMin, endMin, intervalIndex, gaps) {
+    var durationMinutes = Number(endMin) - Number(startMin);
+    if (!(durationMinutes > 0)) return null;
+    var intervals = day && Array.isArray(day.workingIntervals) ? day.workingIntervals : [];
+    var idx = Number.isInteger(intervalIndex) && intervalIndex >= 0
+      ? intervalIndex
+      : containingIntervalIndex(intervals, startMin, endMin);
+    if (idx < 0) return null;
+    var occupied = day && Array.isArray(day.occupied) ? day.occupied : [];
+    var overlap = overlapAgainstOccupied(startMin, endMin, occupied);
+    var findGaps = ns().findFreeGaps;
+    var gapList = Array.isArray(gaps) ? gaps : (typeof findGaps === "function" ? findGaps(day) : []);
+    var gap = primaryFreeGap(gapList, startMin, endMin, idx);
+    return {
+      startMin: startMin,
+      endMin: endMin,
+      durationMinutes: durationMinutes,
+      workingIntervalIndex: idx,
+      usesOverlap: overlap.maxOverlap > 0,
+      overlapMinutes: overlap.maxOverlap,
+      overlapLineIds: overlap.hits.map(function (hit) { return hit.lineId; }).filter(Boolean),
+      freeGapStartMin: gap ? gap.startMin : null,
+      freeGapEndMin: gap ? gap.endMin : null
+    };
+  }
+
   function enumerateValidSlots(day, request) {
     var req = request && typeof request === "object" ? request : {};
     var durationMinutes = positiveInt(req.durationMinutes, 0);
@@ -83,19 +118,7 @@
       while (startMin + durationMinutes <= win.endMin) {
         var endMin = startMin + durationMinutes;
         if (!conflictsOccupied(startMin, endMin, occupied, allowed)) {
-          var overlap = overlapAgainstOccupied(startMin, endMin, occupied);
-          var gap = primaryFreeGap(gaps, startMin, endMin, workingIntervalIndex);
-          slots.push({
-            startMin: startMin,
-            endMin: endMin,
-            durationMinutes: durationMinutes,
-            workingIntervalIndex: workingIntervalIndex,
-            usesOverlap: overlap.maxOverlap > 0,
-            overlapMinutes: overlap.maxOverlap,
-            overlapLineIds: overlap.hits.map(function (hit) { return hit.lineId; }).filter(Boolean),
-            freeGapStartMin: gap ? gap.startMin : null,
-            freeGapEndMin: gap ? gap.endMin : null
-          });
+          slots.push(describePlacement(day, startMin, endMin, workingIntervalIndex, gaps));
         }
         startMin += snapMinutes;
       }
@@ -105,5 +128,6 @@
 
   var api = ns();
   api.enumerateValidSlots = enumerateValidSlots;
+  api.describePlacement = describePlacement;
   api.DEFAULT_SNAP_MINUTES = DEFAULT_SNAP;
 })();

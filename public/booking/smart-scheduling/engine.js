@@ -1,7 +1,7 @@
 /**
  * Smart Scheduling Phase 1 — public ranking API.
  *
- * Load order: normalize.js → gaps.js → candidates.js → score.js → engine.js
+ * Load order: normalize.js → gaps.js → candidates.js → score.js → engine.js → moves.js
  *
  * Sits on top of Booking availability/conflict results. Does not replace them.
  * Recommendation-only: never writes, moves, messages, or hides valid slots.
