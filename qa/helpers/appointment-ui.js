@@ -82,7 +82,28 @@ async function clickCalendarSlot(page, providerId, startMin) {
   }, { providerId, startMin });
 
   await page.mouse.click(point.x, point.y);
-  await page.locator("#ffBookingApptDrawer").waitFor({ state: "visible", timeout: 15000 });
+  await continueFromSlotClickToDrawer(page);
+}
+
+/**
+ * Baseline (c2ba63e): slot click opens #ffBookingApptDrawer.
+ * Calendar Block Time: slot click opens #ffBookingCalSlotChooser; QA must
+ * click the product "New Appointment" action, then wait for the drawer.
+ * Never invokes product create APIs.
+ */
+async function continueFromSlotClickToDrawer(page) {
+  const drawer = page.locator("#ffBookingApptDrawer");
+  const newAppointment = page.locator('#ffBookingCalSlotChooser [data-ff-cal-slot="appointment"]');
+  await Promise.race([
+    drawer.waitFor({ state: "visible", timeout: 15000 }),
+    newAppointment.waitFor({ state: "visible", timeout: 15000 }),
+  ]).catch(() => {
+    throw new Error("Neither #ffBookingApptDrawer nor the Block Time slot chooser appeared after the calendar slot click.");
+  });
+  if (await newAppointment.isVisible() && !(await drawer.isVisible())) {
+    await newAppointment.click();
+  }
+  await drawer.waitFor({ state: "visible", timeout: 15000 });
   await expect(page.locator("#ffApptTitle")).toContainText(/New Appointment/i);
 }
 
@@ -257,6 +278,7 @@ module.exports = {
   goToFutureDay,
   waitForProviders,
   clickCalendarSlot,
+  continueFromSlotClickToDrawer,
   chooseQaClient,
   pickServiceOnLine,
   pickProviderOnLine,

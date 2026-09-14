@@ -16,6 +16,7 @@
     "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle && npm run test:booking:clients",
     "test:booking:regression": "node qa/scripts/run-booking-regression.js",
     "test:booking:regression:compare": "node qa/scripts/verify-baseline-compare.js",
+    "test:booking:regression:slot-helper": "node qa/scripts/verify-slot-create-helper.js",
     "test:booking:regression:lock": "node qa/scripts/verify-write-lock.js",
     "test:booking:regression:cleanup-scope": "node qa/scripts/verify-cleanup-scope.js",
     "test:booking:cleanup-stale": "node qa/scripts/cleanup-stale-qa.js"
