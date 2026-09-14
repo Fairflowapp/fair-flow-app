@@ -100,9 +100,45 @@
     });
   }
 
+  function inspectOverlap(action) {
+    var store = window.ffBookingCalAppointments;
+    if (!store || typeof store.cardsForProvider !== "function" || !action) return { ok: true };
+    var dateKey = String(action.dateKey || "").trim();
+    var loc = String(action.locationId || (state() && state().getLocationId && state().getLocationId()) || "").trim();
+    var providerId = String(action.providerId || "").trim();
+    var startMin = Number(action.startMin);
+    if (!dateKey || !providerId || !Number.isFinite(startMin)) return { ok: true };
+    var exclude = String(
+      (action.source && action.source.appointmentId) || action.excludeAppointmentId || ""
+    ).trim();
+    var endMin = startMin + durationOf(action);
+    var cards = store.cardsForProvider(dateKey, loc, providerId) || [];
+    var hit = cards.some(function (card) {
+      if (!card) return false;
+      if (exclude && String(card.appointmentId || "") === exclude) return false;
+      return rangeOverlaps([{ startMin: card.startMin, endMin: card.endMin }], startMin, endMin);
+    });
+    if (hit) {
+      return {
+        ok: false,
+        reason: "appointment_conflict",
+        message: "This provider already has an overlapping appointment."
+      };
+    }
+    return { ok: true };
+  }
+
+  function inspectMove(action) {
+    var book = inspect(action);
+    if (book && book.ok === false) return book;
+    return inspectOverlap(action);
+  }
+
   window.ffBookingCalDrop = {
     inspect: inspect,
     inspectCreate: inspectCreate,
+    inspectOverlap: inspectOverlap,
+    inspectMove: inspectMove,
     rangeOverlaps: rangeOverlaps,
     MESSAGES: MESSAGES
   };

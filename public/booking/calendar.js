@@ -527,9 +527,18 @@
     syncAppointmentCards();
   }
 
+  function cancelActiveDrag() {
+    if (window.ffBookingCalDrag && typeof window.ffBookingCalDrag.cancel === "function") {
+      window.ffBookingCalDrag.cancel();
+    }
+  }
+
   function onAction(act) {
     var st = state();
     if (!st) return;
+    if (act === "view-day" || act === "view-week" || act === "today" || act === "prev" || act === "next") {
+      cancelActiveDrag();
+    }
     if (act === "view-day") {
       if (st.setView) st.setView("day");
       render({ keepScroll: false });
@@ -657,6 +666,7 @@
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-active-location-changed", function () {
+      cancelActiveDrag();
       if (isCalendarVisible()) render({ keepScroll: false });
     });
     document.addEventListener("ff-locations-updated", function () {

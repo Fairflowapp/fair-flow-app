@@ -168,6 +168,31 @@
     };
   }
 
+  function inspectMove(spec) {
+    var next = spec && typeof spec === "object" ? spec : {};
+    var hit = createHit(next.dateKey, next.startMin);
+    if (!hit) return { ok: false, reason: "no_hit" };
+    var action = {
+      providerId: hit.slot.providerId,
+      startMin: hit.slot.startMin,
+      durationMinutes: Number(next.durationMinutes) > 0 ? Number(next.durationMinutes) : 30,
+      axis: hit.axis,
+      employee: hit.employees[0],
+      dateKey: hit.slot.dateKey,
+      locationId: hit.locationId,
+      source: next.source || null,
+      excludeAppointmentId: next.excludeAppointmentId || ""
+    };
+    var drop = window.ffBookingCalDrop;
+    if (drop && typeof drop.inspectMove === "function") {
+      return Object.assign({ hit: hit }, drop.inspectMove(action));
+    }
+    if (drop && typeof drop.inspect === "function") {
+      return Object.assign({ hit: hit }, drop.inspect(action));
+    }
+    return { ok: true, hit: hit };
+  }
+
   function inspectCreate(dateKey, startMin) {
     var hit = createHit(dateKey, startMin);
     if (!hit) return { ok: false, reason: "no_hit" };
@@ -302,6 +327,9 @@
   function chooseProvider(providerId) {
     var st = state();
     if (!st || !providerId) return;
+    if (window.ffBookingCalDrag && typeof window.ffBookingCalDrag.cancel === "function") {
+      window.ffBookingCalDrag.cancel();
+    }
     st.setWeekProviderId(providerId);
     closePicker();
     if (typeof window.ffRefreshBookingCalendar === "function") window.ffRefreshBookingCalendar();
@@ -475,6 +503,7 @@
     chooseProvider: chooseProvider,
     createHit: createHit,
     inspectCreate: inspectCreate,
+    inspectMove: inspectMove,
     hitTestFromPoint: hitTestFromPoint
   };
 })();
