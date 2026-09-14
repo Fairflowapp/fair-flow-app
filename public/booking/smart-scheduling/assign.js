@@ -395,6 +395,7 @@
   api.recommendProviderAssignment = recommendProviderAssignment;
   api.compareAssignments = compareAssignments;
   api.dayWithAssignmentCandidate = dayWithCandidate;
+  api.createsBetweenGapFromAnalyses = createsBetweenGap;
   api.ASSIGN = {
     CANDIDATE_LINE_ID: CANDIDATE_LINE_ID,
     CLOSE_GAP_BONUS: CLOSE_GAP_BONUS,
