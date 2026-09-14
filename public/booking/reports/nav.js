@@ -15,6 +15,11 @@
           id: "booking-intelligence",
           label: "Booking Intelligence",
           blurb: "Appointments, utilization, calendar gaps, and unused capacity from live booking data."
+        },
+        {
+          id: "forward-outlook",
+          label: "Forward Outlook",
+          blurb: "What is already booked ahead and how much future working time is still open."
         }
       ]
     },

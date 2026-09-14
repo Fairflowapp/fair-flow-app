@@ -77,6 +77,12 @@
     "/booking/reports/insight-priority.js?v=20260913_ui1",
     "/booking/reports/intelligence.js?v=20260914_apptrange"
   ];
+  var FORWARD_OUTLOOK_SCRIPTS = [
+    "/booking/reports/appointment-range.js?v=20260914_apptrange",
+    "/booking/reports/intelligence-compute.js?v=20260913_ui1",
+    "/booking/reports/forward-outlook-compute.js?v=20260914_outlook",
+    "/booking/reports/forward-outlook.js?v=20260914_outlook"
+  ];
 
   function intelReady() {
     return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
@@ -92,6 +98,10 @@
 
   function cancellationsReady() {
     return !!(window.ffBookingReportsCancellationsCompute && window.ffBookingReportsCancellations);
+  }
+
+  function forwardOutlookReady() {
+    return !!(window.ffBookingReportsForwardOutlookCompute && window.ffBookingReportsForwardOutlook);
   }
 
   function loadScripts(list, done) {
@@ -156,6 +166,14 @@
     loadScripts(CANCELLATIONS_SCRIPTS, done);
   }
 
+  function ensureForwardOutlookScripts(done) {
+    if (forwardOutlookReady()) {
+      done();
+      return;
+    }
+    loadScripts(FORWARD_OUTLOOK_SCRIPTS, done);
+  }
+
   function paintMain() {
     var main = document.getElementById("ffRptMain");
     if (!main) return;
@@ -218,6 +236,21 @@
       main.innerHTML = '<p class="ff-rpt-empty">Loading Cancellations…</p>';
       ensureCancellationsScripts(function () {
         if (window.ffBookingReportsCancellations) window.ffBookingReportsCancellations.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
+    if (id === "forward-outlook") {
+      if (window.ffBookingReportsForwardOutlook) {
+        window.ffBookingReportsForwardOutlook.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Forward Outlook…</p>';
+      ensureForwardOutlookScripts(function () {
+        if (window.ffBookingReportsForwardOutlook) window.ffBookingReportsForwardOutlook.paint();
         else {
           var host = document.getElementById("ffRptMain");
           if (host) host.innerHTML = laterHtml(report);

@@ -52,6 +52,7 @@ check("reports ui loads service sales modules", ui.indexOf("/booking/reports/ser
 check("reports ui loads sales by time period modules", ui.indexOf("/booking/reports/sales-time-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-time.js") !== -1);
 check("reports ui loads cancellations modules", ui.indexOf("/booking/reports/cancellations-compute.js") !== -1 && ui.indexOf("/booking/reports/cancellations.js") !== -1);
 check("reports ui loads appointment range helper", ui.indexOf("/booking/reports/appointment-range.js") !== -1);
+check("reports ui loads forward outlook modules", ui.indexOf("/booking/reports/forward-outlook-compute.js") !== -1 && ui.indexOf("/booking/reports/forward-outlook.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
@@ -83,9 +84,12 @@ check("stale product-sales selection falls back to intelligence", nav.setSelecte
 const salesIds = nav.GROUPS.find(function (group) { return group.id === "sales"; }).items.map(function (row) { return row.id; });
 check("visible sales nav is summary, service, time", salesIds.join(",") === "sales-summary,service-sales,sales-by-period");
 check("nav can select cancellations", nav.setSelectedId("cancellations") === "cancellations" && nav.getSelected().label === "Cancellations");
+check("nav can select forward outlook", nav.setSelectedId("forward-outlook") === "forward-outlook" && nav.getSelected().label === "Forward Outlook");
+const intelIds = nav.GROUPS.find(function (group) { return group.id === "intelligence"; }).items.map(function (row) { return row.id; });
+check("intelligence nav is historical plus outlook", intelIds.join(",") === "booking-intelligence,forward-outlook");
 const clientIds = nav.GROUPS.find(function (group) { return group.id === "clients"; }).items.map(function (row) { return row.id; });
 check("clients nav is cancellations only", clientIds.join(",") === "cancellations");
-check("visible reports are built surfaces only", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,sales-summary,service-sales,sales-by-period,cancellations");
+check("visible reports are built surfaces only", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,forward-outlook,sales-summary,service-sales,sales-by-period,cancellations");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },
