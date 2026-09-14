@@ -99,11 +99,21 @@
     return html.join("");
   }
 
+  function durationFromState(state) {
+    var startMin = Number(state && state.startMin);
+    var endMin = Number(state && state.endMin);
+    if (Number.isFinite(startMin) && Number.isFinite(endMin) && endMin > startMin) {
+      return endMin - startMin;
+    }
+    var explicit = Number(state && state.durationMinutes);
+    if (explicit > 0) return explicit;
+    return 30;
+  }
+
   function specFromState(state) {
     var api = model();
     var startMin = Number(state && state.startMin);
-    var duration = Number(state && state.durationMinutes);
-    if (!(duration > 0)) duration = 30;
+    var duration = durationFromState(state);
     var raw = {
       blockId: state && state.blockId,
       providerId: state && state.providerId,
@@ -376,6 +386,7 @@
     isOpen: function () { return !!current; },
     current: function () { return current ? Object.assign({}, current) : null; },
     specFromState: specFromState,
+    durationFromState: durationFromState,
     inspectSave: inspectSave,
     formatMinutes: formatMinutes
   };

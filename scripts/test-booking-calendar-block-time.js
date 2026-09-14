@@ -369,6 +369,64 @@ return windowObj.ffBookingBlocks.create(Object.assign({}, daySpec, {
   check("rules keep blocks inside salon membership", rulesSrc.indexOf("allow delete: if belongsToSalon(salonId);") !== -1);
   check("appointment delete stays manager-only", /match \/salons\/\{salonId\}\/appointments\/\{appointmentId\}[\s\S]*?allow delete: if belongsToSalon\(salonId\) && isManager\(salonId\);/.test(rulesSrc));
 
+  const saved45 = {
+    blockId: "blk_rebecca_45",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-14",
+    startMin: 12 * 60,
+    endMin: 12 * 60 + 45,
+    reason: "meeting",
+    note: "BLOCK QA TEST"
+  };
+  const opened45 = editor.openEdit(saved45);
+  check("existing 45-minute block opens as 45 minutes", !!(opened45 && opened45.endMin - opened45.startMin === 45 && opened45.startMin === 720));
+  check("summary reflects correct end time", editor.formatMinutes(opened45.startMin) === "12:00 PM" && editor.formatMinutes(opened45.endMin) === "12:45 PM");
+  const saveNoChange = editor.specFromState(editor.current());
+  check("save without changes preserves 45 minutes", !!(saveNoChange && saveNoChange.startMin === 720 && saveNoChange.endMin === 765 && saveNoChange.reason === "meeting" && saveNoChange.note === "BLOCK QA TEST"));
+
+  const opened60 = editor.openEdit(Object.assign({}, saved45, { blockId: "blk_60", endMin: 13 * 60, reason: "training" }));
+  check("existing 60-minute block remains 60", opened60.endMin - opened60.startMin === 60 && editor.specFromState(opened60).endMin === 13 * 60);
+
+  const opened90 = editor.openEdit(Object.assign({}, saved45, { blockId: "blk_90", endMin: 12 * 60 + 90, reason: "personal" }));
+  check("existing 90-minute block remains 90", opened90.endMin - opened90.startMin === 90 && editor.specFromState(opened90).endMin === 12 * 60 + 90);
+
+  const createdNew = editor.specFromState({
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-14",
+    startMin: 12 * 60,
+    reason: "lunch"
+  });
+  check("new block still defaults to 30 minutes", createdNew.endMin === 12 * 60 + 30 && editor.durationFromState({ startMin: 12 * 60 }) === 30);
+
+  const reasonOnly = editor.specFromState(Object.assign({}, saved45, { reason: "training" }));
+  check("editing reason only does not change duration", reasonOnly.reason === "training" && reasonOnly.startMin === 720 && reasonOnly.endMin === 765);
+
+  const noteOnly = editor.specFromState(Object.assign({}, saved45, { note: "updated note" }));
+  check("editing note only does not change duration", noteOnly.note === "updated note" && noteOnly.endMin === 765);
+
+  const movedStart = editor.specFromState(Object.assign({}, saved45, { startMin: 13 * 60, endMin: null, durationMinutes: 45 }));
+  check("start-time edit recalculates end correctly", movedStart.startMin === 13 * 60 && movedStart.endMin === 13 * 60 + 45);
+
+  const changedDur = editor.specFromState(Object.assign({}, saved45, { durationMinutes: 60, endMin: null }));
+  check("duration edit still saves correct endMin", changedDur.startMin === 720 && changedDur.endMin === 13 * 60);
+
+  const reloaded = model.normalize({
+    blockId: "blk_reload",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-14",
+    startMin: 720,
+    endMin: 765,
+    reason: "meeting"
+  });
+  const reopened = editor.openEdit(reloaded);
+  check("persisted block reloads with correct duration", reopened.endMin === 765 && editor.durationFromState(reopened) === 45);
+
+  const editorSrc = fs.readFileSync(path.join(root, "public/booking/blocks/editor.js"), "utf8");
+  check("edit hydration prefers stored endMin over the create default", editorSrc.indexOf("function durationFromState") !== -1 && editorSrc.indexOf("endMin > startMin") !== -1);
+
   if (failed) {
     console.error(failed + " calendar block-time tests failed.");
     process.exit(1);
