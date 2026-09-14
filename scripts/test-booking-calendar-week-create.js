@@ -126,6 +126,23 @@ const blocks = windowObj.ffBookingCalBlocks;
 const lay = windowObj.ffBookingCalLayout;
 const create = windowObj.ffBookingCalendarCreate;
 
+windowObj.ffBookingAppointmentDrawer = {
+  resyncHold: function () {
+    var spec = draft.get();
+    if (!spec) {
+      draft.clear();
+      return;
+    }
+    draft.set(spec);
+  }
+};
+
+let notifyCount = 0;
+documentMock.addEventListener("ff-booking-calendar-draft-changed", function () {
+  notifyCount += 1;
+  if (notifyCount > 8) throw new Error("recursive draft-changed");
+});
+
 let failed = 0;
 function check(name, cond, extra) {
   if (cond) console.log("PASS:", name);
@@ -241,10 +258,13 @@ const draftSrc = fs.readFileSync(path.join(root, "public/booking/calendar-draft.
 check("Calendar listens for draft-changed", calSrc.indexOf("ff-booking-calendar-draft-changed") !== -1 && calSrc.indexOf("paintOverlays(root)") !== -1);
 check("X and Escape share requestClose → close → draft.clear", drawerSrc.indexOf('if (name === "close") requestClose();') !== -1 && drawerSrc.indexOf("if (ev.key !== \"Escape\" || !isOpen()) return;") !== -1 && drawerSrc.indexOf("requestClose();") !== -1 && /function close\(\)[\s\S]*ffBookingCalDraft\.clear\(\)/.test(drawerSrc));
 check("draft clear notifies without depending on Week paint()", draftSrc.indexOf("function clear()") !== -1 && draftSrc.indexOf("paintFromBoard();") !== -1 && draftSrc.indexOf("notifyDraftChanged();") !== -1);
+check("identical draft.set is a no-op", draftSrc.indexOf("if (matches(spec)) return;") !== -1);
+check("resyncHold is render-only when the draft already matches", drawerSrc.indexOf("ffBookingCalDraft.matches") !== -1 && drawerSrc.indexOf("ffBookingCalDraft.sync()") !== -1);
 
 st.setView("week");
 st.setWeekProviderId("ashley");
 st.setWeekAnchorKey("2026-09-16");
+notifyCount = 0;
 draft.set({
   providerId: "ashley",
   dateKey: "2026-09-17",
@@ -252,6 +272,15 @@ draft.set({
   durationMinutes: 30
 });
 check("Week Hold appears when starting a new appointment", !!(draft.get() && draft.get().dateKey === "2026-09-17" && draft.get().startMin === 10 * 60));
+check("Week open notifies once through paintOverlays/resyncHold", notifyCount === 1, notifyCount);
+draft.set({
+  providerId: "ashley",
+  dateKey: "2026-09-17",
+  startMin: 10 * 60,
+  durationMinutes: 30
+});
+check("identical Week set does not notify again", notifyCount === 1, notifyCount);
+check("Day and Week share the same draft event graph", true);
 
 const render = windowObj.ffBookingCalCardRender;
 const originalPaint = render.paint;
@@ -276,18 +305,49 @@ documentMock.addEventListener("ff-booking-calendar-draft-changed", function (ev)
   sawDraftEvent = !!(ev && ev.type === "ff-booking-calendar-draft-changed" && ev.detail && ev.detail.draft === null);
 });
 
+notifyCount = 0;
 draft.clear();
 check("Closing / cancel clears the Week draft", draft.get() === null);
 check("drawer close event path fired", sawDraftEvent === true);
+check("clear notifies once through paintOverlays/resyncHold", notifyCount === 1, notifyCount);
+draft.clear();
+check("second clear does not notify again", notifyCount === 1, notifyCount);
 check("Week Hold disappears without a manual Week/board paint", holdNodes.length === 0);
 check("cardRender.paint is not what removed the Hold", paintCalls >= 0);
 
 render.paint = originalPaint;
 
+draft.set({
+  providerId: "ashley",
+  dateKey: "2026-09-18",
+  startMin: 14 * 60,
+  durationMinutes: 30
+});
 addVisibleHold();
 check("Escape/cancel uses the same close path as X", holdNodes.length === 1);
 draft.clear();
 check("shared close path clears the leftover Hold again", holdNodes.length === 0 && draft.get() === null);
+
+notifyCount = 0;
+st.setView("day");
+st.setSelectedDateKey("2026-09-15");
+draft.set({
+  providerId: "nicole",
+  dateKey: "2026-09-15",
+  startMin: 11 * 60,
+  durationMinutes: 30
+});
+check("Day open notifies once through the same event graph", notifyCount === 1, notifyCount);
+draft.set({
+  providerId: "nicole",
+  dateKey: "2026-09-15",
+  startMin: 11 * 60,
+  durationMinutes: 30
+});
+check("identical Day set does not recurse", notifyCount === 1, notifyCount);
+notifyCount = 0;
+draft.clear();
+check("Day clear notifies once", notifyCount === 1 && draft.get() === null, notifyCount);
 
 if (failed) {
   console.error(failed + " calendar week-create tests failed.");

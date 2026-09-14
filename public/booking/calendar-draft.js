@@ -202,6 +202,31 @@
     document.dispatchEvent(ev);
   }
 
+  function sameLine(a, b) {
+    return a.lineKey === b.lineKey
+      && a.providerId === b.providerId
+      && a.startMin === b.startMin
+      && a.durationMinutes === b.durationMinutes
+      && a.title === b.title
+      && a.clientName === b.clientName
+      && a.guestKey === b.guestKey;
+  }
+
+  function matches(spec) {
+    var lines = normalizeLines(spec);
+    var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
+    var clientName = spec && spec.clientName ? String(spec.clientName) : "";
+    if (!dateKey || !lines.length) return !draft;
+    if (!draft) return false;
+    if (draft.dateKey !== dateKey) return false;
+    if ((draft.clientName || "") !== clientName) return false;
+    if (draft.lines.length !== lines.length) return false;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (!sameLine(draft.lines[i], lines[i])) return false;
+    }
+    return true;
+  }
+
   function sync(root) {
     var render = window.ffBookingCalCardRender;
     if (render && typeof render.paint === "function" && !window.__ffPaintingBoard) {
@@ -215,11 +240,10 @@
     var lines = normalizeLines(spec);
     var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
     if (!dateKey || !lines.length) {
-      draft = null;
-      paintFromBoard();
-      notifyDraftChanged();
+      clear();
       return;
     }
+    if (matches(spec)) return;
     draft = {
       dateKey: dateKey,
       clientName: spec.clientName ? String(spec.clientName) : "",
@@ -230,6 +254,7 @@
   }
 
   function clear() {
+    if (!draft) return;
     draft = null;
     paintFromBoard();
     notifyDraftChanged();
@@ -254,6 +279,7 @@
     clear: clear,
     sync: sync,
     get: snapshot,
+    matches: matches,
     paintFromBoard: paintFromBoard,
     bodyHtml: bodyHtml,
     formatTime: formatTime
