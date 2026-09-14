@@ -18,6 +18,7 @@
   function repo() { return window.ffBookingSales || null; }
   function model() { return window.ffBookingSalesModel || null; }
   function time() { return window.ffBookingTime || null; }
+  function rangeApi() { return window.ffBookingReportsSalesRange || null; }
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -234,32 +235,20 @@
   }
 
   function resultHtml() {
-    if (errorText) return '<p class="ff-rpt-empty">' + escapeHtml(errorText) + "</p>";
     if (status === "idle") return '<p class="ff-rpt-empty">Choose locations and a date, then Generate.</p>';
     if (status === "loading") return '<p class="ff-rpt-empty">Loading sales…</p>';
+    if (status === "incomplete") {
+      return '<p class="ff-rpt-warn">' + escapeHtml(errorText || (rangeApi() && rangeApi().INCOMPLETE_MESSAGE) ||
+        "Sales data for this range is incomplete. Narrow the date range and try again.") + "</p>";
+    }
+    if (status === "error" || errorText) {
+      return '<p class="ff-rpt-empty">' + escapeHtml(errorText) + "</p>";
+    }
     return tableHtml(result);
   }
 
   function html() {
     return filtersHtml() + '<div class="ff-rpt-result" aria-live="polite">' + resultHtml() + "</div>";
-  }
-
-  async function loadSales(ids) {
-    var api = repo();
-    var all = allLocationIds();
-    if (!api) throw new Error("Sales are not loaded.");
-    if (!ids.length) return [];
-    var allOn = all.length && ids.length === all.length;
-    if (allOn && typeof api.listForSalon === "function") {
-      return api.listForSalon({ limit: 80 });
-    }
-    if (ids.length === 1 && typeof api.listForLocation === "function") {
-      return api.listForLocation(ids[0], { limit: 80 });
-    }
-    var chunks = await Promise.all(ids.map(function (id) {
-      return api.listForLocation(id, { limit: 80 });
-    }));
-    return [].concat.apply([], chunks);
   }
 
   async function generate() {
@@ -269,34 +258,59 @@
     var range = math && typeof math.rangeForPreset === "function"
       ? math.rangeForPreset(filters.date, today, filters.customFrom, filters.customTo)
       : { fromKey: today, toKey: today };
+    var rangeHelp = rangeApi();
     openMenu = "";
     status = "loading";
     errorText = "";
     result = null;
     paint();
     if (!ids.length) {
-      status = "ready";
+      status = "error";
       errorText = "Choose a location.";
       paint();
       return;
     }
     if (filters.date === "custom" && !(range.fromKey && range.toKey)) {
-      status = "ready";
+      status = "error";
       errorText = "Choose a start and end date.";
       paint();
       return;
     }
-    var rows = [];
+    var fetched = null;
     try {
-      rows = await loadSales(ids);
+      if (!rangeHelp || typeof rangeHelp.fetchForReport !== "function") {
+        throw new Error("Sales range lookup is not available.");
+      }
+      fetched = await rangeHelp.fetchForReport(repo(), {
+        locationIds: ids,
+        fromKey: range.fromKey,
+        toKey: range.toKey
+      });
     } catch (err) {
-      status = "ready";
-      errorText = err && err.message ? err.message : "This report could not load.";
+      status = "error";
+      errorText = (rangeHelp && typeof rangeHelp.userSafeError === "function")
+        ? rangeHelp.userSafeError(err && err.message)
+        : "This report could not load.";
+      paint();
+      return;
+    }
+    var view = rangeHelp && typeof rangeHelp.viewState === "function"
+      ? rangeHelp.viewState(fetched)
+      : { kind: "error", message: "This report could not load.", sales: [] };
+    if (view.kind === "error") {
+      status = "error";
+      errorText = view.message;
+      paint();
+      return;
+    }
+    if (view.kind === "incomplete") {
+      status = "incomplete";
+      errorText = view.message;
       paint();
       return;
     }
     result = math && typeof math.summarize === "function"
-      ? math.summarize(rows, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
+      ? math.summarize(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
       : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } };
     status = "ready";
     paint();

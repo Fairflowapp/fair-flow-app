@@ -51,6 +51,7 @@ check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 &&
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
 check("index.html loads reports nav and sales summary", html.indexOf("/booking/reports/nav.js") !== -1 && html.indexOf("/booking/reports/sales-summary.js") !== -1 && html.indexOf("/booking/reports/ui.js") !== -1);
+check("index.html loads sales range retrieval", html.indexOf("/booking/reports/sales-range.js") !== -1);
 check("index.html is not required for intelligence scripts", html.indexOf("/booking/reports/intelligence.js") === -1);
 
 const store = {};
@@ -115,6 +116,8 @@ check("sales summary shows checkout fields we have", summarySrc.indexOf("# Sales
 check("sales summary keeps later columns", summarySrc.indexOf("Product Sales") !== -1 && summarySrc.indexOf("Custom Fees") !== -1 && summarySrc.indexOf("Taxes") !== -1 && summarySrc.indexOf("Refunds") !== -1 && summarySrc.indexOf("Adjusted Total") !== -1);
 check("sales summary does not add gift cards or memberships", summarySrc.indexOf("Gift Card") === -1 && summarySrc.indexOf("Membership") === -1);
 check("sales summary names the location and period", summarySrc.indexOf("Location(s):") !== -1 && summarySrc.indexOf("Period:") !== -1);
+check("sales summary uses range-complete retrieval", summarySrc.indexOf("fetchForReport") !== -1 && summarySrc.indexOf("listForSalon") === -1 && summarySrc.indexOf("limit: 80") === -1);
+check("sales summary refuses incomplete totals", summarySrc.indexOf('status === "incomplete"') !== -1 && summarySrc.indexOf("ff-rpt-warn") !== -1 && css.indexOf(".ff-rpt-warn") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking reports tab checks passed.");

@@ -15,6 +15,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
+  startAfter,
   updateDoc,
   where,
 } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
@@ -193,6 +194,69 @@ async function listForSalon(options) {
   }
 }
 
+function rangeApi() {
+  return window.ffBookingReportsSalesRange || null;
+}
+
+function rangeUnavailable() {
+  const api = rangeApi();
+  if (api && typeof api.failResult === "function") {
+    return api.failResult("Sales range lookup is not available.");
+  }
+  return {
+    sales: [],
+    complete: false,
+    fetchedCount: 0,
+    truncated: false,
+    error: "Sales range lookup is not available.",
+  };
+}
+
+async function listForLocationRange(locationId, fromKey, toKey, options) {
+  const api = rangeApi();
+  if (!api || typeof api.paginateRange !== "function" || typeof api.boundsForLocation !== "function") {
+    return rangeUnavailable();
+  }
+  const loc = String(locationId || "").trim();
+  if (!loc) return api.failResult("Choose a location.");
+  const bounds = api.boundsForLocation(fromKey, toKey, loc);
+  if (!bounds) return api.failResult("Choose a start and end date.");
+  const sid = requireSalon();
+  const startTs = Timestamp.fromDate(bounds.start);
+  const endTs = Timestamp.fromDate(bounds.endExclusive);
+  async function fetchPage(cursor, pageSize) {
+    const parts = [
+      where("locationId", "==", loc),
+      where("closedAt", ">=", startTs),
+      where("closedAt", "<", endTs),
+      orderBy("closedAt", "desc"),
+    ];
+    if (cursor) parts.push(startAfter(cursor));
+    parts.push(limit(pageSize));
+    const snap = await getDocs(query(salesRef(sid), ...parts));
+    return {
+      rows: snap.docs.map((docSnap) => ({
+        sale: toSale(docSnap),
+        cursor: docSnap,
+      })),
+    };
+  }
+  return api.paginateRange(fetchPage, options);
+}
+
+async function listForLocationsRange(locationIds, fromKey, toKey, options) {
+  const api = rangeApi();
+  if (!api || typeof api.combineLocationResults !== "function") {
+    return rangeUnavailable();
+  }
+  const ids = typeof api.uniqueLocationIds === "function"
+    ? api.uniqueLocationIds(locationIds)
+    : (Array.isArray(locationIds) ? locationIds : []).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!ids.length) return api.failResult("Choose a location.");
+  const parts = await Promise.all(ids.map((id) => listForLocationRange(id, fromKey, toKey, options)));
+  return api.combineLocationResults(parts);
+}
+
 async function listForClient(clientId, options) {
   const sid = requireSalon();
   const id = String(clientId || "").trim();
@@ -355,6 +419,8 @@ const api = {
   findByAppointmentId,
   listForLocation,
   listForSalon,
+  listForLocationRange,
+  listForLocationsRange,
   listForClient,
   createSale,
   createFromAppointment,
@@ -371,6 +437,8 @@ export {
   findByAppointmentId,
   listForLocation,
   listForSalon,
+  listForLocationRange,
+  listForLocationsRange,
   listForClient,
   createSale,
   createFromAppointment,

@@ -177,6 +177,8 @@ check("filters drawer has date presets", options.indexOf("Today") !== -1 && opti
 check("filters drawer has status method processor channel", options.indexOf("Refunded") !== -1 && options.indexOf("Reversed") !== -1 && options.indexOf("Credit Card") !== -1 && options.indexOf("Check") !== -1 && options.indexOf("Gift Card") !== -1 && options.indexOf("House Discount") !== -1 && options.indexOf("house_discount") !== -1 && options.indexOf("Has Discount") === -1 && options.indexOf('name="houseDiscount"') === -1 && options.indexOf("Fair Flow") !== -1 && options.indexOf("Staff member") !== -1 && options.indexOf("Self checkout") !== -1 && options.indexOf("Automatic charge") !== -1 && options.indexOf("Online booking") !== -1);
 check("filters do not invent Point or MangoMint", options.indexOf("Point") === -1 && options.indexOf("MangoMint") === -1 && options.indexOf("Mangomint") === -1);
 check("sales can list the whole salon", data.indexOf("listForSalon") !== -1);
+check("sales keep the 80-row list APIs", data.indexOf("const LIST_LIMIT = 80") !== -1);
+check("sales add reports range APIs", data.indexOf("listForLocationRange") !== -1 && data.indexOf("listForLocationsRange") !== -1);
 check("shell closes sales filters", shell.indexOf("ffBookingSalesOptions") !== -1);
 const checkout = read("public/booking/sales/checkout.js");
 const details = read("public/booking/appointments/details.js");

@@ -259,6 +259,16 @@
   line-height: 1.5;
   color: #6b7280;
 }
+.ff-rpt-warn {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border: 1px solid #f3d19c;
+  border-radius: 10px;
+  background: #fff8ee;
+  color: #7a4b00;
+  font-size: 14px;
+  line-height: 1.45;
+}
 .ff-rpt-meta {
   margin: 0 0 14px;
   font-size: 13px;
