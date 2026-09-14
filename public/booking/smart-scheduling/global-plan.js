@@ -605,7 +605,7 @@
     return reasons;
   }
 
-  function planGlobalProviderDayRecovery(day, waitlistRequests, options) {
+  function runGlobalProviderDaySearch(day, waitlistRequests, options) {
     var api = ns();
     var opts = options && typeof options === "object" ? options : {};
     var dayNorm = asDay(day);
@@ -645,6 +645,7 @@
     var hitCap = false;
     var best = null;
     var sawSimpler = false;
+    var validScored = [];
 
     function considerCombo(actions) {
       if (evaluated >= maxEvaluated) {
@@ -666,6 +667,7 @@
         return;
       }
       validCount += 1;
+      validScored.push(scored);
       if (!best) {
         best = scored;
         return;
@@ -711,19 +713,38 @@
       best = scoreCombination(dayNorm, [], considered, before, opts, {
         totalConsideredGapMinutes: totalConsideredGapMinutes
       });
+      if (best) validScored.push(best);
     }
     if (sawSimpler && best) best.simplerEquivalent = true;
+    return {
+      dayNorm: dayNorm,
+      opts: opts,
+      considered: considered,
+      excludedRows: excludedRows,
+      best: best,
+      validScored: validScored,
+      evaluated: evaluated,
+      validCount: validCount,
+      rejected: rejected,
+      hitCap: hitCap,
+      actionPreselectionTruncated: actionPreselectionTruncated,
+      totalBetweenGaps: totalBetweenGaps
+    };
+  }
 
+  function assembleGlobalPlan(scored, ctx) {
+    var dayNorm = ctx.dayNorm;
+    var considered = ctx.considered;
+    var excludedRows = ctx.excludedRows;
     var selectedByGap = {};
-    (best.selectedActions || []).forEach(function (action) {
+    (scored.selectedActions || []).forEach(function (action) {
       selectedByGap[action.sourceGapIdentity] = action;
     });
-    var selectedActions = (best.selectedActions || []).map(function (action) {
+    var selectedActions = (scored.selectedActions || []).map(function (action) {
       return annotateSelected(action, (considered.filter(function (row) {
         return row.gapIdentity === action.sourceGapIdentity;
       })[0] || {}).primaryActionId);
     });
-
     var skippedGaps = excludedRows.map(function (row) {
       return {
         gapId: row.gapIdentity || gapIdentityOf(row.gap),
@@ -734,7 +755,7 @@
     });
     considered.forEach(function (row) {
       if (selectedByGap[row.gapIdentity]) return;
-      var reason = skipReasonFor(row, best.selectedActions || [], dayNorm);
+      var reason = skipReasonFor(row, scored.selectedActions || [], dayNorm);
       skippedGaps.push({
         gapId: row.gapIdentity,
         gap: row.gap,
@@ -746,7 +767,6 @@
             : "A qualifying action existed, but skipping this gap produced a better global plan."
       });
     });
-
     var moveKeys = {};
     var waitlistGaps = {};
     var hadOverlapCandidate = false;
@@ -774,21 +794,21 @@
     var avoidedDuplicateWaitlist = Object.keys(waitlistGaps).some(function (key) {
       return Object.keys(waitlistGaps[key]).length > 1;
     });
-    var truncated = hitCap || excludedRows.length > 0 || actionPreselectionTruncated;
-    var reasons = buildReasons(best, {
+    var truncated = ctx.hitCap || excludedRows.length > 0 || ctx.actionPreselectionTruncated;
+    var reasons = buildReasons(scored, {
       avoidedConflictingMoves: avoidedConflictingMoves,
       avoidedDuplicateWaitlist: avoidedDuplicateWaitlist,
-      limitsDisruption: (best.totalClientDisruptionMinutes || 0) < primaryDisruption
+      limitsDisruption: (scored.totalClientDisruptionMinutes || 0) < primaryDisruption
         || (!selectedActions.length && primaryDisruption > 0),
-      avoidedOverlap: hadOverlapCandidate && best.overlapActionCount === 0,
+      avoidedOverlap: hadOverlapCandidate && scored.overlapActionCount === 0,
       truncated: truncated
     });
-
     return {
       providerId: trimText(dayNorm.providerId),
       dateKey: trimText(dayNorm.dateKey),
+      isZeroAction: !selectedActions.length,
       consideredGaps: considered.map(function (row, index) {
-        var recovery = best.gapRecoveries[index] || {
+        var recovery = scored.gapRecoveries[index] || {
           gapId: row.gapIdentity,
           originalGapMinutes: Number(row.gap && row.gap.gapMin) || 0,
           recoveredMinutes: 0,
@@ -807,37 +827,37 @@
       }),
       selectedActions: selectedActions,
       skippedGaps: skippedGaps,
-      before: best.before,
-      after: best.after,
-      globalGapRecoveredMinutes: best.globalGapRecoveredMinutes,
-      globalGapRecoveryPercent: best.globalGapRecoveryPercent,
-      resolvedGapCount: best.resolvedGapCount,
-      partiallyRecoveredGapCount: best.partiallyRecoveredGapCount,
-      totalClientDisruptionMinutes: best.totalClientDisruptionMinutes,
-      overlapActionCount: best.overlapActionCount,
-      optimizationBefore: best.optimizationBefore,
-      optimizationAfter: best.optimizationAfter,
-      optimizationDelta: best.optimizationDelta,
-      fragmentationBefore: best.fragmentationBefore,
-      fragmentationAfter: best.fragmentationAfter,
-      fragmentationDelta: best.fragmentationDelta,
-      strandedBetweenGapMinutesBefore: best.strandedBetweenGapMinutesBefore,
-      strandedBetweenGapMinutesAfter: best.strandedBetweenGapMinutesAfter,
-      strandedBetweenMinutesDelta: best.strandedBetweenMinutesDelta,
-      utilizationBefore: best.utilizationBefore,
-      utilizationAfter: best.utilizationAfter,
-      trueFreeMinutesBefore: best.trueFreeMinutesBefore,
-      trueFreeMinutesAfter: best.trueFreeMinutesAfter,
-      betweenGapCountBefore: best.betweenGapCountBefore,
-      betweenGapCountAfter: best.betweenGapCountAfter,
-      globalPlanScore: best.globalPlanScore,
+      before: scored.before,
+      after: scored.after,
+      globalGapRecoveredMinutes: scored.globalGapRecoveredMinutes,
+      globalGapRecoveryPercent: scored.globalGapRecoveryPercent,
+      resolvedGapCount: scored.resolvedGapCount,
+      partiallyRecoveredGapCount: scored.partiallyRecoveredGapCount,
+      totalClientDisruptionMinutes: scored.totalClientDisruptionMinutes,
+      overlapActionCount: scored.overlapActionCount,
+      optimizationBefore: scored.optimizationBefore,
+      optimizationAfter: scored.optimizationAfter,
+      optimizationDelta: scored.optimizationDelta,
+      fragmentationBefore: scored.fragmentationBefore,
+      fragmentationAfter: scored.fragmentationAfter,
+      fragmentationDelta: scored.fragmentationDelta,
+      strandedBetweenGapMinutesBefore: scored.strandedBetweenGapMinutesBefore,
+      strandedBetweenGapMinutesAfter: scored.strandedBetweenGapMinutesAfter,
+      strandedBetweenMinutesDelta: scored.strandedBetweenMinutesDelta,
+      utilizationBefore: scored.utilizationBefore,
+      utilizationAfter: scored.utilizationAfter,
+      trueFreeMinutesBefore: scored.trueFreeMinutesBefore,
+      trueFreeMinutesAfter: scored.trueFreeMinutesAfter,
+      betweenGapCountBefore: scored.betweenGapCountBefore,
+      betweenGapCountAfter: scored.betweenGapCountAfter,
+      globalPlanScore: scored.globalPlanScore,
       searchMetadata: {
-        totalBetweenGaps: totalBetweenGaps,
+        totalBetweenGaps: ctx.totalBetweenGaps,
         consideredGapCount: considered.length,
         excludedGapCount: excludedRows.length,
-        evaluatedCombinationCount: evaluated,
-        validCombinationCount: validCount,
-        rejectedConflictCount: rejected,
+        evaluatedCombinationCount: ctx.evaluated,
+        validCombinationCount: ctx.validCount,
+        rejectedConflictCount: ctx.rejected,
         truncated: truncated,
         emptyPlanEvaluated: true,
         exhaustive: !truncated
@@ -846,8 +866,45 @@
     };
   }
 
+  function pickRankedScored(validScored, maxPlans) {
+    var empty = null;
+    var rest = [];
+    (validScored || []).forEach(function (row) {
+      if (!(row.selectedActions || []).length) {
+        if (!empty || compareGlobalPlans(row, empty) < 0) empty = row;
+        return;
+      }
+      rest.push(row);
+    });
+    rest.sort(compareGlobalPlans);
+    var limit = Math.max(1, Number(maxPlans) || 1);
+    var chosen = [];
+    if (empty) chosen.push(empty);
+    rest.forEach(function (row) {
+      if (chosen.length >= limit) return;
+      chosen.push(row);
+    });
+    chosen.sort(compareGlobalPlans);
+    return chosen;
+  }
+
+  function planGlobalProviderDayRecovery(day, waitlistRequests, options) {
+    var ctx = runGlobalProviderDaySearch(day, waitlistRequests, options);
+    return assembleGlobalPlan(ctx.best, ctx);
+  }
+
+  function rankGlobalProviderDayRecoveryCandidates(day, waitlistRequests, options) {
+    var opts = options && typeof options === "object" ? options : {};
+    var maxPlans = optionInt(opts, "maxPlansPerProvider", 5);
+    var ctx = runGlobalProviderDaySearch(day, waitlistRequests, opts);
+    return pickRankedScored(ctx.validScored, maxPlans).map(function (scored) {
+      return assembleGlobalPlan(scored, ctx);
+    });
+  }
+
   var api = ns();
   api.planGlobalProviderDayRecovery = planGlobalProviderDayRecovery;
+  api.rankGlobalProviderDayRecoveryCandidates = rankGlobalProviderDayRecoveryCandidates;
   api.simulateGlobalRecoveryPlan = simulateGlobalRecoveryPlan;
   api.compareGlobalPlans = compareGlobalPlans;
   api.GLOBAL_PLAN = {
@@ -862,6 +919,7 @@
     DEFAULT_MAX_GAPS: DEFAULT_MAX_GAPS,
     DEFAULT_MAX_ACTIONS_PER_GAP: DEFAULT_MAX_ACTIONS_PER_GAP,
     DEFAULT_MAX_EVALUATED_COMBINATIONS: DEFAULT_MAX_EVALUATED,
+    DEFAULT_MAX_PLANS_PER_PROVIDER: 5,
     WAITLIST_LINE_PREFIX: WAITLIST_LINE_PREFIX
   };
 })();
