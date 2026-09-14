@@ -120,6 +120,7 @@ check("sales summary does not add gift cards or memberships", summarySrc.indexOf
 check("sales summary names the location and period", summarySrc.indexOf("Location(s):") !== -1 && summarySrc.indexOf("Period:") !== -1);
 check("sales summary uses range-complete retrieval", summarySrc.indexOf("fetchForReport") !== -1 && summarySrc.indexOf("listForSalon") === -1 && summarySrc.indexOf("limit: 80") === -1);
 check("sales summary refuses incomplete totals", summarySrc.indexOf('status === "incomplete"') !== -1 && summarySrc.indexOf("ff-rpt-warn") !== -1 && css.indexOf(".ff-rpt-warn") !== -1);
+check("sales reports isolate async generate", summarySrc.indexOf("loadGen") !== -1 && summarySrc.indexOf("shouldPaintReportResult") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking reports tab checks passed.");

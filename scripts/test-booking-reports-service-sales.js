@@ -94,12 +94,15 @@ const walkIn = api.summarizeServiceSales([
     items: [{ kind: "service", name: "Cut", serviceId: "cut", amount: 45 }]
   })
 ], opts);
-check("E: walk-in items without providerId are unassigned", walkIn.totals.unassignedUnits === 1 && walkIn.providers[0].name === "Unassigned" && walkIn.providers[0].assigned === false);
+check("A: missing providerId is not a fake provider", walkIn.providers.length === 0 && walkIn.providers.every(function (row) { return row.name !== "Unassigned"; }));
+check("A: unattributed lines are coverage, not an employee", walkIn.totals.unattributedUnits === 1 && walkIn.totals.attributedUnits === 0);
+check("D: walk-in unattributed lines still count in gross service sales", walkIn.totals.grossSales === 45 && walkIn.totals.units === 1);
+check("B: coverage is 0% when no line has providerId", walkIn.totals.attributionCoverage === 0 && api.coverageLabel(0) === "Provider attribution available for 0% of service sale lines.");
 
 const assigned = api.summarizeServiceSales([
   sale({ items: [item({ amount: 40 })] })
 ], opts);
-check("F: appointment checkout provider is kept", assigned.providers.length === 1 && assigned.providers[0].providerId === "maria" && assigned.providers[0].sales === 40);
+check("C: real provider IDs stay attributable internally", assigned.providers.length === 1 && assigned.providers[0].providerId === "maria" && assigned.providers[0].sales === 40 && assigned.totals.attributionCoverage === 100);
 
 const multi = api.summarizeServiceSales([
   sale({
@@ -166,6 +169,30 @@ const noItems = api.summarizeServiceSales([
 ], opts);
 check("P: a closed ticket with no lines uses subtotal as unspecified service", noItems.services[0].name === "Unspecified service" && noItems.totals.grossSales === 33);
 
+const mixedAttr = api.summarizeServiceSales([
+  sale({ items: [item({ amount: 40 }), { kind: "service", name: "Cut", serviceId: "cut", amount: 10 }] })
+], opts);
+check("B: coverage uses explicit providerId only", mixedAttr.totals.units === 2 && mixedAttr.totals.attributedUnits === 1 && mixedAttr.totals.unattributedUnits === 1 && mixedAttr.totals.attributionCoverage === 50);
+check("E: hiding provider ranking does not change service totals", mixedAttr.services.length === 2 && mixedAttr.totals.grossSales === 50 && mixedAttr.providers.length === 1);
+
+const refunded = api.summarizeServiceSales([
+  sale({
+    items: [item({ amount: 40 })],
+    history: [{ type: "refunded", amount: 10 }]
+  })
+], opts);
+check("H: refund history does not change per-service gross", refunded.services[0].sales === 40 && refunded.totals.grossSales === 40);
+check("H: refund history flags the ticket-level caveat", refunded.totals.hasTicketRefunds === true);
+
+const incompleteView = api.ownerView({ kind: "incomplete", message: api.INCOMPLETE_MESSAGE, sales: many }, over80);
+check("G: incomplete retrieval does not keep totals", incompleteView.kind === "incomplete" && incompleteView.summary == null);
+check("G: incomplete message is the user-facing range warning", incompleteView.message === "Sales data for this range is incomplete. Narrow the date range and try again.");
+
+const emptyView = api.ownerView({ kind: "ok", sales: [] }, empty);
+check("empty complete range has the service-sales empty copy", emptyView.kind === "empty" && emptyView.message === "No closed service sales in this period.");
+const errorView = api.ownerView({ kind: "error", message: "FirebaseError: index" }, twoServices);
+check("error view does not attach financial totals", errorView.kind === "error" && errorView.summary == null);
+
 const src = read("public/booking/reports/service-sales-compute.js");
 const ui = read("public/booking/reports/service-sales.js");
 const shell = read("public/booking/reports/ui.js");
@@ -174,6 +201,11 @@ check("ui uses range-complete retrieval", ui.indexOf("fetchForReport") !== -1 &&
 check("ui refuses incomplete totals", ui.indexOf('status === "incomplete"') !== -1 && ui.indexOf("ff-rpt-warn") !== -1);
 check("ui does not call it revenue", ui.indexOf("revenue") === -1 && ui.indexOf("Revenue") === -1);
 check("ui names booked value as not this report", ui.indexOf("Booked service value stays in Booking Intelligence") !== -1);
+check("ui has no provider leaderboard", ui.indexOf("By provider") === -1 && ui.indexOf("Unassigned") === -1);
+check("ui shows attribution coverage, not a fake provider", ui.indexOf("Provider attribution coverage") !== -1 && ui.indexOf("Service lines without provider attribution") !== -1);
+check("ui keeps the ticket-level refund caveat", ui.indexOf("Refunds are recorded at the ticket level") !== -1);
+check("ui keeps empty and incomplete copy", ui.indexOf("No closed service sales in this period.") !== -1 && ui.indexOf("This report could not load.") !== -1);
+check("compute does not invent an Unassigned employee", src.indexOf("Unassigned") === -1);
 check("reports ui loads service sales modules", shell.indexOf("/booking/reports/service-sales-compute.js") !== -1 && shell.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui can paint service sales", shell.indexOf('id === "service-sales"') !== -1 && shell.indexOf("ffBookingReportsServiceSales") !== -1);
 

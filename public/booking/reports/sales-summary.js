@@ -13,6 +13,7 @@
   var status = "idle";
   var errorText = "";
   var openMenu = "";
+  var loadGen = 0;
 
   function compute() { return window.ffBookingReportsCompute || null; }
   function repo() { return window.ffBookingSales || null; }
@@ -257,6 +258,30 @@
     return filtersHtml() + '<div class="ff-rpt-result" aria-live="polite">' + resultHtml() + "</div>";
   }
 
+  function canStore(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldStoreReportResult === "function") {
+      return api.shouldStoreReportResult(requestId, loadGen);
+    }
+    return requestId === loadGen;
+  }
+
+  function canPaint(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldPaintReportResult === "function") {
+      return api.shouldPaintReportResult(requestId, loadGen, isActive());
+    }
+    return requestId === loadGen && isActive();
+  }
+
+  function finish(requestId, nextStatus, nextError, nextResult) {
+    if (!canStore(requestId)) return;
+    status = nextStatus;
+    errorText = nextError || "";
+    result = nextResult || null;
+    if (canPaint(requestId)) paint();
+  }
+
   async function generate() {
     var math = compute();
     var ids = selectedLocationIds();
@@ -265,21 +290,18 @@
       ? math.rangeForPreset(filters.date, today, filters.customFrom, filters.customTo)
       : { fromKey: today, toKey: today };
     var rangeHelp = rangeApi();
+    var requestId = (loadGen += 1);
     openMenu = "";
     status = "loading";
     errorText = "";
     result = null;
-    paint();
+    if (canPaint(requestId)) paint();
     if (!ids.length) {
-      status = "error";
-      errorText = "Choose a location.";
-      paint();
+      finish(requestId, "error", "Choose a location.", null);
       return;
     }
     if (filters.date === "custom" && !(range.fromKey && range.toKey)) {
-      status = "error";
-      errorText = "Choose a start and end date.";
-      paint();
+      finish(requestId, "error", "Choose a start and end date.", null);
       return;
     }
     var fetched = null;
@@ -293,33 +315,25 @@
         toKey: range.toKey
       });
     } catch (err) {
-      status = "error";
-      errorText = (rangeHelp && typeof rangeHelp.userSafeError === "function")
+      finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
         ? rangeHelp.userSafeError(err && err.message)
-        : "This report could not load.";
-      paint();
+        : "This report could not load.", null);
       return;
     }
     var view = rangeHelp && typeof rangeHelp.viewState === "function"
       ? rangeHelp.viewState(fetched)
       : { kind: "error", message: "This report could not load.", sales: [] };
     if (view.kind === "error") {
-      status = "error";
-      errorText = view.message;
-      paint();
+      finish(requestId, "error", view.message, null);
       return;
     }
     if (view.kind === "incomplete") {
-      status = "incomplete";
-      errorText = view.message;
-      paint();
+      finish(requestId, "incomplete", view.message, null);
       return;
     }
-    result = math && typeof math.summarize === "function"
+    finish(requestId, "ready", "", math && typeof math.summarize === "function"
       ? math.summarize(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
-      : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } };
-    status = "ready";
-    paint();
+      : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } });
   }
 
   function setLocationIds(ids) {

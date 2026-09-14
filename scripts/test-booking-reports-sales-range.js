@@ -265,6 +265,11 @@ check("sales summary no longer loads the latest 80", summarySrc.indexOf("listFor
 check("sales summary uses the range helper", summarySrc.indexOf("fetchForReport") !== -1 && summarySrc.indexOf("viewState") !== -1);
 check("sales summary has an incomplete state", summarySrc.indexOf('status === "incomplete"') !== -1 && summarySrc.indexOf("ff-rpt-warn") !== -1);
 check("index.html loads the range helper before sales summary", html.indexOf("/booking/reports/sales-range.js") !== -1 && html.indexOf("/booking/reports/sales-range.js") < html.indexOf("/booking/reports/sales-summary.js"));
+check("stale request is not stored", range.shouldStoreReportResult(1, 2) === false && range.shouldStoreReportResult(2, 2) === true);
+check("inactive report does not paint", range.shouldPaintReportResult(2, 2, false) === false);
+check("only the latest active request paints", range.shouldPaintReportResult(2, 2, true) === true && range.shouldPaintReportResult(1, 2, true) === false);
+const svcSrc = read("public/booking/reports/service-sales.js");
+check("both sales reports isolate active paint", summarySrc.indexOf("shouldPaintReportResult") !== -1 && svcSrc.indexOf("shouldPaintReportResult") !== -1 && summarySrc.indexOf("isActive") !== -1 && svcSrc.indexOf("isActive") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking sales-range checks passed.");

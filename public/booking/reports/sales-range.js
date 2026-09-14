@@ -322,6 +322,14 @@
     return { kind: "ok", message: "", sales: sales };
   }
 
+  function shouldStoreReportResult(requestId, latestRequestId) {
+    return requestId === latestRequestId;
+  }
+
+  function shouldPaintReportResult(requestId, latestRequestId, active) {
+    return requestId === latestRequestId && active === true;
+  }
+
   async function fetchForReport(repo, options) {
     var opts = options && typeof options === "object" ? options : {};
     var ids = uniqueLocationIds(opts.locationIds);
@@ -367,6 +375,8 @@
     combineLocationResults: combineLocationResults,
     userSafeError: userSafeError,
     viewState: viewState,
+    shouldStoreReportResult: shouldStoreReportResult,
+    shouldPaintReportResult: shouldPaintReportResult,
     fetchForReport: fetchForReport
   };
 })();

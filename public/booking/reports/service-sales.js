@@ -14,6 +14,7 @@
   var status = "idle";
   var errorText = "";
   var openMenu = "";
+  var loadGen = 0;
 
   function compute() { return window.ffBookingReportsCompute || null; }
   function math() { return window.ffBookingReportsServiceSalesCompute || null; }
@@ -241,20 +242,28 @@
       { label: "Mix", value: function (row) { return mixText(row.mix); }, foot: function () { return "100%"; } },
       { label: "Average", value: function (row) { return money(row.average); }, foot: function (t) { return money(t.averageUnit); } }
     ];
-    var providerCols = [
-      { label: "Provider", value: function (row) { return row.name; } },
-      { label: "Units", value: function (row) { return String(row.units); } },
-      { label: "Gross service sales", value: function (row) { return money(row.sales); } },
-      { label: "Mix", value: function (row) { return mixText(row.mix); } }
-    ];
     var dayCols = [
       { label: "Date", value: function (row) { return formatDay(row.dateKey); } },
       { label: "Units", value: function (row) { return String(row.units); } },
       { label: "Gross service sales", value: function (row) { return money(row.sales); } }
     ];
-    var unassignedNote = totals.unassignedUnits
-      ? '<p class="ff-rpt-fine">Walk-in checkout items without a provider are listed as Unassigned. Tips stay on the ticket, not the service.</p>'
-      : '<p class="ff-rpt-fine">Tips stay on the ticket, not the service. Refunds are not split by service.</p>';
+    var svcMath = math();
+    var coverageText = svcMath && typeof svcMath.coverageLabel === "function"
+      ? svcMath.coverageLabel(totals.attributionCoverage)
+      : "";
+    var notes = [];
+    if (coverageText) notes.push(coverageText);
+    if (totals.unattributedUnits) {
+      notes.push("Service lines without provider attribution are included in Gross service sales.");
+    }
+    if (totals.hasTicketRefunds) {
+      notes.push((svcMath && svcMath.REFUND_CAVEAT) ||
+        "Refunds are recorded at the ticket level and are not allocated to individual services in this report.");
+    }
+    notes.push("Tips stay on the ticket, not the service.");
+    var notesHtml = notes.map(function (line) {
+      return '<p class="ff-rpt-fine">' + escapeHtml(line) + "</p>";
+    }).join("");
     return (
       '<div class="ff-rpt-intel">' +
         '<div class="ff-rpt-meta">' +
@@ -273,13 +282,12 @@
           table(serviceCols, summary.services, totals) +
         "</section>" +
         '<section class="ff-rpt-panel">' +
-          "<h2>By provider</h2>" +
-          table(providerCols, summary.providers) +
-          unassignedNote +
-        "</section>" +
-        '<section class="ff-rpt-panel">' +
           "<h2>By day</h2>" +
           table(dayCols, summary.days, null, "ff-rpt-table-service-day") +
+        "</section>" +
+        '<section class="ff-rpt-panel ff-rpt-panel-secondary">' +
+          "<h2>Provider attribution coverage</h2>" +
+          notesHtml +
         "</section>" +
       "</div>"
     );
@@ -302,6 +310,30 @@
     return filtersHtml() + '<div class="ff-rpt-result" aria-live="polite">' + resultHtml() + "</div>";
   }
 
+  function canStore(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldStoreReportResult === "function") {
+      return api.shouldStoreReportResult(requestId, loadGen);
+    }
+    return requestId === loadGen;
+  }
+
+  function canPaint(requestId) {
+    var api = rangeApi();
+    if (api && typeof api.shouldPaintReportResult === "function") {
+      return api.shouldPaintReportResult(requestId, loadGen, isActive());
+    }
+    return requestId === loadGen && isActive();
+  }
+
+  function finish(requestId, nextStatus, nextError, nextResult) {
+    if (!canStore(requestId)) return;
+    status = nextStatus;
+    errorText = nextError || "";
+    result = nextResult || null;
+    if (canPaint(requestId)) paint();
+  }
+
   async function generate() {
     var dates = compute();
     var svc = math();
@@ -311,21 +343,18 @@
       ? dates.rangeForPreset(filters.date, today, filters.customFrom, filters.customTo)
       : { fromKey: today, toKey: today };
     var rangeHelp = rangeApi();
+    var requestId = (loadGen += 1);
     openMenu = "";
     status = "loading";
     errorText = "";
     result = null;
-    paint();
+    if (canPaint(requestId)) paint();
     if (!ids.length) {
-      status = "error";
-      errorText = "Choose a location.";
-      paint();
+      finish(requestId, "error", "Choose a location.", null);
       return;
     }
     if (filters.date === "custom" && !(range.fromKey && range.toKey)) {
-      status = "error";
-      errorText = "Choose a start and end date.";
-      paint();
+      finish(requestId, "error", "Choose a start and end date.", null);
       return;
     }
     var fetched = null;
@@ -339,33 +368,37 @@
         toKey: range.toKey
       });
     } catch (err) {
-      status = "error";
-      errorText = (rangeHelp && typeof rangeHelp.userSafeError === "function")
+      finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
         ? rangeHelp.userSafeError(err && err.message)
-        : "This report could not load.";
-      paint();
+        : "This report could not load.", null);
       return;
     }
-    var view = rangeHelp && typeof rangeHelp.viewState === "function"
+    var fetchView = rangeHelp && typeof rangeHelp.viewState === "function"
       ? rangeHelp.viewState(fetched)
       : { kind: "error", message: "This report could not load.", sales: [] };
+    var summary = null;
+    if (fetchView.kind === "ok" || fetchView.kind === "empty") {
+      summary = svc && typeof svc.summarizeServiceSales === "function"
+        ? svc.summarizeServiceSales(fetchView.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
+        : { totals: { units: 0, grossSales: 0 }, services: [], providers: [], days: [] };
+    }
+    var view = svc && typeof svc.ownerView === "function"
+      ? svc.ownerView(fetchView, summary)
+      : (fetchView.kind === "incomplete"
+        ? { kind: "incomplete", message: fetchView.message, summary: null }
+        : fetchView.kind === "error"
+          ? { kind: "error", message: fetchView.message, summary: null }
+          : { kind: "ok", summary: summary });
     if (view.kind === "error") {
-      status = "error";
-      errorText = view.message;
-      paint();
+      finish(requestId, "error", view.message || "This report could not load.", null);
       return;
     }
     if (view.kind === "incomplete") {
-      status = "incomplete";
-      errorText = view.message;
-      paint();
+      finish(requestId, "incomplete", view.message ||
+        "Sales data for this range is incomplete. Narrow the date range and try again.", null);
       return;
     }
-    result = svc && typeof svc.summarizeServiceSales === "function"
-      ? svc.summarizeServiceSales(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
-      : { totals: { units: 0, grossSales: 0 }, services: [], providers: [], days: [] };
-    status = "ready";
-    paint();
+    finish(requestId, "ready", "", view.summary || summary);
   }
 
   function setLocationIds(ids) {

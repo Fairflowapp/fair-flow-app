@@ -4,7 +4,11 @@
  */
 (function () {
   var UNSPECIFIED_KEY = "unspecified";
-  var UNASSIGNED_KEY = "unassigned";
+  var UNATTRIBUTED_KEY = "unattributed";
+  var REFUND_CAVEAT = "Refunds are recorded at the ticket level and are not allocated to individual services in this report.";
+  var EMPTY_MESSAGE = "No closed service sales in this period.";
+  var INCOMPLETE_MESSAGE = "Sales data for this range is incomplete. Narrow the date range and try again.";
+  var LOAD_ERROR_MESSAGE = "This report could not load.";
 
   function trim(value) {
     return String(value == null ? "" : value).trim();
@@ -75,15 +79,25 @@
     return collapseName(item && item.name) || "Unspecified service";
   }
 
+  function hasExplicitProvider(item) {
+    return !!trim(item && item.providerId);
+  }
+
   function providerKey(item) {
     var id = trim(item && item.providerId);
-    return id || UNASSIGNED_KEY;
+    return id || UNATTRIBUTED_KEY;
   }
 
   function providerDisplayName(item) {
-    var name = collapseName(item && item.providerName);
-    if (trim(item && item.providerId)) return name || "Provider";
-    return "Unassigned";
+    if (!hasExplicitProvider(item)) return "";
+    return collapseName(item && item.providerName) || "Provider";
+  }
+
+  function saleHasTicketRefund(sale) {
+    if ((sale && sale.history || []).some(function (row) {
+      return row && row.type === "refunded";
+    })) return true;
+    return Number(sale && sale.refundAmount) > 0;
   }
 
   function serviceItemsFromSale(sale) {
@@ -117,8 +131,11 @@
       grossSales: 0,
       averageUnit: 0,
       averageTicket: 0,
-      unassignedUnits: 0,
-      unassignedSales: 0
+      attributedUnits: 0,
+      unattributedUnits: 0,
+      unattributedSales: 0,
+      attributionCoverage: 0,
+      hasTicketRefunds: false
     };
   }
 
@@ -160,6 +177,7 @@
     (sales || []).forEach(function (sale) {
       if (!isEligibleSale(sale, options)) return;
       totals.tickets += 1;
+      if (saleHasTicketRefund(sale)) totals.hasTicketRefunds = true;
       var items = serviceItemsFromSale(sale);
       if (!items.length) return;
       totals.serviceTickets += 1;
@@ -184,34 +202,37 @@
         bumpName(services[sKey].nameCounts, serviceDisplayName(item));
         services[sKey].units += 1;
         services[sKey].sales = money2(services[sKey].sales + amount);
-        if (!providers[pKey]) {
-          providers[pKey] = {
-            key: pKey,
-            providerId: pKey === UNASSIGNED_KEY ? "" : pKey,
-            name: providerDisplayName(item),
-            nameCounts: {},
-            assigned: pKey !== UNASSIGNED_KEY,
-            units: 0,
-            sales: 0,
-            mix: 0,
-            average: 0
-          };
+        if (hasExplicitProvider(item)) {
+          if (!providers[pKey]) {
+            providers[pKey] = {
+              key: pKey,
+              providerId: pKey,
+              name: providerDisplayName(item),
+              nameCounts: {},
+              assigned: true,
+              units: 0,
+              sales: 0,
+              mix: 0,
+              average: 0
+            };
+          }
+          bumpName(providers[pKey].nameCounts, providerDisplayName(item));
+          providers[pKey].units += 1;
+          providers[pKey].sales = money2(providers[pKey].sales + amount);
+          totals.attributedUnits += 1;
+        } else {
+          totals.unattributedUnits += 1;
+          totals.unattributedSales = money2(totals.unattributedSales + amount);
         }
-        bumpName(providers[pKey].nameCounts, providerDisplayName(item));
-        providers[pKey].units += 1;
-        providers[pKey].sales = money2(providers[pKey].sales + amount);
         days[dayKey].units += 1;
         days[dayKey].sales = money2(days[dayKey].sales + amount);
         totals.units += 1;
         totals.grossSales = money2(totals.grossSales + amount);
-        if (pKey === UNASSIGNED_KEY) {
-          totals.unassignedUnits += 1;
-          totals.unassignedSales = money2(totals.unassignedSales + amount);
-        }
       });
     });
     totals.averageUnit = totals.units ? money2(totals.grossSales / totals.units) : 0;
     totals.averageTicket = totals.serviceTickets ? money2(totals.grossSales / totals.serviceTickets) : 0;
+    totals.attributionCoverage = percent(totals.attributedUnits, totals.units);
     var serviceRows = Object.keys(services).map(function (key) {
       var row = services[key];
       row.name = topName(row.nameCounts, row.name);
@@ -227,10 +248,7 @@
       row.average = row.units ? money2(row.sales / row.units) : 0;
       delete row.nameCounts;
       return row;
-    }).sort(function (a, b) {
-      if (a.assigned !== b.assigned) return a.assigned ? -1 : 1;
-      return compareSalesDesc(a, b);
-    });
+    }).sort(compareSalesDesc);
     var dayRows = Object.keys(days).sort().map(function (key) { return days[key]; });
     return {
       totals: totals,
@@ -240,13 +258,43 @@
     };
   }
 
+  function coverageLabel(coverage) {
+    var n = Number(coverage);
+    if (!Number.isFinite(n)) n = 0;
+    var shown = Math.abs(n - Math.round(n)) < 0.05 ? String(Math.round(n)) : String(Math.round(n * 10) / 10);
+    return "Provider attribution available for " + shown + "% of service sale lines.";
+  }
+
+  function ownerView(fetchView, summary) {
+    var view = fetchView && typeof fetchView === "object" ? fetchView : {};
+    if (view.kind === "incomplete") {
+      return { kind: "incomplete", message: view.message || INCOMPLETE_MESSAGE, summary: null };
+    }
+    if (view.kind === "error") {
+      return { kind: "error", message: view.message || LOAD_ERROR_MESSAGE, summary: null };
+    }
+    var totals = summary && summary.totals;
+    if (!totals || !totals.units) {
+      return { kind: "empty", message: EMPTY_MESSAGE, summary: null };
+    }
+    return { kind: "ok", message: "", summary: summary };
+  }
+
   window.ffBookingReportsServiceSalesCompute = {
     UNSPECIFIED_KEY: UNSPECIFIED_KEY,
-    UNASSIGNED_KEY: UNASSIGNED_KEY,
+    UNATTRIBUTED_KEY: UNATTRIBUTED_KEY,
+    REFUND_CAVEAT: REFUND_CAVEAT,
+    EMPTY_MESSAGE: EMPTY_MESSAGE,
+    INCOMPLETE_MESSAGE: INCOMPLETE_MESSAGE,
+    LOAD_ERROR_MESSAGE: LOAD_ERROR_MESSAGE,
     isEligibleSale: isEligibleSale,
     isServiceItem: isServiceItem,
+    hasExplicitProvider: hasExplicitProvider,
     serviceKey: serviceKey,
     serviceItemsFromSale: serviceItemsFromSale,
+    saleHasTicketRefund: saleHasTicketRefund,
+    coverageLabel: coverageLabel,
+    ownerView: ownerView,
     summarizeServiceSales: summarizeServiceSales
   };
 })();
