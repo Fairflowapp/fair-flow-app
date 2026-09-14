@@ -28,7 +28,7 @@
         {
           id: "service-sales",
           label: "Service Sales",
-          blurb: "Totals by service from checkout."
+          blurb: "Gross totals by service from closed checkout items."
         },
         {
           id: "product-sales",

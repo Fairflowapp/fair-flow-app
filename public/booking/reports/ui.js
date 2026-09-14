@@ -55,6 +55,10 @@
     );
   }
 
+  var SERVICE_SALES_SCRIPTS = [
+    "/booking/reports/service-sales-compute.js?v=20260914_svcsales",
+    "/booking/reports/service-sales.js?v=20260914_svcsales"
+  ];
   var INTEL_SCRIPTS = [
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/capacity-patterns.js?v=20260913_ui1",
@@ -68,11 +72,11 @@
     return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
   }
 
-  function ensureIntelScripts(done) {
-    if (intelReady()) {
-      done();
-      return;
-    }
+  function serviceSalesReady() {
+    return !!(window.ffBookingReportsServiceSalesCompute && window.ffBookingReportsServiceSales);
+  }
+
+  function loadScripts(list, done) {
     if (typeof document === "undefined" || !document.head) {
       done();
       return;
@@ -91,15 +95,31 @@
       document.head.appendChild(el);
     }
     function loadAll(i) {
-      if (i >= INTEL_SCRIPTS.length) {
+      if (i >= list.length) {
         done();
         return;
       }
-      loadOne(INTEL_SCRIPTS[i], function () {
+      loadOne(list[i], function () {
         loadAll(i + 1);
       });
     }
     loadAll(0);
+  }
+
+  function ensureIntelScripts(done) {
+    if (intelReady()) {
+      done();
+      return;
+    }
+    loadScripts(INTEL_SCRIPTS, done);
+  }
+
+  function ensureServiceSalesScripts(done) {
+    if (serviceSalesReady()) {
+      done();
+      return;
+    }
+    loadScripts(SERVICE_SALES_SCRIPTS, done);
   }
 
   function paintMain() {
@@ -124,6 +144,21 @@
     }
     if (id === "sales-summary" && window.ffBookingReportsSalesSummary) {
       window.ffBookingReportsSalesSummary.paint();
+      return;
+    }
+    if (id === "service-sales") {
+      if (window.ffBookingReportsServiceSales) {
+        window.ffBookingReportsServiceSales.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Service Sales…</p>';
+      ensureServiceSalesScripts(function () {
+        if (window.ffBookingReportsServiceSales) window.ffBookingReportsServiceSales.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
       return;
     }
     main.innerHTML = laterHtml(report);

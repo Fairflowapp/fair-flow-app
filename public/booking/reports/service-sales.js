@@ -1,8 +1,9 @@
 /**
- * Sales Summary report. Pick locations and a date range, then Generate.
+ * Service Sales report. Closed checkout service items only.
  */
 (function () {
   var HOST_ID = "ffRptMain";
+  var REPORT_ID = "service-sales";
   var filters = {
     locationIds: null,
     date: "today",
@@ -15,6 +16,7 @@
   var openMenu = "";
 
   function compute() { return window.ffBookingReportsCompute || null; }
+  function math() { return window.ffBookingReportsServiceSalesCompute || null; }
   function repo() { return window.ffBookingSales || null; }
   function model() { return window.ffBookingSalesModel || null; }
   function time() { return window.ffBookingTime || null; }
@@ -23,7 +25,7 @@
 
   function isActive() {
     var api = nav();
-    return !!(api && typeof api.getSelectedId === "function" && api.getSelectedId() === "sales-summary");
+    return !!(api && typeof api.getSelectedId === "function" && api.getSelectedId() === REPORT_ID);
   }
 
   function escapeHtml(value) {
@@ -123,18 +125,18 @@
     var rows = locations().map(function (row) {
       var on = ids.indexOf(row.id) !== -1;
       return (
-        '<label class="ff-rpt-check" data-ff-rpt-loc="' + escapeHtml(row.id) + '">' +
+        '<label class="ff-rpt-check" data-ff-svc-loc="' + escapeHtml(row.id) + '">' +
           '<input type="checkbox"' + (on ? " checked" : "") + ">" +
-          '<span>' + escapeHtml(row.name) + "</span>" +
+          "<span>" + escapeHtml(row.name) + "</span>" +
         "</label>"
       );
     }).join("");
     var allOn = ids.length && ids.length === allLocationIds().length;
     return (
-      '<div class="ff-rpt-pop' + (openMenu === "loc" ? " is-open" : "") + '" data-ff-rpt-pop="loc">' +
+      '<div class="ff-rpt-pop' + (openMenu === "loc" ? " is-open" : "") + '" data-ff-svc-pop="loc">' +
         (rows || '<p class="ff-rpt-empty">No locations.</p>') +
         '<div class="ff-rpt-pop-foot">' +
-          '<button type="button" data-ff-rpt-loc-all="' + (allOn ? "0" : "1") + '">' +
+          '<button type="button" data-ff-svc-loc-all="' + (allOn ? "0" : "1") + '">' +
             (allOn ? "Unselect all" : "Select all") +
           "</button>" +
         "</div>" +
@@ -146,18 +148,18 @@
     var opts = dateOptions().map(function (row) {
       var on = row.value === filters.date;
       return (
-        '<button type="button" class="ff-rpt-date-opt' + (on ? " is-on" : "") + '" data-ff-rpt-date="' +
+        '<button type="button" class="ff-rpt-date-opt' + (on ? " is-on" : "") + '" data-ff-svc-date="' +
           escapeHtml(row.value) + '">' + escapeHtml(row.label) + "</button>"
       );
     }).join("");
     var custom = filters.date === "custom"
       ? '<div class="ff-rpt-custom">' +
-          '<label>From <input type="date" data-ff-rpt-custom="from" value="' + escapeHtml(filters.customFrom) + '"></label>' +
-          '<label>To <input type="date" data-ff-rpt-custom="to" value="' + escapeHtml(filters.customTo) + '"></label>' +
+          '<label>From <input type="date" data-ff-svc-custom="from" value="' + escapeHtml(filters.customFrom) + '"></label>' +
+          '<label>To <input type="date" data-ff-svc-custom="to" value="' + escapeHtml(filters.customTo) + '"></label>' +
         "</div>"
       : "";
     return (
-      '<div class="ff-rpt-pop ff-rpt-pop-date' + (openMenu === "date" ? " is-open" : "") + '" data-ff-rpt-pop="date">' +
+      '<div class="ff-rpt-pop ff-rpt-pop-date' + (openMenu === "date" ? " is-open" : "") + '" data-ff-svc-pop="date">' +
         opts + custom +
       "</div>"
     );
@@ -165,20 +167,20 @@
 
   function filtersHtml() {
     return (
-      '<div class="ff-rpt-filters" data-ff-rpt-summary-filters>' +
+      '<div class="ff-rpt-filters" data-ff-svc-filters>' +
         '<div class="ff-rpt-dd' + (openMenu === "loc" ? " is-open" : "") + '">' +
-          '<button type="button" class="ff-rpt-dd-btn" data-ff-rpt-menu="loc">' +
+          '<button type="button" class="ff-rpt-dd-btn" data-ff-svc-menu="loc">' +
             escapeHtml(locationLabel()) +
           "</button>" +
           locPopHtml() +
         "</div>" +
         '<div class="ff-rpt-dd' + (openMenu === "date" ? " is-open" : "") + '">' +
-          '<button type="button" class="ff-rpt-dd-btn" data-ff-rpt-menu="date">' +
+          '<button type="button" class="ff-rpt-dd-btn" data-ff-svc-menu="date">' +
             escapeHtml(dateLabel()) +
           "</button>" +
           datePopHtml() +
         "</div>" +
-        '<button type="button" class="ff-rpt-generate" data-ff-rpt-generate' +
+        '<button type="button" class="ff-rpt-generate" data-ff-svc-generate' +
           (status === "loading" ? " disabled" : "") + ">" +
           (status === "loading" ? "Generating…" : "Generate") +
         "</button>" +
@@ -186,56 +188,99 @@
     );
   }
 
-  var MONEY_KEYS = ["serviceSales", "productSales", "subtotal", "customFees", "tax", "tip", "grossTotal", "refunds", "adjustedTotal"];
-  var COLS = [
-    { key: "date", label: "Date" },
-    { key: "sales", label: "# Sales" },
-    { key: "services", label: "# Services" },
-    { key: "serviceSales", label: "Service Sales" },
-    { key: "products", label: "# Products" },
-    { key: "productSales", label: "Product Sales" },
-    { key: "subtotal", label: "Subtotal" },
-    { key: "customFees", label: "Custom Fees" },
-    { key: "tax", label: "Taxes" },
-    { key: "tip", label: "Tips" },
-    { key: "grossTotal", label: "Gross Total" },
-    { key: "refunds", label: "Refunds" },
-    { key: "adjustedTotal", label: "Adjusted Total" }
-  ];
-
-  function cellValue(row, col) {
-    if (col.key === "date") return formatDay(row.dateKey);
-    var value = row[col.key];
-    if (MONEY_KEYS.indexOf(col.key) !== -1) return money(value);
-    return String(value == null ? 0 : value);
+  function kpi(label, value, note) {
+    return (
+      '<div class="ff-rpt-kpi">' +
+        '<p class="ff-rpt-kpi-value">' + escapeHtml(value) + "</p>" +
+        '<p class="ff-rpt-kpi-label">' + escapeHtml(label) + "</p>" +
+        (note ? '<p class="ff-rpt-kpi-note">' + escapeHtml(note) + "</p>" : "") +
+      "</div>"
+    );
   }
 
-  function tableHtml(summary) {
-    if (!summary || !summary.days || !summary.days.length) {
-      return '<p class="ff-rpt-empty">No closed sales in this period.</p>';
-    }
-    var head = COLS.map(function (col) { return "<th>" + escapeHtml(col.label) + "</th>"; }).join("");
-    var rows = summary.days.map(function (row) {
-      return "<tr>" + COLS.map(function (col) {
-        return "<td>" + escapeHtml(cellValue(row, col)) + "</td>";
+  function mixText(value) {
+    var n = Number(value);
+    if (!Number.isFinite(n)) n = 0;
+    return (Math.round(n * 10) / 10) + "%";
+  }
+
+  function table(cols, rows, foot, extraClass) {
+    var head = cols.map(function (col) { return "<th>" + escapeHtml(col.label) + "</th>"; }).join("");
+    var body = (rows || []).map(function (row) {
+      return "<tr>" + cols.map(function (col) {
+        return "<td>" + escapeHtml(col.value(row)) + "</td>";
       }).join("") + "</tr>";
     }).join("");
-    var t = summary.totals || {};
-    var foot = COLS.map(function (col) {
-      if (col.key === "date") return "<th>Total</th>";
-      return "<th>" + escapeHtml(cellValue(t, col)) + "</th>";
-    }).join("");
+    var footer = "";
+    if (foot) {
+      footer = "<tfoot><tr>" + cols.map(function (col) {
+        return "<th>" + escapeHtml(col.foot ? col.foot(foot) : "") + "</th>";
+      }).join("") + "</tr></tfoot>";
+    }
     return (
-      '<div class="ff-rpt-meta">' +
-        "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
-        "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
-      "</div>" +
-      '<div class="ff-rpt-table-wrap">' +
-        '<table class="ff-rpt-table">' +
+      '<div class="ff-rpt-table-wrap ff-rpt-table-wrap-compact">' +
+        '<table class="ff-rpt-table ff-rpt-table-compact ff-rpt-table-service' +
+          (extraClass ? " " + extraClass : "") + '">' +
           "<thead><tr>" + head + "</tr></thead>" +
-          "<tbody>" + rows + "</tbody>" +
-          "<tfoot><tr>" + foot + "</tr></tfoot>" +
+          "<tbody>" + body + "</tbody>" +
+          footer +
         "</table>" +
+      "</div>"
+    );
+  }
+
+  function reportHtml(summary) {
+    var totals = (summary && summary.totals) || {};
+    if (!totals.units) {
+      return '<p class="ff-rpt-empty">No closed service sales in this period.</p>';
+    }
+    var serviceCols = [
+      { label: "Service", value: function (row) { return row.name; }, foot: function () { return "Total"; } },
+      { label: "Units", value: function (row) { return String(row.units); }, foot: function (t) { return String(t.units); } },
+      { label: "Gross service sales", value: function (row) { return money(row.sales); }, foot: function (t) { return money(t.grossSales); } },
+      { label: "Mix", value: function (row) { return mixText(row.mix); }, foot: function () { return "100%"; } },
+      { label: "Average", value: function (row) { return money(row.average); }, foot: function (t) { return money(t.averageUnit); } }
+    ];
+    var providerCols = [
+      { label: "Provider", value: function (row) { return row.name; } },
+      { label: "Units", value: function (row) { return String(row.units); } },
+      { label: "Gross service sales", value: function (row) { return money(row.sales); } },
+      { label: "Mix", value: function (row) { return mixText(row.mix); } }
+    ];
+    var dayCols = [
+      { label: "Date", value: function (row) { return formatDay(row.dateKey); } },
+      { label: "Units", value: function (row) { return String(row.units); } },
+      { label: "Gross service sales", value: function (row) { return money(row.sales); } }
+    ];
+    var unassignedNote = totals.unassignedUnits
+      ? '<p class="ff-rpt-fine">Walk-in checkout items without a provider are listed as Unassigned. Tips stay on the ticket, not the service.</p>'
+      : '<p class="ff-rpt-fine">Tips stay on the ticket, not the service. Refunds are not split by service.</p>';
+    return (
+      '<div class="ff-rpt-intel">' +
+        '<div class="ff-rpt-meta">' +
+          "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
+          "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
+          '<p class="ff-rpt-fine">Closed checkout service items only. Booked service value stays in Booking Intelligence.</p>' +
+        "</div>" +
+        '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +
+          kpi("Gross service sales", money(totals.grossSales)) +
+          kpi("Units sold", String(totals.units)) +
+          kpi("Tickets with services", String(totals.serviceTickets)) +
+          kpi("Average per unit", money(totals.averageUnit)) +
+        "</div>" +
+        '<section class="ff-rpt-panel">' +
+          "<h2>By service</h2>" +
+          table(serviceCols, summary.services, totals) +
+        "</section>" +
+        '<section class="ff-rpt-panel">' +
+          "<h2>By provider</h2>" +
+          table(providerCols, summary.providers) +
+          unassignedNote +
+        "</section>" +
+        '<section class="ff-rpt-panel">' +
+          "<h2>By day</h2>" +
+          table(dayCols, summary.days, null, "ff-rpt-table-service-day") +
+        "</section>" +
       "</div>"
     );
   }
@@ -250,7 +295,7 @@
     if (status === "error" || errorText) {
       return '<p class="ff-rpt-empty">' + escapeHtml(errorText) + "</p>";
     }
-    return tableHtml(result);
+    return reportHtml(result);
   }
 
   function html() {
@@ -258,11 +303,12 @@
   }
 
   async function generate() {
-    var math = compute();
+    var dates = compute();
+    var svc = math();
     var ids = selectedLocationIds();
     var today = todayKey();
-    var range = math && typeof math.rangeForPreset === "function"
-      ? math.rangeForPreset(filters.date, today, filters.customFrom, filters.customTo)
+    var range = dates && typeof dates.rangeForPreset === "function"
+      ? dates.rangeForPreset(filters.date, today, filters.customFrom, filters.customTo)
       : { fromKey: today, toKey: today };
     var rangeHelp = rangeApi();
     openMenu = "";
@@ -315,9 +361,9 @@
       paint();
       return;
     }
-    result = math && typeof math.summarize === "function"
-      ? math.summarize(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
-      : { days: [], totals: { sales: 0, services: 0, serviceSales: 0, tip: 0, total: 0 } };
+    result = svc && typeof svc.summarizeServiceSales === "function"
+      ? svc.summarizeServiceSales(view.sales, { fromKey: range.fromKey, toKey: range.toKey, locationIds: ids })
+      : { totals: { units: 0, grossSales: 0 }, services: [], providers: [], days: [] };
     status = "ready";
     paint();
   }
@@ -340,48 +386,48 @@
     if (!isActive()) return;
     var t = ev.target;
     if (!t || typeof t.closest !== "function") return;
-    var locRow = t.closest("[data-ff-rpt-loc]");
+    var locRow = t.closest("[data-ff-svc-loc]");
     if (locRow) {
       ev.preventDefault();
       ev.stopPropagation();
-      toggleLocation(locRow.getAttribute("data-ff-rpt-loc"));
+      toggleLocation(locRow.getAttribute("data-ff-svc-loc"));
       openMenu = "loc";
       paint();
       return;
     }
-    var menu = t.closest("[data-ff-rpt-menu]");
+    var menu = t.closest("[data-ff-svc-menu]");
     if (menu) {
       ev.preventDefault();
-      var next = menu.getAttribute("data-ff-rpt-menu");
+      var next = menu.getAttribute("data-ff-svc-menu");
       openMenu = openMenu === next ? "" : next;
       paint();
       return;
     }
-    var allBtn = t.closest("[data-ff-rpt-loc-all]");
+    var allBtn = t.closest("[data-ff-svc-loc-all]");
     if (allBtn) {
       ev.preventDefault();
       ev.stopPropagation();
-      setLocationIds(allBtn.getAttribute("data-ff-rpt-loc-all") === "1" ? allLocationIds() : []);
+      setLocationIds(allBtn.getAttribute("data-ff-svc-loc-all") === "1" ? allLocationIds() : []);
       openMenu = "loc";
       paint();
       return;
     }
-    var dateOpt = t.closest("[data-ff-rpt-date]");
+    var dateOpt = t.closest("[data-ff-svc-date]");
     if (dateOpt) {
       ev.preventDefault();
       ev.stopPropagation();
-      filters.date = dateOpt.getAttribute("data-ff-rpt-date") || "today";
+      filters.date = dateOpt.getAttribute("data-ff-svc-date") || "today";
       openMenu = filters.date === "custom" ? "date" : "";
       paint();
       return;
     }
-    var go = t.closest("[data-ff-rpt-generate]");
+    var go = t.closest("[data-ff-svc-generate]");
     if (go) {
       ev.preventDefault();
       generate();
       return;
     }
-    if (t.closest("[data-ff-rpt-pop]")) {
+    if (t.closest("[data-ff-svc-pop]")) {
       ev.stopPropagation();
       return;
     }
@@ -395,7 +441,7 @@
     if (!isActive()) return;
     var t = ev.target;
     if (!t) return;
-    var custom = t.getAttribute && t.getAttribute("data-ff-rpt-custom");
+    var custom = t.getAttribute && t.getAttribute("data-ff-svc-custom");
     if (custom === "from") filters.customFrom = t.value || "";
     if (custom === "to") filters.customTo = t.value || "";
   }
@@ -409,14 +455,14 @@
       if (all.length) filters.locationIds = all;
     }
     host.innerHTML = html();
-    if (!host.getAttribute("data-ff-rpt-summary-bound")) {
-      host.setAttribute("data-ff-rpt-summary-bound", "1");
+    if (!host.getAttribute("data-ff-rpt-svc-bound")) {
+      host.setAttribute("data-ff-rpt-svc-bound", "1");
       host.addEventListener("click", onHostClick);
       host.addEventListener("change", onHostChange);
     }
   }
 
-  window.ffBookingReportsSalesSummary = {
+  window.ffBookingReportsServiceSales = {
     paint: paint
   };
 })();

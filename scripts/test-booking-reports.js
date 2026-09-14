@@ -47,6 +47,7 @@ check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID =
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
 check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
 check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/capacity-patterns.js") !== -1 && ui.indexOf("/booking/reports/service-demand.js") !== -1 && ui.indexOf("/booking/reports/client-behavior.js") !== -1 && ui.indexOf("/booking/reports/insight-priority.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
+check("reports ui loads service sales modules", ui.indexOf("/booking/reports/service-sales-compute.js") !== -1 && ui.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
@@ -69,6 +70,7 @@ check("nav defaults to booking intelligence", nav.getSelectedId() === "booking-i
 check("nav can still open sales summary", nav.setSelectedId("sales-summary") === "sales-summary" && nav.getSelected().label === "Sales Summary");
 check("nav can select booking intelligence", nav.setSelectedId("booking-intelligence") === "booking-intelligence" && nav.getSelected().label === "Booking Intelligence");
 check("nav can select service sales", nav.setSelectedId("service-sales") === "service-sales" && nav.getSelected().label === "Service Sales");
+check("service sales is no longer a placeholder blurb only", nav.getSelected().blurb.indexOf("closed checkout") !== -1);
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },

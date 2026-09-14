@@ -488,6 +488,12 @@
 .ff-rpt-table-demand {
   min-width: 820px;
 }
+.ff-rpt-table-service {
+  min-width: 640px;
+}
+.ff-rpt-table-service-day {
+  min-width: 360px;
+}
 .ff-rpt-kpis-follow {
   margin-top: 10px;
 }
