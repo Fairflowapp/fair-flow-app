@@ -822,6 +822,20 @@
   api.rankParallelMultiServiceVisitPlans = rankParallelMultiServiceVisitPlans;
   api.recommendParallelMultiServiceVisit = recommendParallelMultiServiceVisit;
   api.compareParallelMultiServiceVisitPlans = compareParallelPlans;
+  api.PHASE12_INTERNALS = {
+    parseLines: parseLines,
+    buildBlocks: buildBlocks,
+    validateRequest: validateRequest,
+    collectVisitStarts: collectVisitStarts,
+    rankProvidersForLine: rankProvidersForLine,
+    scoreCompleteVisit: scoreCompleteVisit,
+    compareParallelPlans: compareParallelPlans,
+    enumerateBlockAssignments: enumerateBlockAssignments,
+    insertVisitLine: insertVisitLine,
+    copyDaysMap: copyDaysMap,
+    asDay: asDay,
+    optionInt: optionInt
+  };
   api.PARALLEL_MULTI_SERVICE = {
     BASE: BASE,
     EFFICIENCY_CAP: EFFICIENCY_CAP,
