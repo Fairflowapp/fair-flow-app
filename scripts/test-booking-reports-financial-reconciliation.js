@@ -272,7 +272,7 @@ check("source: reports ui does not preload financial fetches", uiSrc.indexOf("fe
 check("copy: Sales Summary is overall checkout sales", navSrc.indexOf("Overall closed checkout sales.") !== -1 && summarySrc.indexOf("Overall closed checkout sales.") !== -1);
 check("copy: Service Sales explains service-item scope", serviceSrc.indexOf("Tips and ticket-level refunds are not allocated to services.") !== -1);
 check("copy: Time Period is grouped by sale date", timeSrc.indexOf("Closed checkout sales grouped by sale date.") !== -1);
-check("copy: Product Sales stays a placeholder", navSrc.indexOf("Available when product checkout is supported.") !== -1);
+check("copy: Product Sales is not a visible nav item", navSrc.indexOf('id: "product-sales"') === -1);
 check("copy: financial reports do not say revenue or profit", summarySrc.indexOf("Revenue") === -1 && serviceSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("profit") === -1);
 check("copy: incomplete and error strings match", summarySrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && serviceSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && timeSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && summarySrc.indexOf("This report could not load.") !== -1 && serviceSrc.indexOf("This report could not load.") !== -1 && timeSrc.indexOf("This report could not load.") !== -1);
 check("shared item-kind semantic is kind !== product", compute.isServiceItem({ kind: "service" }) === true && compute.isServiceItem({ kind: "product" }) === false && serviceApi.isServiceItem({ kind: "addon" }) === true);

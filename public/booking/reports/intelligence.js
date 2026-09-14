@@ -291,29 +291,6 @@
     );
   }
 
-  function sourcesHtml(report) {
-    var intel = compute();
-    var labels = (intel && intel.SOURCE_LABELS) || {};
-    var keys = (intel && intel.KNOWN_SOURCES) || [];
-    var counts = report.sources.counts || {};
-    var max = 0;
-    keys.forEach(function (key) {
-      if (counts[key] > max) max = counts[key];
-    });
-    if (counts.other > max) max = counts.other;
-    var rows = keys.map(function (key) {
-      return barRow(labels[key] || key, counts[key] || 0, max || 1);
-    }).join("");
-    if (counts.other) rows += barRow(labels.other || "Other", counts.other, max || 1);
-    return (
-      '<section class="ff-rpt-panel ff-rpt-panel-secondary">' +
-        "<h2>Booking source</h2>" +
-        '<p class="ff-rpt-fine">Recorded on the appointment when present. New bookings are currently saved as front desk, so this is not a complete channel report yet.</p>' +
-        '<div class="ff-rpt-bars">' + rows + "</div>" +
-      "</section>"
-    );
-  }
-
   function civilDateLabel(dateKey) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey || "").trim());
     if (!m) return String(dateKey || "");
@@ -657,6 +634,8 @@
     }
     if (status === "loading") return '<p class="ff-rpt-empty">Reading appointments and schedules…</p>';
     if (!result) return '<p class="ff-rpt-empty">No report yet.</p>';
+    // Booking source mix stays in compute only. Create still writes front_desk,
+    // so it is not owner-facing until appointment origin is captured for real.
     return (
       '<div class="ff-rpt-intel">' +
         '<div class="ff-rpt-meta">' +
@@ -670,7 +649,6 @@
         serviceDemandHtml(result) +
         clientBehaviorHtml(result) +
         gapsHtml(result) +
-        sourcesHtml(result) +
       "</div>"
     );
   }

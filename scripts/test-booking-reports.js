@@ -42,7 +42,7 @@ check("shell refreshes reports", shell.indexOf("ffRefreshBookingReports") !== -1
 check("reports has a Sales group", navSrc.indexOf('label: "Sales"') !== -1);
 check("reports has an Intelligence group", navSrc.indexOf('label: "Intelligence"') !== -1 && navSrc.indexOf('id: "booking-intelligence"') !== -1);
 check("sales summary remains a report", navSrc.indexOf('id: "sales-summary"') !== -1);
-check("sales tabs include service, product, and period", navSrc.indexOf("service-sales") !== -1 && navSrc.indexOf("product-sales") !== -1 && navSrc.indexOf("sales-by-period") !== -1);
+check("sales tabs include service and period only", navSrc.indexOf("service-sales") !== -1 && navSrc.indexOf("sales-by-period") !== -1 && navSrc.indexOf("product-sales") === -1);
 check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID = "booking-intelligence"') !== -1);
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
 check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
@@ -74,9 +74,11 @@ check("nav can select service sales", nav.setSelectedId("service-sales") === "se
 check("nav can select sales by time period", nav.setSelectedId("sales-by-period") === "sales-by-period" && nav.getSelected().blurb.indexOf("sale date") !== -1);
 check("service sales is no longer a placeholder blurb only", nav.find("service-sales").blurb.indexOf("closed checkout") !== -1);
 check("sales summary blurb is overall checkout sales", nav.find("sales-summary").blurb.indexOf("Overall closed checkout sales") !== -1);
-check("product sales stays a placeholder", nav.find("product-sales").blurb.indexOf("product checkout") !== -1);
+check("product sales is not a visible report", nav.find("product-sales") == null);
+check("stale product-sales selection falls back to intelligence", nav.setSelectedId("product-sales") === "booking-intelligence");
 const salesIds = nav.GROUPS.find(function (group) { return group.id === "sales"; }).items.map(function (row) { return row.id; });
-check("financial report order is summary, service, time, product", salesIds.join(",") === "sales-summary,service-sales,sales-by-period,product-sales");
+check("visible sales nav is summary, service, time", salesIds.join(",") === "sales-summary,service-sales,sales-by-period");
+check("visible reports are only the four built surfaces", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,sales-summary,service-sales,sales-by-period");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },

@@ -260,25 +260,52 @@ Staff can check out from an appointment or as a walk-in sale. Tax is currently 0
 
 ## Reports
 
-Reports should be **actionable**, not only descriptive.
+Reports should be **actionable**, not only descriptive. Number → explanation → operational context → action, when the data can support it.
 
-Examples:
+Visible navigation today:
 
-- Utilization
-- Gaps
-- Lost capacity
-- Revenue
-- Appointment counts
-- Booking source
-- New vs returning
-- Requested provider
-- Cancellations / no-show
-- Retention
-- Rebooking
-- Waitlist fill rate
-- Gaps prevented
-- Gaps recovered
-- Recovered provider hours
+- Intelligence → Booking Intelligence
+- Sales → Sales Summary · Service Sales · Sales by Time Period
+
+### Built
+
+**Booking Intelligence** (default landing). Appointment-based owner view from live booking data:
+
+- owner overview
+- provider capacity
+- working / booked / idle / calendar gap / open-edge idle time
+- utilization
+- capacity patterns (day / weekday / hour)
+- service demand and booked service value (`priceSnapshot`, not checkout sales)
+- client behavior (in-period first-visit vs returning, repeat-in-period, requested provider)
+- deterministic insights
+
+Appointment `source` is still computed internally, but Booking Source is **not** shown to owners while create writes `front_desk`. No-show is counted when marked, but is not a headline KPI because that workflow is incomplete.
+
+**Financial reports** use closed checkout sales only (`salons/{salonId}/sales`), not appointment booked value:
+
+- Sales Summary
+- Service Sales (service-item amounts; tips and ticket-level refunds are not allocated to services)
+- Sales by Time Period
+
+**Financial infrastructure:**
+
+- date-range-complete Sales retrieval (`ffBookingReportsSalesRange.fetchForReport`)
+- pagination (not the 80-row list APIs)
+- multi-location timezone-aware civil ranges via sale `closedAt`
+- incomplete / error protection (no authoritative totals when incomplete)
+- shared ticket / refund / item math and cross-report reconciliation
+
+### Not yet built / blocked
+
+- Product Sales (product checkout items are not written yet; hidden from nav)
+- Team Sales (walk-in checkout items do not reliably include `providerId`)
+- payment-method / tender reports (`method` / `processor` still `"none"`)
+- full refund reporting (ticket-level history only; refund UI is not live)
+- true cohort retention (in-period client behavior is not retention)
+- gift cards, memberships, packages
+- booking-source mix as owner truth
+- exports as a Reports product
 
 Example insight:
 
@@ -286,12 +313,6 @@ Example insight:
 > 7.25 hours could potentially have been recovered by moving appointments 30 minutes or less.
 
 Reports should eventually provide **actions** from insights.
-
-### Currently implemented
-
-Sales Summary only (closed sales: counts, service $, product columns ready, fees/tax/tip/refunds/adjusted). Other Sales nav items are placeholders.
-
-Appointment-based analytics (utilization, gaps, source mix, no-shows, retention, waitlist) are **not** implemented. `firstVisit` exists on appointments but is unused in reports.
 
 ---
 

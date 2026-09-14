@@ -1,5 +1,7 @@
 /**
- * Reports catalog. Booking Intelligence is the default landing. Sales stay available.
+ * Reports catalog. Booking Intelligence is the default landing.
+ * Visible items are built reports only. Product Sales stays out of nav
+ * until Booking checkout writes product items.
  */
 (function () {
   var KEY = "ff-booking-report";
@@ -34,11 +36,6 @@
           id: "sales-by-period",
           label: "Sales by Time Period",
           blurb: "Closed checkout sales grouped by sale date."
-        },
-        {
-          id: "product-sales",
-          label: "Product Sales",
-          blurb: "Available when product checkout is supported."
         }
       ]
     }

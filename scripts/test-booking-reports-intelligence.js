@@ -433,7 +433,8 @@ check("nav includes booking intelligence", navSrc.indexOf('id: "booking-intellig
 check("dashboard styles stay in reports css", css.indexOf(".ff-rpt-insights") !== -1 && css.indexOf(".ff-rpt-estimate-label") !== -1);
 check("estimated unused service capacity is labeled in the ui", uiSrc.indexOf("Estimated unused service capacity") !== -1 && uiSrc.indexOf("average booked service dollars per booked minute") !== -1);
 check("ui does not call the estimate lost or recoverable revenue", uiSrc.indexOf("lost revenue") === -1 && uiSrc.indexOf("recoverable revenue") === -1 && uiSrc.indexOf("may have been recoverable") === -1);
-check("ui demotes source mix with a data-quality note", uiSrc.indexOf("not a complete channel report") !== -1 && uiSrc.indexOf("ff-rpt-panel-secondary") !== -1);
+check("ui hides booking source from owners", uiSrc.indexOf("<h2>Booking source</h2>") === -1 && uiSrc.indexOf("not a complete channel report") === -1);
+check("source compute remains available internally", intel.KNOWN_SOURCES.indexOf("front_desk") !== -1 && sources.sources.total === 6);
 check("ui does not headline no-show as a KPI card", uiSrc.indexOf('kpi("No-show"') === -1);
 check("ui explains idle versus calendar gaps", uiSrc.indexOf("open-edge idle is unused time at the start or end") !== -1);
 check("ui shows a provider capacity table", uiSrc.indexOf("Provider capacity") !== -1 && uiSrc.indexOf("Open-edge hrs") !== -1 && uiSrc.indexOf("booked ÷ working") !== -1);
