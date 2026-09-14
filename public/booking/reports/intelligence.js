@@ -492,6 +492,53 @@
     );
   }
 
+  function serviceDemandHtml(report) {
+    var demand = report && report.serviceDemand;
+    var services = (demand && demand.services) || [];
+    if (!services.length) return "";
+    var totals = demand.totals || {};
+    var top = demand.highestDemand;
+    var rows = services.map(function (row) {
+      return (
+        "<tr>" +
+          "<td>" + escapeHtml(row.name || "Service") + "</td>" +
+          "<td>" + escapeHtml(String(row.appointmentCount || 0) + " / " + String(row.lineCount || 0)) + "</td>" +
+          "<td>" + escapeHtml(String(row.clientCount || 0)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.bookedMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.timeMixPercent)) + "%</td>" +
+          "<td>" + escapeHtml(row.bookedServiceValue > 0 ? money(row.bookedServiceValue) : "—") + "</td>" +
+          "<td>" + escapeHtml(row.valuePerProviderHour != null ? money(row.valuePerProviderHour) : "—") + "</td>" +
+          "<td>" + escapeHtml(String(row.providerCount || 0)) + "</td>" +
+          "<td>" + escapeHtml(row.providerCount ? String(row.topProviderSharePercent) + "%" : "—") + "</td>" +
+        "</tr>"
+      );
+    }).join("");
+    var quality = totals.unpricedLineCount
+      ? '<p class="ff-rpt-fine">Booked service value includes only lines with a price snapshot. ' +
+        escapeHtml(String(totals.unpricedLineCount)) +
+        " service line" + (totals.unpricedLineCount === 1 ? "" : "s") +
+        " had no booked price.</p>"
+      : '<p class="ff-rpt-fine">Booked service value is the appointment price snapshot, not collected sales. Service hours count each service line; overlapping lines are not unioned here.</p>';
+    return (
+      '<section class="ff-rpt-panel">' +
+        "<h2>Service demand &amp; capacity</h2>" +
+        '<p class="ff-rpt-fine">What was booked. Booked value / provider hr uses priced service-line duration only. This is booked value density, not provider pay or salon profit.</p>' +
+        '<div class="ff-rpt-kpis">' +
+          kpi("Distinct services", totals.serviceCount || 0) +
+          kpi("Booked service hours", hours(totals.bookedMinutes || 0)) +
+          kpi("Booked service value", totals.bookedServiceValue > 0 ? money(totals.bookedServiceValue) : "—") +
+          kpi("Highest-demand service", top && top.name ? top.name : "—", top ? hours(top.bookedMinutes) + " hrs" : "") +
+        "</div>" +
+        patternTable(
+          ["Service", "Bookings / lines", "Clients", "Booked hours", "Time mix", "Booked value", "Value / provider hr", "Providers", "Top-provider share"],
+          rows,
+          "ff-rpt-table-demand"
+        ) +
+        quality +
+      "</section>"
+    );
+  }
+
   function utilizationHtml(report) {
     var u = report.utilization;
     var rows = (u.providers || []).map(function (row) {
@@ -588,6 +635,7 @@
         requestedHtml(result) +
         utilizationHtml(result) +
         patternsHtml(result) +
+        serviceDemandHtml(result) +
         gapsHtml(result) +
         sourcesHtml(result) +
       "</div>"

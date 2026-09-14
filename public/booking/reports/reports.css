@@ -465,6 +465,9 @@
 .ff-rpt-table-patterns {
   min-width: 640px;
 }
+.ff-rpt-table-demand {
+  min-width: 820px;
+}
 .ff-rpt-view-toggle {
   display: inline-flex;
   margin: 14px 0 12px;

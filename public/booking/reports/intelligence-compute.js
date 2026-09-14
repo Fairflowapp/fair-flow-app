@@ -386,7 +386,20 @@
         averageRatePerMinute: null
       },
       insights: [],
-      patterns: { days: [], weekdays: [], hours: [], summary: null }
+      patterns: { days: [], weekdays: [], hours: [], summary: null },
+      serviceDemand: {
+        services: [],
+        totals: {
+          serviceCount: 0,
+          lineCount: 0,
+          bookedMinutes: 0,
+          bookedServiceValue: 0,
+          pricedLineCount: 0,
+          unpricedLineCount: 0,
+          completedLineCount: 0
+        },
+        highestDemand: null
+      }
     };
   }
 
@@ -617,7 +630,11 @@
       window.ffBookingReportsCapacityPatterns.appendInsights(out, report, phrase);
     }
 
-    return out.slice(0, 12);
+    if (window.ffBookingReportsServiceDemand && typeof window.ffBookingReportsServiceDemand.appendInsights === "function") {
+      window.ffBookingReportsServiceDemand.appendInsights(out, report, phrase);
+    }
+
+    return out.slice(0, 16);
   }
 
   function hoursPhrase(minutes) {
@@ -898,6 +915,10 @@
       window.ffBookingReportsCapacityPatterns.attach(report, dayFacts, opts);
     }
 
+    if (window.ffBookingReportsServiceDemand && typeof window.ffBookingReportsServiceDemand.attach === "function") {
+      window.ffBookingReportsServiceDemand.attach(report, appointments, opts);
+    }
+
     report.insights = buildInsights(report, opts);
     return report;
   }
@@ -914,6 +935,7 @@
     appointmentInScope: appointmentInScope,
     mergeIntervals: mergeIntervals,
     clipInterval: clipInterval,
+    lineWindow: lineWindow,
     capacityFromWindows: capacityFromWindows,
     minutesOf: minutesOf,
     formatHours: formatHours,
