@@ -2,7 +2,8 @@
  * Booking Calendar day-view state. One in-memory store — do not copy
  * selected date / location / axis into other Calendar modules.
  *
- * Future appointments / filters / drag can extend this object in place.
+ * Provider filters are view-only. Empty visibleProviderIds means all
+ * eligible providers. Session/in-memory only — no backend persistence.
  */
 (function () {
   var VIEW_DAY = "day";
@@ -12,6 +13,7 @@
   var locationId = "";
   var employees = [];
   var focusProviderId = "";
+  var visibleProviderIds = [];
   var businessHours = null;
   var axisStartMin = 8 * 60;
   var axisEndMin = 19 * 60;
@@ -72,12 +74,60 @@
     return employees;
   }
 
+  function uniqueIds(list) {
+    var seen = {};
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (value) {
+      var id = String(value || "").trim();
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      out.push(id);
+    });
+    return out;
+  }
+
+  function knownProviderIds() {
+    return employees.map(function (emp) {
+      return emp && emp.id ? String(emp.id) : "";
+    }).filter(Boolean);
+  }
+
+  function pruneVisibleProviders() {
+    var known = knownProviderIds();
+    var next = visibleProviderIds.filter(function (id) { return known.indexOf(id) !== -1; });
+    if (!next.length || next.length === known.length) {
+      visibleProviderIds = [];
+      focusProviderId = "";
+      return visibleProviderIds;
+    }
+    visibleProviderIds = next;
+    focusProviderId = next.length === 1 ? next[0] : "";
+    return visibleProviderIds;
+  }
+
   function setEmployees(list) {
     employees = Array.isArray(list) ? list : [];
-    if (focusProviderId && !employees.some(function (emp) { return emp.id === focusProviderId; })) {
-      focusProviderId = "";
-    }
+    pruneVisibleProviders();
     return employees;
+  }
+
+  function getVisibleProviderIds() {
+    return visibleProviderIds.slice();
+  }
+
+  function setVisibleProviderIds(ids) {
+    visibleProviderIds = uniqueIds(ids);
+    return pruneVisibleProviders();
+  }
+
+  function clearVisibleProviders() {
+    visibleProviderIds = [];
+    focusProviderId = "";
+    return visibleProviderIds;
+  }
+
+  function isProviderFilterActive() {
+    return visibleProviderIds.length > 0;
   }
 
   function getFocusProviderId() {
@@ -86,19 +136,25 @@
 
   function setFocusProviderId(next) {
     var id = String(next || "").trim();
-    focusProviderId = id;
+    if (!id) return clearVisibleProviders();
+    setVisibleProviderIds([id]);
     return focusProviderId;
   }
 
   function clearFocusProvider() {
-    focusProviderId = "";
-    return focusProviderId;
+    return clearVisibleProviders();
   }
 
   function getVisibleEmployees() {
-    if (!focusProviderId) return employees;
-    var focused = employees.filter(function (emp) { return emp.id === focusProviderId; });
-    return focused.length ? focused : employees;
+    if (!visibleProviderIds.length && !focusProviderId) return employees;
+    var allow = {};
+    if (visibleProviderIds.length) {
+      visibleProviderIds.forEach(function (id) { allow[id] = true; });
+    } else if (focusProviderId) {
+      allow[focusProviderId] = true;
+    }
+    var visible = employees.filter(function (emp) { return emp && allow[emp.id]; });
+    return visible.length ? visible : employees;
   }
 
   function getBusinessHours() {
@@ -147,6 +203,10 @@
     getEmployees: getEmployees,
     setEmployees: setEmployees,
     getVisibleEmployees: getVisibleEmployees,
+    getVisibleProviderIds: getVisibleProviderIds,
+    setVisibleProviderIds: setVisibleProviderIds,
+    clearVisibleProviders: clearVisibleProviders,
+    isProviderFilterActive: isProviderFilterActive,
     getFocusProviderId: getFocusProviderId,
     setFocusProviderId: setFocusProviderId,
     clearFocusProvider: clearFocusProvider,

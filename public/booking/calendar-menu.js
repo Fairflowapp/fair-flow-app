@@ -149,6 +149,9 @@
       return;
     }
     close();
+    if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+      window.ffBookingCalFilters.close();
+    }
     var el = ensureMenu();
     openCtx = ctx;
     openCtx.anchor = anchor;

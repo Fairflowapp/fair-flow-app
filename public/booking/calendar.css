@@ -154,10 +154,18 @@ body.ff-booking-area .ff-booking-main {
   font-weight: 600;
   line-height: 1;
 }
-.ff-cal-filters,
 .ff-cal-view-btn:disabled {
   opacity: 0.55;
   cursor: default;
+}
+.ff-cal-filters:hover {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+.ff-cal-filters.is-on {
+  border-color: #7c3aed;
+  color: #5b21b6;
+  background: #f5f3ff;
 }
 .ff-cal-view {
   display: inline-flex;
@@ -558,6 +566,82 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-menu-item:disabled {
   color: #9a94a3;
   cursor: default;
+}
+.ff-cal-filter-menu {
+  min-width: 240px;
+  max-height: min(360px, calc(100vh - 24px));
+  overflow: auto;
+}
+.ff-cal-filter-all {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #5b21b6;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ff-cal-filter-all:hover {
+  background: #f5f3ff;
+}
+.ff-cal-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #2a2140;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.25;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ff-cal-filter-row:hover {
+  background: #f5f4f7;
+}
+.ff-cal-filter-check {
+  width: 16px;
+  flex: 0 0 16px;
+  color: #7c3aed;
+  font-weight: 800;
+  text-align: center;
+}
+.ff-cal-filter-avatar {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #f1f1f3;
+  color: #5b5566;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ff-cal-filter-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ff-cal-filter-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ff-cal-move {

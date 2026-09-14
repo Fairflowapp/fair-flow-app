@@ -258,6 +258,7 @@
     vp.setAttribute("data-ff-cal-scroll-bound", "1");
     vp.addEventListener("scroll", function () {
       if (window.ffBookingCalMenu) window.ffBookingCalMenu.close();
+      if (window.ffBookingCalFilters) window.ffBookingCalFilters.close();
     }, { passive: true });
   }
 
@@ -278,7 +279,7 @@
     if (!st || !tm || !lay || !root) return;
     var axis = st.getAxis();
     var employees = (st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees();
-    var focusedId = st.getFocusProviderId ? st.getFocusProviderId() : "";
+    var filterOn = !!(st.isProviderFilterActive && st.isProviderFilterActive());
     var height = lay.axisHeight(axis.startMin, axis.endMin);
     var hours = lay.hourMarks(axis.startMin, axis.endMin);
     var halves = lay.halfHourMarks(axis.startMin, axis.endMin);
@@ -332,10 +333,15 @@
             '<div class="ff-cal-date">' + escapeHtml(dateLabel) + "</div>" +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="next" aria-label="Next day">›</button>' +
             dayStatusHtml(st) +
-            (focusedId ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
+            (filterOn ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
           "</div>" +
           '<div class="ff-cal-toolbar-right">' +
-            '<button type="button" class="ff-cal-filters" disabled title="Coming later">Filters</button>' +
+            '<button type="button" class="ff-cal-filters' + (filterOn ? " is-on" : "") +
+              '" data-ff-cal-act="filters" aria-haspopup="menu" aria-expanded="false">' +
+              escapeHtml(window.ffBookingCalFilters && window.ffBookingCalFilters.buttonLabel
+                ? window.ffBookingCalFilters.buttonLabel()
+                : "Filters") +
+            "</button>" +
             '<div class="ff-cal-view" role="group" aria-label="Calendar view">' +
               '<button type="button" class="ff-cal-view-btn is-active">Day</button>' +
               '<button type="button" class="ff-cal-view-btn" disabled title="Week view coming later">Week</button>' +
@@ -366,7 +372,11 @@
     if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
       window.ffBookingCalMenu.close();
     }
-    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
+    if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+      window.ffBookingCalFilters.close();
+    }
+    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" +
+      (st.getVisibleProviderIds ? st.getVisibleProviderIds().join(",") : focusedId);
     paintOverlays(root);
   }
 
@@ -467,7 +477,13 @@
     if (act === "today") st.goToday();
     else if (act === "prev") st.shiftDay(-1);
     else if (act === "next") st.shiftDay(1);
-    else if (act === "clear-focus") st.clearFocusProvider();
+    else if (act === "clear-focus") st.clearVisibleProviders ? st.clearVisibleProviders() : st.clearFocusProvider();
+    else if (act === "filters") {
+      if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.toggle === "function") {
+        window.ffBookingCalFilters.toggle(document.querySelector(".ff-cal-filters"));
+      }
+      return;
+    }
     else return;
     render({ keepScroll: false });
   }
