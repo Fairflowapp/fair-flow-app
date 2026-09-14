@@ -269,7 +269,8 @@
         startMin: axis.startMin,
         endMin: axis.endMin,
         intervals: axis.intervals || [],
-        source: axis.source,
+        source: axis.source || "",
+        note: axis.note || "",
         usedDefault: false
       };
     }
@@ -301,8 +302,33 @@
       startMin: axisStart,
       endMin: axisEnd,
       intervals: isOpen ? [{ startMin: salonStart, endMin: salonEnd }] : [],
+      source: "business_hours",
+      note: "",
       usedDefault: start == null || end == null
     };
+  }
+
+  function axisFromDay(day) {
+    var next = day && typeof day === "object" ? day : {};
+    return {
+      startMin: next.startMin,
+      endMin: next.endMin,
+      salonOpen: !!next.isOpen,
+      salonStartMin: next.salonStartMin,
+      salonEndMin: next.salonEndMin,
+      intervals: Array.isArray(next.intervals) ? next.intervals : [],
+      source: next.source || "",
+      note: next.note || ""
+    };
+  }
+
+  function dayStatusLabel(day) {
+    var next = day && typeof day === "object" ? day : {};
+    var note = String(next.note || "").trim();
+    if (next.source === "special_day_hours") return note || "Special hours";
+    if (next.source === "special_day_closed") return note || "Salon closed";
+    if (!next.isOpen) return "Salon closed";
+    return "";
   }
 
   function loadCalendarEmployees(dateKey, locationId) {
@@ -337,6 +363,8 @@
     salonClosedWindows: salonClosedWindows,
     employeeOffWindows: employeeOffWindows,
     businessDayFor: businessDayFor,
+    axisFromDay: axisFromDay,
+    dayStatusLabel: dayStatusLabel,
     loadCalendarEmployees: loadCalendarEmployees,
     AXIS_PAD_MINUTES: AXIS_PAD_MINUTES
   };

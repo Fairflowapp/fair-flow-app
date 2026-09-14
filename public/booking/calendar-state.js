@@ -126,7 +126,9 @@
       salonOpen: salonOpen,
       salonStartMin: salonStartMin,
       salonEndMin: salonEndMin,
-      intervals: salonIntervals
+      intervals: salonIntervals,
+      source: businessHours && businessHours.source ? businessHours.source : "",
+      note: businessHours && businessHours.note ? businessHours.note : ""
     };
   }
 

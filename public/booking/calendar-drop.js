@@ -1,6 +1,6 @@
 /**
- * Local Calendar drop guard. Rejects moves into salon-closed or
- * provider-off ranges before drag persist. Does not write appointments.
+ * Local Calendar unavailable-time guard. Shared by create-from-slot and
+ * drag/drop so salon-closed and provider-off reject before persist.
  */
 (function () {
   var MESSAGES = Object.freeze({
@@ -83,8 +83,20 @@
     return { ok: true };
   }
 
+  function inspectCreate(spec) {
+    var next = spec && typeof spec === "object" ? spec : {};
+    return inspect({
+      providerId: next.providerId,
+      startMin: next.startMin,
+      durationMinutes: Number(next.durationMinutes) > 0 ? Number(next.durationMinutes) : 30,
+      axis: next.axis,
+      employee: next.employee
+    });
+  }
+
   window.ffBookingCalDrop = {
     inspect: inspect,
+    inspectCreate: inspectCreate,
     rangeOverlaps: rangeOverlaps,
     MESSAGES: MESSAGES
   };

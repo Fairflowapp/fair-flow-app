@@ -181,8 +181,41 @@
   function slotIsOpen(emp, axis, minutes) {
     var av = availability();
     if (!av) return false;
-    if (typeof av.reasonAt === "function") return av.reasonAt(emp, axis, minutes) === "available";
-    return typeof av.isBookableAt === "function" && av.isBookableAt(emp, axis, minutes);
+    if (typeof av.isBookableAt === "function") return av.isBookableAt(emp, axis, minutes);
+    return typeof av.reasonAt === "function" && av.reasonAt(emp, axis, minutes) === "available";
+  }
+
+  function toastUnavailable(message) {
+    if (window.ffToast && typeof window.ffToast.show === "function") {
+      window.ffToast.show(message, { variant: "error", durationMs: 3200 });
+    }
+  }
+
+  function blockedCreate(hit, emp) {
+    var api = window.ffBookingCalDrop;
+    if (!api || !hit || !hit.slot) return null;
+    var inspect = typeof api.inspectCreate === "function" ? api.inspectCreate : api.inspect;
+    if (typeof inspect !== "function") return null;
+    var result = inspect({
+      providerId: hit.slot.providerId,
+      startMin: hit.slot.startMin,
+      durationMinutes: 30,
+      axis: hit.axis,
+      employee: emp
+    });
+    return result && result.ok === false ? result : null;
+  }
+
+  function dayStatusHtml(st) {
+    var dt = data();
+    var day = st && typeof st.getBusinessHours === "function" ? st.getBusinessHours() : null;
+    var label = dt && typeof dt.dayStatusLabel === "function"
+      ? dt.dayStatusLabel(day)
+      : (!st.getAxis().salonOpen ? "Salon closed" : "");
+    if (!label) return "";
+    var special = day && day.source === "special_day_hours";
+    return '<span class="' + (special ? "ff-cal-special-note" : "ff-cal-closed-note") + '">' +
+      escapeHtml(label) + "</span>";
   }
 
   function composerHasUnsavedWork() {
@@ -197,6 +230,11 @@
     var emp = (hit.employees || []).find(function (row) {
       return row && row.id === hit.slot.providerId;
     });
+    var blocked = blockedCreate(hit, emp);
+    if (blocked) {
+      toastUnavailable(blocked.message || "That time is not available.");
+      return;
+    }
     if (!slotIsOpen(emp, hit.axis, hit.slot.startMin)) return;
     if (window.ffBookingCalDraft) {
       window.ffBookingCalDraft.set({
@@ -293,7 +331,7 @@
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="prev" aria-label="Previous day">‹</button>' +
             '<div class="ff-cal-date">' + escapeHtml(dateLabel) + "</div>" +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="next" aria-label="Next day">›</button>' +
-            (closed ? '<span class="ff-cal-closed-note">Salon closed</span>' : "") +
+            dayStatusHtml(st) +
             (focusedId ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
           "</div>" +
           '<div class="ff-cal-toolbar-right">' +
@@ -522,6 +560,10 @@
 
   window.ffRefreshBookingCalendar = refresh;
   window.ffBookingCalendarPaintKey = function () { return lastPaintKey; };
+  window.ffBookingCalendarCreate = {
+    blockedCreate: blockedCreate,
+    slotIsOpen: slotIsOpen
+  };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bind);

@@ -129,6 +129,7 @@ body.ff-booking-area .ff-booking-main {
   color: #1f1633;
 }
 .ff-cal-closed-note,
+.ff-cal-special-note,
 .ff-cal-clear-focus {
   font-size: 12px;
   font-weight: 600;
@@ -138,6 +139,10 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-closed-note {
   color: #6b6574;
   background: #eeeef1;
+}
+.ff-cal-special-note {
+  color: #5b4f7a;
+  background: #f3effa;
 }
 .ff-cal-clear-focus {
   border: 1px solid #ddd6ee;
