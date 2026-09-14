@@ -80,6 +80,10 @@ load("public/booking/calendar-drop.js", windowObj);
 load("public/booking/calendar-draft.js", windowObj);
 load("public/booking/calendar-week.js", windowObj);
 load("public/booking/calendar.js", windowObj);
+load("public/booking/schedule-board.js", windowObj);
+load("public/booking/appointments/model.js", windowObj);
+load("public/booking/appointments/calendar-data.js", windowObj);
+load("public/booking/appointments/calendar-render.js", windowObj);
 
 const st = windowObj.ffBookingCalState;
 const week = windowObj.ffBookingCalWeek;
@@ -197,6 +201,59 @@ check("appointment click does not start new draft", cardFirst !== -1 && weekCrea
 check("blocked-time chip click does not start a draft", blockFirst !== -1 && weekCreate !== -1 && blockFirst < weekCreate);
 check("Day create helpers are reused", typeof create.blockedCreate === "function" && typeof create.slotIsOpen === "function");
 check("Week create uses Day drop inspect", fs.readFileSync(path.join(root, "public/booking/calendar-week.js"), "utf8").indexOf("blockedCreate") !== -1);
+
+const renderSrc = fs.readFileSync(path.join(root, "public/booking/appointments/calendar-render.js"), "utf8");
+const weekPaint = renderSrc.slice(renderSrc.indexOf("if (week) {"), renderSrc.indexOf("} else {"));
+check(
+  "Week paint always syncs draft holds like Day",
+  weekPaint.indexOf("paintFromBoard") !== -1 && weekPaint.indexOf("if (holds.length &&") === -1
+);
+
+function leftoverHoldRoot() {
+  var holds = [];
+  function addHold() {
+    var el = {
+      remove: function () {
+        var i = holds.indexOf(el);
+        if (i >= 0) holds.splice(i, 1);
+      }
+    };
+    holds.push(el);
+    return el;
+  }
+  addHold();
+  return {
+    root: {
+      querySelectorAll: function (sel) {
+        if (sel === "[data-ff-cal-hold]") return holds.slice();
+        return [];
+      },
+      querySelector: function () {
+        return { appendChild: function () {} };
+      }
+    },
+    holdCount: function () { return holds.length; }
+  };
+}
+
+const render = windowObj.ffBookingCalCardRender;
+st.setView("week");
+st.setWeekProviderId("ashley");
+st.setWeekAnchorKey("2026-09-16");
+draft.set({
+  providerId: "ashley",
+  dateKey: "2026-09-17",
+  startMin: 10 * 60,
+  durationMinutes: 30
+});
+check("Week Hold appears when starting a new appointment", !!(draft.get() && draft.get().dateKey === "2026-09-17" && draft.get().startMin === 10 * 60));
+
+const leftover = leftoverHoldRoot();
+check("leftover Week Hold is visible before cancel", leftover.holdCount() === 1);
+draft.clear();
+check("Closing / cancel clears the Week draft", draft.get() === null);
+render.paint(leftover.root);
+check("Week Hold disappears immediately after draft clear", leftover.holdCount() === 0);
 
 if (failed) {
   console.error(failed + " calendar week-create tests failed.");
