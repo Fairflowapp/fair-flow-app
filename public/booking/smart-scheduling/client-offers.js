@@ -115,6 +115,10 @@
     ].join("||");
   }
 
+  function contextText(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
   function exactSourceSignature(plan) {
     var lines = (plan.serviceLines || []).map(function (row) {
       var res = (row.resourceAssignments || []).map(function (item) {
@@ -123,6 +127,8 @@
       return [row.lineKey, row.providerId, row.startMin, row.endMin, res].join(":");
     }).join("|");
     return [
+      contextText(plan && plan.locationId),
+      contextText(plan && plan.dateKey),
       Number(plan.visitStartMin) || 0,
       Number(plan.visitEndMin) || 0,
       blockTimelineKey(plan, true),
@@ -320,6 +326,8 @@
       sourcePlanKey: sourceKey,
       sourcePlanRank: rank,
       sourcePlanScore: Number(plan.flexibleVisitPlanScore) || 0,
+      dateKey: contextText(plan.dateKey),
+      locationId: contextText(plan.locationId),
       visitStartMin: plan.visitStartMin,
       visitEndMin: plan.visitEndMin,
       totalClientWaitMinutes: Number(plan.totalClientWaitMinutes) || 0,
@@ -330,6 +338,7 @@
       orderDistance: Number(plan.orderDistance) || 0,
       timeDistanceMinutes: Number(plan.timeDistanceMinutes) || 0,
       assignmentKey: providerKey(plan),
+      resourceAssignmentKey: String(plan.resourceAssignmentKey || ""),
       blocks: copyBlocks(plan),
       serviceLines: copyServiceLines(plan),
       advantages: advantageCodes(plan, roles),
@@ -562,5 +571,12 @@
     DIVERSITY_BEST_OVERALL: "best_overall",
     DIVERSITY_CLIENT_TIMELINE: "client_timeline_alternative",
     DIVERSITY_PROVIDER_ONLY: "provider_only_alternative"
+  };
+  api.PHASE15_INTERNALS = {
+    exactSourceSignature: exactSourceSignature,
+    offerIdFromSourceKey: function (key) {
+      return OFFER_PREFIX + "|" + String(key || "");
+    },
+    OFFER_ID_PREFIX: OFFER_PREFIX
   };
 })();

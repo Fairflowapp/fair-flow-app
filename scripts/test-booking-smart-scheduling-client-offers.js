@@ -163,6 +163,8 @@ function fakePlan(overrides) {
     : "pedi|chair|" + (overrides.chairId || "chair-1");
   return Object.assign({
     valid: true,
+    dateKey: overrides.dateKey || "2026-09-14",
+    locationId: overrides.locationId || "locA",
     visitStartMin: start,
     visitEndMin: pediEnd,
     totalClientWaitMinutes: wait,
@@ -476,6 +478,29 @@ check("deterministic offer IDs and order", JSON.stringify(exampleOffers.map(func
 check("signature determinism: same logical plans yield same sourcePlanKeys", JSON.stringify(exampleOffers.map(function (row) { return row.sourcePlanKey; })) === JSON.stringify(again.map(function (row) { return row.sourcePlanKey; })));
 
 check("recommendClientVisitOffers matches rankClientVisitOffers", JSON.stringify(api.recommendClientVisitOffers([], [], { preferredStartMin: TWO }, { sourcePlans: [planA, planB, planC, planD] }).map(function (row) { return row.offerId; })) === JSON.stringify(exampleOffers.map(function (row) { return row.offerId; })));
+
+check("every generated offer carries required dateKey and locationId", exampleOffers.every(function (row) {
+  return row.dateKey === "2026-09-14" && row.locationId === "locA";
+}) && realOffers[0] && realOffers[0].dateKey === "2026-09-14" && realOffers[0].locationId === "locA", realOffers[0]);
+
+const sameDay = offersFrom([planA], {})[0];
+const otherDate = offersFrom([fakePlan({
+  visitStartMin: TWO,
+  totalClientWaitMinutes: 5,
+  flexibleVisitPlanScore: 91,
+  dateKey: "2026-09-15",
+  locationId: "locA"
+})], {})[0];
+const otherLoc = offersFrom([fakePlan({
+  visitStartMin: TWO,
+  totalClientWaitMinutes: 5,
+  flexibleVisitPlanScore: 91,
+  dateKey: "2026-09-14",
+  locationId: "locB"
+})], {})[0];
+check("different dateKey yields a different sourcePlanKey and offerId", !!(sameDay && otherDate && sameDay.sourcePlanKey !== otherDate.sourcePlanKey && sameDay.offerId !== otherDate.offerId && sameDay.offerId.indexOf("__smart_offer__|") === 0));
+check("different locationId yields a different sourcePlanKey and offerId", !!(sameDay && otherLoc && sameDay.sourcePlanKey !== otherLoc.sourcePlanKey && sameDay.offerId !== otherLoc.offerId));
+check("same context + same plan yields the same sourcePlanKey/offerId", sameDay.offerId === offersFrom([planA], {})[0].offerId && sameDay.sourcePlanKey === offersFrom([planA], {})[0].sourcePlanKey);
 
 // ---------------------------------------------------------------------------
 // THREE DISTINCT ROLES
