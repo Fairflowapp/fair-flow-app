@@ -676,4 +676,16 @@
     DEFAULT_MAX_EVALUATED_VISIT_PLANS: DEFAULT_MAX_EVALUATED,
     DEFAULT_MAX_RETURNED_PLANS: DEFAULT_MAX_RETURNED
   };
+  api.PHASE13_INTERNALS = {
+    parseLines: parseLines,
+    parseResourceDays: parseResourceDays,
+    validateResources: validateResources,
+    validateRequirements: validateRequirements,
+    hasResourceRequirements: hasResourceRequirements,
+    enumerateResourceAssignments: enumerateResourceAssignments,
+    copyResourceMap: copyResourceMap,
+    insertReservation: insertReservation,
+    attachResources: attachResources,
+    flattenChosenResources: flattenChosenResources
+  };
 })();
