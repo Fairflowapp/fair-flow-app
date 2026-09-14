@@ -907,6 +907,8 @@
   api.rankGlobalProviderDayRecoveryCandidates = rankGlobalProviderDayRecoveryCandidates;
   api.simulateGlobalRecoveryPlan = simulateGlobalRecoveryPlan;
   api.compareGlobalPlans = compareGlobalPlans;
+  api.baselineConflictMap = baselineConflictMap;
+  api.newOrWorsenedOverlapConflict = newOrWorsenedOverlapConflict;
   api.GLOBAL_PLAN = {
     BASE: BASE,
     OPT_CLAMP: OPT_CLAMP,
