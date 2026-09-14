@@ -115,7 +115,7 @@
       '<span class="ff-cal-emp-ctrl">' +
         providerAvatarHtml(emp) +
         '<span class="ff-cal-emp-label">' + escapeHtml(displayName) + "</span>" +
-        '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
+        '<span class="ff-cal-emp-caret ff-cal-print-hide" aria-hidden="true">▾</span>' +
       "</span>" +
       "</button>";
   }
@@ -315,7 +315,7 @@
     if (st.isToday()) {
       var nowMin = tm.nowMinutes();
       if (nowMin >= axis.startMin && nowMin <= axis.endMin) {
-        nowHtml = '<div class="ff-cal-now" data-ff-cal-now style="top:' +
+        nowHtml = '<div class="ff-cal-now ff-cal-print-hide" data-ff-cal-now style="top:' +
           lay.timeToY(nowMin, axis.startMin) + 'px"></div>';
       }
     }
@@ -326,7 +326,7 @@
 
     root.innerHTML =
       '<div class="ff-cal' + (closed ? " is-closed" : "") + '">' +
-        '<div class="ff-cal-toolbar">' +
+        '<div class="ff-cal-toolbar ff-cal-print-hide">' +
           '<div class="ff-cal-toolbar-left">' +
             '<button type="button" class="ff-cal-today" data-ff-cal-act="today">Today</button>' +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="prev" aria-label="Previous day">‹</button>' +
@@ -342,6 +342,7 @@
                 ? window.ffBookingCalFilters.buttonLabel()
                 : "Filters") +
             "</button>" +
+            '<button type="button" class="ff-cal-print" data-ff-cal-act="print">Print Day</button>' +
             '<div class="ff-cal-view" role="group" aria-label="Calendar view">' +
               '<button type="button" class="ff-cal-view-btn is-active">Day</button>' +
               '<button type="button" class="ff-cal-view-btn" disabled title="Week view coming later">Week</button>' +
@@ -376,7 +377,7 @@
       window.ffBookingCalFilters.close();
     }
     lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" +
-      (st.getVisibleProviderIds ? st.getVisibleProviderIds().join(",") : focusedId);
+      (st.getVisibleProviderIds ? st.getVisibleProviderIds().join(",") : "");
     paintOverlays(root);
   }
 
@@ -426,7 +427,7 @@
       var surface = root.querySelector("[data-ff-cal-surface]");
       if (!surface) return;
       el = document.createElement("div");
-      el.className = "ff-cal-now";
+      el.className = "ff-cal-now ff-cal-print-hide";
       el.setAttribute("data-ff-cal-now", "");
       surface.appendChild(el);
     }
@@ -481,6 +482,12 @@
     else if (act === "filters") {
       if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.toggle === "function") {
         window.ffBookingCalFilters.toggle(document.querySelector(".ff-cal-filters"));
+      }
+      return;
+    }
+    else if (act === "print") {
+      if (window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printCurrent === "function") {
+        window.ffBookingCalPrint.printCurrent();
       }
       return;
     }

@@ -142,7 +142,7 @@
     var axis = st.getAxis();
     var dateKey = st.getSelectedDateKey();
     var locationId = st.getLocationId();
-    forProvider(dateKey, locationId).forEach(function (block) {
+    forView(dateKey, locationId).forEach(function (block) {
       var col = root.querySelector('[data-ff-cal-emp="' + block.providerId + '"]');
       if (!col) return;
       var rect = lay.windowToRect(block.startMin, block.endMin, axis.startMin, axis.endMin);

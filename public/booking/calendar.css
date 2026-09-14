@@ -93,7 +93,8 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-today,
 .ff-cal-nav,
 .ff-cal-view-btn,
-.ff-cal-filters {
+.ff-cal-filters,
+.ff-cal-print {
   border: 1px solid #ddd6ee;
   background: #fff;
   color: #3b3354;
@@ -105,7 +106,8 @@ body.ff-booking-area .ff-booking-main {
   cursor: pointer;
 }
 .ff-cal-today,
-.ff-cal-filters {
+.ff-cal-filters,
+.ff-cal-print {
   padding: 8px 14px;
 }
 .ff-cal-nav {
@@ -158,7 +160,8 @@ body.ff-booking-area .ff-booking-main {
   opacity: 0.55;
   cursor: default;
 }
-.ff-cal-filters:hover {
+.ff-cal-filters:hover,
+.ff-cal-print:hover {
   border-color: #c4b5fd;
   background: #f5f3ff;
 }
@@ -731,6 +734,10 @@ body.ff-booking-area .ff-booking-main {
   filter: brightness(0.97);
 }
 
+.ff-cal-print-header {
+  display: none;
+}
+
 @media (max-width: 720px) {
   .ff-cal-toolbar {
     flex-wrap: wrap;
@@ -739,5 +746,179 @@ body.ff-booking-area .ff-booking-main {
   .ff-cal-date {
     min-width: 0;
     font-size: 14px;
+  }
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body.ff-cal-printing .header,
+  body.ff-cal-printing #authBanner,
+  body.ff-cal-printing #joinBar,
+  body.ff-cal-printing .ff-booking-sidebar,
+  body.ff-cal-printing .ff-product-switch,
+  body.ff-cal-printing .ff-cal-menu,
+  body.ff-cal-printing .ff-cal-filter-menu,
+  body.ff-cal-printing .ff-cal-move,
+  body.ff-cal-printing .ff-cal-drag-ghost,
+  body.ff-cal-printing .ff-cal-hold,
+  body.ff-cal-printing .ff-cal-print-hide,
+  body.ff-cal-printing .ff-cal-toolbar,
+  body.ff-cal-printing .ff-cal-now,
+  body.ff-cal-printing .ff-cal-emp-caret,
+  body.ff-cal-printing [data-ff-booking-drawer],
+  body.ff-cal-printing #ffBookingAppointmentDrawer,
+  body.ff-cal-printing #ffLiveFloorFab,
+  body.ff-cal-printing .live-floor-fab {
+    display: none !important;
+  }
+
+  body.ff-cal-printing .ff-booking-workspace,
+  body.ff-cal-printing .ff-booking-main,
+  body.ff-cal-printing .ff-booking-page-calendar,
+  body.ff-cal-printing #ffBookingCalendarRoot,
+  body.ff-cal-printing .ff-cal,
+  body.ff-cal-printing .ff-cal-viewport {
+    position: static !important;
+    inset: auto !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    width: auto !important;
+    flex: none !important;
+    display: block !important;
+    background: #fff !important;
+  }
+
+  body.ff-cal-printing .ff-cal-corner,
+  body.ff-cal-printing .ff-cal-head,
+  body.ff-cal-printing .ff-cal-times {
+    position: static !important;
+    box-shadow: none !important;
+  }
+
+  body.ff-cal-printing .ff-cal-print-header {
+    display: block;
+    padding: 0 0 10px;
+    margin: 0 0 10px;
+    border-bottom: 2px solid #111;
+    color: #111;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  body.ff-cal-printing .ff-cal-print-brand {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 4px;
+  }
+  body.ff-cal-printing .ff-cal-print-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  body.ff-cal-printing .ff-cal-emp-btn {
+    cursor: default;
+    background: #fff !important;
+  }
+  body.ff-cal-printing .ff-cal-emp-avatar img {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body.ff-cal-printing .ff-cal-closed {
+    background-color: #f0f0f0 !important;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.12) 0,
+      rgba(0, 0, 0, 0.12) 1px,
+      transparent 1px,
+      transparent 6px
+    ) !important;
+    box-shadow: inset 0 0 0 1px #9a9a9a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.ff-cal-printing .ff-cal-off {
+    background-color: #e6e6e6 !important;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      #444 0,
+      #444 1px,
+      transparent 1px,
+      transparent 7px
+    ) !important;
+    box-shadow: inset 0 0 0 1px #666;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.ff-cal-printing .ff-cal-block {
+    background: #fff !important;
+    border: 2px dashed #333 !important;
+    color: #111 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.ff-cal-printing .ff-cal-card,
+  body.ff-cal-printing .ff-cal-card.is-status-scheduled,
+  body.ff-cal-printing .ff-cal-card.is-status-confirmed,
+  body.ff-cal-printing .ff-cal-card.is-status-checked_in,
+  body.ff-cal-printing .ff-cal-card.is-status-in_service,
+  body.ff-cal-printing .ff-cal-card.is-status-completed,
+  body.ff-cal-printing .ff-cal-card.is-status-no_show,
+  body.ff-cal-printing .ff-cal-card.is-new-client.is-status-confirmed,
+  body.ff-cal-printing .ff-cal-card.is-new-client.is-status-checked_in,
+  body.ff-cal-printing .ff-cal-card.is-new-client.is-status-in_service {
+    background: #fff !important;
+    border: 1.5px solid #111 !important;
+    border-left-width: 4px !important;
+    color: #111 !important;
+    box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.ff-cal-printing .ff-cal-card-name,
+  body.ff-cal-printing .ff-cal-card-svc,
+  body.ff-cal-printing .ff-cal-card-time {
+    color: #111 !important;
+    white-space: normal;
+  }
+  body.ff-cal-printing .ff-cal-card.is-requested::before {
+    color: #111 !important;
+    -webkit-text-fill-color: #111 !important;
+  }
+
+  body.ff-cal-printing .ff-cal[data-ff-cal-print-only] .ff-cal-emp-btn:not(.is-print-keep),
+  body.ff-cal-printing .ff-cal[data-ff-cal-print-only] .ff-cal-col:not(.is-print-keep) {
+    display: none !important;
+  }
+  body.ff-cal-printing .ff-cal[data-ff-cal-print-only] .ff-cal-board {
+    --ff-cal-col-w: 5.2in;
+    --ff-cal-cols-w: 5.2in;
+    --ff-cal-canvas-w: 5.2in;
+    width: calc(var(--ff-cal-time-w) + 5.2in);
+  }
+
+  body.ff-cal-printing .ff-cal-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

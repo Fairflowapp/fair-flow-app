@@ -70,8 +70,7 @@
       {
         id: "print",
         label: "Print day schedule",
-        enabled: false,
-        hint: "Coming later"
+        enabled: true
       }
     ];
   }
@@ -90,6 +89,9 @@
     }
     if (id === "profile" && hasProfile()) {
       window.openStaffMembersModal({ jumpToStaffId: ctx.providerId, jumpToTab: "details" });
+    }
+    if (id === "print" && window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printProvider === "function") {
+      window.ffBookingCalPrint.printProvider(ctx.providerId);
     }
   }
 
