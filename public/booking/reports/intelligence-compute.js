@@ -399,6 +399,33 @@
           completedLineCount: 0
         },
         highestDemand: null
+      },
+      clientBehavior: {
+        identifiedClientCount: 0,
+        firstVisitClientCount: 0,
+        returningClientCount: 0,
+        unidentifiedClientAppointmentCount: 0,
+        identifiedAppointmentCount: 0,
+        averageAppointmentsPerClient: 0,
+        repeatInPeriodClientCount: 0,
+        repeatInPeriodClientShare: 0,
+        repeatInPeriodAppointmentCount: 0,
+        repeatInPeriodAppointmentShare: 0,
+        averageAppointmentsPerRepeatClient: 0,
+        frequency: [],
+        averageDistinctServicesPerClient: 0,
+        multiServiceClientCount: 0,
+        multiServiceClientShare: 0,
+        providerAssignedLineCount: 0,
+        requestedLineCount: 0,
+        requestedProviderShare: 0,
+        eligibleRequestedClientCount: 0,
+        consistentRequestedClientCount: 0,
+        consistentRequestedShare: 0,
+        averageMostUsedProviderShare: 0,
+        averageDaysBetweenVisits: null,
+        medianDaysBetweenVisits: null,
+        spacingIntervalCount: 0
       }
     };
   }
@@ -634,7 +661,11 @@
       window.ffBookingReportsServiceDemand.appendInsights(out, report, phrase);
     }
 
-    return out.slice(0, 16);
+    if (window.ffBookingReportsClientBehavior && typeof window.ffBookingReportsClientBehavior.appendInsights === "function") {
+      window.ffBookingReportsClientBehavior.appendInsights(out, report, phrase);
+    }
+
+    return out.slice(0, 20);
   }
 
   function hoursPhrase(minutes) {
@@ -917,6 +948,10 @@
 
     if (window.ffBookingReportsServiceDemand && typeof window.ffBookingReportsServiceDemand.attach === "function") {
       window.ffBookingReportsServiceDemand.attach(report, appointments, opts);
+    }
+
+    if (window.ffBookingReportsClientBehavior && typeof window.ffBookingReportsClientBehavior.attach === "function") {
+      window.ffBookingReportsClientBehavior.attach(report, appointments, opts);
     }
 
     report.insights = buildInsights(report, opts);

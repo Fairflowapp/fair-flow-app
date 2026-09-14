@@ -539,6 +539,46 @@
     );
   }
 
+  function clientBehaviorHtml(report) {
+    var b = report && report.clientBehavior;
+    if (!b) return "";
+    if (!b.identifiedClientCount && !b.unidentifiedClientAppointmentCount) return "";
+    var freq = (b.frequency || []).map(function (row) {
+      return barRow(row.label, row.clientCount, b.identifiedClientCount || 1);
+    }).join("");
+    var quality = b.unidentifiedClientAppointmentCount
+      ? '<p class="ff-rpt-fine">' + escapeHtml(String(b.unidentifiedClientAppointmentCount)) +
+        " appointment" + (b.unidentifiedClientAppointmentCount === 1 ? "" : "s") +
+        " had no client id and are excluded from unique-client counts.</p>"
+      : "";
+    var spacing = b.averageDaysBetweenVisits != null
+      ? kpi("Avg days between visits", b.averageDaysBetweenVisits, "repeat-in-period, this range")
+      : "";
+    return (
+      '<section class="ff-rpt-panel">' +
+        "<h2>Client behavior</h2>" +
+        '<p class="ff-rpt-fine">Behavior visible in this period only. A first-visit client has at least one in-range appointment marked first visit. Repeat-in-period means two or more appointments here, not lifetime retention.</p>' +
+        '<div class="ff-rpt-kpis">' +
+          kpi("Unique clients", b.identifiedClientCount || 0) +
+          kpi("First-visit clients", b.firstVisitClientCount || 0) +
+          kpi("Repeat-in-period clients", b.repeatInPeriodClientCount || 0, (b.repeatInPeriodClientShare || 0) + "% of unique") +
+          kpi("Repeat-in-period appointment share", (b.repeatInPeriodAppointmentShare || 0) + "%") +
+        "</div>" +
+        '<div class="ff-rpt-kpis ff-rpt-kpis-4 ff-rpt-kpis-follow">' +
+          kpi("Returning clients", b.returningClientCount || 0) +
+          kpi("Appointments / client", b.averageAppointmentsPerClient || 0) +
+          kpi("Multi-service clients", (b.multiServiceClientShare || 0) + "%") +
+          kpi("Requested-provider share", (b.requestedProviderShare || 0) + "%", "of assigned lines") +
+          spacing +
+        "</div>" +
+        (freq
+          ? '<p class="ff-rpt-fine ff-rpt-behavior-freq">Appointments in this period</p><div class="ff-rpt-bars">' + freq + "</div>"
+          : "") +
+        quality +
+      "</section>"
+    );
+  }
+
   function utilizationHtml(report) {
     var u = report.utilization;
     var rows = (u.providers || []).map(function (row) {
@@ -636,6 +676,7 @@
         utilizationHtml(result) +
         patternsHtml(result) +
         serviceDemandHtml(result) +
+        clientBehaviorHtml(result) +
         gapsHtml(result) +
         sourcesHtml(result) +
       "</div>"

@@ -56,10 +56,11 @@
   }
 
   var INTEL_SCRIPTS = [
-    "/booking/reports/intelligence-compute.js?v=20260913_demand1",
-    "/booking/reports/capacity-patterns.js?v=20260913_demand1",
-    "/booking/reports/service-demand.js?v=20260913_demand1",
-    "/booking/reports/intelligence.js?v=20260913_demand1"
+    "/booking/reports/intelligence-compute.js?v=20260913_clients1",
+    "/booking/reports/capacity-patterns.js?v=20260913_clients1",
+    "/booking/reports/service-demand.js?v=20260913_clients1",
+    "/booking/reports/client-behavior.js?v=20260913_clients1",
+    "/booking/reports/intelligence.js?v=20260913_clients1"
   ];
 
   function intelReady() {

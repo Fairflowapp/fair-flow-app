@@ -439,6 +439,8 @@ check("ui explains idle versus calendar gaps", uiSrc.indexOf("open-edge idle is 
 check("ui shows a provider capacity table", uiSrc.indexOf("Provider capacity") !== -1 && uiSrc.indexOf("Open-edge hrs") !== -1 && uiSrc.indexOf("booked ÷ working") !== -1);
 check("ui includes a capacity patterns section", uiSrc.indexOf("Capacity patterns") !== -1 && uiSrc.indexOf("By day / weekday") !== -1 && uiSrc.indexOf("By time of day") !== -1);
 check("ui includes a service demand section", uiSrc.indexOf("Service demand") !== -1 && uiSrc.indexOf("Booked service value") !== -1 && uiSrc.indexOf("Value / provider hr") !== -1);
+check("ui includes a client behavior section", uiSrc.indexOf("Client behavior") !== -1 && uiSrc.indexOf("Repeat-in-period") !== -1 && uiSrc.indexOf("Appointments in this period") !== -1);
+check("ui does not present client behavior as retention", uiSrc.indexOf("retention rate") === -1 && uiSrc.indexOf("loyal clients") === -1 && uiSrc.indexOf("Lifetime value") === -1);
 check("ui does not label booked value as revenue or sales", uiSrc.indexOf("collected revenue") === -1 && uiSrc.indexOf("Net revenue") === -1 && uiSrc.indexOf("most profitable") === -1);
 check("ui does not add a charting library for patterns", uiSrc.indexOf("chart.js") === -1 && uiSrc.indexOf("Chart(") === -1);
 

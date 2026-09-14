@@ -468,6 +468,12 @@
 .ff-rpt-table-demand {
   min-width: 820px;
 }
+.ff-rpt-kpis-follow {
+  margin-top: 10px;
+}
+.ff-rpt-behavior-freq {
+  margin-top: 14px;
+}
 .ff-rpt-view-toggle {
   display: inline-flex;
   margin: 14px 0 12px;
