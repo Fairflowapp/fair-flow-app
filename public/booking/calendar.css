@@ -739,7 +739,13 @@ body.ff-booking-area .ff-booking-main {
 }
 
 .ff-cal.is-week {
-  --ff-cal-header-h: 52px;
+  --ff-cal-header-h: 68px;
+}
+.ff-cal.is-week .ff-cal-toolbar {
+  flex-wrap: wrap;
+}
+.ff-cal.is-week .ff-cal-date {
+  min-width: 0;
 }
 .ff-cal-week-provider,
 .ff-cal-week-pick {

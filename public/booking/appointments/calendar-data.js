@@ -23,6 +23,7 @@
 
   function cardsFrom(rows, locationId) {
     var api = model();
+    var tm = time();
     var out = [];
     (rows || []).forEach(function (appt) {
       if (!appt || (api && typeof api.isActiveStatus === "function" && !api.isActiveStatus(appt.status))) return;
@@ -68,7 +69,10 @@
           firstVisit: !!(appt.firstVisit),
           requested: !!(line.requested),
           personKey: person,
-          dateKey: String(appt.dateKey || "").trim()
+          dateKey: String(appt.dateKey || "").trim() ||
+            (tm && typeof tm.zonedDateKey === "function" && line.startAt
+              ? String(tm.zonedDateKey(line.startAt, locationId) || "").trim()
+              : "")
         });
       });
       groupOrder.forEach(function (key) {

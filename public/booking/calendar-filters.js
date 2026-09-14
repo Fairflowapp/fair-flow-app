@@ -121,6 +121,9 @@
     if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
       window.ffBookingCalMenu.close();
     }
+    if (window.ffBookingCalWeek && typeof window.ffBookingCalWeek.closePicker === "function") {
+      window.ffBookingCalWeek.closePicker();
+    }
     open = true;
     paint(anchor);
   }

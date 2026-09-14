@@ -246,6 +246,46 @@ check("provider menu can open Week without mutating Day filters", menuSrc.indexO
 check("Week paint does not reuse provider photos on each day", weekSrc.indexOf("ff-cal-day-head") !== -1 && weekSrc.indexOf("providerBarHtml") !== -1);
 check("Week empty-slot create is not wired in Phase 1", calSrc.indexOf("if (st && st.isWeek && st.isWeek()) return;") !== -1);
 
+load("public/booking/schedule-board.js", windowObj);
+const board = windowObj.ffBookingScheduleBoard;
+const sameClock = board.build({
+  cards: [
+    { providerId: "ashley", dateKey: "2026-09-14", startMin: 14 * 60, endMin: 15 * 60, appointmentId: "m1", lineId: "lm1" },
+    { providerId: "ashley", dateKey: "2026-09-15", startMin: 14 * 60, endMin: 15 * 60, appointmentId: "t1", lineId: "lt1" }
+  ]
+});
+check("merged week cards at the same clock time would collide", sameClock.items.some(function (item) {
+  return item.laneCount > 1;
+}));
+const mondayOnly = board.build({
+  cards: [
+    { providerId: "ashley", dateKey: "2026-09-14", startMin: 14 * 60, endMin: 15 * 60, appointmentId: "m1", lineId: "lm1" }
+  ]
+});
+check("per-day board build keeps a full-width Monday card", mondayOnly.items[0].laneCount === 1 && mondayOnly.items[0].widthPct === 100);
+
+const renderSrc = fs.readFileSync(path.join(root, "public/booking/appointments/calendar-render.js"), "utf8");
+check("Week paint builds overlap lanes one day at a time", renderSrc.indexOf("cardsForWeekDay") !== -1 && renderSrc.indexOf("getWeekDateKeys") !== -1);
+check("Week header stays taller than Day tokens", week.headerHeight() === 68);
+
+const prevZoned = tm.zonedDateKey;
+tm.zonedDateKey = function () { return "2026-09-15"; };
+const derived = cards.cardsFrom([{
+  appointmentId: "derived1",
+  status: "scheduled",
+  clientSnapshot: { displayName: "No Key" },
+  serviceLines: [{
+    lineId: "ld1",
+    providerId: "ashley",
+    serviceNameSnapshot: "Gel",
+    startAt: utc("2026-09-15", 15, 0),
+    endAt: utc("2026-09-15", 16, 0),
+    durationMinutes: 60
+  }]
+}]);
+check("missing appointment dateKey falls back to salon zoned start", derived[0] && derived[0].dateKey === "2026-09-15");
+tm.zonedDateKey = prevZoned;
+
 tm.todayDateKey = originalToday;
 
 if (failed) {

@@ -138,6 +138,12 @@
     var vp = root.querySelector("[data-ff-cal-viewport]");
     if (!shell || !board) return;
     lay.applyTokensToElement(shell);
+    if (st.isWeek && st.isWeek()) {
+      var weekH = window.ffBookingCalWeek && typeof window.ffBookingCalWeek.headerHeight === "function"
+        ? window.ffBookingCalWeek.headerHeight()
+        : 68;
+      shell.style.setProperty("--ff-cal-header-h", weekH + "px");
+    }
     var n = st.isWeek && st.isWeek()
       ? 7
       : ((st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees() || []).length;

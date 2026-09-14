@@ -4,6 +4,7 @@
  */
 (function () {
   var PICKER_ID = "ffBookingCalWeekPicker";
+  var WEEK_HEADER_H = 68;
   var pickerOpen = false;
 
   function state() { return window.ffBookingCalState || null; }
@@ -186,8 +187,35 @@
     }
   }
 
+  function placePicker(el, anchor) {
+    if (!el || !anchor || !anchor.getBoundingClientRect) return;
+    var rect = anchor.getBoundingClientRect();
+    var menuW = el.offsetWidth || 240;
+    var menuH = el.offsetHeight || 0;
+    var pad = 8;
+    var left = rect.left;
+    var top = rect.bottom + 6;
+    if (typeof window !== "undefined") {
+      if (left + menuW > window.innerWidth - pad) left = window.innerWidth - menuW - pad;
+      if (left < pad) left = pad;
+      if (top + menuH > window.innerHeight - pad) top = Math.max(pad, rect.top - menuH - 6);
+    }
+    el.style.position = "fixed";
+    el.style.zIndex = "9900";
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
+  }
+
   function openPicker(anchor) {
     if (typeof document === "undefined") return;
+    try {
+      if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+        window.ffBookingCalFilters.close();
+      }
+      if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
+        window.ffBookingCalMenu.close();
+      }
+    } catch (_) {}
     var el = document.getElementById(PICKER_ID);
     if (!el) {
       el = document.createElement("div");
@@ -199,11 +227,9 @@
     el.innerHTML = pickerRows() || '<div class="ff-cal-empty">No service providers for this location yet.</div>';
     el.removeAttribute("hidden");
     pickerOpen = true;
-    if (anchor && anchor.getBoundingClientRect) {
-      var rect = anchor.getBoundingClientRect();
-      el.style.position = "fixed";
-      el.style.left = Math.round(rect.left) + "px";
-      el.style.top = Math.round(rect.bottom + 6) + "px";
+    placePicker(el, anchor);
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(function () { placePicker(el, anchor); });
     }
   }
 
@@ -372,6 +398,7 @@
 
   window.ffBookingCalWeek = {
     paint: paint,
+    headerHeight: function () { return WEEK_HEADER_H; },
     sharedAxis: sharedAxis,
     axisForDate: axisForDate,
     nowLineDayKey: nowLineDayKey,
