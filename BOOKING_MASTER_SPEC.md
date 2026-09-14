@@ -266,6 +266,7 @@ Visible navigation today:
 
 - Intelligence → Booking Intelligence
 - Sales → Sales Summary · Service Sales · Sales by Time Period
+- Clients → Cancellations
 
 ### Built
 
@@ -288,6 +289,8 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - Service Sales (service-item amounts; tips and ticket-level refunds are not allocated to services)
 - Sales by Time Period
 
+**Cancellations.** Appointments scheduled in the selected appointment-date range that have `status === "cancelled"`. Rate denominator is all appointments scheduled in that range. Cancelled provider time unions overlapping service-line windows per provider. Notice uses `startAt − cancelledAt`. Same-day uses the appointment location timezone. A later appointment indicator only looks inside the already loaded range and is not a rebook proof.
+
 **Financial infrastructure:**
 
 - date-range-complete Sales retrieval (`ffBookingReportsSalesRange.fetchForReport`)
@@ -302,7 +305,7 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 - Team Sales (walk-in checkout items do not reliably include `providerId`)
 - payment-method / tender reports (`method` / `processor` still `"none"`)
 - full refund reporting (ticket-level history only; refund UI is not live)
-- true cohort retention (in-period client behavior is not retention)
+- true cohort retention (in-period client behavior is not retention; Cancellations is not retention)
 - gift cards, memberships, packages
 - booking-source mix as owner truth
 - exports as a Reports product

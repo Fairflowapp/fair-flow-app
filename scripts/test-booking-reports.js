@@ -41,6 +41,7 @@ check("shell paints a Reports page", shell.indexOf('data-ff-booking-page="report
 check("shell refreshes reports", shell.indexOf("ffRefreshBookingReports") !== -1);
 check("reports has a Sales group", navSrc.indexOf('label: "Sales"') !== -1);
 check("reports has an Intelligence group", navSrc.indexOf('label: "Intelligence"') !== -1 && navSrc.indexOf('id: "booking-intelligence"') !== -1);
+check("reports has a Clients group with Cancellations", navSrc.indexOf('id: "clients"') !== -1 && navSrc.indexOf('label: "Clients"') !== -1 && navSrc.indexOf('id: "cancellations"') !== -1);
 check("sales summary remains a report", navSrc.indexOf('id: "sales-summary"') !== -1);
 check("sales tabs include service and period only", navSrc.indexOf("service-sales") !== -1 && navSrc.indexOf("sales-by-period") !== -1 && navSrc.indexOf("product-sales") === -1);
 check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID = "booking-intelligence"') !== -1);
@@ -49,6 +50,7 @@ check("reports ui can paint booking intelligence", ui.indexOf("booking-intellige
 check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/capacity-patterns.js") !== -1 && ui.indexOf("/booking/reports/service-demand.js") !== -1 && ui.indexOf("/booking/reports/client-behavior.js") !== -1 && ui.indexOf("/booking/reports/insight-priority.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
 check("reports ui loads service sales modules", ui.indexOf("/booking/reports/service-sales-compute.js") !== -1 && ui.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui loads sales by time period modules", ui.indexOf("/booking/reports/sales-time-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-time.js") !== -1);
+check("reports ui loads cancellations modules", ui.indexOf("/booking/reports/cancellations-compute.js") !== -1 && ui.indexOf("/booking/reports/cancellations.js") !== -1);
 check("reports ui does not read Firestore", ui.indexOf("getFirestore") === -1 && ui.indexOf("collection(") === -1 && ui.indexOf("getDoc") === -1);
 check("reports is not a Mangomint catalog", navSrc.indexOf("Gift Card") === -1 && navSrc.indexOf("Membership") === -1 && navSrc.indexOf("Inventory") === -1 && navSrc.indexOf("Mango") === -1);
 check("reports page fills the workspace", css.indexOf(".ff-booking-page-reports") !== -1);
@@ -78,7 +80,10 @@ check("product sales is not a visible report", nav.find("product-sales") == null
 check("stale product-sales selection falls back to intelligence", nav.setSelectedId("product-sales") === "booking-intelligence");
 const salesIds = nav.GROUPS.find(function (group) { return group.id === "sales"; }).items.map(function (row) { return row.id; });
 check("visible sales nav is summary, service, time", salesIds.join(",") === "sales-summary,service-sales,sales-by-period");
-check("visible reports are only the four built surfaces", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,sales-summary,service-sales,sales-by-period");
+check("nav can select cancellations", nav.setSelectedId("cancellations") === "cancellations" && nav.getSelected().label === "Cancellations");
+const clientIds = nav.GROUPS.find(function (group) { return group.id === "clients"; }).items.map(function (row) { return row.id; });
+check("clients nav is cancellations only", clientIds.join(",") === "cancellations");
+check("visible reports are built surfaces only", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,sales-summary,service-sales,sales-by-period,cancellations");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },

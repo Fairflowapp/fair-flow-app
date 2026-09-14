@@ -63,6 +63,10 @@
     "/booking/reports/sales-time-compute.js?v=20260914_salestime",
     "/booking/reports/sales-time.js?v=20260914_salestime"
   ];
+  var CANCELLATIONS_SCRIPTS = [
+    "/booking/reports/cancellations-compute.js?v=20260914_cancels",
+    "/booking/reports/cancellations.js?v=20260914_cancels"
+  ];
   var INTEL_SCRIPTS = [
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/capacity-patterns.js?v=20260913_ui1",
@@ -82,6 +86,10 @@
 
   function salesTimeReady() {
     return !!(window.ffBookingReportsSalesTimeCompute && window.ffBookingReportsSalesTime);
+  }
+
+  function cancellationsReady() {
+    return !!(window.ffBookingReportsCancellationsCompute && window.ffBookingReportsCancellations);
   }
 
   function loadScripts(list, done) {
@@ -138,6 +146,14 @@
     loadScripts(SALES_TIME_SCRIPTS, done);
   }
 
+  function ensureCancellationsScripts(done) {
+    if (cancellationsReady()) {
+      done();
+      return;
+    }
+    loadScripts(CANCELLATIONS_SCRIPTS, done);
+  }
+
   function paintMain() {
     var main = document.getElementById("ffRptMain");
     if (!main) return;
@@ -185,6 +201,21 @@
       main.innerHTML = '<p class="ff-rpt-empty">Loading Sales by Time Period…</p>';
       ensureSalesTimeScripts(function () {
         if (window.ffBookingReportsSalesTime) window.ffBookingReportsSalesTime.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
+    if (id === "cancellations") {
+      if (window.ffBookingReportsCancellations) {
+        window.ffBookingReportsCancellations.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Cancellations…</p>';
+      ensureCancellationsScripts(function () {
+        if (window.ffBookingReportsCancellations) window.ffBookingReportsCancellations.paint();
         else {
           var host = document.getElementById("ffRptMain");
           if (host) host.innerHTML = laterHtml(report);

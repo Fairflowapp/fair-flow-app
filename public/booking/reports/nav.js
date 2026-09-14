@@ -38,6 +38,17 @@
           blurb: "Closed checkout sales grouped by sale date."
         }
       ]
+    },
+    {
+      id: "clients",
+      label: "Clients",
+      items: [
+        {
+          id: "cancellations",
+          label: "Cancellations",
+          blurb: "Appointments scheduled in the selected period that were cancelled."
+        }
+      ]
     }
   ];
 

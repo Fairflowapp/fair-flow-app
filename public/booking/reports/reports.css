@@ -503,6 +503,16 @@
 .ff-rpt-table-time-weekday {
   min-width: 720px;
 }
+.ff-rpt-table-cancel {
+  min-width: 640px;
+}
+.ff-rpt-table-cancel-day,
+.ff-rpt-table-cancel-weekday {
+  min-width: 480px;
+}
+.ff-rpt-table-cancel-detail {
+  min-width: 980px;
+}
 .ff-rpt-kpis-follow {
   margin-top: 10px;
 }
