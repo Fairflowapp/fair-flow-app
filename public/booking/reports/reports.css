@@ -290,6 +290,12 @@
   border-bottom: 1px solid #f3effa;
   white-space: nowrap;
 }
+.ff-rpt-table th:first-child,
+.ff-rpt-table td:first-child {
+  white-space: normal;
+  max-width: 168px;
+  overflow-wrap: anywhere;
+}
 .ff-rpt-table th {
   font-size: 12px;
   font-weight: 700;
@@ -402,6 +408,7 @@
   font-weight: 750;
   letter-spacing: -0.03em;
   color: #111827;
+  overflow-wrap: anywhere;
 }
 .ff-rpt-kpi-label,
 .ff-rpt-kpi-note,
@@ -435,6 +442,9 @@
 .ff-rpt-bar-label {
   color: #3b3354;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ff-rpt-bar-track {
   height: 8px;
@@ -476,6 +486,7 @@
 }
 .ff-rpt-view-toggle {
   display: inline-flex;
+  flex-wrap: wrap;
   margin: 14px 0 12px;
   padding: 3px;
   border-radius: 10px;
@@ -527,5 +538,23 @@
 @media (max-width: 860px) {
   .ff-rpt-split {
     grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .ff-rpt-kpis,
+  .ff-rpt-kpis-3,
+  .ff-rpt-kpis-4 {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+  .ff-rpt-bar-row,
+  .ff-rpt-bar-row-pattern {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .ff-rpt-bar-value {
+    text-align: left;
+  }
+  .ff-rpt-intel-head h1 {
+    font-size: 20px;
   }
 }

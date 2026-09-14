@@ -124,6 +124,18 @@
     return String(Math.round((Number(minutes) || 0) / 6) / 10);
   }
 
+  function hoursUnit(minutes) {
+    return hours(minutes) + " h";
+  }
+
+  function displayValue(value) {
+    if (value == null || value === "") return "—";
+    if (typeof value === "number" && !Number.isFinite(value)) return "—";
+    var text = String(value);
+    if (text === "NaN" || text === "Infinity" || text === "-Infinity") return "—";
+    return text;
+  }
+
   function locPopHtml() {
     var ids = selectedLocationIds();
     var rows = locations().map(function (row) {
@@ -195,7 +207,7 @@
   function kpi(label, value, note) {
     return (
       '<div class="ff-rpt-kpi">' +
-        '<p class="ff-rpt-kpi-value">' + escapeHtml(String(value)) + "</p>" +
+        '<p class="ff-rpt-kpi-value">' + escapeHtml(displayValue(value)) + "</p>" +
         '<p class="ff-rpt-kpi-label">' + escapeHtml(label) + "</p>" +
         (note ? '<p class="ff-rpt-kpi-note">' + escapeHtml(note) + "</p>" : "") +
       "</div>"
@@ -214,7 +226,11 @@
   }
 
   function insightsHtml(report) {
-    var lines = (report && report.insights) || [];
+    var raw = (report && report.insights) || [];
+    var rank = window.ffBookingReportsInsightPriority;
+    var lines = rank && typeof rank.presentInsights === "function"
+      ? rank.presentInsights(raw)
+      : raw.slice(0, 8);
     if (!lines.length) return "";
     return (
       '<section class="ff-rpt-panel ff-rpt-insights">' +
@@ -226,8 +242,18 @@
     );
   }
 
-  function appointmentsHtml(report) {
-    var a = report.appointments;
+  function overviewHtml(report) {
+    var a = report.appointments || {};
+    var u = report.utilization || {};
+    var demand = report.serviceDemand || {};
+    var behavior = report.clientBehavior || {};
+    var working = u.workingMinutes || 0;
+    var utilLabel = working > 0 ? String(u.percent) + "%" : "—";
+    var value = demand.totals && demand.totals.bookedServiceValue > 0
+      ? money(demand.totals.bookedServiceValue)
+      : "—";
+    var unique = behavior.identifiedClientCount || 0;
+    var repeatShare = unique > 0 ? String(behavior.repeatInPeriodClientShare || 0) + "%" : "—";
     var extra = "";
     if (a.checkedIn || a.inService) {
       extra = kpi("Checked in", a.checkedIn) + kpi("In service", a.inService);
@@ -237,33 +263,30 @@
         escapeHtml(String(a.noShow)) +
         "). That status is not a complete front-desk workflow yet, so it is not treated as a headline KPI.</p>"
       : "";
+    var emptyNote = !a.total
+      ? '<p class="ff-rpt-empty">No appointments in this period. Provider hours below are scheduled working time only.</p>'
+      : "";
     return (
       '<section class="ff-rpt-panel">' +
-        "<h2>Appointments</h2>" +
+        "<h2>Overview</h2>" +
+        '<p class="ff-rpt-fine">What happened and how scheduled provider time was used. Booked service value is the appointment price snapshot, not collected sales.</p>' +
         '<div class="ff-rpt-kpis">' +
-          kpi("Total", a.total) +
-          kpi("Completed", a.completed) +
-          kpi("Scheduled", a.scheduled) +
-          kpi("Confirmed", a.confirmed) +
-          kpi("Cancelled", a.cancelled) +
-          kpi("Cancellation rate", a.cancellationRate + "%") +
+          kpi("Appointments", a.total || 0) +
+          kpi("Unique clients", unique, behavior.unidentifiedClientAppointmentCount ? "identified only" : "") +
+          kpi("Utilization", utilLabel, working > 0 ? "booked ÷ working" : "no working hours") +
+          kpi("Provider working hours", hoursUnit(working)) +
+          kpi("Calendar gap hours", hoursUnit((report.gaps && report.gaps.totalMinutes) || 0)) +
+          kpi("Booked service value", value) +
+          kpi("Repeat-in-period share", repeatShare, unique ? "of unique clients" : "") +
+        "</div>" +
+        emptyNote +
+        '<div class="ff-rpt-kpis ff-rpt-kpis-follow">' +
+          kpi("Completed", a.completed || 0) +
+          kpi("Cancelled", a.cancelled || 0) +
+          kpi("Cancellation rate", (a.cancellationRate || 0) + "%") +
           extra +
         "</div>" +
         noShowNote +
-      "</section>"
-    );
-  }
-
-  function clientsHtml(report) {
-    var c = report.clients;
-    return (
-      '<section class="ff-rpt-panel">' +
-        "<h2>Clients</h2>" +
-        '<div class="ff-rpt-kpis ff-rpt-kpis-2">' +
-          kpi("New", c.newAppointments, c.newPercent + "% of appointments") +
-          kpi("Returning", c.returningAppointments, c.returningPercent + "% of appointments") +
-        "</div>" +
-        '<p class="ff-rpt-fine">New vs returning uses the existing first-visit flag on each appointment.</p>' +
       "</section>"
     );
   }
@@ -287,20 +310,6 @@
         "<h2>Booking source</h2>" +
         '<p class="ff-rpt-fine">Recorded on the appointment when present. New bookings are currently saved as front desk, so this is not a complete channel report yet.</p>' +
         '<div class="ff-rpt-bars">' + rows + "</div>" +
-      "</section>"
-    );
-  }
-
-  function requestedHtml(report) {
-    var r = report.requested;
-    return (
-      '<section class="ff-rpt-panel">' +
-        "<h2>Requested provider</h2>" +
-        '<div class="ff-rpt-kpis ff-rpt-kpis-3">' +
-          kpi("Requested lines", r.requestedLines) +
-          kpi("Not requested", r.nonRequestedLines) +
-          kpi("Requested", r.requestedPercent + "%") +
-        "</div>" +
       "</section>"
     );
   }
@@ -338,14 +347,8 @@
     if (summary.weakestDay) {
       cards.push(kpi("Least utilized day", civilDateLabel(summary.weakestDay.dateKey), summary.weakestDay.percent + "% utilized"));
     }
-    if (summary.mostGapDay) {
-      cards.push(kpi("Most gap hours", civilDateLabel(summary.mostGapDay.dateKey), hours(summary.mostGapDay.gapMinutes) + " hrs"));
-    }
     if (summary.mostGapHour) {
-      cards.push(kpi("Most gap time", summary.mostGapHour.shortLabel || summary.mostGapHour.label, hours(summary.mostGapHour.gapMinutes) + " hrs"));
-    }
-    if (summary.weakestHour) {
-      cards.push(kpi("Lowest hour utilization", summary.weakestHour.shortLabel || summary.weakestHour.label, summary.weakestHour.percent + "%"));
+      cards.push(kpi("Most gap time", summary.mostGapHour.shortLabel || summary.mostGapHour.label, hoursUnit(summary.mostGapHour.gapMinutes)));
     }
     if (!cards.length) return "";
     return '<div class="ff-rpt-kpis">' + cards.join("") + "</div>";
@@ -484,7 +487,7 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Capacity patterns</h2>" +
-        '<p class="ff-rpt-fine">When unused capacity occurred. Utilization is booked hours divided by working hours. Closed days are omitted. Hours are provider hours, not salon wall-clock hours.</p>' +
+        '<p class="ff-rpt-fine">Shows when provider capacity was most and least utilized. Closed days are omitted. Hours are provider hours, not salon wall-clock hours.</p>' +
         patternHighlights(patterns.summary) +
         patternToggleHtml() +
         body +
@@ -522,12 +525,11 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Service demand &amp; capacity</h2>" +
-        '<p class="ff-rpt-fine">What was booked. Booked value / provider hr uses priced service-line duration only. This is booked value density, not provider pay or salon profit.</p>' +
+        '<p class="ff-rpt-fine">Based on appointment service lines. Booked value is not collected sales. Booked value / provider hr is booked value density, not provider pay.</p>' +
         '<div class="ff-rpt-kpis">' +
           kpi("Distinct services", totals.serviceCount || 0) +
-          kpi("Booked service hours", hours(totals.bookedMinutes || 0)) +
-          kpi("Booked service value", totals.bookedServiceValue > 0 ? money(totals.bookedServiceValue) : "—") +
-          kpi("Highest-demand service", top && top.name ? top.name : "—", top ? hours(top.bookedMinutes) + " hrs" : "") +
+          kpi("Booked service hours", hoursUnit(totals.bookedMinutes || 0)) +
+          kpi("Highest-demand service", top && top.name ? top.name : "—", top ? hoursUnit(top.bookedMinutes) : "") +
         "</div>" +
         patternTable(
           ["Service", "Bookings / lines", "Clients", "Booked hours", "Time mix", "Booked value", "Value / provider hr", "Providers", "Top-provider share"],
@@ -557,16 +559,12 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Client behavior</h2>" +
-        '<p class="ff-rpt-fine">Behavior visible in this period only. A first-visit client has at least one in-range appointment marked first visit. Repeat-in-period means two or more appointments here, not lifetime retention.</p>' +
+        '<p class="ff-rpt-fine">Shows behavior inside this reporting period, not lifetime retention.</p>' +
         '<div class="ff-rpt-kpis">' +
-          kpi("Unique clients", b.identifiedClientCount || 0) +
           kpi("First-visit clients", b.firstVisitClientCount || 0) +
-          kpi("Repeat-in-period clients", b.repeatInPeriodClientCount || 0, (b.repeatInPeriodClientShare || 0) + "% of unique") +
-          kpi("Repeat-in-period appointment share", (b.repeatInPeriodAppointmentShare || 0) + "%") +
-        "</div>" +
-        '<div class="ff-rpt-kpis ff-rpt-kpis-4 ff-rpt-kpis-follow">' +
           kpi("Returning clients", b.returningClientCount || 0) +
-          kpi("Appointments / client", b.averageAppointmentsPerClient || 0) +
+          kpi("Repeat-in-period clients", b.repeatInPeriodClientCount || 0) +
+          kpi("Repeat-in-period appointment share", (b.repeatInPeriodAppointmentShare || 0) + "%") +
           kpi("Multi-service clients", (b.multiServiceClientShare || 0) + "%") +
           kpi("Requested-provider share", (b.requestedProviderShare || 0) + "%", "of assigned lines") +
           spacing +
@@ -610,16 +608,8 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Provider capacity</h2>" +
-        '<div class="ff-rpt-kpis">' +
-          kpi("Working hours", hours(u.workingMinutes)) +
-          kpi("Booked hours", hours(u.bookedMinutes)) +
-          kpi("Idle hours", hours(u.idleMinutes)) +
-          kpi("Calendar gap hours", hours((report.gaps && report.gaps.totalMinutes) || 0)) +
-          kpi("Open-edge idle", hours(u.openEdgeMinutes || 0), "start/end of shifts") +
-          kpi("Utilization", u.percent + "%", "booked ÷ working") +
-        "</div>" +
+        '<p class="ff-rpt-fine">Shows how scheduled provider working time was used during this period. Ranked by the most calendar gap time, then idle. Calendar gaps are holes between visits; open-edge idle is unused time at the start or end of a working window.</p>' +
         body +
-        '<p class="ff-rpt-fine">Providers with scheduled hours, ranked by the most calendar gap time, then the most idle time. Overall utilization is total booked hours divided by total working hours. Calendar gaps are holes between visits; open-edge idle is unused time at the start or end of a working window.</p>' +
       "</section>"
     );
   }
@@ -627,10 +617,6 @@
   function gapsHtml(report) {
     var g = report.gaps;
     var cap = report.capacity;
-    var most = g.mostGapProvider
-      ? (g.mostGapProvider.firstName || String(g.mostGapProvider.name || "").split(/\s+/)[0] || g.mostGapProvider.name)
-      : "—";
-    var peak = g.peakPeriod && g.peakPeriod.label ? g.peakPeriod.label : "—";
     var estimate = cap.estimatedDollars == null
       ? '<p class="ff-rpt-fine">Estimated unused service capacity is shown only when booked services have both a price and a duration.</p>'
       : '<div class="ff-rpt-estimate">' +
@@ -638,18 +624,26 @@
           '<p class="ff-rpt-estimate-value">' + escapeHtml(money(cap.estimatedDollars)) + "</p>" +
           '<p class="ff-rpt-fine">Estimate only: average booked service dollars per booked minute, multiplied by calendar gap minutes. Based on booked service value, not a guarantee.</p>' +
         "</div>";
+    if (!g.count && cap.estimatedDollars == null) {
+      if (!(report.appointments && report.appointments.total) && !(report.utilization && report.utilization.workingMinutes)) {
+        return "";
+      }
+      return (
+        '<section class="ff-rpt-panel">' +
+          "<h2>Calendar gaps</h2>" +
+          '<p class="ff-rpt-fine">A calendar gap is unused working time between two booked visits. Open-edge idle is unused time at the start or end of a shift, not a gap.</p>' +
+          '<p class="ff-rpt-empty">No calendar gaps in this period.</p>' +
+        "</section>"
+      );
+    }
     return (
       '<section class="ff-rpt-panel">' +
-        "<h2>Calendar gaps and unused capacity</h2>" +
-        '<p class="ff-rpt-fine">A calendar gap is unused working time between two booked visits. Open time at the start or end of a shift is idle, not a gap.</p>' +
+        "<h2>Calendar gaps</h2>" +
+        '<p class="ff-rpt-fine">A calendar gap is unused working time between two booked visits. Open-edge idle is unused time at the start or end of a shift, not a gap.</p>' +
         '<div class="ff-rpt-kpis">' +
           kpi("Gaps", g.count) +
-          kpi("Gap hours", hours(g.totalMinutes)) +
-          kpi("Small gap hours", hours(g.smallMinutes), "gaps of 30 minutes or less") +
-          kpi("Larger gap hours", hours(g.largerMinutes), "gaps over 30 minutes") +
-          kpi("Most gap time", most, g.mostGapProvider ? hours(g.mostGapProvider.minutes) + " hrs" : "") +
-          kpi("Busiest gap window", peak) +
-          kpi("Unused to gaps", cap.unusedPercent + "%", "of scheduled hours") +
+          kpi("Small gap hours", hoursUnit(g.smallMinutes), "30 minutes or less") +
+          kpi("Larger gap hours", hoursUnit(g.largerMinutes), "over 30 minutes") +
         "</div>" +
         estimate +
       "</section>"
@@ -669,10 +663,8 @@
           "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
           "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
         "</div>" +
+        overviewHtml(result) +
         insightsHtml(result) +
-        appointmentsHtml(result) +
-        clientsHtml(result) +
-        requestedHtml(result) +
         utilizationHtml(result) +
         patternsHtml(result) +
         serviceDemandHtml(result) +

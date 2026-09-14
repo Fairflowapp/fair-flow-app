@@ -437,6 +437,7 @@ check("ui demotes source mix with a data-quality note", uiSrc.indexOf("not a com
 check("ui does not headline no-show as a KPI card", uiSrc.indexOf('kpi("No-show"') === -1);
 check("ui explains idle versus calendar gaps", uiSrc.indexOf("open-edge idle is unused time at the start or end") !== -1);
 check("ui shows a provider capacity table", uiSrc.indexOf("Provider capacity") !== -1 && uiSrc.indexOf("Open-edge hrs") !== -1 && uiSrc.indexOf("booked ÷ working") !== -1);
+check("ui starts with a compact owner overview", uiSrc.indexOf("<h2>Overview</h2>") !== -1 && uiSrc.indexOf("Unique clients") !== -1 && uiSrc.indexOf("Repeat-in-period share") !== -1);
 check("ui includes a capacity patterns section", uiSrc.indexOf("Capacity patterns") !== -1 && uiSrc.indexOf("By day / weekday") !== -1 && uiSrc.indexOf("By time of day") !== -1);
 check("ui includes a service demand section", uiSrc.indexOf("Service demand") !== -1 && uiSrc.indexOf("Booked service value") !== -1 && uiSrc.indexOf("Value / provider hr") !== -1);
 check("ui includes a client behavior section", uiSrc.indexOf("Client behavior") !== -1 && uiSrc.indexOf("Repeat-in-period") !== -1 && uiSrc.indexOf("Appointments in this period") !== -1);
