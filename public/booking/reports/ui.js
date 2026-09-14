@@ -59,6 +59,10 @@
     "/booking/reports/service-sales-compute.js?v=20260914_svcsales",
     "/booking/reports/service-sales.js?v=20260914_svcsales"
   ];
+  var SALES_TIME_SCRIPTS = [
+    "/booking/reports/sales-time-compute.js?v=20260914_salestime",
+    "/booking/reports/sales-time.js?v=20260914_salestime"
+  ];
   var INTEL_SCRIPTS = [
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/capacity-patterns.js?v=20260913_ui1",
@@ -74,6 +78,10 @@
 
   function serviceSalesReady() {
     return !!(window.ffBookingReportsServiceSalesCompute && window.ffBookingReportsServiceSales);
+  }
+
+  function salesTimeReady() {
+    return !!(window.ffBookingReportsSalesTimeCompute && window.ffBookingReportsSalesTime);
   }
 
   function loadScripts(list, done) {
@@ -122,6 +130,14 @@
     loadScripts(SERVICE_SALES_SCRIPTS, done);
   }
 
+  function ensureSalesTimeScripts(done) {
+    if (salesTimeReady()) {
+      done();
+      return;
+    }
+    loadScripts(SALES_TIME_SCRIPTS, done);
+  }
+
   function paintMain() {
     var main = document.getElementById("ffRptMain");
     if (!main) return;
@@ -154,6 +170,21 @@
       main.innerHTML = '<p class="ff-rpt-empty">Loading Service Sales…</p>';
       ensureServiceSalesScripts(function () {
         if (window.ffBookingReportsServiceSales) window.ffBookingReportsServiceSales.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
+    if (id === "sales-by-period") {
+      if (window.ffBookingReportsSalesTime) {
+        window.ffBookingReportsSalesTime.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Sales by Time Period…</p>';
+      ensureSalesTimeScripts(function () {
+        if (window.ffBookingReportsSalesTime) window.ffBookingReportsSalesTime.paint();
         else {
           var host = document.getElementById("ffRptMain");
           if (host) host.innerHTML = laterHtml(report);

@@ -311,6 +311,8 @@
     rangeForPreset: rangeForPreset,
     datePresets: datePresets,
     monthPresets: monthPresets,
+    refundAmount: refundAmount,
+    breakdown: breakdown,
     summarize: summarize
   };
 })();

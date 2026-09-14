@@ -494,6 +494,12 @@
 .ff-rpt-table-service-day {
   min-width: 360px;
 }
+.ff-rpt-table-time {
+  min-width: 760px;
+}
+.ff-rpt-table-time-weekday {
+  min-width: 640px;
+}
 .ff-rpt-kpis-follow {
   margin-top: 10px;
 }

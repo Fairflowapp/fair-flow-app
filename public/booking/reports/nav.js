@@ -38,7 +38,7 @@
         {
           id: "sales-by-period",
           label: "Sales by Time Period",
-          blurb: "Compare sales across days, weeks, or months."
+          blurb: "Closed checkout sales by day and weekday."
         }
       ]
     }
