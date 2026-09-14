@@ -85,7 +85,7 @@
     var st = window.ffBookingCalState;
     if (api && st && emp && emp.id) {
       return api.isProviderAvailableAt(emp.id, {
-        dateKey: st.getSelectedDateKey(),
+        dateKey: (axis && axis.dateKey) || st.getSelectedDateKey(),
         minutes: minutes
       }, st.getLocationId());
     }

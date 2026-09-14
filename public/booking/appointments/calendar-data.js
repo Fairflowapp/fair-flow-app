@@ -2,7 +2,7 @@
  * Bounded Calendar appointment reads. Uses ffBookingAppointments only.
  */
 (function () {
-  var cache = { key: "", rows: [] };
+  var cache = { key: "", rows: [], byDate: {}, locationId: "" };
 
   function repo() { return window.ffBookingAppointments || null; }
   function model() { return window.ffBookingAppointmentModel || null; }
@@ -67,7 +67,8 @@
           partySize: partySize,
           firstVisit: !!(appt.firstVisit),
           requested: !!(line.requested),
-          personKey: person
+          personKey: person,
+          dateKey: String(appt.dateKey || "").trim()
         });
       });
       groupOrder.forEach(function (key) {
@@ -116,7 +117,7 @@
     var api = repo();
     var key = viewKey(dateKey, locationId);
     if (!api || !dateKey || !locationId) {
-      cache = { key: "", rows: [] };
+      cache = { key: "", rows: [], byDate: {}, locationId: "" };
       return [];
     }
     var rows = [];
@@ -125,13 +126,54 @@
     } catch (_) {
       rows = [];
     }
-    cache = { key: key, rows: rows || [] };
+    var byDate = {};
+    byDate[dateKey] = rows || [];
+    cache = { key: key, rows: rows || [], byDate: byDate, locationId: String(locationId || "") };
     return cache.rows;
   }
 
+  async function loadForDates(dateKeys, locationId) {
+    var api = repo();
+    var keys = (Array.isArray(dateKeys) ? dateKeys : []).filter(Boolean);
+    var loc = String(locationId || "").trim();
+    if (!api || !keys.length || !loc) {
+      cache = { key: "", rows: [], byDate: {}, locationId: "" };
+      return [];
+    }
+    var byDate = {};
+    var all = [];
+    var i;
+    for (i = 0; i < keys.length; i += 1) {
+      var rows = [];
+      try {
+        rows = await api.getAppointmentsForDate(keys[i], loc);
+      } catch (_) {
+        rows = [];
+      }
+      byDate[keys[i]] = rows || [];
+      all = all.concat(rows || []);
+    }
+    cache = { key: "range|" + keys.join(",") + "|" + loc, rows: all, byDate: byDate, locationId: loc };
+    return cache.rows;
+  }
+
+  function rowsForDate(dateKey, locationId) {
+    var loc = String(locationId || "");
+    if (cache.locationId && cache.locationId !== loc) return [];
+    if (cache.byDate && cache.byDate[dateKey]) return cache.byDate[dateKey];
+    if (cache.key === viewKey(dateKey, loc)) return cache.rows;
+    return [];
+  }
+
   function cardsForView(dateKey, locationId) {
-    if (cache.key !== viewKey(dateKey, locationId)) return [];
-    return cardsFrom(cache.rows, locationId);
+    return cardsFrom(rowsForDate(dateKey, locationId), locationId);
+  }
+
+  function cardsForProvider(dateKey, locationId, providerId) {
+    var id = String(providerId || "").trim();
+    return cardsForView(dateKey, locationId).filter(function (card) {
+      return card && String(card.providerId || "") === id;
+    });
   }
 
   function getCachedById(appointmentId) {
@@ -145,7 +187,9 @@
 
   window.ffBookingCalAppointments = {
     loadForView: loadForView,
+    loadForDates: loadForDates,
     cardsForView: cardsForView,
+    cardsForProvider: cardsForProvider,
     cardsFrom: cardsFrom,
     getCached: function () { return cache.rows.slice(); },
     getCachedById: getCachedById

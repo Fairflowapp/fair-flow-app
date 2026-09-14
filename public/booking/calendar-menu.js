@@ -41,8 +41,7 @@
       {
         id: "week",
         label: "View provider week",
-        enabled: false,
-        hint: "Week view coming later"
+        enabled: true
       },
       {
         id: "hours",
@@ -80,6 +79,12 @@
     if (id === "focus" && st) {
       if (st.getFocusProviderId() === ctx.providerId) st.clearFocusProvider();
       else st.setFocusProviderId(ctx.providerId);
+      if (typeof window.ffRefreshBookingCalendar === "function") window.ffRefreshBookingCalendar();
+      return;
+    }
+    if (id === "week" && st) {
+      if (typeof st.setWeekProviderId === "function") st.setWeekProviderId(ctx.providerId);
+      if (typeof st.setView === "function") st.setView("week");
       if (typeof window.ffRefreshBookingCalendar === "function") window.ffRefreshBookingCalendar();
       return;
     }

@@ -220,7 +220,13 @@
     try { window.print(); } catch (_) {}
   }
 
+  function canPrintDay() {
+    var st = state();
+    return !(st && st.isWeek && st.isWeek());
+  }
+
   function printCurrent() {
+    if (!canPrintDay()) return { ok: false, reason: "week_view", printing: false };
     var snapshot = enterPrintMode({});
     triggerBrowserPrint();
     return snapshot;
@@ -235,6 +241,7 @@
   window.ffBookingCalPrint = {
     printCurrent: printCurrent,
     printProvider: printProvider,
+    canPrintDay: canPrintDay,
     enterPrintMode: enterPrintMode,
     exitPrintMode: exitPrintMode,
     isPrintMode: function () { return printing; },

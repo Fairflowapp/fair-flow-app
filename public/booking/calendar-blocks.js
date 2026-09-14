@@ -139,9 +139,25 @@
     var lay = window.ffBookingCalLayout;
     if (!root || !st || !lay) return;
     clearPaint(root);
+    var locationId = st.getLocationId();
+    if (st.isWeek && st.isWeek()) {
+      var weekAxis = window.ffBookingCalWeek && typeof window.ffBookingCalWeek.sharedAxis === "function"
+        ? window.ffBookingCalWeek.sharedAxis()
+        : st.getAxis();
+      var weekProviderId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+      (st.getWeekDateKeys ? st.getWeekDateKeys() : []).forEach(function (dateKey) {
+        var col = root.querySelector('[data-ff-cal-day="' + dateKey + '"]');
+        if (!col) return;
+        forProvider(dateKey, locationId, weekProviderId).forEach(function (block) {
+          var rect = lay.windowToRect(block.startMin, block.endMin, weekAxis.startMin, weekAxis.endMin);
+          if (!rect) return;
+          col.insertAdjacentHTML("beforeend", blockHtml(block, rect));
+        });
+      });
+      return;
+    }
     var axis = st.getAxis();
     var dateKey = st.getSelectedDateKey();
-    var locationId = st.getLocationId();
     forView(dateKey, locationId).forEach(function (block) {
       var col = root.querySelector('[data-ff-cal-emp="' + block.providerId + '"]');
       if (!col) return;

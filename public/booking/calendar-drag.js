@@ -690,6 +690,8 @@
 
   function onPointerDown(ev) {
     if (ev.button != null && ev.button !== 0) return;
+    var st = calState();
+    if (st && st.isWeek && st.isWeek()) return;
     cancelPendingTap();
     var source = readSource(ev.target);
     if (!source) return;

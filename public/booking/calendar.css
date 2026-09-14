@@ -738,6 +738,90 @@ body.ff-booking-area .ff-booking-main {
   display: none;
 }
 
+.ff-cal.is-week {
+  --ff-cal-header-h: 52px;
+}
+.ff-cal-week-provider,
+.ff-cal-week-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #ddd6ee;
+  background: #fff;
+  color: #2a2140;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 6px 12px 6px 6px;
+  cursor: pointer;
+  max-width: 260px;
+}
+.ff-cal-week-pick {
+  padding: 8px 14px;
+}
+.ff-cal-week-provider:hover,
+.ff-cal-week-pick:hover {
+  border-color: #c4b5fd;
+  background: #f5f3ff;
+}
+.ff-cal-week-provider-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ff-cal-day-head {
+  box-sizing: border-box;
+  flex: 0 0 var(--ff-cal-col-w);
+  width: var(--ff-cal-col-w);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-right: 1px solid var(--ff-cal-divider);
+  background: #fff;
+  color: #2a2140;
+}
+.ff-cal-day-head.is-today {
+  background: #faf7ff;
+}
+.ff-cal-day-wd {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #6d657c;
+}
+.ff-cal-day-head.is-today .ff-cal-day-wd {
+  color: #5b21b6;
+}
+.ff-cal-day-num {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.ff-cal-day-head .ff-cal-closed-note,
+.ff-cal-day-head .ff-cal-special-note {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.ff-cal.is-week .ff-cal-now {
+  left: 0;
+  right: 0;
+}
+.ff-cal-print:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 @media (max-width: 720px) {
   .ff-cal-toolbar {
     flex-wrap: wrap;

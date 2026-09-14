@@ -142,15 +142,35 @@
     window.__ffPaintingBoard = true;
     try {
       clear(root);
-      var axis = st.getAxis();
-      var cards = api.cardsForView(st.getSelectedDateKey(), st.getLocationId());
+      var week = !!(st.isWeek && st.isWeek());
+      var axis = week && window.ffBookingCalWeek && typeof window.ffBookingCalWeek.sharedAxis === "function"
+        ? window.ffBookingCalWeek.sharedAxis()
+        : st.getAxis();
+      var cards;
+      if (week) {
+        var weekId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+        var loc = st.getLocationId();
+        cards = [];
+        (st.getWeekDateKeys ? st.getWeekDateKeys() : []).forEach(function (dateKey) {
+          var dayCards = typeof api.cardsForProvider === "function"
+            ? api.cardsForProvider(dateKey, loc, weekId)
+            : (api.cardsForView(dateKey, loc) || []).filter(function (card) {
+              return card && card.providerId === weekId;
+            });
+          cards = cards.concat(dayCards);
+        });
+      } else {
+        cards = api.cardsForView(st.getSelectedDateKey(), st.getLocationId());
+      }
       var built = board() && typeof board().build === "function"
-        ? board().build({ cards: cards, holds: holdsFromDraft() })
+        ? board().build({ cards: cards, holds: week ? [] : holdsFromDraft() })
         : { items: overlapLanes(cards) };
       built.items.forEach(function (item) {
         if (item.kind && item.kind !== "card") return;
         var card = item.source || item;
-        var col = root.querySelector('[data-ff-cal-emp="' + item.providerId + '"]');
+        var col = week
+          ? root.querySelector('[data-ff-cal-day="' + (card.dateKey || item.dateKey || "") + '"]')
+          : root.querySelector('[data-ff-cal-emp="' + item.providerId + '"]');
         if (!col) return;
         var rect = lay.windowToRect(item.startMin, item.endMin, axis.startMin, axis.endMin);
         if (!rect) return;
