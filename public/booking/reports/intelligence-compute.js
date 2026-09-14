@@ -1,6 +1,13 @@
 /**
  * Booking Intelligence numbers. Appointments, utilization, gaps, insights.
  * No Firestore. Callers pass appointments and provider schedules.
+ *
+ * Time buckets stay separate:
+ *   working  = provider scheduled minutes inside effective working windows
+ *   booked   = union of active appointment time clipped to those windows
+ *   idle     = working − booked (includes open time before first / after last)
+ *   gap      = unused working time BETWEEN booked blocks only
+ * Calendar gap time is a subset of idle time. Utilization stays booked / working.
  */
 (function () {
   var BOOKED_STATUSES = [
@@ -472,11 +479,12 @@
       );
     }
 
-    if (gaps.smallCount > 0) {
+    if (gaps.smallMinutes > 0) {
+      var smallHours = gaps.smallMinutes / 60;
       out.push(
-        gaps.smallCount + " gap" + (gaps.smallCount === 1 ? "" : "s") +
-        " of 30 minutes or less " + (gaps.smallCount === 1 ? "was" : "were") +
-        " detected and may have been recoverable."
+        formatHours(gaps.smallMinutes) + " provider " + hourWord(smallHours) +
+        (Math.abs(smallHours - 1) < 0.05 ? " was" : " were") +
+        " left in calendar gaps of 30 minutes or less."
       );
     }
 
@@ -499,7 +507,7 @@
     }
 
     if (gaps.peakPeriod && gaps.peakPeriod.label) {
-      out.push("Most unused calendar time occurred between " + gaps.peakPeriod.label + ".");
+      out.push("Most calendar gap time occurred between " + gaps.peakPeriod.label + ".");
     }
 
     if (gaps.mostGapProvider && gaps.mostGapProvider.minutes > 0) {
@@ -518,7 +526,7 @@
     if (cap.estimatedDollars != null) {
       out.push(
         "Estimated unused service capacity is " + formatMoney(cap.estimatedDollars) +
-        ". This is estimated capacity, not actual lost revenue."
+        ", based on booked service value and calendar gap time."
       );
     }
 
@@ -638,6 +646,7 @@
             return clipInterval(block, windowRow);
           }).filter(Boolean));
           var g;
+          // Gaps are holes between consecutive booked blocks in this window only.
           for (g = 0; g < inside.length - 1; g += 1) {
             var startMin = inside[g].endMin;
             var endMin = inside[g + 1].startMin;

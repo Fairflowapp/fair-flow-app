@@ -1,9 +1,9 @@
 /**
- * Reports catalog. Sales first. Other groups wait until we use them.
+ * Reports catalog. Booking Intelligence is the default landing. Sales stay available.
  */
 (function () {
   var KEY = "ff-booking-report";
-  var DEFAULT_ID = "sales-summary";
+  var DEFAULT_ID = "booking-intelligence";
   var GROUPS = [
     {
       id: "intelligence",

@@ -22,7 +22,7 @@
 
   function navHtml() {
     var api = nav();
-    var selected = api && api.getSelectedId ? api.getSelectedId() : "sales-summary";
+    var selected = api && api.getSelectedId ? api.getSelectedId() : "booking-intelligence";
     var groups = (api && api.GROUPS) || [];
     return groups.map(function (group) {
       var items = (group.items || []).map(function (item) {

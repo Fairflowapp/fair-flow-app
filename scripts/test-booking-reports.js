@@ -43,7 +43,7 @@ check("reports has a Sales group", navSrc.indexOf('label: "Sales"') !== -1);
 check("reports has an Intelligence group", navSrc.indexOf('label: "Intelligence"') !== -1 && navSrc.indexOf('id: "booking-intelligence"') !== -1);
 check("sales summary remains a report", navSrc.indexOf('id: "sales-summary"') !== -1);
 check("sales tabs include service, product, and period", navSrc.indexOf("service-sales") !== -1 && navSrc.indexOf("product-sales") !== -1 && navSrc.indexOf("sales-by-period") !== -1);
-check("sales summary is the default report", navSrc.indexOf('DEFAULT_ID = "sales-summary"') !== -1);
+check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID = "booking-intelligence"') !== -1);
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
 check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
 check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
@@ -64,7 +64,8 @@ load("public/booking/reports/nav.js", windowObj);
 load("public/booking/reports/compute.js", windowObj);
 const nav = windowObj.ffBookingReportsNav;
 const compute = windowObj.ffBookingReportsCompute;
-check("nav defaults to sales summary", nav.getSelectedId() === "sales-summary");
+check("nav defaults to booking intelligence", nav.getSelectedId() === "booking-intelligence");
+check("nav can still open sales summary", nav.setSelectedId("sales-summary") === "sales-summary" && nav.getSelected().label === "Sales Summary");
 check("nav can select booking intelligence", nav.setSelectedId("booking-intelligence") === "booking-intelligence" && nav.getSelected().label === "Booking Intelligence");
 check("nav can select service sales", nav.setSelectedId("service-sales") === "service-sales" && nav.getSelected().label === "Service Sales");
 const summary = compute.summarize([

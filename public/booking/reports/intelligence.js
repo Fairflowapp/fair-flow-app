@@ -231,6 +231,11 @@
     if (a.checkedIn || a.inService) {
       extra = kpi("Checked in", a.checkedIn) + kpi("In service", a.inService);
     }
+    var noShowNote = a.noShow
+      ? '<p class="ff-rpt-fine">No-show is counted when a visit is marked that way (' +
+        escapeHtml(String(a.noShow)) +
+        "). That status is not a complete front-desk workflow yet, so it is not treated as a headline KPI.</p>"
+      : "";
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Appointments</h2>" +
@@ -240,10 +245,10 @@
           kpi("Scheduled", a.scheduled) +
           kpi("Confirmed", a.confirmed) +
           kpi("Cancelled", a.cancelled) +
-          kpi("No-show", a.noShow) +
           kpi("Cancellation rate", a.cancellationRate + "%") +
           extra +
         "</div>" +
+        noShowNote +
       "</section>"
     );
   }
@@ -277,8 +282,9 @@
     }).join("");
     if (counts.other) rows += barRow(labels.other || "Other", counts.other, max || 1);
     return (
-      '<section class="ff-rpt-panel">' +
+      '<section class="ff-rpt-panel ff-rpt-panel-secondary">' +
         "<h2>Booking source</h2>" +
+        '<p class="ff-rpt-fine">Recorded on the appointment when present. New bookings are currently saved as front desk, so this is not a complete channel report yet.</p>' +
         '<div class="ff-rpt-bars">' + rows + "</div>" +
       "</section>"
     );
@@ -329,6 +335,7 @@
           kpi("Utilization", u.percent + "%") +
         "</div>" +
         body +
+        '<p class="ff-rpt-fine">Idle hours are scheduled time that was not booked. Calendar gaps are only unused time between booked visits, not the open time before the first or after the last appointment.</p>' +
       "</section>"
     );
   }
@@ -341,20 +348,21 @@
       : "—";
     var peak = g.peakPeriod && g.peakPeriod.label ? g.peakPeriod.label : "—";
     var estimate = cap.estimatedDollars == null
-      ? '<p class="ff-rpt-fine">Estimated unused service capacity needs priced appointments with durations.</p>'
+      ? '<p class="ff-rpt-fine">Estimated unused service capacity is shown only when booked services have both a price and a duration.</p>'
       : '<div class="ff-rpt-estimate">' +
-          '<p class="ff-rpt-estimate-label">Estimated capacity</p>' +
+          '<p class="ff-rpt-estimate-label">Estimated unused service capacity</p>' +
           '<p class="ff-rpt-estimate-value">' + escapeHtml(money(cap.estimatedDollars)) + "</p>" +
-          '<p class="ff-rpt-fine">This is estimated unused service capacity from gap time and booked service rates — not actual lost revenue.</p>' +
+          '<p class="ff-rpt-fine">Estimate only: average booked service dollars per booked minute, multiplied by calendar gap minutes. Based on booked service value, not a guarantee.</p>' +
         "</div>";
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Calendar gaps and unused capacity</h2>" +
+        '<p class="ff-rpt-fine">A calendar gap is unused working time between two booked visits. Open time at the start or end of a shift is idle, not a gap.</p>' +
         '<div class="ff-rpt-kpis">' +
           kpi("Gaps", g.count) +
           kpi("Gap hours", hours(g.totalMinutes)) +
-          kpi("Small gaps", g.smallCount, "30 minutes or less") +
-          kpi("Larger gaps", g.largerCount, "over 30 minutes") +
+          kpi("Small gap hours", hours(g.smallMinutes), "gaps of 30 minutes or less") +
+          kpi("Larger gap hours", hours(g.largerMinutes), "gaps over 30 minutes") +
           kpi("Most gap time", most, g.mostGapProvider ? hours(g.mostGapProvider.minutes) + " hrs" : "") +
           kpi("Busiest gap window", peak) +
           kpi("Unused to gaps", cap.unusedPercent + "%", "of scheduled hours") +
@@ -379,10 +387,11 @@
         "</div>" +
         insightsHtml(result) +
         appointmentsHtml(result) +
-        '<div class="ff-rpt-split">' + clientsHtml(result) + sourcesHtml(result) + "</div>" +
+        clientsHtml(result) +
         requestedHtml(result) +
         utilizationHtml(result) +
         gapsHtml(result) +
+        sourcesHtml(result) +
       "</div>"
     );
   }

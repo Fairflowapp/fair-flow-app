@@ -113,9 +113,11 @@ const gap30 = intel.buildReport(Object.assign({
   ],
   providers: [provider("maria", "Maria", work9to12)]
 }, day));
-check("one 30-minute gap is a small recoverable gap", gap30.gaps.count === 1 && gap30.gaps.totalMinutes === 30 && gap30.gaps.smallCount === 1);
-check("30-minute gap insight mentions recoverable gaps", gap30.insights.some(function (line) {
-  return line === "1 gap of 30 minutes or less was detected and may have been recoverable.";
+check("one 30-minute gap is a small descriptive gap", gap30.gaps.count === 1 && gap30.gaps.totalMinutes === 30 && gap30.gaps.smallCount === 1 && gap30.gaps.smallMinutes === 30);
+check("30-minute gap insight is descriptive not recoverable", gap30.insights.some(function (line) {
+  return line === "0.5 provider hours were left in calendar gaps of 30 minutes or less.";
+}) && gap30.insights.every(function (line) {
+  return line.indexOf("recoverable") === -1;
 }));
 
 const many = intel.buildReport(Object.assign({
@@ -289,7 +291,9 @@ const estimated = intel.buildReport(Object.assign({
 }, day));
 check("estimated unused capacity uses booked rate times gap minutes", estimated.capacity.averageRatePerMinute === 1 && estimated.capacity.estimatedDollars === 30);
 check("estimated unused capacity insight is labeled as estimate", estimated.insights.some(function (line) {
-  return line === "Estimated unused service capacity is $30.00. This is estimated capacity, not actual lost revenue.";
+  return line === "Estimated unused service capacity is $30.00, based on booked service value and calendar gap time.";
+}) && estimated.insights.every(function (line) {
+  return line.indexOf("lost revenue") === -1 && line.indexOf("recoverable revenue") === -1;
 }));
 check("unused capacity percent is gap over working minutes", estimated.capacity.unusedPercent === 16.7 && estimated.gaps.totalMinutes === 30);
 
@@ -360,6 +364,60 @@ const otherLoc = intel.buildReport(Object.assign({
 }, day));
 check("appointments at another location are excluded", otherLoc.appointments.total === 0);
 
+const work10to6 = [{ startMin: 600, endMin: 1080 }];
+const midShift = intel.buildReport(Object.assign({
+  appointments: [appt({
+    appointmentId: "mid",
+    serviceLines: [line({ startMin: 720, endMin: 780, durationMinutes: 60 })]
+  })],
+  providers: [provider("maria", "Maria", work10to6)]
+}, day));
+check("A: one mid-shift appointment has zero calendar gaps", midShift.gaps.count === 0 && midShift.gaps.totalMinutes === 0);
+check("A: one mid-shift appointment still has idle time", midShift.utilization.workingMinutes === 480 && midShift.utilization.bookedMinutes === 60 && midShift.utilization.idleMinutes === 420);
+check("A: utilization stays booked over working", midShift.utilization.percent === 12.5);
+
+const hole30 = intel.buildReport(Object.assign({
+  appointments: [
+    appt({ appointmentId: "a", serviceLines: [line({ startMin: 720, endMin: 780, durationMinutes: 60 })] }),
+    appt({ appointmentId: "b", serviceLines: [line({ lineId: "l2", startMin: 810, endMin: 870, durationMinutes: 60 })] })
+  ],
+  providers: [provider("maria", "Maria", work10to6)]
+}, day));
+check("B: 30-minute hole between visits is a calendar gap", hole30.gaps.count === 1 && hole30.gaps.totalMinutes === 30 && hole30.gaps.smallMinutes === 30);
+check("B: idle includes leading, trailing, and the gap", hole30.utilization.bookedMinutes === 120 && hole30.utilization.idleMinutes === 360 && hole30.utilization.idleMinutes > hole30.gaps.totalMinutes);
+
+const backToBack = intel.buildReport(Object.assign({
+  appointments: [
+    appt({ appointmentId: "a", serviceLines: [line({ startMin: 720, endMin: 780, durationMinutes: 60 })] }),
+    appt({ appointmentId: "b", serviceLines: [line({ lineId: "l2", startMin: 780, endMin: 840, durationMinutes: 60 })] })
+  ],
+  providers: [provider("maria", "Maria", work10to6)]
+}, day));
+check("C: back-to-back appointments create no calendar gap", backToBack.gaps.count === 0 && backToBack.gaps.totalMinutes === 0);
+check("C: back-to-back idle is only open shift ends", backToBack.utilization.bookedMinutes === 120 && backToBack.utilization.idleMinutes === 360);
+
+const clip = intel.buildReport(Object.assign({
+  appointments: [
+    appt({ appointmentId: "early", serviceLines: [line({ startMin: 540, endMin: 660, durationMinutes: 120 })] }),
+    appt({ appointmentId: "late", serviceLines: [line({ lineId: "l2", startMin: 780, endMin: 900, durationMinutes: 120 })] })
+  ],
+  providers: [provider("maria", "Maria", [{ startMin: 600, endMin: 840 }])]
+}, day));
+check("E: booked minutes clip to working windows", clip.utilization.workingMinutes === 240 && clip.utilization.bookedMinutes === 120);
+check("E: gap between clipped blocks stays inside working hours", clip.gaps.count === 1 && clip.gaps.totalMinutes === 120 && clip.gaps.items[0].startMin === 660 && clip.gaps.items[0].endMin === 780);
+check("E: idle is working minus clipped booked", clip.utilization.idleMinutes === 120);
+
+check("F: overlapping lines already covered as union not sum", overlap.utilization.bookedMinutes === 180 && overlap.gaps.count === 0);
+check("D: cancelled between actives already leaves a gap and is not booked", cancelledBetween.gaps.totalMinutes === 60 && cancelledBetween.utilization.bookedMinutes === 120);
+
+check("insights do not headline source mix", sources.insights.every(function (line) {
+  return line.indexOf("front desk") === -1 && line.indexOf("booking source") === -1;
+}));
+check("insights do not headline no-show", noShow.insights.every(function (line) {
+  return line.toLowerCase().indexOf("no-show") === -1 && line.toLowerCase().indexOf("no show") === -1;
+}));
+check("calendar gap time is a subset of idle time", hole30.gaps.totalMinutes < hole30.utilization.idleMinutes);
+
 check("dateKeysBetween covers a month", intel.dateKeysBetween("2026-08-01", "2026-08-31").length === 31);
 check("small gap max is 30 minutes", intel.SMALL_GAP_MAX === 30);
 check("cancelled is not a booked status", intel.isBookedStatus("cancelled") === false && intel.isBookedStatus("completed") === true && intel.isBookedStatus("no_show") === true);
@@ -373,7 +431,11 @@ check("intelligence ui uses existing appointment reads", uiSrc.indexOf("getAppoi
 check("intelligence ui uses existing calendar employees for hours", uiSrc.indexOf("loadCalendarEmployees") !== -1);
 check("nav includes booking intelligence", navSrc.indexOf('id: "booking-intelligence"') !== -1);
 check("dashboard styles stay in reports css", css.indexOf(".ff-rpt-insights") !== -1 && css.indexOf(".ff-rpt-estimate-label") !== -1);
-check("estimated capacity is labeled in the ui", uiSrc.indexOf("Estimated capacity") !== -1 && uiSrc.indexOf("not actual lost revenue") !== -1);
+check("estimated unused service capacity is labeled in the ui", uiSrc.indexOf("Estimated unused service capacity") !== -1 && uiSrc.indexOf("average booked service dollars per booked minute") !== -1);
+check("ui does not call the estimate lost or recoverable revenue", uiSrc.indexOf("lost revenue") === -1 && uiSrc.indexOf("recoverable revenue") === -1 && uiSrc.indexOf("may have been recoverable") === -1);
+check("ui demotes source mix with a data-quality note", uiSrc.indexOf("not a complete channel report") !== -1 && uiSrc.indexOf("ff-rpt-panel-secondary") !== -1);
+check("ui does not headline no-show as a KPI card", uiSrc.indexOf('kpi("No-show"') === -1);
+check("ui explains idle versus calendar gaps", uiSrc.indexOf("only unused time between booked visits") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking Intelligence report checks passed.");
