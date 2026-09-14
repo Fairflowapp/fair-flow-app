@@ -7,13 +7,17 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test:booking:static": "node scripts/run-booking-static-qa.js",
+    "test:booking:static:policy": "node qa/scripts/verify-static-runner-policy.js",
+    "test:booking:e2e": "playwright test --config qa/playwright.config.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "patch-package": "^8.0.1",
     "playwright": "^1.62.0",
     "sharp": "^0.34.5"

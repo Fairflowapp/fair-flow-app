@@ -1,0 +1,110 @@
+# Fair Flow Booking QA
+
+Isolated automated QA for Booking. This is not product code.
+
+Canonical checkpoint: `c2ba63ed92faec884e5ab4e2beb0b76829ced251` (`c2ba63e`).
+
+## NEVER run Booking browser QA without staging environment verification
+
+The Playwright suite must prove Firebase `projectId === fair-flow-staging` **before** login or any Booking click.
+
+- Local pages **must** use `?env=staging`.
+- Plain `http://localhost/` / `http://127.0.0.1/` without that query talks to **production**. The suite refuses that.
+- Production hosts (`fairflowapp-db841`, `app.fairflowapp.com`) are rejected.
+- Do not use production credentials or production URLs.
+
+If the project ID is anything other than `fair-flow-staging`, tests fail immediately with `QA SAFETY STOP` and do not log in.
+
+## Environment
+
+Required for authenticated browser smoke:
+
+```
+FF_STAGING_EMAIL
+FF_STAGING_PASSWORD
+```
+
+Create the isolated staging QA user + salon (after a valid Firebase CLI login):
+
+```bash
+firebase login --reauth
+node qa/scripts/setup-staging-qa-fixture.js
+```
+
+That writes `qa/fixtures/staging.env` (gitignored). Do not commit secrets. The script aborts unless Admin `projectId === fair-flow-staging`.
+
+Optional:
+
+```
+FF_BASE_URL=https://fair-flow-staging.web.app
+```
+
+Browser QA always uses `https://fair-flow-staging.web.app/?env=staging` so staging Auth accepts the Referer. Playwright fulfills that origin from this worktree's `public/` and does **not** load the remotely deployed staging build. `FF_BASE_URL` pointing at `127.0.0.1` is upgraded to the staging origin for the same reason. Production hosts are rejected.
+
+Authenticated login runs in a dedicated Playwright setup project with tracing, screenshots, and video **off**. Saved session files under `qa/.auth/` are gitignored credential artifacts. Do not print or commit them.
+
+## Commands
+
+From the repo root (`ff-booking-qa`):
+
+```bash
+# Static Booking contract tests (no browser, no Firestore writes)
+npm run test:booking:static
+
+# Policy self-check: runner exits 0 only for the exact c2ba63e CLASS A set
+npm run test:booking:static:policy
+
+# Playwright smoke (Chromium, America/New_York)
+# Browser origin is https://fair-flow-staging.web.app/?env=staging
+# Application files are fulfilled from local public/
+npm run test:booking:e2e
+```
+
+First Playwright run also needs browsers:
+
+```bash
+npx playwright install chromium
+```
+
+## What the suites do
+
+### Static
+
+Runs existing `scripts/test-booking-*.js` files without rewriting them.
+
+Known **CLASS A — PRE-EXISTING AT c2ba63e** in `scripts/test-booking-clients-ui.js`:
+
+- recent list is bounded to 50
+- UI recent list uses getRecentClients
+- drawer update uses repository
+
+The runner labels those A and still exits 0. Any other static failure is unexpected.
+
+Machine-readable output: `qa/baselines/last-static.json`  
+Frozen checkpoint copy: `qa/baselines/c2ba63e-static.json`
+
+### Playwright smoke (read-only)
+
+Does **not** create, edit, drag, cancel, or delete appointments or clients.
+
+Covers:
+
+- staging origin + Firebase project guard + local-worktree proof
+- dedicated setup login (not recorded in traces)
+- Booking switch + `#ffBookingWorkspace`
+- Day Calendar ready (provider columns **or** empty state)
+- location switcher / active location report
+- Clients / Reports / Sales / Settings smoke
+
+Traces, screenshots, and video are kept on failure under `qa/test-results/` for post-login tests only.  
+Auth setup never records traces/screenshots/video.  
+Summary: `qa/baselines/last-e2e.json`.
+
+Retries default to 0 so missing credentials or genuine failures are not hidden. Set `FF_E2E_RETRIES=1` only when diagnosing flake.
+
+## Classification
+
+- **A** — pre-existing at `c2ba63e`
+- **B** — introduced by a product branch
+- **C** — flaky / environmental (timezone, missing location, network)
+- **D** — QA infrastructure (wrong project, missing creds, server, selectors we own)

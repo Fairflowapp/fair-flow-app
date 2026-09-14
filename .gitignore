@@ -71,6 +71,13 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# Booking QA local secrets and generated reports
+qa/fixtures/staging.env
+qa/.auth/
+qa/baselines/last-*.json
+qa/test-results/
+qa/playwright-report/
+
 # dataconnect generated files
 .dataconnect
 
