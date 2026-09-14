@@ -24,8 +24,14 @@ const UID = "ff-booking-qa-user";
 const SALON_ID = "ffBookingQa";
 const LOCATION_ID = "qaLoc1";
 const PROVIDER_ID = "qaProv1";
+const PROVIDER_TWO_ID = "qaProv2";
 const MANAGER_STAFF_ID = "qaManager1";
 const TECH_TYPE_ID = "qa-manicure";
+const TECH_TYPE_PEDI_ID = "qa-pedicure";
+const SERVICE_CAT_ID = "qaCatHands";
+const SERVICE_MANI_ID = "qaServiceManicure";
+const SERVICE_PEDI_ID = "qaServicePedicure";
+const CLIENT_ID = "qaAppointmentClient";
 
 function abort(message) {
   console.error("ABORT:", message);
@@ -276,6 +282,65 @@ async function main() {
     updatedAt: now,
   });
 
+  await setDoc("salons/" + SALON_ID + "/technicianTypes/" + TECH_TYPE_PEDI_ID, {
+    name: "QA Pedicure",
+    active: true,
+    isQaType: true,
+    updatedAt: now,
+  });
+
+  await setDoc("salons/" + SALON_ID + "/serviceCategories/" + SERVICE_CAT_ID, {
+    name: "QA Hands",
+    sortOrder: 1,
+    isQaCategory: true,
+    updatedAt: now,
+  });
+
+  await setDoc("salons/" + SALON_ID + "/services/" + SERVICE_MANI_ID, {
+    name: "QA Manicure",
+    category: "QA Hands",
+    categoryId: SERVICE_CAT_ID,
+    defaultPrice: 25,
+    durationMinutes: 30,
+    active: true,
+    locationId: LOCATION_ID,
+    isQaService: true,
+    staffOverrides: {},
+    updatedAt: now,
+  });
+
+  await setDoc("salons/" + SALON_ID + "/services/" + SERVICE_PEDI_ID, {
+    name: "QA Pedicure",
+    category: "QA Hands",
+    categoryId: SERVICE_CAT_ID,
+    defaultPrice: 35,
+    durationMinutes: 45,
+    active: true,
+    locationId: LOCATION_ID,
+    isQaService: true,
+    staffOverrides: {},
+    updatedAt: now,
+  });
+
+  await setDoc("salons/" + SALON_ID + "/clients/" + CLIENT_ID, {
+    firstName: "QA Appointment",
+    lastName: "Client",
+    email: "qa-appointment-client@fair-flow-staging.test",
+    emailNormalized: "qa-appointment-client@fair-flow-staging.test",
+    notes: "FF-QA-FIXTURE",
+    firstNameNormalized: "qa appointment",
+    lastNameNormalized: "client",
+    displayNameNormalized: "qa appointment client",
+    phone: "",
+    phoneDigits: "",
+    phoneKeys: [],
+    phoneKeyPrefixes: [],
+    isQaClient: true,
+    isTestClient: true,
+    createdAtLocationId: LOCATION_ID,
+    updatedAt: now,
+  });
+
   await setDoc("salons/" + SALON_ID + "/staff/" + MANAGER_STAFF_ID, {
     name: "QA Manager",
     role: "manager",
@@ -293,9 +358,24 @@ async function main() {
   });
 
   await setDoc("salons/" + SALON_ID + "/staff/" + PROVIDER_ID, {
-    name: "QA Provider",
+    name: "QA Provider One",
+    firstName: "QA",
     role: "technician",
-    technicianTypes: [TECH_TYPE_ID],
+    technicianTypes: [TECH_TYPE_ID, TECH_TYPE_PEDI_ID],
+    allowedLocationIds: [LOCATION_ID],
+    primaryLocationId: LOCATION_ID,
+    active: true,
+    isArchived: false,
+    isQaStaff: true,
+    defaultSchedule: weekSchedule(),
+    updatedAt: now,
+  });
+
+  await setDoc("salons/" + SALON_ID + "/staff/" + PROVIDER_TWO_ID, {
+    name: "QA Provider Two",
+    firstName: "QA",
+    role: "technician",
+    technicianTypes: [TECH_TYPE_ID, TECH_TYPE_PEDI_ID],
     allowedLocationIds: [LOCATION_ID],
     primaryLocationId: LOCATION_ID,
     active: true,
@@ -344,7 +424,10 @@ async function main() {
     salonId: SALON_ID,
     locationId: LOCATION_ID,
     providerId: PROVIDER_ID,
+    providerTwoId: PROVIDER_TWO_ID,
     managerStaffId: MANAGER_STAFF_ID,
+    serviceIds: [SERVICE_MANI_ID, SERVICE_PEDI_ID],
+    clientId: CLIENT_ID,
     documents: created,
     createdAt: new Date().toISOString(),
     note: "Password is only in qa/fixtures/staging.env (gitignored).",

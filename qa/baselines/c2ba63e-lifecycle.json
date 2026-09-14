@@ -1,0 +1,107 @@
+{
+  "checkpointSha": "c2ba63ed92faec884e5ab4e2beb0b76829ced251",
+  "suite": "lifecycle",
+  "generatedAt": "2026-09-14T03:21:04.869Z",
+  "finishedAt": "2026-09-14T03:21:51.775Z",
+  "note": "Appointment lifecycle against isolated salon ffBookingQa / qaLoc1 on fair-flow-staging. Appointments are created through the Booking UI. Admin verifies persistence and deletes only FF-QA-* notes in that salon. Auth setup is not recorded.",
+  "originApproach": "playwright-route-local-public-under-staging-origin",
+  "tests": [
+    {
+      "test": "setup — authenticate dedicated staging QA user without recording credentials",
+      "status": "PASS",
+      "classification": "",
+      "reason": "",
+      "appointmentScenario": "none",
+      "timestamp": "2026-09-14T03:21:07.194Z"
+    },
+    {
+      "test": "1. create appointment",
+      "status": "PASS",
+      "classification": "",
+      "reason": "UI create persisted client qaAppointmentClient, service qaServiceManicure, provider qaProv1, dateKey two days ahead, status scheduled. Details and Firestore matched.",
+      "appointmentScenario": "create",
+      "timestamp": "2026-09-14T03:21:13.394Z"
+    },
+    {
+      "test": "2. edit appointment service",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Details edit changed QA Manicure to QA Pedicure. Calendar details and Firestore serviceId matched after save.",
+      "appointmentScenario": "edit",
+      "timestamp": "2026-09-14T03:21:20.409Z"
+    },
+    {
+      "test": "3. multi-service appointment",
+      "status": "PASS",
+      "classification": "",
+      "reason": "One appointmentId with qaServiceManicure and qaServicePedicure on qaProv1. Details showed both names.",
+      "appointmentScenario": "multi-service",
+      "timestamp": "2026-09-14T03:21:26.447Z"
+    },
+    {
+      "test": "4. multi-provider appointment",
+      "status": "PASS",
+      "classification": "",
+      "reason": "One appointmentId with line 1 qaProv1 and line 2 qaProv2. Calendar rendered a card in each provider column.",
+      "appointmentScenario": "multi-provider",
+      "timestamp": "2026-09-14T03:21:32.087Z"
+    },
+    {
+      "test": "5. requested provider",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Create-drawer Request toggle persisted serviceLines[0].requested=true and data-ff-cal-requested=1 on the card.",
+      "appointmentScenario": "requested-provider",
+      "timestamp": "2026-09-14T03:21:36.981Z"
+    },
+    {
+      "test": "6. drag appointment to a later time",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Same-provider pointer drag changed persisted startAt. appointmentId, clientId, and serviceId were unchanged.",
+      "appointmentScenario": "drag",
+      "timestamp": "2026-09-14T03:21:42.998Z"
+    },
+    {
+      "test": "7. cancel appointment",
+      "status": "PASS",
+      "classification": "",
+      "reason": "UI confirm-cancel set status=cancelled. Details closed. Card left the active Day Calendar.",
+      "appointmentScenario": "cancel",
+      "timestamp": "2026-09-14T03:21:48.979Z"
+    },
+    {
+      "test": "safety: lifecycle stayed on fair-flow-staging / ffBookingQa",
+      "status": "PASS",
+      "classification": "",
+      "reason": "window.firebaseConfig.projectId === fair-flow-staging and currentSalonId === ffBookingQa",
+      "appointmentScenario": "none",
+      "timestamp": "2026-09-14T03:21:51.658Z"
+    }
+  ],
+  "discoveredProductNotes": [
+    {
+      "id": "A1",
+      "classification": "A",
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e",
+      "status": "not-asserted-as-suite-failure",
+      "title": "Edit-drawer start-time save can fail with INVALID_LINE",
+      "evidence": "Time-only and time+service edits can fail with Please complete every service / INVALID_LINE even though the visible service line looks complete (service, provider, 11:00–11:30, 30 min). Service-only edit on the same drawer succeeds. Reproduced 2026-09-14 against c2ba63e. The lifecycle suite edits service, not start time, so this remains a documented product defect rather than a green-suite proof that time edit works."
+    },
+    {
+      "id": "A2",
+      "classification": "A",
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e",
+      "status": "non-blocking",
+      "title": "Create drawer throws NotFoundError while service search repaints innerHTML",
+      "evidence": "Uncaught NotFoundError in booking/appointments/drawer.js during every lifecycle create: Failed to set the innerHTML property on Element; the node was moved in a blur handler. Appointment still persists. Reproduced consistently against c2ba63e."
+    }
+  ],
+  "qaObservedUiRisks": [
+    {
+      "id": "provider-chip-select-overlap",
+      "title": "Provider chip center can overlap an invisible start-time select hit area",
+      "evidence": "Playwright hit-testing on the provider chip center is intercepted by the opacity-0 start-time <select> in .ff-appt-strip-start. QA clicks the lower edge of the chip because that interaction is stable. This workaround is not proof that the product hit target is correct for a human center-click."
+    }
+  ]
+}

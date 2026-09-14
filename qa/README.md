@@ -54,10 +54,16 @@ npm run test:booking:static
 # Policy self-check: runner exits 0 only for the exact c2ba63e CLASS A set
 npm run test:booking:static:policy
 
-# Playwright smoke (Chromium, America/New_York)
+# Playwright smoke (read-only, Chromium, America/New_York)
 # Browser origin is https://fair-flow-staging.web.app/?env=staging
 # Application files are fulfilled from local public/
 npm run test:booking:e2e
+
+# Appointment lifecycle (writes only inside salons/ffBookingQa)
+npm run test:booking:lifecycle
+
+# Smoke then lifecycle. Named as a staging-write suite; smoke itself stays read-only.
+npm run test:booking:staging-write
 ```
 
 First Playwright run also needs browsers:
@@ -101,6 +107,26 @@ Auth setup never records traces/screenshots/video.
 Summary: `qa/baselines/last-e2e.json`.
 
 Retries default to 0 so missing credentials or genuine failures are not hidden. Set `FF_E2E_RETRIES=1` only when diagnosing flake.
+
+### Appointment lifecycle (staging writes, ffBookingQa only)
+
+Separate from smoke. Creates appointments through the Booking UI in `salons/ffBookingQa` / `qaLoc1` only.
+
+- Notes every created appointment as `FF-QA-<runId> <scenario>`
+- Admin cleanup before and after the suite deletes only those QA-marked appointments
+- Soft cancel in the product; Admin hard-delete is QA cleanup only
+- Baseline: `qa/baselines/last-lifecycle.json` and `qa/baselines/c2ba63e-lifecycle.json`
+
+Do not use `test:booking:e2e` for lifecycle. That command stays non-destructive.
+
+Known **CLASS A — PRE-EXISTING AT c2ba63e** found during lifecycle (not product-fixed by QA):
+
+- **A1.** Edit-drawer start-time save can fail with `INVALID_LINE` / “Please complete every service” even when the visible line looks complete. Time-only and time+service edits can fail; service-only edit succeeds. The suite therefore edits **service**, not start time.
+- **A2.** Create drawer can throw `NotFoundError` while service search repaints `innerHTML` during blur handling. The appointment still persists.
+
+QA-observed UI risk (not encoded as a passing product proof):
+
+- Provider chip center can overlap an invisible start-time `<select>` hit area. Lifecycle QA clicks the lower chip edge because that is stable.
 
 ## Classification
 

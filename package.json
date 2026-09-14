@@ -10,7 +10,9 @@
     "postinstall": "patch-package",
     "test:booking:static": "node scripts/run-booking-static-qa.js",
     "test:booking:static:policy": "node qa/scripts/verify-static-runner-policy.js",
-    "test:booking:e2e": "playwright test --config qa/playwright.config.js"
+    "test:booking:e2e": "playwright test --config qa/playwright.config.js --project=chromium",
+    "test:booking:lifecycle": "FF_QA_SUITE=lifecycle playwright test --config qa/playwright.config.js --project=lifecycle",
+    "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle"
   },
   "keywords": [],
   "author": "",

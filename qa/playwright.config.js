@@ -49,7 +49,16 @@ module.exports = defineConfig({
     {
       name: "chromium",
       dependencies: ["setup"],
-      testIgnore: /auth\.setup\.js/,
+      testMatch: /smoke\.spec\.js/,
+      use: {
+        storageState: STORAGE_STATE_PATH,
+      },
+    },
+    {
+      name: "lifecycle",
+      dependencies: ["setup"],
+      testMatch: /appointment-lifecycle\.spec\.js/,
+      timeout: 120000,
       use: {
         storageState: STORAGE_STATE_PATH,
       },

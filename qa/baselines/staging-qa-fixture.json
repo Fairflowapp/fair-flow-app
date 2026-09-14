@@ -5,18 +5,30 @@
   "salonId": "ffBookingQa",
   "locationId": "qaLoc1",
   "providerId": "qaProv1",
+  "providerTwoId": "qaProv2",
   "managerStaffId": "qaManager1",
+  "serviceIds": [
+    "qaServiceManicure",
+    "qaServicePedicure"
+  ],
+  "clientId": "qaAppointmentClient",
   "documents": [
     "salons/ffBookingQa",
     "salons/ffBookingQa/settings/main",
     "salons/ffBookingQa/locations/qaLoc1",
     "salons/ffBookingQa/technicianTypes/qa-manicure",
+    "salons/ffBookingQa/technicianTypes/qa-pedicure",
+    "salons/ffBookingQa/serviceCategories/qaCatHands",
+    "salons/ffBookingQa/services/qaServiceManicure",
+    "salons/ffBookingQa/services/qaServicePedicure",
+    "salons/ffBookingQa/clients/qaAppointmentClient",
     "salons/ffBookingQa/staff/qaManager1",
     "salons/ffBookingQa/staff/qaProv1",
+    "salons/ffBookingQa/staff/qaProv2",
     "salons/ffBookingQa/members/ff-booking-qa-user",
     "users/ff-booking-qa-user",
     "users/ff-booking-qa-user/memberships/ffBookingQa"
   ],
-  "createdAt": "2026-09-14T01:57:02.588Z",
+  "createdAt": "2026-09-14T02:58:35.072Z",
   "note": "Password is only in qa/fixtures/staging.env (gitignored)."
 }

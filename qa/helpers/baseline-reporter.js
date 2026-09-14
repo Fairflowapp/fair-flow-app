@@ -38,14 +38,16 @@ class BaselineReporter {
   }
 
   onEnd() {
+    const suite = process.env.FF_QA_SUITE || "booking-e2e-smoke";
     const out = {
       checkpointSha: CHECKPOINT_SHA,
       generatedAt: this.startedAt,
       finishedAt: new Date().toISOString(),
-      suite: "booking-e2e-smoke",
+      suite,
       tests: this.tests,
     };
-    const file = path.join(__dirname, "..", "baselines", "last-e2e.json");
+    const fileName = suite === "lifecycle" ? "last-lifecycle.json" : "last-e2e.json";
+    const file = path.join(__dirname, "..", "baselines", fileName);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");
   }
