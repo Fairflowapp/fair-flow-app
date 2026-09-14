@@ -46,7 +46,9 @@ class BaselineReporter {
       suite,
       tests: this.tests,
     };
-    const fileName = suite === "lifecycle" ? "last-lifecycle.json" : "last-e2e.json";
+    const fileName = suite === "lifecycle"
+      ? "last-lifecycle.json"
+      : (suite === "clients" ? "last-clients.json" : "last-e2e.json");
     const file = path.join(__dirname, "..", "baselines", fileName);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n");

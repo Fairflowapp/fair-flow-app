@@ -63,5 +63,14 @@ module.exports = defineConfig({
         storageState: STORAGE_STATE_PATH,
       },
     },
+    {
+      name: "clients",
+      dependencies: ["setup"],
+      testMatch: /client-lifecycle\.spec\.js/,
+      timeout: 120000,
+      use: {
+        storageState: STORAGE_STATE_PATH,
+      },
+    },
   ],
 });

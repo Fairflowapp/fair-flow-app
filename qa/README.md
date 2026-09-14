@@ -62,7 +62,10 @@ npm run test:booking:e2e
 # Appointment lifecycle (writes only inside salons/ffBookingQa)
 npm run test:booking:lifecycle
 
-# Smoke then lifecycle. Named as a staging-write suite; smoke itself stays read-only.
+# Client lifecycle (writes only FF-QA-CLIENT-* inside salons/ffBookingQa)
+npm run test:booking:clients
+
+# Smoke then appointment + client write suites. Smoke itself stays read-only.
 npm run test:booking:staging-write
 ```
 
@@ -127,6 +130,23 @@ Known **CLASS A — PRE-EXISTING AT c2ba63e** found during lifecycle (not produc
 QA-observed UI risk (not encoded as a passing product proof):
 
 - Provider chip center can overlap an invisible start-time `<select>` hit area. Lifecycle QA clicks the lower chip edge because that is stable.
+
+### Client lifecycle (staging writes, ffBookingQa only)
+
+Separate from smoke and appointment lifecycle. Creates clients through the Booking UI in `salons/ffBookingQa` only.
+
+- Search of `qaAppointmentClient` is read-only
+- Browser-created clients use first name `QAClient`, last name = run id, notes `FF-QA-CLIENT-<runId> …`
+- Admin cleanup deletes only those `FF-QA-CLIENT-*` notes and never `qaAppointmentClient`
+- Baseline: `qa/baselines/last-clients.json` and `qa/baselines/c2ba63e-clients.json`
+
+Known frozen **CLASS A — PRE-EXISTING AT c2ba63e** static clients-ui failures remain unchanged and are not product-fixed by this suite:
+
+- recent list is bounded to 50
+- UI recent list uses getRecentClients
+- drawer update uses repository
+
+Browser Client Lifecycle currently **PASSES** and does **not** independently reproduce those static failures as a broken Clients search/create/profile/edit flow. The static CLASS A set and the browser suite are separate evidence.
 
 ## Classification
 

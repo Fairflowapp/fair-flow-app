@@ -1,0 +1,74 @@
+{
+  "checkpointSha": "c2ba63ed92faec884e5ab4e2beb0b76829ced251",
+  "suite": "clients",
+  "generatedAt": "2026-09-14T03:51:21.993Z",
+  "finishedAt": "2026-09-14T03:51:49.954Z",
+  "note": "Client lifecycle against isolated salon ffBookingQa on fair-flow-staging. Search of qaAppointmentClient is read-only. Create/edit go through the Booking UI. Admin verifies persistence and deletes only FF-QA-CLIENT-* notes. qaAppointmentClient is never deleted.",
+  "originApproach": "playwright-route-local-public-under-staging-origin",
+  "tests": [
+    {
+      "scenario": "setup — authenticate dedicated staging QA user without recording credentials",
+      "status": "PASS",
+      "classification": "",
+      "reason": "",
+      "timestamp": "2026-09-14T03:51:24.316Z"
+    },
+    {
+      "scenario": "1. search existing fixture client",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Clients search for QA Appointment found qaAppointmentClient. Profile and Firestore first/last/email matched the fixture. Read-only.",
+      "clientId": "qaAppointmentClient",
+      "timestamp": "2026-09-14T03:51:28.466Z"
+    },
+    {
+      "scenario": "2. create client",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Add Client UI persisted QAClient + run last name, 555 phone, email, FF-QA-CLIENT-* notes under ffBookingQa. Profile opened and search-by-email found the same id.",
+      "timestamp": "2026-09-14T03:51:32.522Z"
+    },
+    {
+      "scenario": "3. open client profile",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Search + row click opened #ffBookingClientProfile. Header name/phone/email matched Firestore. Sales and Notes tabs were present. Did not click tel/sms/mailto or photo.",
+      "timestamp": "2026-09-14T03:51:36.936Z"
+    },
+    {
+      "scenario": "4. edit client profile",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Profile edit changed phone and email (and notes). clientId unchanged. Header and Firestore matched the new values including phoneDigits.",
+      "timestamp": "2026-09-14T03:51:41.367Z"
+    },
+    {
+      "scenario": "5. search after edit",
+      "status": "PASS",
+      "classification": "",
+      "reason": "Search by updated 555 phone returned one row with the same clientId. No duplicate QAClient row. Profile and Firestore phoneDigits matched.",
+      "timestamp": "2026-09-14T03:51:47.159Z"
+    },
+    {
+      "scenario": "safety: clients stayed on fair-flow-staging / ffBookingQa and fixture remains",
+      "status": "PASS",
+      "classification": "",
+      "reason": "projectId fair-flow-staging, salonId ffBookingQa, qaAppointmentClient still present with original first name.",
+      "clientId": "qaAppointmentClient",
+      "timestamp": "2026-09-14T03:51:49.889Z"
+    }
+  ],
+  "knownStaticClassA": [
+    {
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e",
+      "source": "scripts/test-booking-clients-ui.js",
+      "failures": [
+        "recent list is bounded to 50",
+        "UI recent list uses getRecentClients",
+        "drawer update uses repository"
+      ],
+      "browserLifecycle": "PASS — these static failures were not independently reproduced as a broken Clients search/create/profile/edit flow"
+    }
+  ],
+  "discoveredProductNotes": []
+}

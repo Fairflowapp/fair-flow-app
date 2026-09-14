@@ -12,7 +12,8 @@
     "test:booking:static:policy": "node qa/scripts/verify-static-runner-policy.js",
     "test:booking:e2e": "playwright test --config qa/playwright.config.js --project=chromium",
     "test:booking:lifecycle": "FF_QA_SUITE=lifecycle playwright test --config qa/playwright.config.js --project=lifecycle",
-    "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle"
+    "test:booking:clients": "FF_QA_SUITE=clients playwright test --config qa/playwright.config.js --project=clients",
+    "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle && npm run test:booking:clients"
   },
   "keywords": [],
   "author": "",
