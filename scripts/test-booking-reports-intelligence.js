@@ -373,7 +373,7 @@ const midShift = intel.buildReport(Object.assign({
   providers: [provider("maria", "Maria", work10to6)]
 }, day));
 check("A: one mid-shift appointment has zero calendar gaps", midShift.gaps.count === 0 && midShift.gaps.totalMinutes === 0);
-check("A: one mid-shift appointment still has idle time", midShift.utilization.workingMinutes === 480 && midShift.utilization.bookedMinutes === 60 && midShift.utilization.idleMinutes === 420);
+check("A: one mid-shift appointment still has idle time", midShift.utilization.workingMinutes === 480 && midShift.utilization.bookedMinutes === 60 && midShift.utilization.idleMinutes === 420 && midShift.utilization.openEdgeMinutes === 420 && midShift.utilization.providers[0].openEdgeMinutes === 420);
 check("A: utilization stays booked over working", midShift.utilization.percent === 12.5);
 
 const hole30 = intel.buildReport(Object.assign({
@@ -384,7 +384,7 @@ const hole30 = intel.buildReport(Object.assign({
   providers: [provider("maria", "Maria", work10to6)]
 }, day));
 check("B: 30-minute hole between visits is a calendar gap", hole30.gaps.count === 1 && hole30.gaps.totalMinutes === 30 && hole30.gaps.smallMinutes === 30);
-check("B: idle includes leading, trailing, and the gap", hole30.utilization.bookedMinutes === 120 && hole30.utilization.idleMinutes === 360 && hole30.utilization.idleMinutes > hole30.gaps.totalMinutes);
+check("B: idle includes leading, trailing, and the gap", hole30.utilization.bookedMinutes === 120 && hole30.utilization.idleMinutes === 360 && hole30.utilization.openEdgeMinutes === 330 && hole30.utilization.idleMinutes > hole30.gaps.totalMinutes);
 
 const backToBack = intel.buildReport(Object.assign({
   appointments: [
@@ -435,7 +435,8 @@ check("estimated unused service capacity is labeled in the ui", uiSrc.indexOf("E
 check("ui does not call the estimate lost or recoverable revenue", uiSrc.indexOf("lost revenue") === -1 && uiSrc.indexOf("recoverable revenue") === -1 && uiSrc.indexOf("may have been recoverable") === -1);
 check("ui demotes source mix with a data-quality note", uiSrc.indexOf("not a complete channel report") !== -1 && uiSrc.indexOf("ff-rpt-panel-secondary") !== -1);
 check("ui does not headline no-show as a KPI card", uiSrc.indexOf('kpi("No-show"') === -1);
-check("ui explains idle versus calendar gaps", uiSrc.indexOf("only unused time between booked visits") !== -1);
+check("ui explains idle versus calendar gaps", uiSrc.indexOf("open-edge idle is unused time at the start or end") !== -1);
+check("ui shows a provider capacity table", uiSrc.indexOf("Provider capacity") !== -1 && uiSrc.indexOf("Open-edge hrs") !== -1 && uiSrc.indexOf("booked ÷ working") !== -1);
 
 if (failed) process.exit(1);
 console.log("All Booking Intelligence report checks passed.");

@@ -309,7 +309,16 @@
       clients: { newAppointments: 0, returningAppointments: 0, newPercent: 0, returningPercent: 0 },
       sources: { counts: emptySources(), total: 0 },
       requested: { requestedLines: 0, nonRequestedLines: 0, totalLines: 0, requestedPercent: 0 },
-      utilization: { workingMinutes: 0, bookedMinutes: 0, idleMinutes: 0, percent: 0, providers: [] },
+      utilization: {
+        workingMinutes: 0,
+        bookedMinutes: 0,
+        idleMinutes: 0,
+        openEdgeMinutes: 0,
+        percent: 0,
+        gapSharePercent: 0,
+        idleSharePercent: 0,
+        providers: []
+      },
       gaps: {
         count: 0,
         totalMinutes: 0,
@@ -323,6 +332,7 @@
       },
       capacity: {
         gapMinutes: 0,
+        openEdgeMinutes: 0,
         unusedPercent: 0,
         estimatedDollars: null,
         averageRatePerMinute: null
@@ -488,6 +498,8 @@
       );
     }
 
+    appendCapacityInsights(out, report, phrase);
+
     var compared = (util.providers || []).filter(function (row) {
       return row.workingMinutes > 0 && trim(row.name || row.firstName);
     });
@@ -510,10 +522,12 @@
       out.push("Most calendar gap time occurred between " + gaps.peakPeriod.label + ".");
     }
 
-    if (gaps.mostGapProvider && gaps.mostGapProvider.minutes > 0) {
+    if (gaps.mostGapProvider && gaps.mostGapProvider.minutes > 0 && !out.some(function (line) {
+      return line.indexOf("most calendar gap time") !== -1;
+    })) {
       out.push(
-        "Provider " + providerLabel(gaps.mostGapProvider) + " had the most calendar gap time (" +
-        formatHours(gaps.mostGapProvider.minutes) + " " + hourWord(gaps.mostGapProvider.minutes / 60) + ")."
+        providerLabel(gaps.mostGapProvider) + " had the most calendar gap time " + phrase + ": " +
+        formatHours(gaps.mostGapProvider.minutes) + " " + hourWord(gaps.mostGapProvider.minutes / 60) + "."
       );
     }
 
@@ -550,7 +564,58 @@
       );
     }
 
-    return out.slice(0, 8);
+    return out.slice(0, 10);
+  }
+
+  function hoursPhrase(minutes) {
+    return formatHours(minutes) + " " + hourWord(minutes / 60);
+  }
+
+  function appendCapacityInsights(out, report, phrase) {
+    var rows = ((report && report.utilization && report.utilization.providers) || []).filter(function (row) {
+      return row && row.workingMinutes > 0;
+    });
+    if (!rows.length) return;
+
+    var mostGap = rows.slice().sort(function (a, b) {
+      return b.gapMinutes - a.gapMinutes || b.gapCount - a.gapCount;
+    })[0];
+    if (mostGap && mostGap.gapMinutes > 0) {
+      out.push(
+        providerLabel(mostGap) + " had the most calendar gap time " + phrase + ": " +
+        hoursPhrase(mostGap.gapMinutes) + " across " + mostGap.gapCount +
+        " gap" + (mostGap.gapCount === 1 ? "" : "s") + "."
+      );
+    }
+
+    var bookedRows = rows.filter(function (row) { return row.bookedMinutes > 0; });
+    var mostUtil = bookedRows.slice().sort(function (a, b) {
+      return b.percent - a.percent || b.bookedMinutes - a.bookedMinutes;
+    })[0];
+    if (mostUtil && mostUtil.percent > 0) {
+      out.push(
+        providerLabel(mostUtil) + " was the most utilized provider at " + mostUtil.percent + "%."
+      );
+    }
+
+    var mostIdle = rows.slice().sort(function (a, b) {
+      return b.idleMinutes - a.idleMinutes || b.openEdgeMinutes - a.openEdgeMinutes;
+    })[0];
+    if (mostIdle && mostIdle.idleMinutes > 0 && mostIdle.gapMinutes < mostIdle.idleMinutes) {
+      out.push(
+        providerLabel(mostIdle) + " had " + formatHours(mostIdle.idleMinutes) +
+        " idle working " + hourWord(mostIdle.idleMinutes / 60) +
+        ", but only " + formatHours(mostIdle.gapMinutes) + " " +
+        hourWord(mostIdle.gapMinutes / 60) +
+        (Math.abs(mostIdle.gapMinutes / 60 - 1) < 0.05 ? " was" : " were") +
+        " between appointments."
+      );
+    }
+
+    var below = rows.filter(function (row) { return row.percent < 50; });
+    if (rows.length >= 2 && below.length >= 2) {
+      out.push(below.length + " providers were below 50% utilization.");
+    }
   }
 
   function emptyProviderUtil(provider) {
@@ -561,10 +626,39 @@
       workingMinutes: 0,
       bookedMinutes: 0,
       idleMinutes: 0,
+      openEdgeMinutes: 0,
       percent: 0,
+      gapSharePercent: 0,
+      idleSharePercent: 0,
       gapCount: 0,
       gapMinutes: 0
     };
+  }
+
+  function finalizeProviderRow(row) {
+    row.idleMinutes = Math.max(0, row.workingMinutes - row.bookedMinutes);
+    row.openEdgeMinutes = Math.max(0, row.idleMinutes - row.gapMinutes);
+    if (row.workingMinutes > 0) {
+      row.percent = percent(row.bookedMinutes, row.workingMinutes);
+      row.gapSharePercent = percent(row.gapMinutes, row.workingMinutes);
+      row.idleSharePercent = percent(row.idleMinutes, row.workingMinutes);
+    } else {
+      row.percent = 0;
+      row.gapSharePercent = 0;
+      row.idleSharePercent = 0;
+    }
+    return row;
+  }
+
+  function rankProviders(rows) {
+    return (rows || []).filter(function (row) {
+      return row && row.workingMinutes > 0;
+    }).slice().sort(function (a, b) {
+      return (b.gapMinutes - a.gapMinutes)
+        || (b.idleMinutes - a.idleMinutes)
+        || (b.workingMinutes - a.workingMinutes)
+        || String(a.name || a.id).localeCompare(String(b.name || b.id));
+    });
   }
 
   function buildReport(input) {
@@ -669,24 +763,33 @@
           }
         });
       });
-      row.idleMinutes = Math.max(0, row.workingMinutes - row.bookedMinutes);
-      row.percent = percent(row.bookedMinutes, row.workingMinutes);
+      finalizeProviderRow(row);
       return row;
     });
 
+    var ranked = rankProviders(utilRows);
     var workingMinutes = 0;
     var bookedMinutes = 0;
-    utilRows.forEach(function (row) {
+    var idleMinutes = 0;
+    var openEdgeMinutes = 0;
+    var rankedGapMinutes = 0;
+    ranked.forEach(function (row) {
       workingMinutes += row.workingMinutes;
       bookedMinutes += row.bookedMinutes;
+      idleMinutes += row.idleMinutes;
+      openEdgeMinutes += row.openEdgeMinutes;
+      rankedGapMinutes += row.gapMinutes;
     });
 
     report.utilization = {
       workingMinutes: workingMinutes,
       bookedMinutes: bookedMinutes,
-      idleMinutes: Math.max(0, workingMinutes - bookedMinutes),
+      idleMinutes: idleMinutes,
+      openEdgeMinutes: openEdgeMinutes,
       percent: percent(bookedMinutes, workingMinutes),
-      providers: utilRows
+      gapSharePercent: percent(rankedGapMinutes, workingMinutes),
+      idleSharePercent: percent(idleMinutes, workingMinutes),
+      providers: ranked
     };
 
     var smallCount = 0;
@@ -737,6 +840,7 @@
     }
     report.capacity = {
       gapMinutes: report.gaps.totalMinutes,
+      openEdgeMinutes: openEdgeMinutes,
       unusedPercent: percent(report.gaps.totalMinutes, workingMinutes),
       estimatedDollars: estimated,
       averageRatePerMinute: rate
@@ -763,6 +867,8 @@
     hourLabel: hourLabel,
     percent: percent,
     emptyReport: emptyReport,
+    finalizeProviderRow: finalizeProviderRow,
+    rankProviders: rankProviders,
     buildInsights: buildInsights,
     buildReport: buildReport
   };

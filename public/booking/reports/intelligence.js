@@ -312,30 +312,39 @@
           "<td>" + escapeHtml(row.name || row.id) + "</td>" +
           "<td>" + escapeHtml(hours(row.workingMinutes)) + "</td>" +
           "<td>" + escapeHtml(hours(row.bookedMinutes)) + "</td>" +
-          "<td>" + escapeHtml(hours(row.idleMinutes)) + "</td>" +
           "<td>" + escapeHtml(String(row.percent)) + "%</td>" +
+          "<td>" + escapeHtml(hours(row.idleMinutes)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.gapMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.gapCount || 0)) + "</td>" +
+          "<td>" + escapeHtml(hours(row.openEdgeMinutes)) + "</td>" +
+          "<td>" + escapeHtml(String(row.gapSharePercent)) + "%</td>" +
         "</tr>"
       );
     }).join("");
     var body = rows
       ? '<div class="ff-rpt-table-wrap ff-rpt-table-wrap-compact">' +
-          '<table class="ff-rpt-table ff-rpt-table-compact">' +
-            "<thead><tr><th>Provider</th><th>Scheduled hrs</th><th>Booked hrs</th><th>Idle hrs</th><th>Utilization</th></tr></thead>" +
+          '<table class="ff-rpt-table ff-rpt-table-compact ff-rpt-table-capacity">' +
+            "<thead><tr>" +
+              "<th>Provider</th><th>Working hrs</th><th>Booked hrs</th><th>Utilization</th>" +
+              "<th>Idle hrs</th><th>Gap hrs</th><th>Gaps</th><th>Open-edge hrs</th><th>Gap share</th>" +
+            "</tr></thead>" +
             "<tbody>" + rows + "</tbody>" +
           "</table>" +
         "</div>"
       : '<p class="ff-rpt-empty">No scheduled providers in this period.</p>';
     return (
       '<section class="ff-rpt-panel">' +
-        "<h2>Provider utilization</h2>" +
-        '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +
-          kpi("Scheduled hours", hours(u.workingMinutes)) +
+        "<h2>Provider capacity</h2>" +
+        '<div class="ff-rpt-kpis">' +
+          kpi("Working hours", hours(u.workingMinutes)) +
           kpi("Booked hours", hours(u.bookedMinutes)) +
           kpi("Idle hours", hours(u.idleMinutes)) +
-          kpi("Utilization", u.percent + "%") +
+          kpi("Calendar gap hours", hours((report.gaps && report.gaps.totalMinutes) || 0)) +
+          kpi("Open-edge idle", hours(u.openEdgeMinutes || 0), "start/end of shifts") +
+          kpi("Utilization", u.percent + "%", "booked ÷ working") +
         "</div>" +
         body +
-        '<p class="ff-rpt-fine">Idle hours are scheduled time that was not booked. Calendar gaps are only unused time between booked visits, not the open time before the first or after the last appointment.</p>' +
+        '<p class="ff-rpt-fine">Providers with scheduled hours, ranked by the most calendar gap time, then the most idle time. Overall utilization is total booked hours divided by total working hours. Calendar gaps are holes between visits; open-edge idle is unused time at the start or end of a working window.</p>' +
       "</section>"
     );
   }
