@@ -6,7 +6,6 @@
 
 const {
   EMULATOR_PROJECT,
-  STAGING_PROJECT,
   assertCallableRuntimeProject
 } = require("./project-guard");
 const {
@@ -363,12 +362,6 @@ async function handleExecuteBookingMutation(input) {
     : trimText(process.env.FIRESTORE_EMULATOR_HOST);
   if (projectId === EMULATOR_PROJECT && !emulatorHost) {
     return publicResult({ status: "mutation_invalid", reasonCodes: ["emulator_required"] });
-  }
-  if (projectId === STAGING_PROJECT && !emulatorHost) {
-    return publicResult({
-      status: "mutation_invalid",
-      reasonCodes: ["staging_execution_not_enabled"]
-    });
   }
 
   const ex = createFirestoreAtomicExecutor({

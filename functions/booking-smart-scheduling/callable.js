@@ -1,7 +1,8 @@
 /**
  * Thin Firebase onCall wrapper around handleExecuteBookingMutation.
  * Loads Smart Scheduling from generated runtime/ copies, not repository public/.
- * Deploy is a later Phase 18F.1 step. Do not deploy from this module.
+ * Phase 18F.1: staging-only deploy of this callable is approved.
+ * Production remains forbidden. Do not deploy this module to production.
  */
 "use strict";
 

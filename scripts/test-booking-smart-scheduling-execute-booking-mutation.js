@@ -453,7 +453,12 @@ async function main() {
       api: api,
       emulatorHost: ""
     });
-    check("staging id allowed by guard but writes latch without emulator", stagingGuard.status === "mutation_invalid" && (stagingGuard.reasonCodes || []).indexOf("staging_execution_not_enabled") !== -1);
+    check(
+      "staging project may execute; missing command is not the old latch",
+      stagingGuard.status === "command_invalid"
+        && (stagingGuard.reasonCodes || []).indexOf("staging_execution_not_enabled") === -1,
+      stagingGuard
+    );
 
     const created = await call(AUTH_A, {
       mutationType: "create",
