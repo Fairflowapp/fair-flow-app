@@ -3,7 +3,22 @@
  * Staging only. Refuses production and any other project.
  *
  * Usage:
+ *   node scripts/test-booking-smart-scheduling-staging-callable.js --help
  *   node scripts/test-booking-smart-scheduling-staging-callable.js --project fair-flow-staging
+ *
+ * Auth: per-run email/password (not committed). Identity Toolkit requires Referer
+ * https://fair-flow-staging.web.app/ because the staging web API key blocks empty
+ * Referer. createCustomToken is not used: user ADC cannot iam.serviceAccounts.signBlob.
+ *
+ * Cleanup is identity-exact. It may delete only the salon/auth UID recorded for
+ * this process. It never listUsers, never matches email domains, and never
+ * touches ff-booking-qa-user.
+ *
+ * Deploy note (fair-flow-staging, do not change org policy, do not add allUsers):
+ * executeBookingMutation Cloud Run uses run.googleapis.com/invoker-iam-disabled: true
+ * because Domain Restricted Sharing blocks allUsers -> roles/run.invoker.
+ * After any future staging Functions deploy, re-check that annotation; persistence
+ * across new revisions is not proven. Do not redeploy from this script.
  *
  * Do not set FIRESTORE_EMULATOR_HOST. Never uses the default Firebase alias.
  */
@@ -21,7 +36,30 @@ const PRODUCTION_PROJECT = "fairflowapp-db841";
 const REGION = "us-central1";
 const FUNCTION_NAME = "executeBookingMutation";
 const STAGING_API_KEY = "AIzaSyDTBRAIbEmgx5uJ3I81mw5qfhlCpZAX4VI";
+const STAGING_REFERER = "https://fair-flow-staging.web.app/";
 const TWO = 14 * 60;
+
+const {
+  createSmokeIdentities,
+  recordCreatedDoc,
+  assertSalonDeleteTarget,
+  assertAuthDeleteTarget,
+  planExactCleanup
+} = require("./lib/booking-smart-scheduling-staging-smoke-cleanup");
+
+if (process.argv.indexOf("--help") !== -1 || process.argv.indexOf("-h") !== -1) {
+  console.log([
+    "Usage: node scripts/test-booking-smart-scheduling-staging-callable.js --project fair-flow-staging",
+    "",
+    "Staging-only remote smoke for executeBookingMutation.",
+    "Requires Firebase CLI login ADC. Production is forbidden.",
+    "Creates one ss-staging-smoke-* salon and one ss-smoke-uid-* Auth user,",
+    "then deletes only those exact recorded identities.",
+    "Per-run Auth password is random and never logged.",
+    "Cleanup safety (local, no cloud): node scripts/test-booking-smart-scheduling-staging-smoke-cleanup.js"
+  ].join("\n"));
+  process.exit(0);
+}
 
 require("../functions/booking-smart-scheduling/build-runtime").syncRuntime();
 const { loadSmartSchedulingApi } = require("../functions/booking-smart-scheduling/load-smart-scheduling-api");
@@ -211,28 +249,28 @@ async function callRemote(idToken, data) {
   };
 }
 
-async function idTokenFor(admin, uid) {
-  const custom = await admin.auth().createCustomToken(uid);
+async function idTokenFor(email, password) {
+  // authorized_user ADC cannot mint custom tokens (no local SA key, and
+  // iam.serviceAccounts.signBlob is denied). Staging web API key requires a
+  // hosting Referer; Identity Toolkit email/password is the existing smoke path.
   const res = await fetch(
-    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=" + STAGING_API_KEY,
+    "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" + STAGING_API_KEY,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: custom, returnSecureToken: true })
+      headers: {
+        "Content-Type": "application/json",
+        Referer: STAGING_REFERER,
+        Origin: "https://fair-flow-staging.web.app"
+      },
+      body: JSON.stringify({ email: email, password: password, returnSecureToken: true })
     }
   );
   const body = await res.json();
-  if (!body || !body.idToken) failHard("custom-token sign-in failed");
+  if (!body || !body.idToken) {
+    const msg = body && body.error && body.error.message ? body.error.message : "password sign-in failed";
+    throw new Error(msg);
+  }
   return body.idToken;
-}
-
-async function deleteCollection(col) {
-  const snap = await col.limit(200).get();
-  if (snap.empty) return;
-  const batch = col.firestore.batch();
-  snap.docs.forEach(function (doc) { batch.delete(doc.ref); });
-  await batch.commit();
-  if (snap.size === 200) await deleteCollection(col);
 }
 
 async function deleteDocRecursive(docRef) {
@@ -263,17 +301,21 @@ async function countDescendants(docRef) {
   return total;
 }
 
-async function cleanup(admin, salonId, uid) {
+async function cleanupExact(admin, record) {
+  const plan = planExactCleanup(record);
+  assertSalonDeleteTarget(record, plan.salonId);
   const db = admin.firestore();
-  await deleteDocRecursive(db.doc("salons/" + salonId));
-  if (uid) {
-    await db.doc("users/" + uid + "/memberships/" + salonId).delete().catch(function () {});
-    await db.doc("users/" + uid).delete().catch(function () {});
-    try {
-      await admin.auth().deleteUser(uid);
-    } catch (err) {
-      if (!err || err.code !== "auth/user-not-found") throw err;
-    }
+  await deleteDocRecursive(db.doc(plan.recursiveSalonPath));
+  let i;
+  for (i = 0; i < plan.userDocs.length; i += 1) {
+    await db.doc(plan.userDocs[i]).delete().catch(function () {});
+  }
+  try {
+    const authUser = await admin.auth().getUser(plan.authUid);
+    assertAuthDeleteTarget(record, authUser);
+    await admin.auth().deleteUser(plan.authUid);
+  } catch (err) {
+    if (!err || err.code !== "auth/user-not-found") throw err;
   }
 }
 
@@ -286,10 +328,16 @@ async function main() {
   if (resolved === PRODUCTION_PROJECT) failHard("admin resolved production");
 
   const suffix = Date.now().toString(36) + crypto.randomBytes(3).toString("hex");
-  const salonId = "ss-staging-smoke-" + suffix;
-  const uid = "ss-smoke-uid-" + suffix;
+  const record = createSmokeIdentities(suffix);
+  const salonId = record.createdSmokeSalonId;
+  const uid = record.createdSmokeAuthUid;
+  const email = record.createdSmokeEmail;
   const db = admin.firestore();
-  if (!/^ss-staging-smoke-/.test(salonId)) failHard("salon namespace invalid");
+
+  function writeSmokeDoc(docPath, data) {
+    recordCreatedDoc(record, docPath);
+    return db.doc(docPath).set(data);
+  }
 
   let cleanupFailed = false;
   try {
@@ -300,14 +348,15 @@ async function main() {
     });
     check("REMOTE unauthenticated", unauth.result.status === "unauthenticated", unauth.result.status);
 
-    await db.doc("salons/" + salonId).set({
+    await writeSmokeDoc("salons/" + salonId, {
       name: "18F.1 staging smoke",
       ownerUid: "not-this-user",
       smokeTest: true,
       phase: "18F.1"
     });
-    await admin.auth().createUser({ uid: uid, disabled: false });
-    const token = await idTokenFor(admin, uid);
+    const password = crypto.randomBytes(24).toString("base64url") + "Aa1!";
+    await admin.auth().createUser({ uid: uid, email: email, password: password, disabled: false });
+    const token = await idTokenFor(email, password);
     const denied = await callRemote(token, {
       mutationType: "create",
       salonId: salonId,
@@ -315,33 +364,33 @@ async function main() {
     });
     check("REMOTE permission_denied before membership", denied.result.status === "permission_denied", denied.result.status);
 
-    await db.doc("users/" + uid).set({
+    await writeSmokeDoc("users/" + uid, {
       salonId: salonId,
       role: "admin",
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/members/" + uid).set({
+    await writeSmokeDoc("salons/" + salonId + "/members/" + uid, {
       role: "admin",
       staffId: "front-desk",
       smokeTest: true
     });
-    await db.doc("users/" + uid + "/memberships/" + salonId).set({
+    await writeSmokeDoc("users/" + uid + "/memberships/" + salonId, {
       role: "admin",
       staffId: "front-desk",
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/clients/client-1").set({
+    await writeSmokeDoc("salons/" + salonId + "/clients/client-1", {
       firstName: "Ada",
       lastName: "Lovelace",
       displayName: "Ada Lovelace",
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/services/svc-gel").set({
+    await writeSmokeDoc("salons/" + salonId + "/services/svc-gel", {
       name: "Gel Manicure",
       defaultPrice: 100,
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/staff/maria").set({
+    await writeSmokeDoc("salons/" + salonId + "/staff/maria", {
       firstName: "Maria",
       lastName: "Chen",
       displayName: "Maria Chen",
@@ -349,7 +398,7 @@ async function main() {
       defaultSchedule: weekSchedule(),
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/bookingExecution/config").set({
+    await writeSmokeDoc("salons/" + salonId + "/bookingExecution/config", {
       executionMode: "guarded",
       providerGuardsReady: true,
       writersConverted: true,
@@ -362,13 +411,13 @@ async function main() {
       configRevision: 1,
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/settings/main").set({
+    await writeSmokeDoc("salons/" + salonId + "/settings/main", {
       booking: { allowedOverlapMinutes: 0, overlapPolicyRevision: 1 },
       preferences: { salonTimeZone: "America/New_York" },
       locationSchedules: { locA: { businessHours: weekHours(), specialBusinessDays: {} } },
       smokeTest: true
     });
-    await db.doc("salons/" + salonId + "/bookingAvailabilityEpochs/locA").set({
+    await writeSmokeDoc("salons/" + salonId + "/bookingAvailabilityEpochs/locA", {
       schemaVersion: 1,
       locationId: "locA",
       version: 1,
@@ -473,7 +522,7 @@ async function main() {
     console.error("FAIL: staging smoke aborted", err && err.message ? err.message : err);
   } finally {
     try {
-      await cleanup(admin, salonId, uid);
+      await cleanupExact(admin, record);
       const salonSnap = await admin.firestore().doc("salons/" + salonId).get();
       const leftover = salonSnap.exists ? 1 + await countDescendants(salonSnap.ref) : await countDescendants(admin.firestore().doc("salons/" + salonId));
       const userSnap = await admin.firestore().doc("users/" + uid).get();
