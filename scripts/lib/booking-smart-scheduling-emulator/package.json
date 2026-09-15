@@ -1,0 +1,8 @@
+{
+  "name": "booking-smart-scheduling-emulator",
+  "private": true,
+  "description": "Node-only firebase-admin install for Phase 18E emulator tests. Not a browser bundle.",
+  "dependencies": {
+    "firebase-admin": "^13.6.0"
+  }
+}

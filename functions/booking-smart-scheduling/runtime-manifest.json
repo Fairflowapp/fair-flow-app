@@ -1,0 +1,37 @@
+{
+  "description": "Exact public/ sources copied into functions/booking-smart-scheduling/runtime for the deployed executeBookingMutation callable. Edit this list, never generated copies.",
+  "groups": {
+    "availabilityEngine": [
+      "public/booking/calendar-time.js",
+      "public/booking/availability.js"
+    ],
+    "smartSchedulingApi": [
+      "public/booking/calendar-time.js",
+      "public/booking/appointments/model.js",
+      "public/booking/smart-scheduling/normalize.js",
+      "public/booking/smart-scheduling/gaps.js",
+      "public/booking/smart-scheduling/candidates.js",
+      "public/booking/smart-scheduling/score.js",
+      "public/booking/smart-scheduling/engine.js",
+      "public/booking/smart-scheduling/moves.js",
+      "public/booking/smart-scheduling/day-analysis.js",
+      "public/booking/smart-scheduling/priorities.js",
+      "public/booking/smart-scheduling/assign.js",
+      "public/booking/smart-scheduling/cancellation-recovery.js",
+      "public/booking/smart-scheduling/waitlist.js",
+      "public/booking/smart-scheduling/recovery-planner.js",
+      "public/booking/smart-scheduling/gap-planner.js",
+      "public/booking/smart-scheduling/global-plan.js",
+      "public/booking/smart-scheduling/salon-plan.js",
+      "public/booking/smart-scheduling/multi-service.js",
+      "public/booking/smart-scheduling/parallel-multi-service.js",
+      "public/booking/smart-scheduling/resource-aware-multi-service.js",
+      "public/booking/smart-scheduling/flexible-visit.js",
+      "public/booking/smart-scheduling/client-offers.js",
+      "public/booking/smart-scheduling/offer-revalidation.js",
+      "public/booking/smart-scheduling/offer-acceptance.js",
+      "public/booking/smart-scheduling/booking-execution-adapter.js",
+      "public/booking/smart-scheduling/atomic-booking-simulator.js"
+    ]
+  }
+}
