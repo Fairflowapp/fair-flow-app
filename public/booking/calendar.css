@@ -499,7 +499,12 @@ body.ff-booking-area .ff-booking-main {
   font-weight: 600;
   line-height: 1.25;
   pointer-events: auto;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+}
+.ff-cal-block.is-dragging {
+  opacity: 0.28;
+  cursor: grabbing;
 }
 .ff-cal-block-label {
   display: block;
@@ -574,23 +579,27 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-block-editor {
   position: fixed;
   inset: 0;
-  z-index: 9920;
+  z-index: 100360;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(31, 22, 51, 0.28);
   padding: 16px;
+  pointer-events: auto;
 }
 .ff-cal-block-editor[hidden] {
   display: none;
 }
 .ff-cal-block-editor-card {
+  position: relative;
+  z-index: 1;
   width: min(360px, 100%);
   background: #fff;
   border: 1px solid #e6e4ea;
   border-radius: 14px;
   box-shadow: 0 16px 40px rgba(31, 22, 51, 0.16);
   padding: 14px 14px 12px;
+  pointer-events: auto;
 }
 .ff-cal-block-editor-head {
   display: flex;
@@ -628,6 +637,9 @@ body.ff-booking-area .ff-booking-main {
   font-weight: 600;
   color: #4b4556;
 }
+.ff-cal-block-editor-field[hidden] {
+  display: none !important;
+}
 .ff-cal-block-editor-field select,
 .ff-cal-block-editor-field input[type="text"] {
   width: 100%;
@@ -641,22 +653,35 @@ body.ff-booking-area .ff-booking-main {
   background: #fff;
 }
 .ff-cal-block-reasons {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 .ff-cal-block-reason {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: auto;
   gap: 5px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border: 1px solid #e6e4ea;
   border-radius: 999px;
   background: #f8f7f5;
+  color: #2a2140;
+  font: inherit;
+  font-size: 12px;
   font-weight: 550;
+  line-height: 1.2;
   cursor: pointer;
+  pointer-events: auto;
 }
-.ff-cal-block-reason:has(input:checked) {
+.ff-cal-block-reason.is-selected,
+.ff-cal-block-reason[aria-checked="true"] {
   border-color: #A89F8D;
   background: #F3F0E8;
   color: #5C5648;
@@ -688,7 +713,7 @@ body.ff-booking-area .ff-booking-main {
   cursor: pointer;
 }
 .ff-cal-block-editor-save {
-  background: #5C5648;
+  background: #7c3aed;
   color: #fff;
 }
 .ff-cal-block-editor-delete {

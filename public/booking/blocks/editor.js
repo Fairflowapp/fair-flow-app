@@ -78,25 +78,49 @@
     return "Other";
   }
 
-  function durations(includeMin) {
+  function presetDurations() {
     var api = model();
-    var list = ((api && api.DURATIONS) || [15, 30, 45, 60, 90, 120]).slice();
-    var extra = Number(includeMin);
-    if (extra > 0 && list.indexOf(extra) === -1) {
-      list.push(extra);
-      list.sort(function (a, b) { return a - b; });
+    return ((api && api.DURATIONS) || [15, 30, 45, 60, 90, 120]).slice();
+  }
+
+  function isPresetDuration(mins) {
+    return presetDurations().indexOf(Number(mins)) !== -1;
+  }
+
+  function timeOptions(selected, fromMin, toMin) {
+    var start = Number.isFinite(Number(fromMin)) ? Number(fromMin) : 6 * 60;
+    var end = Number.isFinite(Number(toMin)) ? Number(toMin) : 22 * 60;
+    var chosen = Number(selected);
+    var html = [];
+    var min;
+    if (Number.isFinite(chosen) && chosen > end) end = chosen;
+    for (min = start; min <= end; min += 15) {
+      html.push('<option value="' + min + '"' + (min === chosen ? " selected" : "") + ">" +
+        escapeHtml(formatMinutes(min)) + "</option>");
     }
-    return list;
+    if (Number.isFinite(chosen) && chosen > start - 15 && (chosen - start) % 15 !== 0) {
+      html.push('<option value="' + chosen + '" selected>' + escapeHtml(formatMinutes(chosen)) + "</option>");
+    }
+    return html.join("");
   }
 
   function startOptions(selected) {
-    var html = [];
-    var min;
-    for (min = 6 * 60; min <= 22 * 60; min += 15) {
-      html.push('<option value="' + min + '"' + (min === selected ? " selected" : "") + ">" +
-        escapeHtml(formatMinutes(min)) + "</option>");
-    }
-    return html.join("");
+    return timeOptions(selected, 6 * 60, 22 * 60);
+  }
+
+  function endOptions(startMin, selectedEnd) {
+    var first = Number(startMin) + 15;
+    if (!Number.isFinite(first)) first = 6 * 60 + 15;
+    return timeOptions(selectedEnd, first, 23 * 60);
+  }
+
+  function durationOptions(duration) {
+    var mins = Number(duration);
+    var custom = !isPresetDuration(mins);
+    return presetDurations().map(function (value) {
+      return '<option value="' + value + '"' + (!custom && value === mins ? " selected" : "") + ">" +
+        value + " min</option>";
+    }).join("") + '<option value="custom"' + (custom ? " selected" : "") + ">Custom</option>";
   }
 
   function durationFromState(state) {
@@ -152,22 +176,54 @@
     return { ok: true, spec: spec };
   }
 
+  function selectedReason(el) {
+    var chip = el && el.querySelector("[data-ff-block-reason][aria-checked='true']");
+    if (!chip) chip = el && el.querySelector("[data-ff-block-reason].is-selected");
+    var raw = chip ? chip.getAttribute("data-ff-block-reason") : (current && current.reason);
+    var api = model();
+    if (api && typeof api.normalizeReason === "function") return api.normalizeReason(raw);
+    return trim(raw).toLowerCase() || "lunch";
+  }
+
+  function selectReason(reason) {
+    var api = model();
+    var key = api && typeof api.normalizeReason === "function" ? api.normalizeReason(reason) : trim(reason).toLowerCase();
+    if (!current || !key) return null;
+    current.reason = key;
+    var el = document.getElementById(EDITOR_ID);
+    if (el) {
+      el.querySelectorAll("[data-ff-block-reason]").forEach(function (chip) {
+        var on = chip.getAttribute("data-ff-block-reason") === key;
+        chip.classList.toggle("is-selected", on);
+        chip.setAttribute("aria-checked", on ? "true" : "false");
+      });
+    }
+    return current.reason;
+  }
+
   function readForm(el) {
     if (!el || !current) return null;
-    var reasonEl = el.querySelector("[name='ff-block-reason']:checked");
     var startEl = el.querySelector("[name='ff-block-start']");
     var durEl = el.querySelector("[name='ff-block-duration']");
+    var endEl = el.querySelector("[name='ff-block-end']");
     var noteEl = el.querySelector("[name='ff-block-note']");
-    return specFromState({
+    var startMin = startEl ? Number(startEl.value) : current.startMin;
+    var custom = !!(durEl && durEl.value === "custom");
+    var spec = {
       blockId: current.blockId,
       providerId: current.providerId,
       locationId: current.locationId,
       dateKey: current.dateKey,
-      startMin: startEl ? Number(startEl.value) : current.startMin,
-      durationMinutes: durEl ? Number(durEl.value) : (current.endMin - current.startMin),
-      reason: reasonEl ? reasonEl.value : current.reason,
+      startMin: startMin,
+      reason: selectedReason(el),
       note: noteEl ? noteEl.value : current.note
-    });
+    };
+    if (custom) {
+      spec.endMin = endEl ? Number(endEl.value) : current.endMin;
+    } else {
+      spec.durationMinutes = durEl ? Number(durEl.value) : (current.endMin - current.startMin);
+    }
+    return specFromState(spec);
   }
 
   function close() {
@@ -211,13 +267,14 @@
         "</p>" +
         '<div class="ff-cal-block-editor-field">' +
           "<span>Reason</span>" +
-          '<div class="ff-cal-block-reasons">' +
+          '<div class="ff-cal-block-reasons" role="radiogroup" aria-label="Reason">' +
             reasons().map(function (reason) {
-              return '<label class="ff-cal-block-reason">' +
-                '<input type="radio" name="ff-block-reason" value="' + escapeHtml(reason) + '"' +
-                (reason === current.reason ? " checked" : "") + ">" +
+              var on = reason === current.reason;
+              return '<button type="button" class="ff-cal-block-reason' + (on ? " is-selected" : "") +
+                '" role="radio" aria-checked="' + (on ? "true" : "false") +
+                '" data-ff-block-reason="' + escapeHtml(reason) + '">' +
                 escapeHtml(reasonLabel(reason)) +
-              "</label>";
+              "</button>";
             }).join("") +
           "</div>" +
         "</div>" +
@@ -226,14 +283,13 @@
             '<select name="ff-block-start">' + startOptions(current.startMin) + "</select>" +
           "</label>" +
           '<label class="ff-cal-block-editor-field">Duration' +
-            '<select name="ff-block-duration">' +
-              durations(duration).map(function (mins) {
-                return '<option value="' + mins + '"' + (mins === duration ? " selected" : "") + ">" +
-                  mins + " min</option>";
-              }).join("") +
-            "</select>" +
+            '<select name="ff-block-duration">' + durationOptions(duration) + "</select>" +
           "</label>" +
         "</div>" +
+        '<label class="ff-cal-block-editor-field" data-ff-block-custom-end' +
+          (isPresetDuration(duration) ? " hidden" : "") + ">End" +
+          '<select name="ff-block-end">' + endOptions(current.startMin, current.endMin) + "</select>" +
+        "</label>" +
         '<p class="ff-cal-block-editor-end" data-ff-block-end>' +
           escapeHtml(formatMinutes(current.startMin)) + "–" + escapeHtml(formatMinutes(current.endMin)) +
         "</p>" +
@@ -258,6 +314,26 @@
     var label = el && el.querySelector("[data-ff-block-end]");
     if (!spec || !label) return;
     label.textContent = formatMinutes(spec.startMin) + "–" + formatMinutes(spec.endMin);
+  }
+
+  function syncTimeUi(el) {
+    if (!el) return;
+    var startEl = el.querySelector("[name='ff-block-start']");
+    var durEl = el.querySelector("[name='ff-block-duration']");
+    var endWrap = el.querySelector("[data-ff-block-custom-end]");
+    var endEl = el.querySelector("[name='ff-block-end']");
+    var startMin = startEl ? Number(startEl.value) : (current && current.startMin);
+    var custom = !!(durEl && durEl.value === "custom");
+    if (endWrap) {
+      if (custom) endWrap.removeAttribute("hidden");
+      else endWrap.setAttribute("hidden", "");
+    }
+    if (custom && endEl) {
+      var endMin = Number(endEl.value);
+      if (!Number.isFinite(endMin) || endMin <= startMin) endMin = startMin + 30;
+      endEl.innerHTML = endOptions(startMin, endMin);
+    }
+    refreshEndLabel(el);
   }
 
   function openCreate(spec) {
@@ -352,24 +428,33 @@
       if (!t || typeof t.closest !== "function") return;
       var el = document.getElementById(EDITOR_ID);
       if (!el || el.hasAttribute("hidden")) return;
-      var act = t.closest("[data-ff-block-act]");
-      if (act) {
+      var reasonBtn = t.closest("[data-ff-block-reason]");
+      if (reasonBtn && el.contains(reasonBtn)) {
         ev.preventDefault();
+        ev.stopPropagation();
+        selectReason(reasonBtn.getAttribute("data-ff-block-reason"));
+        return;
+      }
+      var act = t.closest("[data-ff-block-act]");
+      if (act && el.contains(act)) {
+        ev.preventDefault();
+        ev.stopPropagation();
         var name = act.getAttribute("data-ff-block-act");
         if (name === "close") close();
         else if (name === "save") save();
         else if (name === "delete") remove();
         return;
       }
+      if (t.closest(".ff-cal-block-editor-card")) return;
       if (Date.now() - openedAt < 80) return;
-      if (!t.closest("#" + EDITOR_ID)) close();
-    });
+      if (t === el) close();
+    }, true);
     document.addEventListener("change", function (ev) {
       var t = ev.target;
       if (!t || !t.closest) return;
       var el = document.getElementById(EDITOR_ID);
       if (!el || el.hasAttribute("hidden") || !el.contains(t)) return;
-      refreshEndLabel(el);
+      syncTimeUi(el);
     });
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape" && current) {
@@ -387,6 +472,8 @@
     current: function () { return current ? Object.assign({}, current) : null; },
     specFromState: specFromState,
     durationFromState: durationFromState,
+    selectReason: selectReason,
+    isPresetDuration: isPresetDuration,
     inspectSave: inspectSave,
     formatMinutes: formatMinutes
   };

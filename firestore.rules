@@ -1309,8 +1309,8 @@ service cloud.firestore {
         && request.resource.data.createdByStaffId == resource.data.createdByStaffId
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.locationId == resource.data.locationId
-        && request.resource.data.providerId == resource.data.providerId
-        && request.resource.data.dateKey == resource.data.dateKey
+        && request.resource.data.providerId is string
+        && request.resource.data.dateKey is string
         && request.resource.data.endMin > request.resource.data.startMin;
       allow delete: if belongsToSalon(salonId);
     }
