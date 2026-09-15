@@ -1,0 +1,78 @@
+{
+  "checkpointSha": "c2ba63ed92faec884e5ab4e2beb0b76829ced251",
+  "suite": "booking-e2e-smoke",
+  "generatedAt": "2026-09-14T02:14:33.789Z",
+  "finishedAt": "2026-09-14T02:14:49.903Z",
+  "note": "Authenticated Batch 1 after staging-origin + local public/ harness. Browser origin is https://fair-flow-staging.web.app/?env=staging. Application files are fulfilled from this worktree public/. Firebase projectId is fair-flow-staging. Auth setup records no traces/screenshots/video. Session replay uses gitignored Playwright storageState plus Firebase IndexedDB restore on the staging origin only.",
+  "originApproach": "playwright-route-local-public-under-staging-origin",
+  "tests": [
+    {
+      "testName": "setup — authenticate dedicated staging QA user without recording credentials",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1767,
+      "identity": {
+        "email": "ff-booking-qa@fair-flow-staging.test",
+        "uid": "ff-booking-qa-user",
+        "salonId": "ffBookingQa"
+      }
+    },
+    {
+      "testName": "A. Environment safety — page loads with ?env=staging and Firebase project is fair-flow-staging",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 528,
+      "pageUrl": "https://fair-flow-staging.web.app/?env=staging",
+      "projectId": "fair-flow-staging"
+    },
+    {
+      "testName": "B. authenticated session reaches a ready main app",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1588
+    },
+    {
+      "testName": "C. Booking product switch opens the workspace",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1642
+    },
+    {
+      "testName": "D. Day Calendar reaches a valid ready state",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1953
+    },
+    {
+      "testName": "E. active location control exists and location is reported",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1874,
+      "note": "After Booking opened, ffGetActiveLocationId resolved to qaLoc1. Setup-time identity snapshot still saw location unresolved before location helpers finished."
+    },
+    {
+      "testName": "F. Clients smoke — search field only",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1528
+    },
+    {
+      "testName": "G. Reports smoke — page renders",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1459
+    },
+    {
+      "testName": "H. Sales and Settings open without writes",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1562
+    },
+    {
+      "testName": "I. safety: still on fair-flow-staging after navigation",
+      "status": "pass",
+      "classification": "",
+      "durationMs": 1405
+    }
+  ]
+}

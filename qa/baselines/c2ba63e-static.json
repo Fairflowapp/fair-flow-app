@@ -1,0 +1,110 @@
+{
+  "checkpointSha": "c2ba63ed92faec884e5ab4e2beb0b76829ced251",
+  "suite": "booking-static",
+  "note": "Frozen baseline for CLASS A vs later regressions. Do not treat these three clients-ui failures as new.",
+  "tests": [
+    {
+      "testName": "scripts/test-booking-appointment-create.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-appointment-details.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-appointment-edit.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-appointment-lines.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-appointment-model.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-appointment-status.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-calendar-cards.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-calendar-draft.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-calendar-drag.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-client-model.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-client-profile.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-clients-ui.js :: recent list is bounded to 50",
+      "status": "fail",
+      "classification": "A",
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e"
+    },
+    {
+      "testName": "scripts/test-booking-clients-ui.js :: UI recent list uses getRecentClients",
+      "status": "fail",
+      "classification": "A",
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e"
+    },
+    {
+      "testName": "scripts/test-booking-clients-ui.js :: drawer update uses repository",
+      "status": "fail",
+      "classification": "A",
+      "label": "CLASS A — PRE-EXISTING AT c2ba63e"
+    },
+    {
+      "testName": "scripts/test-booking-overlap-settings.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-reports.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-sales.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-schedule-board.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-service-duration.js",
+      "status": "pass",
+      "classification": ""
+    },
+    {
+      "testName": "scripts/test-booking-shell.js",
+      "status": "pass",
+      "classification": ""
+    }
+  ]
+}
