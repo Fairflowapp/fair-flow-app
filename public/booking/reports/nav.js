@@ -57,6 +57,11 @@
           id: "client-retention",
           label: "Client Retention",
           blurb: "Of clients with a completed visit in the cohort period, how many returned within 30, 60, 90, or 180 days."
+        },
+        {
+          id: "client-spend",
+          label: "Client Spend",
+          blurb: "Closed checkout sales grouped by identified client. In-period spend, not lifetime value."
         }
       ]
     }

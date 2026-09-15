@@ -88,6 +88,10 @@
     "/booking/reports/client-retention-compute.js?v=20260914_retention",
     "/booking/reports/client-retention.js?v=20260914_retention"
   ];
+  var CLIENT_SPEND_SCRIPTS = [
+    "/booking/reports/client-spend-compute.js?v=20260915_spend",
+    "/booking/reports/client-spend.js?v=20260915_spend"
+  ];
 
   function intelReady() {
     return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
@@ -111,6 +115,10 @@
 
   function clientRetentionReady() {
     return !!(window.ffBookingReportsClientRetentionCompute && window.ffBookingReportsClientRetention);
+  }
+
+  function clientSpendReady() {
+    return !!(window.ffBookingReportsClientSpendCompute && window.ffBookingReportsClientSpend);
   }
 
   function loadScripts(list, done) {
@@ -189,6 +197,14 @@
       return;
     }
     loadScripts(CLIENT_RETENTION_SCRIPTS, done);
+  }
+
+  function ensureClientSpendScripts(done) {
+    if (clientSpendReady()) {
+      done();
+      return;
+    }
+    loadScripts(CLIENT_SPEND_SCRIPTS, done);
   }
 
   function paintMain() {
@@ -283,6 +299,21 @@
       main.innerHTML = '<p class="ff-rpt-empty">Loading Client Retention…</p>';
       ensureClientRetentionScripts(function () {
         if (window.ffBookingReportsClientRetention) window.ffBookingReportsClientRetention.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
+      return;
+    }
+    if (id === "client-spend") {
+      if (window.ffBookingReportsClientSpend) {
+        window.ffBookingReportsClientSpend.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Client Spend…</p>';
+      ensureClientSpendScripts(function () {
+        if (window.ffBookingReportsClientSpend) window.ffBookingReportsClientSpend.paint();
         else {
           var host = document.getElementById("ffRptMain");
           if (host) host.innerHTML = laterHtml(report);
