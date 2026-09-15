@@ -248,7 +248,9 @@ check("adapter source has no DOM/calendar/reports", !/document\.|ffBookingCalend
 function prepare(plan, extra) {
   const offer = offerFrom(plan);
   const acceptance = acceptOf(offer, extra);
-  return api.prepareOfferAcceptance([maria, ana], [chair1, chair2], offer, acceptance);
+  return api.prepareOfferAcceptance([maria, ana], [chair1, chair2], offer, acceptance, {
+    availabilityVersions: [{ locationId: offer.locationId, version: 12 }]
+  });
 }
 
 const singlePlan = fakePlan({
@@ -301,6 +303,15 @@ check("BASIC appointmentId strategy is current auto-id", singleAdapt.appointment
 check("BASIC createdAt is server_timestamp_required", singleAdapt.persistencePreview.createdAt === "server_timestamp_required" && singleAdapt.persistencePreview.updatedAt === "server_timestamp_required");
 check("BASIC firstVisit is not invented", singleAdapt.persistencePreview.firstVisit === "requires_client_history_io");
 check("BASIC normalizeCreateInput accepts adapted input", model.normalizeCreateInput(singleAdapt.bookingCreateInput).ok === true);
+check("BASIC availabilityVersions stay off bookingCreateInput", !Object.prototype.hasOwnProperty.call(singleAdapt.bookingCreateInput, "availabilityVersions"));
+check("BASIC availabilityVersions stay off persistencePreview", !Object.prototype.hasOwnProperty.call(singleAdapt.persistencePreview, "availabilityVersions"));
+check("BASIC provenance keeps command availabilityVersions", !!(
+  singleAdapt.smartSchedulingProvenance.availabilityVersions
+  && singleAdapt.smartSchedulingProvenance.availabilityVersions.length === 1
+  && singleAdapt.smartSchedulingProvenance.availabilityVersions[0].locationId === "locA"
+  && singleAdapt.smartSchedulingProvenance.availabilityVersions[0].version === 12
+  && !Object.prototype.hasOwnProperty.call(singleAdapt.smartSchedulingProvenance, "availabilityVersion")
+));
 
 const waitPlan = fakePlan({ totalClientWaitMinutes: 5, noResources: true });
 const waitReady = prepare(waitPlan);
@@ -431,6 +442,8 @@ const noClientPrepared = api.prepareOfferAcceptance([maria, ana], [chair1], noCl
   acceptanceId: "accept-no-client",
   offerId: noClientOffer.offerId,
   sourcePlanKey: noClientOffer.sourcePlanKey
+}, {
+  availabilityVersions: [{ locationId: noClientOffer.locationId, version: 12 }]
 });
 check("Phase 17 can prepare without clientId", noClientPrepared.status === "ready" && !noClientPrepared.bookingCommand.clientId);
 const missingClientAdapt = api.adaptAcceptanceCommandToBookingCreateInput(noClientPrepared.bookingCommand, baseContext());
@@ -647,6 +660,11 @@ const tamperSim = api.simulateBookingExecution(
 check("COMMAND TAMPER stops adapter", tamperAdapt.valid === false && tamperAdapt.reasonCodes.indexOf("command_integrity_mismatch") !== -1 && !tamperAdapt.bookingCreateInput);
 check("COMMAND TAMPER simulator is command_invalid", tamperSim.status === "command_invalid" && tamperSim.bookingCreateInput == null);
 
+const versionTampered = JSON.parse(JSON.stringify(waitReady.bookingCommand));
+versionTampered.availabilityVersions = [{ locationId: "locA", version: 13 }];
+const versionTamperAdapt = api.adaptAcceptanceCommandToBookingCreateInput(versionTampered, baseContext());
+check("VERSION TAMPER stops adapter before mapping", versionTamperAdapt.valid === false && versionTamperAdapt.reasonCodes.indexOf("command_integrity_mismatch") !== -1 && !versionTamperAdapt.bookingCreateInput);
+
 const ctxSnap = baseContext();
 const cmdSnap = JSON.parse(JSON.stringify(waitReady.bookingCommand));
 const ctxBefore = JSON.stringify(ctxSnap);
@@ -661,6 +679,7 @@ const sameB = api.adaptAcceptanceCommandToBookingCreateInput(waitReady.bookingCo
 check("DETERMINISM same command+context same lineIds", sameA.bookingCreateInput.serviceLines[0].lineId === sameB.bookingCreateInput.serviceLines[0].lineId && sameA.bookingCreateInput.serviceLines[1].lineId === sameB.bookingCreateInput.serviceLines[1].lineId);
 check("DETERMINISM same civil instants", sameA.bookingCreateInput.serviceLines[1].startAt.getTime() === sameB.bookingCreateInput.serviceLines[1].startAt.getTime());
 check("DETERMINISM same fingerprint provenance", sameA.smartSchedulingProvenance.acceptanceFingerprint === sameB.smartSchedulingProvenance.acceptanceFingerprint);
+check("DETERMINISM same availabilityVersions provenance", JSON.stringify(sameA.smartSchedulingProvenance.availabilityVersions) === JSON.stringify(sameB.smartSchedulingProvenance.availabilityVersions));
 
 const mismatchWindow = JSON.parse(JSON.stringify(waitReady.bookingCommand));
 mismatchWindow.visitEndMin = waitReady.bookingCommand.visitEndMin + 10;

@@ -903,31 +903,91 @@ const prepared = api.prepareOfferAcceptance([mariaDay, anaDay], [], offer, {
   offerId: offer.offerId,
   sourcePlanKey: offer.sourcePlanKey,
   clientId: "client-1"
+}, {
+  availabilityVersions: [{ locationId: "locA", version: 1 }]
 });
+const ssCtx = {
+  salonId: "salon-1",
+  candidateAppointmentId: "appt_ss1",
+  client: { clientId: "client-1", displayName: "Jessica Miller" },
+  staffById: { maria: { name: "Maria" }, ana: { name: "Ana" } },
+  servicesById: {
+    "svc-gel": { name: "Gel Mani", defaultPrice: 45 },
+    "svc-pedi": { name: "Regular Pedi", defaultPrice: 50 }
+  },
+  providerAvailability: Object.assign({}, working("maria"), working("ana"))
+};
 const ssBridge = api.buildSmartSchedulingAtomicCreateMutation(
   prepared.bookingCommand,
   prepared.transactionPreconditions,
-  {
-    salonId: "salon-1",
-    candidateAppointmentId: "appt_ss1",
-    client: { clientId: "client-1", displayName: "Jessica Miller" },
-    staffById: { maria: { name: "Maria" }, ana: { name: "Ana" } },
-    servicesById: {
-      "svc-gel": { name: "Gel Mani", defaultPrice: 45 },
-      "svc-pedi": { name: "Regular Pedi", defaultPrice: 50 }
-    },
-    providerAvailability: Object.assign({}, working("maria"), working("ana"))
-  },
-  "ss-create-1",
-  [{ locationId: "locA", version: 1 }]
+  ssCtx,
+  "ss-create-1"
 );
 check("SS create mutation bridge ok", !!(ssBridge.ok && ssBridge.mutation && ssBridge.mutation.smartScheduling.offerId === offer.offerId));
+check("SS bridge uses command-bound availabilityVersions", !!(
+  ssBridge.mutation.availabilityVersions
+  && ssBridge.mutation.availabilityVersions.length === 1
+  && ssBridge.mutation.availabilityVersions[0].locationId === "locA"
+  && ssBridge.mutation.availabilityVersions[0].version === 1
+  && ssBridge.mutation.availabilityVersions[0].version === prepared.bookingCommand.availabilityVersions[0].version
+));
 const ssExec = api.executeAtomicMutation(store0, ssBridge.mutation);
 check("SS create executes atomically", ssExec.status === "created" && ssExec.state.appointments.appt_ss1.serviceLines[0].providerId === "maria" && ssExec.state.appointments.appt_ss1.serviceLines[1].providerId === "ana");
 
 const ssTamper = JSON.parse(JSON.stringify(ssBridge.mutation));
 ssTamper.availabilityVersions = [{ locationId: "locA", version: 13 }];
 check("SS version tamper is command_invalid", api.executeAtomicMutation(store0, ssTamper).status === "command_invalid");
+
+const cmdVersionTamper = JSON.parse(JSON.stringify(prepared.bookingCommand));
+cmdVersionTamper.availabilityVersions = [{ locationId: "locA", version: 13 }];
+const ssCmdTamper = api.buildSmartSchedulingAtomicCreateMutation(
+  cmdVersionTamper,
+  prepared.transactionPreconditions,
+  Object.assign({}, ssCtx, { candidateAppointmentId: "appt_ss_tamper" }),
+  "ss-cmd-tamper"
+);
+check("command version tamper is command_invalid", ssCmdTamper.ok === false && ssCmdTamper.status === "command_invalid" && (ssCmdTamper.reasonCodes || []).indexOf("command_integrity_mismatch") !== -1);
+
+const preVersionMismatch = JSON.parse(JSON.stringify(prepared.transactionPreconditions));
+preVersionMismatch.availabilityVersions = [{ locationId: "locA", version: 13 }];
+const ssPreMismatch = api.buildSmartSchedulingAtomicCreateMutation(
+  prepared.bookingCommand,
+  preVersionMismatch,
+  Object.assign({}, ssCtx, { candidateAppointmentId: "appt_ss_pre" }),
+  "ss-pre-mismatch"
+);
+check("command/precondition version mismatch is command_invalid", ssPreMismatch.ok === false && ssPreMismatch.status === "command_invalid" && (ssPreMismatch.reasonCodes || []).indexOf("command_integrity_mismatch") !== -1);
+
+const store12 = readyStore({ availabilityEpochs: { locA: { version: 12 } } });
+const prepared12 = api.prepareOfferAcceptance([mariaDay, anaDay], [], offer, {
+  acceptanceId: "accept-sim-12",
+  offerId: offer.offerId,
+  sourcePlanKey: offer.sourcePlanKey,
+  clientId: "client-1"
+}, {
+  availabilityVersions: [{ locationId: "locA", version: 12 }]
+});
+const ssBridge12 = api.buildSmartSchedulingAtomicCreateMutation(
+  prepared12.bookingCommand,
+  prepared12.transactionPreconditions,
+  Object.assign({}, ssCtx, { candidateAppointmentId: "appt_ss12" }),
+  "ss-create-12"
+);
+check("REAL COMMAND VERSION 12 is carried by the bridge", ssBridge12.ok && ssBridge12.mutation && ssBridge12.mutation.availabilityVersions[0].version === 12 && ssBridge12.mutation.availabilityVersions[0].version === prepared12.bookingCommand.availabilityVersions[0].version);
+check("SAME VERSION store 12 executes", ssBridge12.ok && api.executeAtomicMutation(store12, ssBridge12.mutation).status === "created");
+
+const liveEpoch = api.applyAvailabilityMutationAtomically(store12, {
+  locationIds: ["locA"],
+  availabilityConfig: { locA: { businessHours: { monday: { isOpen: true } } } }
+});
+const ssLive = api.buildSmartSchedulingAtomicCreateMutation(
+  prepared12.bookingCommand,
+  prepared12.transactionPreconditions,
+  Object.assign({}, ssCtx, { candidateAppointmentId: "appt_ss_live" }),
+  "ss-create-live"
+);
+const ssLiveExec = api.executeAtomicMutation(liveEpoch.state, ssLive.mutation);
+check("LIVE EPOCH CHANGE is availability_version_changed", ssLiveExec.status === "availability_version_changed" && snap(ssLiveExec.state) === snap(liveEpoch.state));
 
 const ssCancelled = JSON.parse(JSON.stringify(ssBridge.mutation));
 ssCancelled.appointmentPayload.status = "cancelled";

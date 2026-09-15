@@ -5,7 +5,8 @@
  * Does not call Firebase, Firestore, Cloud Functions, or createAppointment.
  *
  * Phase 17 acceptanceFingerprint is reused, not replaced.
- * availabilityVersions are bound only on the simulator mutation fingerprint.
+ * Smart Scheduling create availabilityVersions come from the Phase 17
+ * bookingCommand. The mutation fingerprint also binds that same list.
  *
  * Cross-day Smart Scheduling create is rejected (overnight_not_supported).
  * Front-desk overnight guard split is not simulated.
@@ -1010,8 +1011,7 @@
     bookingCommand,
     transactionPreconditions,
     adapterContext,
-    mutationId,
-    availabilityVersions
+    mutationId
   ) {
     var api = ns();
     var reasons = [];
@@ -1028,7 +1028,12 @@
         return { ok: false, status: "command_invalid", reasonCodes: ["command_integrity_mismatch"] };
       }
     }
-    var ctx = adapterContext && typeof adapterContext === "object" ? adapterContext : {};
+    var commandVersions = bookingCommand.availabilityVersions;
+    var preVersions = transactionPreconditions && transactionPreconditions.availabilityVersions;
+    if (JSON.stringify(commandVersions || []) !== JSON.stringify(preVersions || [])) {
+      return { ok: false, status: "command_invalid", reasonCodes: ["command_integrity_mismatch"] };
+    }
+    var ctx = adapterContext && typeof adapterContext === "object" ? copyJson(adapterContext) : {};
     if (transactionPreconditions && ctx.transactionPreconditions == null) {
       ctx.transactionPreconditions = transactionPreconditions;
     }
@@ -1044,9 +1049,9 @@
         adapter: adapted || null
       };
     }
-    var versions = normalizeAvailabilityVersions(availabilityVersions, bookingCommand.locationId);
+    var versions = normalizeAvailabilityVersions(bookingCommand.availabilityVersions, bookingCommand.locationId);
     if (!versions.ok) {
-      return { ok: false, status: "mutation_invalid", reasonCodes: [versions.reason] };
+      return { ok: false, status: "command_invalid", reasonCodes: [versions.reason || "command_integrity_mismatch"] };
     }
     var providerReservations = (bookingCommand.serviceLines || []).map(function (line) {
       return {
@@ -1113,7 +1118,9 @@
   api.providerDayGuardKey = providerDayGuardKey;
   api.resourceDayGuardKey = resourceDayGuardKey;
   api.mutationIdempotencyKey = mutationIdempotencyKey;
-  api.normalizeAvailabilityVersions = normalizeAvailabilityVersions;
+  if (typeof api.normalizeAvailabilityVersions !== "function") {
+    api.normalizeAvailabilityVersions = normalizeAvailabilityVersions;
+  }
   api.atomicMutationFingerprint = mutationFingerprint;
   api.sealAtomicMutation = sealAtomicMutation;
   api.evaluateGuardedReadiness = evaluateGuardedReadiness;

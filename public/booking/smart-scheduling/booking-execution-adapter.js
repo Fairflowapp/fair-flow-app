@@ -24,6 +24,10 @@
  * Persistence-ready mapping requires caller-supplied salon/client/service/staff
  * snapshots. Missing names or prices are adapter errors, not empty/$0 warnings.
  * Explicit numeric 0 is a valid complimentary price; missing/NaN is not.
+ *
+ * Phase 17 availabilityVersions stay on the command / transaction /
+ * smartSchedulingProvenance contract. They are not persisted as ordinary
+ * Booking appointment fields and are not copied onto bookingCreateInput.
  */
 (function () {
   var APPOINTMENT_ID_STRATEGY = "firestore_auto_id_currently";
@@ -122,6 +126,11 @@
     if (preconditions && preconditions.acceptanceFingerprint
       && String(preconditions.acceptanceFingerprint) !== expected) {
       addCode(reasons, "command_integrity_mismatch");
+    }
+    if (preconditions && Object.prototype.hasOwnProperty.call(preconditions, "availabilityVersions")) {
+      var commandVersions = JSON.stringify((command && command.availabilityVersions) || []);
+      var preVersions = JSON.stringify(preconditions.availabilityVersions || []);
+      if (commandVersions !== preVersions) addCode(reasons, "command_integrity_mismatch");
     }
     return reasons;
   }
@@ -466,6 +475,7 @@
       acceptanceId: bookingCommand.acceptanceId,
       idempotencyKey: bookingCommand.idempotencyKey,
       acceptanceFingerprint: bookingCommand.acceptanceFingerprint,
+      availabilityVersions: copyJson(bookingCommand.availabilityVersions || []),
       lineKeyToLineId: lineIdByKey
     };
 

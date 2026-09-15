@@ -7,6 +7,23 @@
  *
  * Does not write, reserve, hold, book, or call Firebase.
  * advisoryOnly = true, writesPerformed = false.
+ *
+ * Caller snapshot contract for availabilityVersions:
+ * 1. read epoch V1
+ * 2. load availability inputs (providerDays / resourceDays)
+ * 3. read epoch V2
+ * 4. require V1 === V2
+ * 5. Phase 16 revalidate against those exact inputs
+ * 6. Phase 17 prepare with V1 via options.availabilityVersions
+ * 7. acceptanceFingerprint binds V1
+ *
+ * Phase 17 cannot independently prove steps 1–4. It only guarantees the
+ * version token is structurally valid, fingerprint-bound, and copied onto
+ * both bookingCommand and transactionPreconditions. Live epoch recheck is
+ * the atomic executor / Phase 18D responsibility.
+ *
+ * Availability version is acceptance/execution intent, not Phase 15 offer
+ * identity. It changes acceptanceFingerprint, not offerId or sourcePlanKey.
  */
 (function () {
   var COMMAND_TYPE = "create_appointment_from_smart_offer";
@@ -196,6 +213,61 @@
     ];
   }
 
+  function canonAvailabilityVersion(value) {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+    return ["noncanonical", value == null ? "" : String(value)];
+  }
+
+  function canonicalAvailabilityVersions(list) {
+    return (Array.isArray(list) ? list.slice() : []).sort(function (a, b) {
+      return canonText(a && a.locationId).localeCompare(canonText(b && b.locationId));
+    }).map(function (row) {
+      return [canonText(row && row.locationId), canonAvailabilityVersion(row && row.version)];
+    });
+  }
+
+  function normalizeAvailabilityVersions(raw, requiredLocationId) {
+    if (raw == null) {
+      return { ok: false, reason: "availability_version_missing", versions: [] };
+    }
+    if (!Array.isArray(raw)) {
+      return { ok: false, reason: "availability_version_invalid", versions: [] };
+    }
+    if (!raw.length) {
+      return { ok: false, reason: "availability_version_missing", versions: [] };
+    }
+    var seen = {};
+    var out = [];
+    var i;
+    for (i = 0; i < raw.length; i += 1) {
+      var row = raw[i];
+      var locationId = trimText(row && row.locationId);
+      if (!locationId) {
+        return { ok: false, reason: "availability_version_invalid", versions: [] };
+      }
+      if (!row || typeof row.version !== "number" || !Number.isInteger(row.version) || row.version < 0) {
+        return { ok: false, reason: "availability_version_invalid", versions: [] };
+      }
+      if (seen[locationId]) {
+        return { ok: false, reason: "availability_version_invalid", versions: [] };
+      }
+      seen[locationId] = true;
+      out.push({ locationId: locationId, version: row.version });
+    }
+    out.sort(function (a, b) {
+      return a.locationId.localeCompare(b.locationId);
+    });
+    var required = trimText(requiredLocationId);
+    if (required && (out.length !== 1 || out[0].locationId !== required)) {
+      return { ok: false, reason: "availability_version_location_mismatch", versions: [] };
+    }
+    return { ok: true, versions: out };
+  }
+
+  function versionsEqual(a, b) {
+    return JSON.stringify(canonicalAvailabilityVersions(a)) === JSON.stringify(canonicalAvailabilityVersions(b));
+  }
+
   function canonicalAcceptanceIntent(command) {
     if (!command || typeof command !== "object") return [];
     var snap = command.sourceOfferSnapshot || {};
@@ -203,6 +275,7 @@
       canonText(command.commandType),
       canonText(command.locationId),
       canonText(command.dateKey),
+      canonicalAvailabilityVersions(command.availabilityVersions),
       canonText(command.offerId),
       canonText(command.sourcePlanKey),
       canonText(command.acceptanceId),
@@ -260,13 +333,15 @@
     return out;
   }
 
-  function buildPreconditions(offer, acceptance, key, providerDays, fingerprint) {
+  function buildPreconditions(offer, acceptance, key, providerDays, fingerprint, versions) {
     return {
       idempotency: {
         idempotencyKey: key,
         checkRequiredAtExecution: true
       },
       acceptanceFingerprint: fingerprint || "",
+      availabilityVersions: copyJson(versions || []),
+      availabilityVersionCheckRequiredAtExecution: true,
       offerIdentity: {
         offerId: offer.offerId,
         sourcePlanKey: offer.sourcePlanKey,
@@ -283,12 +358,13 @@
     };
   }
 
-  function buildCommand(offer, acceptance, key) {
+  function buildCommand(offer, acceptance, key, versions) {
     var lines = (offer.serviceLines || []).map(copyServiceLine);
     var command = {
       commandType: COMMAND_TYPE,
       locationId: offer.locationId,
       dateKey: offer.dateKey,
+      availabilityVersions: copyJson(versions || []),
       offerId: offer.offerId,
       sourcePlanKey: offer.sourcePlanKey,
       acceptanceId: acceptance.acceptanceId,
@@ -333,7 +409,6 @@
   }
 
   function prepareOfferAcceptance(providerDays, resourceDays, offer, acceptance, options) {
-    void options;
     var acceptReasons = validateAcceptance(offer, acceptance);
     var identity = {
       offerId: offer && offer.offerId || acceptance && acceptance.offerId || "",
@@ -342,6 +417,15 @@
     };
     if (acceptReasons.length) {
       return emptyAcceptanceResult("invalid_acceptance", acceptReasons, identity);
+    }
+    var versionNorm = normalizeAvailabilityVersions(
+      options && Object.prototype.hasOwnProperty.call(options, "availabilityVersions")
+        ? options.availabilityVersions
+        : null,
+      offer && offer.locationId
+    );
+    if (!versionNorm.ok) {
+      return emptyAcceptanceResult("invalid_acceptance", [versionNorm.reason], identity);
     }
     var api = ns();
     var revalidation = typeof api.revalidateClientVisitOffer === "function"
@@ -367,8 +451,15 @@
       return emptyAcceptanceResult("invalid_offer", ["offer_invalid"], identity);
     }
 
-    var command = buildCommand(offer, acceptance, identity.idempotencyKey);
-    var preconditions = buildPreconditions(offer, acceptance, identity.idempotencyKey, providerDays, command.acceptanceFingerprint);
+    var command = buildCommand(offer, acceptance, identity.idempotencyKey, versionNorm.versions);
+    var preconditions = buildPreconditions(
+      offer,
+      acceptance,
+      identity.idempotencyKey,
+      providerDays,
+      command.acceptanceFingerprint,
+      versionNorm.versions
+    );
     return {
       status: "ready",
       readyForAtomicExecution: true,
@@ -391,7 +482,8 @@
 
   function prepareOfferAcceptances(providerDays, resourceDays, requests, options) {
     return (Array.isArray(requests) ? requests : []).map(function (row) {
-      return prepareOfferAcceptance(providerDays, resourceDays, row && row.offer, row && row.acceptance, options);
+      var merged = Object.assign({}, options || {}, row && row.options || {});
+      return prepareOfferAcceptance(providerDays, resourceDays, row && row.offer, row && row.acceptance, merged);
     });
   }
 
@@ -418,6 +510,7 @@
     if (command.locationId !== pre.offerIdentity.locationId) return false;
     if (command.dateKey !== pre.offerIdentity.dateKey) return false;
     if (command.idempotencyKey !== pre.idempotency.idempotencyKey) return false;
+    if (!versionsEqual(command.availabilityVersions, pre.availabilityVersions)) return false;
     if (command.commandType !== COMMAND_TYPE) return false;
     var lines = command.serviceLines || [];
     var providers = pre.providers || [];
@@ -490,6 +583,15 @@
         advisoryOnly: true
       };
     }
+    if (transactionPreconditions && !versionsEqual(bookingCommand.availabilityVersions, transactionPreconditions.availabilityVersions)) {
+      addCode(reasons, "command_integrity_mismatch");
+      return {
+        status: "command_invalid",
+        reasonCodes: reasons,
+        writesPerformed: false,
+        advisoryOnly: true
+      };
+    }
     if (!commandMatchesPreconditions(bookingCommand, transactionPreconditions)) {
       addCode(reasons, "command_integrity_mismatch");
       return {
@@ -544,6 +646,7 @@
   api.evaluateAcceptancePreconditions = evaluateAcceptancePreconditions;
   api.acceptanceFingerprintForCommand = acceptanceFingerprintForCommand;
   api.canonicalAcceptanceIntent = canonicalAcceptanceIntent;
+  api.normalizeAvailabilityVersions = normalizeAvailabilityVersions;
   api.OFFER_ACCEPTANCE = {
     ADVISORY_ONLY: true,
     WRITES_PERFORMED: false,

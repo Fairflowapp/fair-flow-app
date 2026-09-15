@@ -186,6 +186,19 @@ function acceptOf(offer, extra) {
   }, extra || {});
 }
 
+function availOpts(offer, version) {
+  return {
+    availabilityVersions: [{
+      locationId: (offer && offer.locationId) || "locA",
+      version: version == null ? 12 : version
+    }]
+  };
+}
+
+function prepareReady(days, resources, offer, acceptance, version) {
+  return api.prepareOfferAcceptance(days, resources, offer, acceptance, availOpts(offer, version));
+}
+
 const TWO = 14 * 60;
 const maria = makeDay({ providerId: "maria" });
 const ana = makeDay({ providerId: "ana" });
@@ -200,6 +213,7 @@ check("public acceptance API loaded", !!(
   && api.prepareOfferAcceptances
   && api.evaluateAcceptancePreconditions
   && api.acceptanceFingerprintForCommand
+  && api.normalizeAvailabilityVersions
   && api.OFFER_ACCEPTANCE
 ));
 
@@ -212,7 +226,7 @@ const acceptSnap = JSON.stringify(acceptance);
 // READY / IDENTITY / MISSING ID
 // ---------------------------------------------------------------------------
 
-const ready = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance);
+const ready = prepareReady([maria, ana], [chair1], offer, acceptance);
 check("valid snapshot prepares a ready acceptance", ready && ready.status === "ready" && ready.readyForAtomicExecution === true && ready.refreshRequired === false && ready.reasonCodes.indexOf("ready_for_atomic_execution") !== -1, ready);
 check("ready result is advisory and performs no writes", ready && ready.advisoryOnly === true && ready.writesPerformed === false && ready.holdsCapacity === false && ready.idempotencyCheckRequiredAtExecution === true);
 check("command times/providers/resources exactly match the offer", !!(ready.bookingCommand
@@ -232,6 +246,14 @@ check("each command service line remains one atomic provider interval", ready.bo
   return typeof line.providerId === "string" && line.endMin === line.startMin + line.durationMinutes;
 }));
 check("command is bound to offer dateKey and locationId", ready.bookingCommand.dateKey === "2026-09-14" && ready.bookingCommand.locationId === "locA");
+check("READY WITH VERSION binds availabilityVersions onto the command", !!(
+  ready.bookingCommand.availabilityVersions
+  && ready.bookingCommand.availabilityVersions.length === 1
+  && ready.bookingCommand.availabilityVersions[0].locationId === "locA"
+  && ready.bookingCommand.availabilityVersions[0].version === 12
+  && ready.transactionPreconditions.availabilityVersions[0].version === 12
+  && ready.transactionPreconditions.availabilityVersionCheckRequiredAtExecution === true
+));
 check("preconditions carry exact reservation windows not only service times", ready.transactionPreconditions.resources[0]
   && ready.transactionPreconditions.resources[0].reservationStartMin === TWO + 50
   && ready.transactionPreconditions.resources[0].reservationEndMin === TWO + 95);
@@ -266,7 +288,7 @@ const mariaBusy = makeDay({
   providerId: "maria",
   lines: [occ(TWO, TWO + 45, { providerId: "maria", appointmentId: "booked-gel" })]
 });
-const stale = api.prepareOfferAcceptance([mariaBusy, ana], [chair1], offer, acceptance);
+const stale = prepareReady([mariaBusy, ana], [chair1], offer, acceptance);
 check("stale offer is rejected with no executable command", stale && stale.status === "stale" && stale.readyForAtomicExecution === false && stale.refreshRequired === true && stale.reasonCodes.indexOf("offer_stale") !== -1 && !stale.bookingCommand, stale);
 
 const tamperedOffer = JSON.parse(JSON.stringify(offer));
@@ -275,21 +297,21 @@ const invalidOffer = api.prepareOfferAcceptance([maria, ana, sara], [chair1], ta
   acceptanceId: "accept-1",
   offerId: tamperedOffer.offerId,
   sourcePlanKey: tamperedOffer.sourcePlanKey
-});
+}, availOpts(tamperedOffer));
 check("invalid offer is rejected without a command", invalidOffer && invalidOffer.status === "invalid_offer" && invalidOffer.readyForAtomicExecution === false && invalidOffer.reasonCodes.indexOf("offer_invalid") !== -1 && !invalidOffer.bookingCommand, invalidOffer);
 
 // ---------------------------------------------------------------------------
 // IDEMPOTENCY / FINGERPRINT / CLIENT ID
 // ---------------------------------------------------------------------------
 
-const again = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance);
+const again = prepareReady([maria, ana], [chair1], offer, acceptance);
 check("same acceptance input yields the same idempotencyKey", ready.idempotencyKey === again.idempotencyKey && ready.idempotencyKey.indexOf("accept|") === 0);
 check("same acceptance input yields the same fingerprint", ready.acceptanceFingerprint === again.acceptanceFingerprint && ready.bookingCommand.acceptanceFingerprint === api.acceptanceFingerprintForCommand(ready.bookingCommand));
 
-const otherAccept = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptOf(offer, { acceptanceId: "accept-2" }));
+const otherAccept = prepareReady([maria, ana], [chair1], offer, acceptOf(offer, { acceptanceId: "accept-2" }));
 check("different acceptanceId yields a different idempotencyKey", otherAccept.status === "ready" && otherAccept.idempotencyKey !== ready.idempotencyKey);
 
-const withClient = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptOf(offer, { clientId: "client-9" }));
+const withClient = prepareReady([maria, ana], [chair1], offer, acceptOf(offer, { clientId: "client-9" }));
 check("supplied clientId is copied into command and fingerprint", withClient.status === "ready" && withClient.bookingCommand.clientId === "client-9" && withClient.acceptanceFingerprint !== ready.acceptanceFingerprint);
 check("absent clientId is not invented", ready.bookingCommand.clientId === undefined);
 
@@ -297,7 +319,7 @@ check("absent clientId is not invented", ready.bookingCommand.clientId === undef
 // TOCTOU
 // ---------------------------------------------------------------------------
 
-const prepared = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance);
+const prepared = prepareReady([maria, ana], [chair1], offer, acceptance);
 const commandSnap = JSON.stringify(prepared.bookingCommand);
 const evalOk = api.evaluateAcceptancePreconditions([maria, ana], [chair1], prepared.bookingCommand, prepared.transactionPreconditions);
 check("evaluator allows create against the original snapshot", evalOk && evalOk.status === "can_create" && evalOk.writesPerformed === false, evalOk);
@@ -354,7 +376,7 @@ massagePlan.assignmentKey = "massage|maria||next|ana";
 massagePlan.resourceAssignmentKey = "massage|room|room-a";
 const massageOffer = offerFrom(massagePlan);
 const room = makeResource({ resourceId: "room-a", resourceType: "massage_room" });
-const massageReady = api.prepareOfferAcceptance([maria, ana], [room], massageOffer, acceptOf(massageOffer, { acceptanceId: "massage-1" }));
+const massageReady = prepareReady([maria, ana], [room], massageOffer, acceptOf(massageOffer, { acceptanceId: "massage-1" }));
 check("buffer reservation is 10:00–11:15 on the command", massageReady.status === "ready"
   && massageReady.bookingCommand.serviceLines[0].resourceAssignments[0].reservationEndMin === 11 * 60 + 15
   && massageReady.transactionPreconditions.resources[0].reservationEndMin === 11 * 60 + 15);
@@ -446,7 +468,7 @@ parallelPlan.parallelMinutesSaved = 60;
 parallelPlan.assignmentKey = "mani|maria||pedi|ana";
 parallelPlan.resourceAssignmentKey = "mani|chair|chair-1||pedi|chair|chair-2";
 const parallelOffer = offerFrom(parallelPlan);
-const parallelReady = api.prepareOfferAcceptance([maria, ana], [chair1, chair2], parallelOffer, acceptOf(parallelOffer, { acceptanceId: "par-1" }));
+const parallelReady = prepareReady([maria, ana], [chair1, chair2], parallelOffer, acceptOf(parallelOffer, { acceptanceId: "par-1" }));
 check("parallel command keeps simultaneous lines", parallelReady.status === "ready"
   && parallelReady.bookingCommand.blocks[0].parallel === true
   && parallelReady.bookingCommand.serviceLines[0].startMin === parallelReady.bookingCommand.serviceLines[1].startMin
@@ -456,13 +478,13 @@ const noResPlan = fakePlan({ visitStartMin: 10 * 60, totalClientWaitMinutes: 0 }
 noResPlan.serviceLines[1].resourceAssignments = [];
 noResPlan.resourceAssignmentKey = "";
 const noResOffer = offerFrom(noResPlan);
-const noResReady = api.prepareOfferAcceptance([maria, ana], [], noResOffer, acceptOf(noResOffer, { acceptanceId: "nores-1" }));
+const noResReady = prepareReady([maria, ana], [], noResOffer, acceptOf(noResOffer, { acceptanceId: "nores-1" }));
 check("provider-only offer prepares with empty resource preconditions", noResReady.status === "ready" && noResReady.transactionPreconditions.resources.length === 0);
 const noResEval = api.evaluateAcceptancePreconditions([maria, ana], [], noResReady.bookingCommand, noResReady.transactionPreconditions);
 check("provider-only precondition evaluation can create", noResEval.status === "can_create");
 
 const waitOffer = offerFrom(fakePlan({ visitStartMin: TWO, totalClientWaitMinutes: 5, orderChanged: true }));
-const waitReady = api.prepareOfferAcceptance([maria, ana], [chair1], waitOffer, acceptOf(waitOffer, { acceptanceId: "wait-1" }));
+const waitReady = prepareReady([maria, ana], [chair1], waitOffer, acceptOf(waitOffer, { acceptanceId: "wait-1" }));
 check("wait/reorder timeline is preserved on the command", waitReady.status === "ready"
   && waitReady.bookingCommand.serviceLines[1].startMin === TWO + 50
   && waitReady.bookingCommand.blocks[1].waitBeforeMinutes === 5
@@ -476,15 +498,91 @@ check("evaluator rejects snapshot date/location mismatch", wrongDateEval && wron
 
 const laterOffer = offerFrom(fakePlan({ visitStartMin: 16 * 60, totalClientWaitMinutes: 0 }));
 const batch = api.prepareOfferAcceptances([mariaBusy, ana], [chair1], [
-  { offer: offer, acceptance: acceptance },
-  { offer: laterOffer, acceptance: acceptOf(laterOffer, { acceptanceId: "later-1" }) },
-  { offer: offer, acceptance: acceptOf(offer, { acceptanceId: "accept-3" }) }
+  { offer: offer, acceptance: acceptance, options: availOpts(offer) },
+  { offer: laterOffer, acceptance: acceptOf(laterOffer, { acceptanceId: "later-1" }), options: availOpts(laterOffer) },
+  { offer: offer, acceptance: acceptOf(offer, { acceptanceId: "accept-3" }), options: availOpts(offer) }
 ]);
 check("batch preserves order and isolates stale acceptances", batch.length === 3
   && batch[0].status === "stale"
   && batch[1].status === "ready"
   && batch[2].status === "stale"
   && batch[1].offerId === laterOffer.offerId, batch.map(function (row) { return row.status; }));
+
+const brickellPlan = fakePlan({ locationId: "brickell" });
+const keyPlan = fakePlan({ locationId: "key_biscayne" });
+const brickellOffer = offerFrom(brickellPlan);
+const keyOffer = offerFrom(keyPlan);
+const brickellDays = [
+  makeDay({ providerId: "maria", locationId: "brickell" }),
+  makeDay({ providerId: "ana", locationId: "brickell" })
+];
+const keyDays = [
+  makeDay({ providerId: "maria", locationId: "key_biscayne" }),
+  makeDay({ providerId: "ana", locationId: "key_biscayne" })
+];
+const brickellChair = makeResource({ locationId: "brickell" });
+const keyChair = makeResource({ locationId: "key_biscayne" });
+const wrongGlobal = api.prepareOfferAcceptances(keyDays, [keyChair], [
+  { offer: keyOffer, acceptance: acceptOf(keyOffer, { acceptanceId: "kb-wrong" }) }
+], { availabilityVersions: [{ locationId: "brickell", version: 12 }] });
+check("batch does not apply Brickell version to a Key Biscayne offer", wrongGlobal.length === 1
+  && wrongGlobal[0].status === "invalid_acceptance"
+  && wrongGlobal[0].reasonCodes.indexOf("availability_version_location_mismatch") !== -1
+  && !wrongGlobal[0].bookingCommand);
+const perRequest = api.prepareOfferAcceptances(keyDays, [keyChair], [
+  { offer: keyOffer, acceptance: acceptOf(keyOffer, { acceptanceId: "kb-ok" }), options: availOpts(keyOffer, 7) }
+], { availabilityVersions: [{ locationId: "brickell", version: 12 }] });
+check("batch per-request availabilityVersions override the global options", perRequest[0].status === "ready"
+  && perRequest[0].bookingCommand.availabilityVersions[0].locationId === "key_biscayne"
+  && perRequest[0].bookingCommand.availabilityVersions[0].version === 7);
+
+// ---------------------------------------------------------------------------
+// AVAILABILITY VERSIONS
+// ---------------------------------------------------------------------------
+
+const missingVersion = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance);
+check("MISSING VERSION is invalid_acceptance", missingVersion.status === "invalid_acceptance" && missingVersion.readyForAtomicExecution === false && missingVersion.reasonCodes.indexOf("availability_version_missing") !== -1 && !missingVersion.bookingCommand, missingVersion);
+
+const versionZero = prepareReady([maria, ana], [chair1], offer, acceptance, 0);
+check("VERSION ZERO is ready", versionZero.status === "ready" && versionZero.bookingCommand.availabilityVersions[0].version === 0);
+
+const wrongLocation = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance, {
+  availabilityVersions: [{ locationId: "key_biscayne", version: 12 }]
+});
+check("WRONG LOCATION is invalid_acceptance", wrongLocation.status === "invalid_acceptance" && wrongLocation.reasonCodes.indexOf("availability_version_location_mismatch") !== -1 && !wrongLocation.bookingCommand, wrongLocation);
+
+function invalidVersion(raw) {
+  return api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance, { availabilityVersions: raw });
+}
+check("INVALID negative version", invalidVersion([{ locationId: "locA", version: -1 }]).reasonCodes.indexOf("availability_version_invalid") !== -1);
+check("INVALID fractional version", invalidVersion([{ locationId: "locA", version: 12.5 }]).reasonCodes.indexOf("availability_version_invalid") !== -1);
+check("INVALID string version", invalidVersion([{ locationId: "locA", version: "12" }]).reasonCodes.indexOf("availability_version_invalid") !== -1);
+check("INVALID duplicate location", invalidVersion([{ locationId: "locA", version: 12 }, { locationId: "locA", version: 13 }]).reasonCodes.indexOf("availability_version_invalid") !== -1);
+check("INVALID blank location", invalidVersion([{ locationId: "", version: 12 }]).reasonCodes.indexOf("availability_version_invalid") !== -1);
+
+const v12 = prepareReady([maria, ana], [chair1], offer, acceptance, 12);
+const v13 = prepareReady([maria, ana], [chair1], offer, acceptance, 13);
+check("FINGERPRINT BINDS VERSION", v12.status === "ready" && v13.status === "ready" && v12.acceptanceFingerprint !== v13.acceptanceFingerprint);
+check("idempotencyKey does not include availability version", v12.idempotencyKey === v13.idempotencyKey && v12.idempotencyKey === ready.idempotencyKey);
+check("same version same fingerprint", v12.acceptanceFingerprint === prepareReady([maria, ana], [chair1], offer, acceptance, 12).acceptanceFingerprint);
+
+const shuffled = api.prepareOfferAcceptance([maria, ana], [chair1], offer, acceptance, {
+  availabilityVersions: [{ locationId: "locA", version: 12 }]
+});
+check("input order does not change normalized fingerprint", shuffled.acceptanceFingerprint === v12.acceptanceFingerprint);
+
+const versionTamper = JSON.parse(JSON.stringify(v12.bookingCommand));
+versionTamper.availabilityVersions = [{ locationId: "locA", version: 13 }];
+const versionTamperEval = api.evaluateAcceptancePreconditions([maria, ana], [chair1], versionTamper, v12.transactionPreconditions);
+check("VERSION TAMPER is command_integrity_mismatch", versionTamperEval.status === "command_invalid" && versionTamperEval.reasonCodes.indexOf("command_integrity_mismatch") !== -1, versionTamperEval);
+
+const preMismatch = JSON.parse(JSON.stringify(v12.transactionPreconditions));
+preMismatch.availabilityVersions = [{ locationId: "locA", version: 13 }];
+const preMismatchEval = api.evaluateAcceptancePreconditions([maria, ana], [chair1], v12.bookingCommand, preMismatch);
+check("COMMAND/PRECONDITION VERSION MISMATCH is command_invalid", preMismatchEval.status === "command_invalid" && preMismatchEval.reasonCodes.indexOf("command_integrity_mismatch") !== -1, preMismatchEval);
+
+const brickellReady = api.prepareOfferAcceptance(brickellDays, [brickellChair], brickellOffer, acceptOf(brickellOffer, { acceptanceId: "brickell-ready" }), availOpts(brickellOffer, 12));
+check("READY WITH VERSION for Brickell", brickellReady.status === "ready" && brickellReady.bookingCommand.locationId === "brickell" && brickellReady.bookingCommand.availabilityVersions[0].version === 12);
 
 // ---------------------------------------------------------------------------
 // IMMUTABILITY / PURITY / DETERMINISM
