@@ -25,6 +25,19 @@ const KNOWN_A = {
   ],
 };
 
+/** Environment-dependent suites. Dedicated commands only — never test:booking:static. */
+const STATIC_EXCLUDED = [
+  "scripts/test-booking-smart-scheduling-execute-booking-mutation.js",
+  "scripts/test-booking-smart-scheduling-firestore-emulator.js",
+  "scripts/test-booking-smart-scheduling-staging-callable.js",
+];
+
+function isStaticBookingScript(rel) {
+  const name = String(rel || "").replace(/\\/g, "/");
+  if (!/^scripts\/test-booking-.*\.js$/.test(name)) return false;
+  return STATIC_EXCLUDED.indexOf(name) === -1;
+}
+
 function expectedFailureKeys() {
   const keys = [];
   Object.keys(KNOWN_A).sort().forEach((rel) => {
@@ -70,8 +83,9 @@ function listStaticTests(root) {
   return fs
     .readdirSync(dir)
     .filter((name) => /^test-booking-.*\.js$/.test(name))
-    .sort()
-    .map((name) => path.join("scripts", name));
+    .map((name) => path.join("scripts", name).replace(/\\/g, "/"))
+    .filter(isStaticBookingScript)
+    .sort();
 }
 
 function runOne(rel, root) {
@@ -213,6 +227,8 @@ function main() {
 module.exports = {
   CHECKPOINT_SHA,
   KNOWN_A,
+  STATIC_EXCLUDED,
+  isStaticBookingScript,
   expectedFailureKeys,
   parseFails,
   classifyFail,
