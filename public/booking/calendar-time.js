@@ -14,6 +14,7 @@
   var WEEKDAY = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
   var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   var WEEKDAYS_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   function isValidTimeZone(zone) {
     if (!zone) return false;
@@ -113,6 +114,50 @@
     return WEEKDAYS_LONG[utc.getUTCDay()] + ", " + MONTHS[utc.getUTCMonth()] + " " + p.d + ", " + p.y;
   }
 
+  function formatWeekdayShort(dateKey) {
+    var p = parseDateKey(dateKey);
+    if (!p) return "";
+    var utc = new Date(Date.UTC(p.y, p.m - 1, p.d, 12, 0, 0));
+    return WEEKDAYS_SHORT[utc.getUTCDay()] || "";
+  }
+
+  function formatMonthDay(dateKey) {
+    var p = parseDateKey(dateKey);
+    if (!p) return "";
+    return MONTHS[p.m - 1] + " " + p.d;
+  }
+
+  function startOfWeek(dateKey) {
+    var key = String(dateKey || "").trim() || todayDateKey();
+    var p = parseDateKey(key);
+    if (!p) return key;
+    var utc = new Date(Date.UTC(p.y, p.m - 1, p.d, 12, 0, 0));
+    var dow = utc.getUTCDay();
+    var back = dow === 0 ? 6 : dow - 1;
+    return addDays(key, -back);
+  }
+
+  function weekDateKeys(dateKey) {
+    var start = startOfWeek(dateKey);
+    var keys = [];
+    var i;
+    for (i = 0; i < 7; i += 1) keys.push(addDays(start, i));
+    return keys;
+  }
+
+  function formatWeekRange(dateKey) {
+    var keys = weekDateKeys(dateKey);
+    var start = parseDateKey(keys[0]);
+    var end = parseDateKey(keys[6]);
+    if (!start || !end) return "";
+    var startLabel = MONTHS[start.m - 1] + " " + start.d;
+    var endLabel = MONTHS[end.m - 1] + " " + end.d;
+    if (start.y !== end.y) {
+      return startLabel + ", " + start.y + " – " + endLabel + ", " + end.y;
+    }
+    return startLabel + " – " + endLabel + ", " + end.y;
+  }
+
   function nowMinutes(locationId) {
     var p = zonedParts(new Date(), getTimeZone(locationId));
     return Number(p.hour) * 60 + Number(p.minute);
@@ -148,6 +193,11 @@
     addDays: addDays,
     weekdayKey: weekdayKey,
     formatDisplayDate: formatDisplayDate,
+    formatWeekdayShort: formatWeekdayShort,
+    formatMonthDay: formatMonthDay,
+    startOfWeek: startOfWeek,
+    weekDateKeys: weekDateKeys,
+    formatWeekRange: formatWeekRange,
     nowMinutes: nowMinutes,
     formatHourLabel: formatHourLabel,
     formatQuarterLabel: formatQuarterLabel,

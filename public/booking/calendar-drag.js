@@ -11,6 +11,32 @@
 
   function layout() { return window.ffBookingCalLayout || null; }
   function calState() { return window.ffBookingCalState || null; }
+  function weekApi() { return window.ffBookingCalWeek || null; }
+
+  function isWeek() {
+    var st = calState();
+    return !!(st && st.isWeek && st.isWeek());
+  }
+
+  function dragContext() {
+    var st = calState();
+    if (!st) return {};
+    return {
+      view: st.getView ? st.getView() : "",
+      locationId: st.getLocationId ? st.getLocationId() : "",
+      weekProviderId: st.getWeekProviderId ? st.getWeekProviderId() : "",
+      weekStartKey: st.getWeekStartKey ? st.getWeekStartKey() : ""
+    };
+  }
+
+  function dragContextChanged(prev) {
+    var now = dragContext();
+    if (!prev) return false;
+    return now.view !== prev.view
+      || now.locationId !== prev.locationId
+      || now.weekProviderId !== prev.weekProviderId
+      || now.weekStartKey !== prev.weekStartKey;
+  }
 
   function pxPerMinute() {
     var lay = layout();
@@ -58,10 +84,23 @@
     return n > 0 ? n : 144;
   }
 
+  function weekCardDraggable(appointment, weekProviderId) {
+    var want = String(weekProviderId || "").trim();
+    if (!appointment || !want) return false;
+    var ids = {};
+    (appointment.serviceLines || []).forEach(function (line) {
+      var id = String(line && line.providerId || "").trim();
+      if (id) ids[id] = true;
+    });
+    var keys = Object.keys(ids);
+    return keys.length === 1 && keys[0] === want;
+  }
+
   function readSource(el) {
     if (!el || typeof el.closest !== "function") return null;
     var hold = el.closest("[data-ff-cal-hold]");
     if (hold) {
+      if (isWeek()) return null;
       return {
         kind: "hold",
         el: hold,
@@ -74,6 +113,22 @@
     var card = el.closest("[data-ff-cal-card]");
     if (card) {
       var col = card.closest("[data-ff-cal-emp]");
+      var dayCol = card.closest("[data-ff-cal-day]");
+      var st = calState();
+      var week = isWeek();
+      var providerId = col
+        ? col.getAttribute("data-ff-cal-emp") || ""
+        : (week && st && st.getWeekProviderId ? st.getWeekProviderId() : "");
+      var dateKey = dayCol
+        ? dayCol.getAttribute("data-ff-cal-day") || ""
+        : (st && st.getSelectedDateKey ? st.getSelectedDateKey() : "");
+      if (week) {
+        var store = window.ffBookingCalAppointments;
+        var appt = store && typeof store.getCachedById === "function"
+          ? store.getCachedById(card.getAttribute("data-ff-cal-card"))
+          : null;
+        if (!weekCardDraggable(appt, providerId)) return null;
+      }
       var source = {
         kind: "card",
         el: card,
@@ -83,11 +138,14 @@
           .split(",")
           .map(function (id) { return String(id || "").trim(); })
           .filter(Boolean),
-        fromProviderId: col ? col.getAttribute("data-ff-cal-emp") || "" : "",
+        fromProviderId: providerId,
+        fromDateKey: dateKey,
+        fromLocationId: st && st.getLocationId ? st.getLocationId() : "",
         fromStartMin: Number(card.getAttribute("data-ff-cal-start")),
         durationMinutes: Number(card.getAttribute("data-ff-cal-duration")) || 30,
         requested: card.getAttribute("data-ff-cal-requested") === "1"
       };
+      if (week) return source;
       return applySolo(source, card, el);
     }
     return null;
@@ -182,13 +240,27 @@
     if (!preview || !preview.providerId) return null;
     if (source.kind === "hold" && !source.lineKey) return null;
     if (source.kind === "card" && (!source.appointmentId || !source.lineId)) return null;
+    var destDate = String((hit && hit.dateKey) || "").trim();
+    if (destDate) preview.dateKey = destDate;
+    else if (source.fromDateKey) preview.dateKey = String(source.fromDateKey);
+    if (isWeek()) {
+      preview.providerId = String(source.fromProviderId || "").trim();
+      if (!preview.providerId) return null;
+      var keys = calState() && calState().getWeekDateKeys ? calState().getWeekDateKeys() : [];
+      if (preview.dateKey && keys.length && keys.indexOf(preview.dateKey) === -1) return null;
+    }
     var sameProvider = preview.providerId === String(source.fromProviderId || "");
     var sameTime = preview.startMin === Number(source.fromStartMin);
-    if (sameProvider && sameTime) return null;
+    var sameDate = !preview.dateKey || !source.fromDateKey || preview.dateKey === String(source.fromDateKey);
+    if (sameProvider && sameTime && sameDate) return null;
     return preview;
   }
 
-  function findCol(providerId) {
+  function findCol(providerId, dateKey) {
+    if (isWeek() && dateKey) {
+      var day = document.querySelector('[data-ff-cal-day="' + String(dateKey) + '"]');
+      return day || null;
+    }
     var id = String(providerId || "");
     if (!id) return null;
     var cols = document.querySelectorAll("[data-ff-cal-emp]");
@@ -203,6 +275,24 @@
     var lay = layout();
     var st = calState();
     if (!surface || !lay || !st) return null;
+    if (isWeek()) {
+      var week = weekApi();
+      var dates = st.getWeekDateKeys ? st.getWeekDateKeys() : [];
+      var providerId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+      return {
+        surface: surface,
+        rect: surface.getBoundingClientRect(),
+        employees: dates.map(function (dateKey) {
+          return { id: providerId, dateKey: dateKey };
+        }),
+        axis: week && typeof week.sharedAxis === "function" ? week.sharedAxis() : st.getAxis(),
+        dateKey: "",
+        locationId: st.getLocationId(),
+        weekProviderId: providerId,
+        weekStartKey: st.getWeekStartKey ? st.getWeekStartKey() : "",
+        columnWidth: columnWidth(surface)
+      };
+    }
     return {
       surface: surface,
       rect: surface.getBoundingClientRect(),
@@ -225,15 +315,15 @@
     });
   }
 
-  function providerAtX(clientX) {
-    var cols = document.querySelectorAll("[data-ff-cal-emp]");
+  function attrAtX(clientX, attr) {
+    var cols = document.querySelectorAll("[" + attr + "]");
     if (!cols.length) return "";
     var i;
     var nearest = "";
     var nearestDist = Infinity;
     for (i = 0; i < cols.length; i += 1) {
       var rect = cols[i].getBoundingClientRect();
-      var id = cols[i].getAttribute("data-ff-cal-emp") || "";
+      var id = cols[i].getAttribute(attr) || "";
       if (clientX >= rect.left && clientX < rect.right) return id;
       var mid = (rect.left + rect.right) / 2;
       var dist = Math.abs(clientX - mid);
@@ -245,15 +335,31 @@
     return nearest;
   }
 
+  function providerAtX(clientX) {
+    return attrAtX(clientX, "data-ff-cal-emp");
+  }
+
+  function dateAtX(clientX) {
+    return attrAtX(clientX, "data-ff-cal-day");
+  }
+
   function previewAt(clientX, clientY, sess) {
     var area = (sess && sess.geo) || captureGeo();
     if (!sess || !sess.source || !area) return null;
-    return previewFromDelta(
+    var providerId = isWeek()
+      ? (area.weekProviderId || sess.source.fromProviderId)
+      : (providerAtX(clientX) || sess.source.fromProviderId);
+    var preview = previewFromDelta(
       sess.source,
       clientY - sess.startY,
-      providerAtX(clientX) || sess.source.fromProviderId,
+      providerId,
       area.axis
     );
+    if (preview && isWeek()) {
+      preview.dateKey = dateAtX(clientX) || sess.source.fromDateKey || "";
+      preview.providerId = sess.source.fromProviderId;
+    }
+    return preview;
   }
 
   function clearDrop() {
@@ -263,11 +369,12 @@
     }
   }
 
-  function markDrop(providerId) {
-    if (session && session.dropProviderId === providerId) return;
-    if (session) session.dropProviderId = providerId || "";
+  function markDrop(providerId, dateKey) {
+    var key = isWeek() ? String(dateKey || "") : String(providerId || "");
+    if (session && session.dropKey === key) return;
+    if (session) session.dropKey = key;
     clearDrop();
-    var col = findCol(providerId);
+    var col = findCol(providerId, dateKey);
     if (col) {
       col.classList.add("is-drop");
       if (session) session.dropCol = col;
@@ -287,7 +394,7 @@
       return row && (String(row.id || "") === id || String(row.staffId || "") === id);
     });
     if (!emp) return id;
-    var name = String(emp.firstName || emp.name || emp.displayName || "").trim();
+    var name = String(emp.displayName || emp.name || emp.firstName || "").trim();
     return name || id;
   }
 
@@ -454,10 +561,57 @@
     return drawer.assignLineSlot(lineKey, providerId, startMin);
   }
 
-  async function assignCard(appointmentId, lineIds, providerId, startMin, keepRequest, fromStartMin) {
+  function planCardMove(appt, spec) {
+    var model = window.ffBookingAppointmentModel;
+    if (!appt || !spec) return null;
+    var ids = {};
+    (Array.isArray(spec.lineIds) ? spec.lineIds : [spec.lineIds]).forEach(function (id) {
+      if (id) ids[String(id)] = true;
+    });
+    var fromStartMin = Number(spec.fromStartMin);
+    var startMin = Number(spec.startMin);
+    var delta = startMin - fromStartMin;
+    if (!Number.isFinite(delta)) delta = 0;
+    var dateKey = String(spec.dateKey || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
+    var lockProvider = spec.lockProvider === true;
+    var providerId = String(spec.providerId || "").trim();
+    var keepRequest = spec.keepRequest;
+    var locationId = appt.locationId;
+    var lines = (appt.serviceLines || []).map(function (line) {
+      if (!line || !ids[String(line.lineId || "")]) return line;
+      var duration = Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30;
+      var next = Object.assign({}, line);
+      if (!lockProvider && providerId) next.providerId = providerId;
+      if (keepRequest === true) next.requested = true;
+      if (keepRequest === false) next.requested = false;
+      if (Number.isFinite(startMin) && model && typeof model.civilToDate === "function") {
+        var lineStart = fromStartMin + delta;
+        var tm = window.ffBookingTime;
+        if (tm && typeof tm.zonedMinutes === "function") {
+          var current = tm.zonedMinutes(
+            model.toDate ? model.toDate(line.startAt) : line.startAt,
+            locationId
+          );
+          if (Number.isFinite(current)) lineStart = current + delta;
+        }
+        next.startAt = model.civilToDate(dateKey, lineStart, locationId);
+        next.endAt = model.civilToDate(dateKey, lineStart + duration, locationId);
+        next.durationMinutes = duration;
+      }
+      return next;
+    });
+    return {
+      dateKey: dateKey,
+      locationId: locationId,
+      providerId: lockProvider ? String((lines[0] && lines[0].providerId) || providerId) : providerId,
+      lines: lines
+    };
+  }
+
+  async function assignCard(appointmentId, lineIds, providerId, startMin, keepRequest, fromStartMin, dateKey) {
     var repo = window.ffBookingAppointments;
     var store = window.ffBookingCalAppointments;
-    var model = window.ffBookingAppointmentModel;
     var st = calState();
     if (!repo || typeof repo.updateAppointment !== "function") return;
     var appt = store && typeof store.getCachedById === "function" ? store.getCachedById(appointmentId) : null;
@@ -468,36 +622,26 @@
       toastError("This appointment could not be moved.");
       return;
     }
-    var ids = {};
-    (Array.isArray(lineIds) ? lineIds : [lineIds]).forEach(function (id) {
-      if (id) ids[String(id)] = true;
+    var nextDate = String(dateKey || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) {
+      nextDate = st && typeof st.getSelectedDateKey === "function" ? st.getSelectedDateKey() : appt.dateKey;
+    }
+    var planned = planCardMove(appt, {
+      lineIds: lineIds,
+      providerId: providerId,
+      startMin: startMin,
+      fromStartMin: fromStartMin,
+      dateKey: nextDate,
+      keepRequest: keepRequest,
+      lockProvider: isWeek()
     });
-    var delta = Number(startMin) - Number(fromStartMin);
-    if (!Number.isFinite(delta)) delta = 0;
-    var dateKey = st && typeof st.getSelectedDateKey === "function" ? st.getSelectedDateKey() : appt.dateKey;
-    var lines = (appt.serviceLines || []).map(function (line) {
-      if (!line || !ids[String(line.lineId || "")]) return line;
-      var duration = Number(line.durationMinutes) > 0 ? Number(line.durationMinutes) : 30;
-      var next = Object.assign({}, line, { providerId: providerId });
-      if (keepRequest === true) next.requested = true;
-      if (keepRequest === false) next.requested = false;
-      if (Number.isFinite(Number(startMin)) && model && typeof model.civilToDate === "function") {
-        var lineStart = Number(fromStartMin) + delta;
-        var tm = window.ffBookingTime;
-        if (tm && typeof tm.zonedMinutes === "function") {
-          var current = tm.zonedMinutes(
-            model.toDate ? model.toDate(line.startAt) : line.startAt,
-            appt.locationId
-          );
-          if (Number.isFinite(current)) lineStart = current + delta;
-        }
-        next.startAt = model.civilToDate(dateKey, lineStart, appt.locationId);
-        next.endAt = model.civilToDate(dateKey, lineStart + duration, appt.locationId);
-        next.durationMinutes = duration;
-      }
-      return next;
-    });
+    if (!planned) {
+      toastError("This appointment could not be moved.");
+      return;
+    }
+    var lines = planned.lines;
     appt.serviceLines = lines;
+    appt.dateKey = planned.dateKey;
     if (window.ffBookingCalCardRender && typeof window.ffBookingCalCardRender.paint === "function") {
       try { window.ffBookingCalCardRender.paint(); } catch (_) {}
     }
@@ -519,8 +663,55 @@
     toastError(msg);
   }
 
+  function unavailableDrop(action) {
+    var api = window.ffBookingCalDrop;
+    if (!api || typeof api.inspect !== "function") return null;
+    var result = api.inspect(action);
+    return result && result.ok === false ? result : null;
+  }
+
+  function overlapDrop(action) {
+    var api = window.ffBookingCalDrop;
+    if (!api || typeof api.inspectOverlap !== "function") return null;
+    var result = api.inspectOverlap(action);
+    return result && result.ok === false ? result : null;
+  }
+
+  function decorateWeekAction(action) {
+    var week = weekApi();
+    if (!action || !week || typeof week.createHit !== "function") return action;
+    var hit = week.createHit(action.dateKey, action.startMin);
+    if (!hit) return action;
+    action.providerId = action.source && action.source.fromProviderId
+      ? action.source.fromProviderId
+      : hit.slot.providerId;
+    action.axis = hit.axis;
+    action.employee = hit.employees[0];
+    action.locationId = hit.locationId;
+    action.dateKey = hit.slot.dateKey;
+    return action;
+  }
+
   function applyDrop(action) {
     if (!action) return Promise.resolve(false);
+    if (session && session.context && dragContextChanged(session.context)) {
+      restoreSource();
+      return Promise.resolve(false);
+    }
+    if (isWeek()) {
+      if (action.source && action.source.kind === "hold") {
+        restoreSource();
+        return Promise.resolve(false);
+      }
+      decorateWeekAction(action);
+    }
+    var blocked = unavailableDrop(action);
+    if (!blocked && isWeek()) blocked = overlapDrop(action);
+    if (blocked) {
+      restoreSource();
+      toastError(blocked.message || "That time is not available.");
+      return Promise.resolve(false);
+    }
     return confirmProviderMove(action).then(function (choice) {
       if (!choice || !choice.ok) {
         restoreSource();
@@ -536,7 +727,8 @@
         action.providerId,
         action.startMin,
         choice.keepRequest,
-        action.source.fromStartMin
+        action.source.fromStartMin,
+        action.dateKey || action.source.fromDateKey
       );
       return true;
     });
@@ -623,7 +815,7 @@
     if (!ghost || !ghost.el) return;
     var y = clientY - ghost.offsetY;
     var x = clientX - ghost.offsetX;
-    var col = preview ? findCol(preview.providerId) : null;
+    var col = preview ? findCol(preview.providerId, preview.dateKey) : null;
     if (col) {
       var colRect = col.getBoundingClientRect();
       var inset = 4;
@@ -652,6 +844,11 @@
     clearDrop();
     if (moved) suppressClick = true;
     session = null;
+  }
+
+  function cancel() {
+    if (!session) return;
+    endSession(false);
   }
 
   function consumeClick() {
@@ -688,12 +885,17 @@
       ghost: null,
       geo: null,
       dropCol: null,
-      dropProviderId: ""
+      dropKey: "",
+      context: dragContext()
     };
   }
 
   function onPointerMove(ev) {
     if (!session) return;
+    if (session.context && dragContextChanged(session.context)) {
+      cancel();
+      return;
+    }
     var dx = ev.clientX - session.startX;
     var dy = ev.clientY - session.startY;
     if (!session.dragging) {
@@ -710,19 +912,24 @@
     var preview = previewAt(ev.clientX, ev.clientY, session);
     moveGhost(session, ev.clientX, ev.clientY, preview);
     if (preview) {
-      markDrop(preview.providerId);
+      markDrop(preview.providerId, preview.dateKey);
       updateGhostTime(session.ghost, preview.startMin, session.source.durationMinutes);
     }
   }
 
   function onPointerUp(ev) {
     if (!session) return;
+    if (session.context && dragContextChanged(session.context)) {
+      cancel();
+      return;
+    }
     var moved = session.dragging;
     var action = null;
     if (moved) {
       var preview = previewAt(ev.clientX, ev.clientY, session);
       action = dropAction(session.source, {
         providerId: preview && preview.providerId,
+        dateKey: preview && preview.dateKey,
         dy: ev.clientY - session.startY,
         axis: session.geo && session.geo.axis
       });
@@ -785,8 +992,16 @@
         closeMoveAsk({ ok: false });
         return;
       }
+      if (session) {
+        ev.preventDefault();
+        cancel();
+        return;
+      }
       clearSegmentFocus();
     }, true);
+    document.addEventListener("ff-active-location-changed", function () {
+      cancel();
+    });
   }
 
   window.ffBookingCalDrag = {
@@ -802,8 +1017,15 @@
     providerMovePrompt: providerMovePrompt,
     requestedMoveActions: requestedMoveActions,
     moveAskResult: moveAskResult,
+    unavailableDrop: unavailableDrop,
+    applyDrop: applyDrop,
     consumeClick: consumeClick,
     releaseOpensDetails: releaseOpensDetails,
+    cancel: cancel,
+    planCardMove: planCardMove,
+    weekCardDraggable: weekCardDraggable,
+    dragContext: dragContext,
+    dragContextChanged: dragContextChanged,
     THRESHOLD: THRESHOLD,
     SNAP_MIN: SNAP_MIN
   };

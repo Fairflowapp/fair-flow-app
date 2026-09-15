@@ -76,15 +76,21 @@
     return rangeHtml(regions.off, axis, "ff-cal-off") + rangeHtml(regions.closed, axis, "ff-cal-closed");
   }
 
+  function providerDisplayName(emp) {
+    var dt = data();
+    if (dt && typeof dt.displayNameOf === "function") return dt.displayNameOf(emp);
+    return String((emp && (emp.displayName || emp.name || emp.firstName)) || "").trim() || "Staff";
+  }
+
   function providerAvatarHtml(emp) {
-    var firstName = String(emp.firstName || "").trim() || "Staff";
-    var initial = firstName.charAt(0).toUpperCase();
+    var displayName = providerDisplayName(emp);
+    var initial = displayName.charAt(0).toUpperCase() || "S";
     var src = "";
     if (typeof window.ffGetAvatarUrlForUser === "function") {
       try {
         src = String(window.ffGetAvatarUrlForUser({
           staffId: emp.id,
-          name: emp.name || firstName,
+          name: displayName,
           photoURL: emp.photoURL,
           avatarUrl: emp.photoURL
         }) || "").trim();
@@ -102,13 +108,14 @@
   }
 
   function providerHeaderHtml(emp) {
-    var firstName = String(emp.firstName || "").trim() || "Staff";
+    var displayName = providerDisplayName(emp);
     return '<button type="button" class="ff-cal-emp-btn" data-ff-cal-provider="' +
-      escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false">' +
+      escapeHtml(emp.id) + '" aria-haspopup="menu" aria-expanded="false" title="' +
+      escapeHtml(displayName) + '">' +
       '<span class="ff-cal-emp-ctrl">' +
         providerAvatarHtml(emp) +
-        '<span class="ff-cal-emp-label">' + escapeHtml(firstName) + "</span>" +
-        '<span class="ff-cal-emp-caret" aria-hidden="true">▾</span>' +
+        '<span class="ff-cal-emp-label">' + escapeHtml(displayName) + "</span>" +
+        '<span class="ff-cal-emp-caret ff-cal-print-hide" aria-hidden="true">▾</span>' +
       "</span>" +
       "</button>";
   }
@@ -131,7 +138,15 @@
     var vp = root.querySelector("[data-ff-cal-viewport]");
     if (!shell || !board) return;
     lay.applyTokensToElement(shell);
-    var n = ((st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees() || []).length;
+    if (st.isWeek && st.isWeek()) {
+      var weekH = window.ffBookingCalWeek && typeof window.ffBookingCalWeek.headerHeight === "function"
+        ? window.ffBookingCalWeek.headerHeight()
+        : 68;
+      shell.style.setProperty("--ff-cal-header-h", weekH + "px");
+    }
+    var n = st.isWeek && st.isWeek()
+      ? 7
+      : ((st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees() || []).length;
     var timeW = lay.tokens().timeW;
     var host = vp || root;
     var available = host.clientWidth > 0 ? Math.max(0, host.clientWidth - timeW) : 0;
@@ -171,11 +186,59 @@
     return slot ? { slot: slot, employees: employees, axis: st.getAxis(), locationId: st.getLocationId() } : null;
   }
 
+  function rememberWeekSlot(ev, surface) {
+    var st = state();
+    var week = window.ffBookingCalWeek;
+    if (!st || !week || !surface || !ev) return null;
+    if (typeof week.hitTestFromPoint !== "function") return null;
+    var rect = surface.getBoundingClientRect();
+    var hit = week.hitTestFromPoint(
+      ev.clientX - rect.left,
+      ev.clientY - rect.top,
+      columnWidth(surface)
+    );
+    window.ffBookingCalLastSlot = hit && hit.slot ? hit.slot : null;
+    return hit;
+  }
+
   function slotIsOpen(emp, axis, minutes) {
     var av = availability();
     if (!av) return false;
-    if (typeof av.reasonAt === "function") return av.reasonAt(emp, axis, minutes) === "available";
-    return typeof av.isBookableAt === "function" && av.isBookableAt(emp, axis, minutes);
+    if (typeof av.isBookableAt === "function") return av.isBookableAt(emp, axis, minutes);
+    return typeof av.reasonAt === "function" && av.reasonAt(emp, axis, minutes) === "available";
+  }
+
+  function toastUnavailable(message) {
+    if (window.ffToast && typeof window.ffToast.show === "function") {
+      window.ffToast.show(message, { variant: "error", durationMs: 3200 });
+    }
+  }
+
+  function blockedCreate(hit, emp) {
+    var api = window.ffBookingCalDrop;
+    if (!api || !hit || !hit.slot) return null;
+    var inspect = typeof api.inspectCreate === "function" ? api.inspectCreate : api.inspect;
+    if (typeof inspect !== "function") return null;
+    var result = inspect({
+      providerId: hit.slot.providerId,
+      startMin: hit.slot.startMin,
+      durationMinutes: 30,
+      axis: hit.axis,
+      employee: emp
+    });
+    return result && result.ok === false ? result : null;
+  }
+
+  function dayStatusHtml(st) {
+    var dt = data();
+    var day = st && typeof st.getBusinessHours === "function" ? st.getBusinessHours() : null;
+    var label = dt && typeof dt.dayStatusLabel === "function"
+      ? dt.dayStatusLabel(day)
+      : (!st.getAxis().salonOpen ? "Salon closed" : "");
+    if (!label) return "";
+    var special = day && day.source === "special_day_hours";
+    return '<span class="' + (special ? "ff-cal-special-note" : "ff-cal-closed-note") + '">' +
+      escapeHtml(label) + "</span>";
   }
 
   function composerHasUnsavedWork() {
@@ -190,6 +253,11 @@
     var emp = (hit.employees || []).find(function (row) {
       return row && row.id === hit.slot.providerId;
     });
+    var blocked = blockedCreate(hit, emp);
+    if (blocked) {
+      toastUnavailable(blocked.message || "That time is not available.");
+      return;
+    }
     if (!slotIsOpen(emp, hit.axis, hit.slot.startMin)) return;
     if (window.ffBookingCalDraft) {
       window.ffBookingCalDraft.set({
@@ -207,12 +275,40 @@
     });
   }
 
+  function offerSlotCreate(hit, ev) {
+    if (!isCalendarVisible()) return;
+    if (!hit || !hit.slot) return;
+    if (composerHasUnsavedWork()) return;
+    var emp = (hit.employees || []).find(function (row) {
+      return row && row.id === hit.slot.providerId;
+    });
+    var blocked = blockedCreate(hit, emp);
+    if (blocked) {
+      toastUnavailable(blocked.message || "That time is not available.");
+      return;
+    }
+    if (!slotIsOpen(emp, hit.axis, hit.slot.startMin)) return;
+    var ui = window.ffBookingCalBlockUi;
+    if (ui && typeof ui.openChooser === "function") {
+      ui.openChooser(hit, ev);
+      return;
+    }
+    openAppointmentFromHit(hit);
+  }
+
+  function openBlockFromEl(el) {
+    var ui = window.ffBookingCalBlockUi;
+    var id = el && el.getAttribute ? el.getAttribute("data-ff-cal-block") : "";
+    if (ui && typeof ui.openEdit === "function" && id) ui.openEdit(id);
+  }
+
   function bindViewportScroll(root) {
     var vp = root && root.querySelector("[data-ff-cal-viewport]");
     if (!vp || vp.getAttribute("data-ff-cal-scroll-bound")) return;
     vp.setAttribute("data-ff-cal-scroll-bound", "1");
     vp.addEventListener("scroll", function () {
       if (window.ffBookingCalMenu) window.ffBookingCalMenu.close();
+      if (window.ffBookingCalFilters) window.ffBookingCalFilters.close();
     }, { passive: true });
   }
 
@@ -231,9 +327,28 @@
     var tm = time();
     var lay = layout();
     if (!st || !tm || !lay || !root) return;
+    if (st.isWeek && st.isWeek() && window.ffBookingCalWeek && typeof window.ffBookingCalWeek.paint === "function") {
+      window.ffBookingCalWeek.paint(root);
+      var shellWeek = root.querySelector(".ff-cal");
+      if (shellWeek) lay.applyTokensToElement(shellWeek);
+      applyCanvasLayout(root);
+      watchCanvas(root);
+      bindViewportScroll(root);
+      if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
+        window.ffBookingCalMenu.close();
+      }
+      if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+        window.ffBookingCalFilters.close();
+      }
+      lastPaintKey = "week|" + st.getWeekStartKey() + "|" + st.getLocationId() + "|" +
+        (st.getWeekProviderId ? st.getWeekProviderId() : "") + "|" +
+        (st.getVisibleProviderIds ? st.getVisibleProviderIds().join(",") : "");
+      paintOverlays(root);
+      return;
+    }
     var axis = st.getAxis();
     var employees = (st.getVisibleEmployees && st.getVisibleEmployees()) || st.getEmployees();
-    var focusedId = st.getFocusProviderId ? st.getFocusProviderId() : "";
+    var filterOn = !!(st.isProviderFilterActive && st.isProviderFilterActive());
     var height = lay.axisHeight(axis.startMin, axis.endMin);
     var hours = lay.hourMarks(axis.startMin, axis.endMin);
     var halves = lay.halfHourMarks(axis.startMin, axis.endMin);
@@ -269,7 +384,7 @@
     if (st.isToday()) {
       var nowMin = tm.nowMinutes();
       if (nowMin >= axis.startMin && nowMin <= axis.endMin) {
-        nowHtml = '<div class="ff-cal-now" data-ff-cal-now style="top:' +
+        nowHtml = '<div class="ff-cal-now ff-cal-print-hide" data-ff-cal-now style="top:' +
           lay.timeToY(nowMin, axis.startMin) + 'px"></div>';
       }
     }
@@ -280,20 +395,26 @@
 
     root.innerHTML =
       '<div class="ff-cal' + (closed ? " is-closed" : "") + '">' +
-        '<div class="ff-cal-toolbar">' +
+        '<div class="ff-cal-toolbar ff-cal-print-hide">' +
           '<div class="ff-cal-toolbar-left">' +
             '<button type="button" class="ff-cal-today" data-ff-cal-act="today">Today</button>' +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="prev" aria-label="Previous day">‹</button>' +
             '<div class="ff-cal-date">' + escapeHtml(dateLabel) + "</div>" +
             '<button type="button" class="ff-cal-nav" data-ff-cal-act="next" aria-label="Next day">›</button>' +
-            (closed ? '<span class="ff-cal-closed-note">Salon closed</span>' : "") +
-            (focusedId ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
+            dayStatusHtml(st) +
+            (filterOn ? '<button type="button" class="ff-cal-clear-focus" data-ff-cal-act="clear-focus">All providers</button>' : "") +
           "</div>" +
           '<div class="ff-cal-toolbar-right">' +
-            '<button type="button" class="ff-cal-filters" disabled title="Coming later">Filters</button>' +
+            '<button type="button" class="ff-cal-filters' + (filterOn ? " is-on" : "") +
+              '" data-ff-cal-act="filters" aria-haspopup="menu" aria-expanded="false">' +
+              escapeHtml(window.ffBookingCalFilters && window.ffBookingCalFilters.buttonLabel
+                ? window.ffBookingCalFilters.buttonLabel()
+                : "Filters") +
+            "</button>" +
+            '<button type="button" class="ff-cal-print" data-ff-cal-act="print">Print Day</button>' +
             '<div class="ff-cal-view" role="group" aria-label="Calendar view">' +
-              '<button type="button" class="ff-cal-view-btn is-active">Day</button>' +
-              '<button type="button" class="ff-cal-view-btn" disabled title="Week view coming later">Week</button>' +
+              '<button type="button" class="ff-cal-view-btn is-active" data-ff-cal-act="view-day">Day</button>' +
+              '<button type="button" class="ff-cal-view-btn" data-ff-cal-act="view-week">Week</button>' +
             "</div>" +
           "</div>" +
         "</div>" +
@@ -321,11 +442,20 @@
     if (window.ffBookingCalMenu && typeof window.ffBookingCalMenu.close === "function") {
       window.ffBookingCalMenu.close();
     }
-    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" + focusedId;
+    if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+      window.ffBookingCalFilters.close();
+    }
+    lastPaintKey = st.getSelectedDateKey() + "|" + st.getLocationId() + "|" + employees.length + "|" +
+      (st.getVisibleProviderIds ? st.getVisibleProviderIds().join(",") : "");
     paintOverlays(root);
   }
 
   function paintOverlays(root) {
+    try {
+      if (window.ffBookingCalBlocks && typeof window.ffBookingCalBlocks.paint === "function") {
+        window.ffBookingCalBlocks.paint(root);
+      }
+    } catch (_) {}
     try {
       if (window.ffBookingCalCardRender) window.ffBookingCalCardRender.paint(root);
     } catch (_) {}
@@ -343,13 +473,38 @@
     var root = document.getElementById(ROOT_ID);
     var st = state();
     if (!root || !st || !window.ffBookingCalAppointments) return;
-    await window.ffBookingCalAppointments.loadForView(st.getSelectedDateKey(), st.getLocationId());
+    if (st.isWeek && st.isWeek() && typeof window.ffBookingCalAppointments.loadForDates === "function") {
+      await window.ffBookingCalAppointments.loadForDates(st.getWeekDateKeys(), st.getLocationId());
+    } else {
+      await window.ffBookingCalAppointments.loadForView(st.getSelectedDateKey(), st.getLocationId());
+    }
+    paintOverlays(root);
+  }
+
+  async function syncBlocks() {
+    var root = document.getElementById(ROOT_ID);
+    var st = state();
+    var api = window.ffBookingBlocks;
+    if (!root || !st || !api) return;
+    try {
+      if (st.isWeek && st.isWeek() && typeof api.loadForDates === "function") {
+        await api.loadForDates(st.getWeekDateKeys(), st.getLocationId());
+      } else if (typeof api.loadForView === "function") {
+        await api.loadForView(st.getSelectedDateKey(), st.getLocationId());
+      }
+    } catch (_) {}
     paintOverlays(root);
   }
 
   function updateNowLine() {
     if (!isCalendarVisible()) return;
     var st = state();
+    if (st && st.isWeek && st.isWeek()) {
+      if (window.ffBookingCalWeek && typeof window.ffBookingCalWeek.updateNowLine === "function") {
+        window.ffBookingCalWeek.updateNowLine();
+      }
+      return;
+    }
     var tm = time();
     var lay = layout();
     var root = document.getElementById(ROOT_ID);
@@ -366,7 +521,7 @@
       var surface = root.querySelector("[data-ff-cal-surface]");
       if (!surface) return;
       el = document.createElement("div");
-      el.className = "ff-cal-now";
+      el.className = "ff-cal-now ff-cal-print-hide";
       el.setAttribute("data-ff-cal-now", "");
       surface.appendChild(el);
     }
@@ -405,19 +560,85 @@
     var scroll = keepScroll ? readScroll(root) : { left: 0, top: 0 };
     paint(root);
     var st = state();
+    var axis = st && st.isWeek && st.isWeek() && window.ffBookingCalWeek
+      ? window.ffBookingCalWeek.sharedAxis()
+      : (st && st.getAxis ? st.getAxis() : null);
     if (keepScroll) restoreScroll(root, scroll.left, scroll.top);
-    else restoreScroll(root, 0, initialScrollTop(st && st.getAxis ? st.getAxis() : null));
+    else restoreScroll(root, 0, initialScrollTop(axis));
     startNowTimer();
     syncAppointmentCards();
+    syncBlocks();
+  }
+
+  function cancelActiveDrag() {
+    if (window.ffBookingCalDrag && typeof window.ffBookingCalDrag.cancel === "function") {
+      window.ffBookingCalDrag.cancel();
+    }
   }
 
   function onAction(act) {
     var st = state();
     if (!st) return;
+    if (act === "view-day" || act === "view-week" || act === "today" || act === "prev" || act === "next") {
+      cancelActiveDrag();
+    }
+    if (act === "view-day") {
+      if (st.setView) st.setView("day");
+      render({ keepScroll: false });
+      return;
+    }
+    if (act === "view-week") {
+      if (st.setView) st.setView("week");
+      render({ keepScroll: false });
+      return;
+    }
+    if (act === "week-pick") {
+      if (window.ffBookingCalWeek && typeof window.ffBookingCalWeek.openPicker === "function") {
+        window.ffBookingCalWeek.openPicker(document.querySelector(".ff-cal-week-provider, .ff-cal-week-pick"));
+      }
+      return;
+    }
+    if (st.isWeek && st.isWeek()) {
+      if (act === "today") st.goThisWeek();
+      else if (act === "prev") st.shiftWeek(-1);
+      else if (act === "next") st.shiftWeek(1);
+      else if (act === "filters") {
+        if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.toggle === "function") {
+          window.ffBookingCalFilters.toggle(document.querySelector(".ff-cal-filters"));
+        }
+        return;
+      }
+      else if (act === "print") {
+        if (window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printCurrent === "function") {
+          window.ffBookingCalPrint.printCurrent();
+        }
+        return;
+      }
+      else if (act === "clear-focus") {
+        if (st.clearVisibleProviders) st.clearVisibleProviders();
+        render({ keepScroll: true });
+        return;
+      }
+      else return;
+      render({ keepScroll: false });
+      return;
+    }
     if (act === "today") st.goToday();
     else if (act === "prev") st.shiftDay(-1);
     else if (act === "next") st.shiftDay(1);
-    else if (act === "clear-focus") st.clearFocusProvider();
+    else if (act === "clear-focus") st.clearVisibleProviders ? st.clearVisibleProviders() : st.clearFocusProvider();
+    else if (act === "filters") {
+      if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.toggle === "function") {
+        window.ffBookingCalFilters.toggle(document.querySelector(".ff-cal-filters"));
+      }
+      return;
+    }
+    else if (act === "print") {
+      if (window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printCurrent === "function") {
+        window.ffBookingCalPrint.printCurrent();
+      }
+      return;
+    }
     else return;
     render({ keepScroll: false });
   }
@@ -437,6 +658,12 @@
       }
       if (t.closest("[data-ff-cal-hold]")) {
         ev.preventDefault();
+        return;
+      }
+      var blockEl = t.closest("[data-ff-cal-block]");
+      if (blockEl) {
+        ev.preventDefault();
+        openBlockFromEl(blockEl);
         return;
       }
       var card = t.closest("[data-ff-cal-card]");
@@ -472,7 +699,12 @@
         });
         return;
       }
-      openAppointmentFromHit(rememberSlot(ev, t.closest("[data-ff-cal-surface]")));
+      var surface = t.closest("[data-ff-cal-surface]");
+      if (st && st.isWeek && st.isWeek()) {
+        offerSlotCreate(rememberWeekSlot(ev, surface), ev);
+        return;
+      }
+      offerSlotCreate(rememberSlot(ev, surface), ev);
     });
     document.addEventListener("ff-staff-cloud-updated", function () {
       if (isCalendarVisible()) render({ keepScroll: true });
@@ -484,6 +716,7 @@
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-active-location-changed", function () {
+      cancelActiveDrag();
       if (isCalendarVisible()) render({ keepScroll: false });
     });
     document.addEventListener("ff-locations-updated", function () {
@@ -497,6 +730,14 @@
     });
     document.addEventListener("ff-booking-appointment-cancelled", function () {
       if (isCalendarVisible()) syncAppointmentCards();
+    });
+    document.addEventListener("ff-booking-calendar-draft-changed", function () {
+      var root = document.getElementById(ROOT_ID);
+      if (root && isCalendarVisible()) paintOverlays(root);
+    });
+    document.addEventListener("ff-booking-calendar-blocks-changed", function () {
+      var root = document.getElementById(ROOT_ID);
+      if (root && isCalendarVisible()) paintOverlays(root);
     });
     if (!resizeBound) {
       resizeBound = true;
@@ -515,6 +756,12 @@
 
   window.ffRefreshBookingCalendar = refresh;
   window.ffBookingCalendarPaintKey = function () { return lastPaintKey; };
+  window.ffBookingCalendarCreate = {
+    blockedCreate: blockedCreate,
+    slotIsOpen: slotIsOpen,
+    openAppointmentFromHit: openAppointmentFromHit,
+    offerSlotCreate: offerSlotCreate
+  };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bind);

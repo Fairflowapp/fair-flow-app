@@ -82,9 +82,16 @@
     root.querySelectorAll("[data-ff-cal-hold]").forEach(function (el) { el.remove(); });
   }
 
-  function findCol(root, providerId) {
+  function findCol(root, providerId, dateKey) {
     var id = String(providerId || "");
-    if (!root || !id) return null;
+    if (!root) return null;
+    var st = calState();
+    if (st && st.isWeek && st.isWeek()) {
+      var day = String(dateKey || (draft && draft.dateKey) || "");
+      if (!day || !root.querySelector) return null;
+      return root.querySelector('[data-ff-cal-day="' + day + '"]');
+    }
+    if (!id) return null;
     var cols = root.querySelectorAll("[data-ff-cal-emp]");
     for (var i = 0; i < cols.length; i += 1) {
       if (cols[i].getAttribute("data-ff-cal-emp") === id) return cols[i];
@@ -117,7 +124,7 @@
   }
 
   function paintLine(root, axis, lay, line, partySize, item) {
-    var col = findCol(root, line.providerId);
+    var col = findCol(root, line.providerId, draft && draft.dateKey);
     if (!col) return;
     var rect = lay.windowToRect(line.startMin, line.startMin + line.durationMinutes, axis.startMin, axis.endMin);
     if (!rect) return;
@@ -150,8 +157,21 @@
     var st = calState();
     var lay = layout();
     if (!st || !lay) return;
-    if (st.getSelectedDateKey() !== draft.dateKey) return;
-    var axis = st.getAxis();
+    var axis = null;
+    if (st.isWeek && st.isWeek()) {
+      var keys = st.getWeekDateKeys ? st.getWeekDateKeys() : [];
+      if (keys.indexOf(draft.dateKey) === -1) return;
+      var weekId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+      if (weekId && draft.lines.every(function (line) {
+        return String(line.providerId) !== String(weekId);
+      })) return;
+      axis = window.ffBookingCalWeek && typeof window.ffBookingCalWeek.sharedAxis === "function"
+        ? window.ffBookingCalWeek.sharedAxis()
+        : st.getAxis();
+    } else {
+      if (st.getSelectedDateKey() !== draft.dateKey) return;
+      axis = st.getAxis();
+    }
     if (!axis) return;
     var partySize = draftPartySize(draft.lines);
     var items = (built && built.items) || [];
@@ -171,6 +191,42 @@
     });
   }
 
+  function notifyDraftChanged() {
+    if (typeof document === "undefined" || typeof document.dispatchEvent !== "function") return;
+    var ev;
+    try {
+      ev = new CustomEvent("ff-booking-calendar-draft-changed", { detail: { draft: snapshot() } });
+    } catch (_) {
+      ev = { type: "ff-booking-calendar-draft-changed", detail: { draft: snapshot() } };
+    }
+    document.dispatchEvent(ev);
+  }
+
+  function sameLine(a, b) {
+    return a.lineKey === b.lineKey
+      && a.providerId === b.providerId
+      && a.startMin === b.startMin
+      && a.durationMinutes === b.durationMinutes
+      && a.title === b.title
+      && a.clientName === b.clientName
+      && a.guestKey === b.guestKey;
+  }
+
+  function matches(spec) {
+    var lines = normalizeLines(spec);
+    var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
+    var clientName = spec && spec.clientName ? String(spec.clientName) : "";
+    if (!dateKey || !lines.length) return !draft;
+    if (!draft) return false;
+    if (draft.dateKey !== dateKey) return false;
+    if ((draft.clientName || "") !== clientName) return false;
+    if (draft.lines.length !== lines.length) return false;
+    for (var i = 0; i < lines.length; i += 1) {
+      if (!sameLine(draft.lines[i], lines[i])) return false;
+    }
+    return true;
+  }
+
   function sync(root) {
     var render = window.ffBookingCalCardRender;
     if (render && typeof render.paint === "function" && !window.__ffPaintingBoard) {
@@ -184,21 +240,24 @@
     var lines = normalizeLines(spec);
     var dateKey = spec && spec.dateKey ? String(spec.dateKey) : "";
     if (!dateKey || !lines.length) {
-      draft = null;
-      sync();
+      clear();
       return;
     }
+    if (matches(spec)) return;
     draft = {
       dateKey: dateKey,
       clientName: spec.clientName ? String(spec.clientName) : "",
       lines: lines
     };
     sync();
+    notifyDraftChanged();
   }
 
   function clear() {
+    if (!draft) return;
     draft = null;
-    sync();
+    paintFromBoard();
+    notifyDraftChanged();
   }
 
   function snapshot() {
@@ -220,6 +279,7 @@
     clear: clear,
     sync: sync,
     get: snapshot,
+    matches: matches,
     paintFromBoard: paintFromBoard,
     bodyHtml: bodyHtml,
     formatTime: formatTime

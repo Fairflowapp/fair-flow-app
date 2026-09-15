@@ -160,6 +160,8 @@ const calCss = fs.readFileSync(path.join(root, "public/booking/calendar.css"), "
 check("move uses an in-app dialog", dragSrc.indexOf("ff-cal-move") !== -1 && dragSrc.indexOf("window.confirm") === -1);
 check("requested move writes the heart choice", dragSrc.indexOf("keepRequest === true") !== -1 && dragSrc.indexOf("keepRequest === false") !== -1);
 check("staff names are extra bold", /ff-cal-emp-label[\s\S]*font-weight:\s*800/.test(calCss));
+check("closed and off no longer share one background rule", !/\.ff-cal-off,\s*\.ff-cal-closed\s*\{[^}]*background:/.test(calCss.replace(/\s+/g, " ")));
+check("drag exports the local unavailable helper", typeof drag.unavailableDrop === "function");
 
 if (failed) {
   console.error(failed + " calendar drag helper tests failed.");

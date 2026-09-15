@@ -1290,6 +1290,31 @@ service cloud.firestore {
       allow delete: if belongsToSalon(salonId) && isManager(salonId);
     }
 
+    // ===== BOOKING CALENDAR BLOCK TIME =====
+    // One-off provider blocks. Not appointments and not recurring schedule.
+    // Salon members can create/update/delete so front desk can manage availability.
+    // Provider, location, and date stay immutable after create.
+    match /salons/{salonId}/calendarBlocks/{blockId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.locationId is string
+        && request.resource.data.providerId is string
+        && request.resource.data.dateKey is string
+        && request.resource.data.startMin is number
+        && request.resource.data.endMin is number
+        && request.resource.data.endMin > request.resource.data.startMin;
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByStaffId == resource.data.createdByStaffId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.locationId == resource.data.locationId
+        && request.resource.data.providerId == resource.data.providerId
+        && request.resource.data.dateKey == resource.data.dateKey
+        && request.resource.data.endMin > request.resource.data.startMin;
+      allow delete: if belongsToSalon(salonId);
+    }
+
     // ===== BOOKING SALES =====
     // Checkout tickets. Not public. Salon members can read and create.
     match /salons/{salonId}/sales/{saleId} {

@@ -73,7 +73,11 @@
     var api = form();
     var spec = state && api && typeof api.holdSpec === "function" ? api.holdSpec(state) : null;
     if (!spec) {
-      window.ffBookingCalDraft.clear();
+      if (window.ffBookingCalDraft.get && window.ffBookingCalDraft.get()) window.ffBookingCalDraft.clear();
+      return;
+    }
+    if (typeof window.ffBookingCalDraft.matches === "function" && window.ffBookingCalDraft.matches(spec)) {
+      if (typeof window.ffBookingCalDraft.sync === "function") window.ffBookingCalDraft.sync();
       return;
     }
     window.ffBookingCalDraft.set(spec);
