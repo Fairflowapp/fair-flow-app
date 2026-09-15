@@ -94,6 +94,29 @@ check("R draft keep providers separate", multi.lines[0].providerId === "koko" &&
 check("S draft keep start times separate", multi.lines[0].startMin === 705 && multi.lines[1].startMin === 765);
 draft.clear();
 check("clear removes all holds", draft.get() === null);
+draft.set({
+  providerId: "koko",
+  dateKey: "2026-08-24",
+  startMin: 11 * 60 + 15,
+  durationMinutes: 45,
+  title: "Manicure"
+});
+check("matches current draft", draft.matches({
+  providerId: "koko",
+  dateKey: "2026-08-24",
+  startMin: 11 * 60 + 15,
+  durationMinutes: 45,
+  title: "Manicure"
+}) === true);
+draft.set({
+  providerId: "koko",
+  dateKey: "2026-08-24",
+  startMin: 11 * 60 + 15,
+  durationMinutes: 45,
+  title: "Manicure"
+});
+check("identical set keeps the same draft", draft.get() && draft.get().startMin === 11 * 60 + 15);
+check("empty clear matches no draft after clear", (draft.clear(), draft.matches(null) === true && draft.get() === null));
 
 if (failed) process.exit(1);
 console.log("All Calendar draft preview tests passed.");

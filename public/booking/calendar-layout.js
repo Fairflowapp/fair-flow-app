@@ -143,7 +143,7 @@
     var emp = employees[index];
     return {
       providerId: emp && emp.id ? emp.id : "",
-      dateKey: spec.dateKey || "",
+      dateKey: (emp && emp.dateKey) || spec.dateKey || "",
       startMin: startMin
     };
   }

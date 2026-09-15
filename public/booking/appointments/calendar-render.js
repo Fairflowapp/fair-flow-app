@@ -130,7 +130,77 @@
 
   function clear(root) {
     if (!root) return;
-    root.querySelectorAll("[data-ff-cal-card]").forEach(function (el) { el.remove(); });
+    root.querySelectorAll("[data-ff-cal-card], [data-ff-cal-hold]").forEach(function (el) { el.remove(); });
+  }
+
+  function cardsForWeekDay(api, dateKey, locationId, providerId) {
+    if (typeof api.cardsForProvider === "function") return api.cardsForProvider(dateKey, locationId, providerId);
+    return (api.cardsForView(dateKey, locationId) || []).filter(function (card) {
+      return card && card.providerId === providerId;
+    });
+  }
+
+  function buildItems(cards, holds) {
+    return board() && typeof board().build === "function"
+      ? board().build({ cards: cards, holds: holds || [] })
+      : { items: overlapLanes(cards) };
+  }
+
+  function paintItems(root, items, axis, week) {
+    var lay = layout();
+    if (!root || !lay) return;
+    (items || []).forEach(function (item) {
+      if (item.kind && item.kind !== "card") return;
+      var card = item.source || item;
+      var col = week
+        ? root.querySelector('[data-ff-cal-day="' + (card.dateKey || item.dateKey || "") + '"]')
+        : root.querySelector('[data-ff-cal-emp="' + item.providerId + '"]');
+      if (!col) return;
+      var rect = lay.windowToRect(item.startMin, item.endMin, axis.startMin, axis.endMin);
+      if (!rect) return;
+      var el = document.createElement("button");
+      el.type = "button";
+      var statusKey = String(card.status || "scheduled").trim() || "scheduled";
+      var statusClass = window.ffBookingAppointmentStatus && typeof window.ffBookingAppointmentStatus.cardClass === "function"
+        ? window.ffBookingAppointmentStatus.cardClass(statusKey)
+        : "is-status-" + statusKey;
+      var duration = card.durationMinutes || (item.endMin - item.startMin);
+      var stacked = (card.serviceNames && card.serviceNames.length > 1) || (card.lineIds && card.lineIds.length > 1);
+      el.className = ("ff-cal-card " + densityClass(duration) + " " + statusClass + (card.firstVisit ? " is-new-client" : "") + (card.requested ? " is-requested" : "") + (stacked ? " is-stack" : "")).trim();
+      el.setAttribute("data-ff-cal-card", card.appointmentId || item.appointmentId);
+      if (card.clientKey || card.clientId) {
+        el.setAttribute("data-ff-cal-client", card.clientKey || card.clientId);
+      }
+      el.setAttribute("data-ff-cal-status", statusKey);
+      el.setAttribute("data-ff-cal-line", card.lineId || item.lineId);
+      if (card.lineIds && card.lineIds.length) {
+        el.setAttribute("data-ff-cal-lines", card.lineIds.join(","));
+      }
+      if (card.requested) {
+        el.setAttribute("data-ff-cal-requested", "1");
+        el.setAttribute("title", "Requested for this provider");
+        el.setAttribute("aria-label", "Requested for this provider");
+      }
+      el.setAttribute("data-ff-cal-start", String(item.startMin));
+      el.setAttribute("data-ff-cal-duration", String(duration));
+      el.style.top = rect.top + "px";
+      el.style.height = Math.max(rect.height, 18) + "px";
+      applyBoardBox(el, item);
+      var party = Number(card.partySize) > 1
+        ? '<span class="ff-cal-card-party">' + escapeHtml(String(card.partySize) + " people") + "</span>"
+        : "";
+      var newbie = card.firstVisit
+        ? '<span class="ff-cal-card-new">New Client</span>'
+        : "";
+      el.innerHTML = stacked
+        ? stackHtml(card) + party + newbie
+        : '<span class="ff-cal-card-name">' + escapeHtml(card.clientName) + "</span>" +
+          servicesHtml(card) +
+          '<span class="ff-cal-card-time">' + escapeHtml(rangeLabel(item.startMin, item.endMin)) + "</span>" +
+          party +
+          newbie;
+      col.appendChild(el);
+    });
   }
 
   function paint(root) {
@@ -142,63 +212,34 @@
     window.__ffPaintingBoard = true;
     try {
       clear(root);
-      var axis = st.getAxis();
-      var cards = api.cardsForView(st.getSelectedDateKey(), st.getLocationId());
-      var built = board() && typeof board().build === "function"
-        ? board().build({ cards: cards, holds: holdsFromDraft() })
-        : { items: overlapLanes(cards) };
-      built.items.forEach(function (item) {
-        if (item.kind && item.kind !== "card") return;
-        var card = item.source || item;
-        var col = root.querySelector('[data-ff-cal-emp="' + item.providerId + '"]');
-        if (!col) return;
-        var rect = lay.windowToRect(item.startMin, item.endMin, axis.startMin, axis.endMin);
-        if (!rect) return;
-        var el = document.createElement("button");
-        el.type = "button";
-        var statusKey = String(card.status || "scheduled").trim() || "scheduled";
-        var statusClass = window.ffBookingAppointmentStatus && typeof window.ffBookingAppointmentStatus.cardClass === "function"
-          ? window.ffBookingAppointmentStatus.cardClass(statusKey)
-          : "is-status-" + statusKey;
-        var duration = card.durationMinutes || (item.endMin - item.startMin);
-        var stacked = (card.serviceNames && card.serviceNames.length > 1) || (card.lineIds && card.lineIds.length > 1);
-        el.className = ("ff-cal-card " + densityClass(duration) + " " + statusClass + (card.firstVisit ? " is-new-client" : "") + (card.requested ? " is-requested" : "") + (stacked ? " is-stack" : "")).trim();
-        el.setAttribute("data-ff-cal-card", card.appointmentId || item.appointmentId);
-        if (card.clientKey || card.clientId) {
-          el.setAttribute("data-ff-cal-client", card.clientKey || card.clientId);
+      var week = !!(st.isWeek && st.isWeek());
+      var axis = week && window.ffBookingCalWeek && typeof window.ffBookingCalWeek.sharedAxis === "function"
+        ? window.ffBookingCalWeek.sharedAxis()
+        : st.getAxis();
+      if (week) {
+        var weekId = st.getWeekProviderId ? st.getWeekProviderId() : "";
+        var loc = st.getLocationId();
+        var snap = draftApi() && typeof draftApi().get === "function" ? draftApi().get() : null;
+        var weekHoldBuilt = null;
+        (st.getWeekDateKeys ? st.getWeekDateKeys() : []).forEach(function (dateKey) {
+          var dayCards = cardsForWeekDay(api, dateKey, loc, weekId);
+          var holds = snap && snap.dateKey === dateKey && (!weekId || snap.providerId === weekId)
+            ? holdsFromDraft()
+            : [];
+          var built = buildItems(dayCards, holds);
+          paintItems(root, built.items, axis, true);
+          if (holds.length) weekHoldBuilt = built;
+        });
+        if (draftApi() && typeof draftApi().paintFromBoard === "function") {
+          draftApi().paintFromBoard(root, weekHoldBuilt);
         }
-        el.setAttribute("data-ff-cal-status", statusKey);
-        el.setAttribute("data-ff-cal-line", card.lineId || item.lineId);
-        if (card.lineIds && card.lineIds.length) {
-          el.setAttribute("data-ff-cal-lines", card.lineIds.join(","));
+      } else {
+        var cards = api.cardsForView(st.getSelectedDateKey(), st.getLocationId());
+        var built = buildItems(cards, holdsFromDraft());
+        paintItems(root, built.items, axis, false);
+        if (draftApi() && typeof draftApi().paintFromBoard === "function") {
+          draftApi().paintFromBoard(root, built);
         }
-        if (card.requested) {
-          el.setAttribute("data-ff-cal-requested", "1");
-          el.setAttribute("title", "Requested for this provider");
-          el.setAttribute("aria-label", "Requested for this provider");
-        }
-        el.setAttribute("data-ff-cal-start", String(item.startMin));
-        el.setAttribute("data-ff-cal-duration", String(duration));
-        el.style.top = rect.top + "px";
-        el.style.height = Math.max(rect.height, 18) + "px";
-        applyBoardBox(el, item);
-        var party = Number(card.partySize) > 1
-          ? '<span class="ff-cal-card-party">' + escapeHtml(String(card.partySize) + " people") + "</span>"
-          : "";
-        var newbie = card.firstVisit
-          ? '<span class="ff-cal-card-new">New Client</span>'
-          : "";
-        el.innerHTML = stacked
-          ? stackHtml(card) + party + newbie
-          : '<span class="ff-cal-card-name">' + escapeHtml(card.clientName) + "</span>" +
-            servicesHtml(card) +
-            '<span class="ff-cal-card-time">' + escapeHtml(rangeLabel(item.startMin, item.endMin)) + "</span>" +
-            party +
-            newbie;
-        col.appendChild(el);
-      });
-      if (draftApi() && typeof draftApi().paintFromBoard === "function") {
-        draftApi().paintFromBoard(root, built);
       }
     } finally {
       window.__ffPaintingBoard = false;

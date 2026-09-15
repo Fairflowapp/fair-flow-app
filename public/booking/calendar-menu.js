@@ -41,8 +41,7 @@
       {
         id: "week",
         label: "View provider week",
-        enabled: false,
-        hint: "Week view coming later"
+        enabled: true
       },
       {
         id: "hours",
@@ -53,8 +52,7 @@
       {
         id: "block",
         label: "Block time",
-        enabled: false,
-        hint: "Coming later"
+        enabled: true
       },
       {
         id: "unavailable",
@@ -70,8 +68,7 @@
       {
         id: "print",
         label: "Print day schedule",
-        enabled: false,
-        hint: "Coming later"
+        enabled: true
       }
     ];
   }
@@ -84,12 +81,25 @@
       if (typeof window.ffRefreshBookingCalendar === "function") window.ffRefreshBookingCalendar();
       return;
     }
+    if (id === "week" && st) {
+      if (typeof st.setWeekProviderId === "function") st.setWeekProviderId(ctx.providerId);
+      if (typeof st.setView === "function") st.setView("week");
+      if (typeof window.ffRefreshBookingCalendar === "function") window.ffRefreshBookingCalendar();
+      return;
+    }
     if (id === "hours" && canManageHours() && hasScheduleTab()) {
       window.openStaffMemberScheduleTab(ctx.providerId);
       return;
     }
+    if (id === "block" && window.ffBookingCalBlockUi && typeof window.ffBookingCalBlockUi.openCreateFromMenu === "function") {
+      window.ffBookingCalBlockUi.openCreateFromMenu(ctx);
+      return;
+    }
     if (id === "profile" && hasProfile()) {
       window.openStaffMembersModal({ jumpToStaffId: ctx.providerId, jumpToTab: "details" });
+    }
+    if (id === "print" && window.ffBookingCalPrint && typeof window.ffBookingCalPrint.printProvider === "function") {
+      window.ffBookingCalPrint.printProvider(ctx.providerId);
     }
   }
 
@@ -149,6 +159,9 @@
       return;
     }
     close();
+    if (window.ffBookingCalFilters && typeof window.ffBookingCalFilters.close === "function") {
+      window.ffBookingCalFilters.close();
+    }
     var el = ensureMenu();
     openCtx = ctx;
     openCtx.anchor = anchor;

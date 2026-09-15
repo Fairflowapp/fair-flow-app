@@ -49,16 +49,34 @@
     });
   }
 
+  function blockContext(axis) {
+    var ax = axisOf(axis);
+    var st = window.ffBookingCalState;
+    return {
+      dateKey: ax.dateKey || (st && typeof st.getSelectedDateKey === "function" ? st.getSelectedDateKey() : ""),
+      locationId: ax.locationId || (st && typeof st.getLocationId === "function" ? st.getLocationId() : "")
+    };
+  }
+
+  function providerBlockWindows(emp, axis) {
+    var api = window.ffBookingCalBlocks;
+    if (!api || typeof api.windowsForProvider !== "function" || !emp || !emp.id) return [];
+    var ctx = blockContext(axis);
+    return api.windowsForProvider(ctx.dateKey, ctx.locationId, emp.id) || [];
+  }
+
   function unavailableForProvider(emp, axis) {
     return {
       closed: salonClosedWindows(axis),
-      off: providerOffWindows(emp && emp.working, axis)
+      off: providerOffWindows(emp && emp.working, axis),
+      blocked: providerBlockWindows(emp, axis)
     };
   }
 
   function reasonAt(emp, axis, minutes) {
     if (covers(salonClosedWindows(axis), minutes)) return "salon_closed";
     if (covers(providerOffWindows(emp && emp.working, axis), minutes)) return "provider_off";
+    if (covers(providerBlockWindows(emp, axis), minutes)) return "provider_blocked";
     return "available";
   }
 
@@ -67,7 +85,7 @@
     var st = window.ffBookingCalState;
     if (api && st && emp && emp.id) {
       return api.isProviderAvailableAt(emp.id, {
-        dateKey: st.getSelectedDateKey(),
+        dateKey: (axis && axis.dateKey) || st.getSelectedDateKey(),
         minutes: minutes
       }, st.getLocationId());
     }

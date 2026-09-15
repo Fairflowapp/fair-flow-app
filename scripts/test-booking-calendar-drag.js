@@ -79,6 +79,14 @@ check("a hold click does not open details", drag.releaseOpensDetails({
   kind: "hold",
   lineKey: "k1"
 }, null) === false);
+check("tapping a block opens the editor", drag.releaseOpensBlock({
+  kind: "block",
+  blockId: "blk_1"
+}, null) === true);
+check("dropping a block does not open the editor", drag.releaseOpensBlock({
+  kind: "block",
+  blockId: "blk_1"
+}, { providerId: "ashley", startMin: 800 }) === false);
 check("drag starts after a real move, not a tap", drag.THRESHOLD >= 8);
 
 const at930 = { kind: "hold", lineKey: "k1", fromProviderId: "ashley", fromStartMin: 9 * 60 + 30, durationMinutes: 60 };
@@ -160,6 +168,8 @@ const calCss = fs.readFileSync(path.join(root, "public/booking/calendar.css"), "
 check("move uses an in-app dialog", dragSrc.indexOf("ff-cal-move") !== -1 && dragSrc.indexOf("window.confirm") === -1);
 check("requested move writes the heart choice", dragSrc.indexOf("keepRequest === true") !== -1 && dragSrc.indexOf("keepRequest === false") !== -1);
 check("staff names are extra bold", /ff-cal-emp-label[\s\S]*font-weight:\s*800/.test(calCss));
+check("closed and off no longer share one background rule", !/\.ff-cal-off,\s*\.ff-cal-closed\s*\{[^}]*background:/.test(calCss.replace(/\s+/g, " ")));
+check("drag exports the local unavailable helper", typeof drag.unavailableDrop === "function");
 
 if (failed) {
   console.error(failed + " calendar drag helper tests failed.");
