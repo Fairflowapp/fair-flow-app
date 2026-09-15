@@ -79,6 +79,16 @@ qa/test-results/
 qa/playwright-report/
 qa/regression-results/
 
+# Generated Cloud Functions copies of Booking/Smart Scheduling sources.
+# Rebuild with: node functions/booking-smart-scheduling/build-runtime.js
+functions/booking-smart-scheduling/runtime/
+
+# Isolated Functions bundle smoke-test scratch
+.tmp-functions-bundle/
+
+# Local Firestore emulator JDK / scratch (never commit)
+.local/
+
 # dataconnect generated files
 .dataconnect
 
