@@ -48,11 +48,17 @@ Authenticated login runs in a dedicated Playwright setup project with tracing, s
 From the repo root (`ff-booking-qa`):
 
 ```bash
-# Static Booking contract tests (no browser, no Firestore writes)
+# Static Booking contract tests (no browser, no emulator, no staging callables)
 npm run test:booking:static
 
 # Policy self-check: runner exits 0 only for the exact c2ba63e CLASS A set
 npm run test:booking:static:policy
+
+# Environment-dependent Smart Scheduling suites (not part of test:booking:static)
+# Require FF_QA_APP_ROOT pointing at a product worktree that has the scripts
+npm run test:booking:smart-scheduling:firestore-emulator
+npm run test:booking:smart-scheduling:execute-booking-mutation
+npm run test:booking:smart-scheduling:staging-callable -- --project fair-flow-staging
 
 # Playwright smoke (read-only, Chromium, America/New_York)
 # Browser origin is https://fair-flow-staging.web.app/?env=staging

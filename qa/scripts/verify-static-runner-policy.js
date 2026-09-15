@@ -6,11 +6,14 @@
  */
 const assert = require("assert");
 const {
+  STATIC_EXCLUDED,
+  isStaticBookingScript,
   expectedFailureKeys,
   parseFails,
   classifyFail,
   assessCollectedTests,
   collectFromSpawn,
+  listStaticTests,
 } = require("../../scripts/run-booking-static-qa.js");
 
 const BASE = "scripts/test-booking-clients-ui.js";
@@ -98,6 +101,23 @@ check("crash without FAIL lines is rejected", () => {
   });
   assert.strictEqual(collected.rows[0].status, "fail");
   assert.ok(assessCollectedTests(collected.rows).unexpected > 0);
+});
+
+check("env-dependent Smart Scheduling suites are excluded from static", () => {
+  assert.deepStrictEqual(STATIC_EXCLUDED, [
+    "scripts/test-booking-smart-scheduling-execute-booking-mutation.js",
+    "scripts/test-booking-smart-scheduling-firestore-emulator.js",
+    "scripts/test-booking-smart-scheduling-staging-callable.js",
+  ]);
+  STATIC_EXCLUDED.forEach((rel) => {
+    assert.strictEqual(isStaticBookingScript(rel), false);
+  });
+  assert.strictEqual(isStaticBookingScript("scripts/test-booking-shell.js"), true);
+  assert.strictEqual(isStaticBookingScript("scripts/test-booking-smart-scheduling.js"), true);
+  const listed = listStaticTests();
+  STATIC_EXCLUDED.forEach((rel) => {
+    assert.ok(listed.indexOf(rel) === -1);
+  });
 });
 
 check("spawn error is rejected", () => {
