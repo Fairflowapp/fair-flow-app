@@ -71,6 +71,9 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# Local Firestore emulator JDK / scratch (never commit)
+.local/
+
 # dataconnect generated files
 .dataconnect
 

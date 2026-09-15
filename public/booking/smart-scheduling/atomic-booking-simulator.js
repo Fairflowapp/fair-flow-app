@@ -1130,6 +1130,7 @@
   api.prepareSimulatedTransaction = prepareSimulatedTransaction;
   api.commitSimulatedTransaction = commitSimulatedTransaction;
   api.executeAtomicMutation = executeAtomicMutation;
+  api.evaluateAtomicMutation = evaluateMutation;
   api.simulateConcurrentMutations = simulateConcurrentMutations;
   api.ATOMIC_BOOKING_SIMULATOR = {
     SCHEMA_VERSION: SCHEMA,
