@@ -194,7 +194,7 @@ Ordinary appointment/client cleanup deletes only records whose notes contain tha
 npm run test:booking:cleanup-stale
 ```
 
-That command only deletes QA-marked `ffBookingQa` appointments/clients older than 6 hours (override with `FF_QA_STALE_MS`). Never `qaAppointmentClient` / `FF-QA-FIXTURE`.
+That command only deletes QA-marked `ffBookingQa` appointments, clients, and `calendarBlocks` older than 6 hours (override with `FF_QA_STALE_MS`). Never `qaAppointmentClient` / `FF-QA-FIXTURE`. Blocks must have an `FF-QA-*` note or label on `qaLoc1` / `qaProv1`/`qaProv2`.
 
 Machine-readable output: `qa/regression-results/` (gitignored).
 
