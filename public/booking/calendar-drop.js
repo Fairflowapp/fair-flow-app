@@ -81,7 +81,15 @@
     if (rangeOverlaps(regions.off, startMin, endMin)) {
       return { ok: false, reason: "provider_off", message: MESSAGES.provider_off };
     }
-    if (rangeOverlaps(regions.blocked, startMin, endMin)) {
+    var skipBlock = String(
+      (action.source && action.source.kind === "block" && action.source.blockId) ||
+      action.excludeBlockId ||
+      ""
+    ).trim();
+    var blockedWins = (regions.blocked || []).filter(function (win) {
+      return !(skipBlock && win && String(win.blockId || "") === skipBlock);
+    });
+    if (rangeOverlaps(blockedWins, startMin, endMin)) {
       return { ok: false, reason: "provider_blocked", message: MESSAGES.provider_blocked };
     }
     return { ok: true };

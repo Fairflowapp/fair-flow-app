@@ -71,6 +71,14 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# Booking QA local secrets and generated reports
+qa/fixtures/staging.env
+qa/.auth/
+qa/baselines/last-*.json
+qa/test-results/
+qa/playwright-report/
+qa/regression-results/
+
 # Generated Cloud Functions copies of Booking/Smart Scheduling sources.
 # Rebuild with: node functions/booking-smart-scheduling/build-runtime.js
 functions/booking-smart-scheduling/runtime/

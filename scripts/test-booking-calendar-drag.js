@@ -79,6 +79,14 @@ check("a hold click does not open details", drag.releaseOpensDetails({
   kind: "hold",
   lineKey: "k1"
 }, null) === false);
+check("tapping a block opens the editor", drag.releaseOpensBlock({
+  kind: "block",
+  blockId: "blk_1"
+}, null) === true);
+check("dropping a block does not open the editor", drag.releaseOpensBlock({
+  kind: "block",
+  blockId: "blk_1"
+}, { providerId: "ashley", startMin: 800 }) === false);
 check("drag starts after a real move, not a tap", drag.THRESHOLD >= 8);
 
 const at930 = { kind: "hold", lineKey: "k1", fromProviderId: "ashley", fromStartMin: 9 * 60 + 30, durationMinutes: 60 };

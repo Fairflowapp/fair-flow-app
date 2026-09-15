@@ -7,13 +7,29 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "test:booking:static": "node scripts/run-booking-static-qa.js",
+    "test:booking:static:policy": "node qa/scripts/verify-static-runner-policy.js",
+    "test:booking:smart-scheduling:firestore-emulator": "node qa/scripts/run-env-dependent-booking-script.js scripts/test-booking-smart-scheduling-firestore-emulator.js",
+    "test:booking:smart-scheduling:execute-booking-mutation": "node qa/scripts/run-env-dependent-booking-script.js scripts/test-booking-smart-scheduling-execute-booking-mutation.js",
+    "test:booking:smart-scheduling:staging-callable": "node qa/scripts/run-env-dependent-booking-script.js scripts/test-booking-smart-scheduling-staging-callable.js",
+    "test:booking:e2e": "playwright test --config qa/playwright.config.js --project=chromium",
+    "test:booking:lifecycle": "FF_QA_SUITE=lifecycle playwright test --config qa/playwright.config.js --project=lifecycle",
+    "test:booking:clients": "FF_QA_SUITE=clients playwright test --config qa/playwright.config.js --project=clients",
+    "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle && npm run test:booking:clients",
+    "test:booking:regression": "node qa/scripts/run-booking-regression.js",
+    "test:booking:regression:compare": "node qa/scripts/verify-baseline-compare.js",
+    "test:booking:regression:slot-helper": "node qa/scripts/verify-slot-create-helper.js",
+    "test:booking:regression:lock": "node qa/scripts/verify-write-lock.js",
+    "test:booking:regression:cleanup-scope": "node qa/scripts/verify-cleanup-scope.js",
+    "test:booking:cleanup-stale": "node qa/scripts/cleanup-stale-qa.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "patch-package": "^8.0.1",
     "playwright": "^1.62.0",
     "sharp": "^0.34.5"

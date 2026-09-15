@@ -154,6 +154,10 @@
     if (!block || !rect) return "";
     return '<div class="ff-cal-block" data-ff-cal-block="' + escapeHtml(block.blockId) +
       '" data-ff-cal-block-reason="' + escapeHtml(block.reason) +
+      '" data-ff-cal-start="' + Number(block.startMin) +
+      '" data-ff-cal-duration="' + Math.max(15, Number(block.endMin) - Number(block.startMin)) +
+      '" data-ff-cal-block-provider="' + escapeHtml(block.providerId) +
+      '" data-ff-cal-block-date="' + escapeHtml(block.dateKey) +
       '" title="' + escapeHtml(block.label) +
       '" style="top:' + rect.top + "px;height:" + Math.max(rect.height, 16) + 'px">' +
       '<span class="ff-cal-block-label">' + escapeHtml(block.label) + "</span></div>";

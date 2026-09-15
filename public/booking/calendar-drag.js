@@ -110,6 +110,38 @@
         durationMinutes: Number(hold.getAttribute("data-ff-cal-duration")) || 30
       };
     }
+    var blockEl = el.closest("[data-ff-cal-block]");
+    if (blockEl) {
+      var blockId = blockEl.getAttribute("data-ff-cal-block") || "";
+      var row = window.ffBookingCalBlocks && typeof window.ffBookingCalBlocks.getById === "function"
+        ? window.ffBookingCalBlocks.getById(blockId)
+        : null;
+      var st = calState();
+      var col = blockEl.closest("[data-ff-cal-emp]");
+      var dayCol = blockEl.closest("[data-ff-cal-day]");
+      var week = isWeek();
+      return {
+        kind: "block",
+        el: blockEl,
+        blockId: blockId,
+        fromProviderId: (row && row.providerId) ||
+          blockEl.getAttribute("data-ff-cal-block-provider") ||
+          (col ? col.getAttribute("data-ff-cal-emp") : "") ||
+          (week && st && st.getWeekProviderId ? st.getWeekProviderId() : ""),
+        fromDateKey: (row && row.dateKey) ||
+          blockEl.getAttribute("data-ff-cal-block-date") ||
+          (dayCol ? dayCol.getAttribute("data-ff-cal-day") : "") ||
+          (st && st.getSelectedDateKey ? st.getSelectedDateKey() : ""),
+        fromLocationId: (row && row.locationId) || (st && st.getLocationId ? st.getLocationId() : ""),
+        fromStartMin: row ? Number(row.startMin) : Number(blockEl.getAttribute("data-ff-cal-start")),
+        durationMinutes: row
+          ? Math.max(15, Number(row.endMin) - Number(row.startMin))
+          : (Number(blockEl.getAttribute("data-ff-cal-duration")) || 30),
+        reason: row && row.reason,
+        note: row && row.note,
+        label: row && row.label
+      };
+    }
     var card = el.closest("[data-ff-cal-card]");
     if (card) {
       var col = card.closest("[data-ff-cal-emp]");
@@ -239,6 +271,7 @@
       );
     if (!preview || !preview.providerId) return null;
     if (source.kind === "hold" && !source.lineKey) return null;
+    if (source.kind === "block" && !source.blockId) return null;
     if (source.kind === "card" && (!source.appointmentId || !source.lineId)) return null;
     var destDate = String((hit && hit.dateKey) || "").trim();
     if (destDate) preview.dateKey = destDate;
@@ -692,6 +725,74 @@
     return action;
   }
 
+  function blockDropConflict(action) {
+    if (!action || !action.source || action.source.kind !== "block") return null;
+    if (action.dateKey || action.source.fromDateKey) {
+      action.dateKey = action.dateKey || action.source.fromDateKey;
+    }
+    if (action.source.fromLocationId) {
+      action.locationId = action.locationId || action.source.fromLocationId;
+    }
+    if (action.axis) {
+      action.axis.dateKey = action.dateKey || action.axis.dateKey;
+      action.axis.locationId = action.locationId || action.axis.locationId;
+    }
+    var blocked = unavailableDrop(action) || overlapDrop(action);
+    if (blocked) return blocked;
+    var cache = window.ffBookingCalBlocks;
+    var startMin = Number(action.startMin);
+    var duration = Number(action.source.durationMinutes) || 30;
+    if (cache && typeof cache.overlaps === "function" && Number.isFinite(startMin)
+        && cache.overlaps(
+          action.dateKey || action.source.fromDateKey,
+          action.locationId || action.source.fromLocationId,
+          action.providerId,
+          startMin,
+          startMin + duration,
+          action.source.blockId
+        )) {
+      return {
+        ok: false,
+        reason: "block_conflict",
+        message: "This provider already has overlapping block time."
+      };
+    }
+    return null;
+  }
+
+  function assignBlock(action) {
+    var source = action && action.source;
+    var api = window.ffBookingBlocks;
+    var cache = window.ffBookingCalBlocks;
+    if (!source || !source.blockId || !api || typeof api.update !== "function") {
+      toastError("This block time could not be moved.");
+      return Promise.resolve(false);
+    }
+    var startMin = Number(action.startMin);
+    var duration = Number(source.durationMinutes) || 30;
+    var spec = {
+      blockId: source.blockId,
+      providerId: action.providerId,
+      locationId: source.fromLocationId,
+      dateKey: action.dateKey || source.fromDateKey,
+      startMin: startMin,
+      endMin: startMin + duration,
+      reason: source.reason,
+      note: source.note || "",
+      label: source.label
+    };
+    if (cache && typeof cache.upsert === "function") cache.upsert(spec);
+    if (cache && typeof cache.paint === "function") {
+      try { cache.paint(); } catch (_) {}
+    }
+    return api.update(source.blockId, spec).then(function () {
+      return true;
+    }).catch(function (err) {
+      toastError((err && err.message) || "This block time could not be moved.");
+      return false;
+    });
+  }
+
   function applyDrop(action) {
     if (!action) return Promise.resolve(false);
     if (session && session.context && dragContextChanged(session.context)) {
@@ -704,6 +805,15 @@
         return Promise.resolve(false);
       }
       decorateWeekAction(action);
+    }
+    if (action.source && action.source.kind === "block") {
+      var blockBlocked = blockDropConflict(action);
+      if (blockBlocked) {
+        restoreSource();
+        toastError(blockBlocked.message || "That time is not available.");
+        return Promise.resolve(false);
+      }
+      return assignBlock(action);
     }
     var blocked = unavailableDrop(action);
     if (!blocked && isWeek()) blocked = overlapDrop(action);
@@ -826,6 +936,7 @@
   }
 
   function restoreSource() {
+    var dragged = !!(session && session.dragging);
     var sourceEl = session && session.source && session.source.el;
     if (sourceEl) sourceEl.classList.remove("is-dragging");
     if (window.ffBookingCalDraft && typeof window.ffBookingCalDraft.sync === "function") {
@@ -833,6 +944,9 @@
     }
     if (window.ffBookingCalCardRender && typeof window.ffBookingCalCardRender.paint === "function") {
       try { window.ffBookingCalCardRender.paint(); } catch (_) {}
+    }
+    if (dragged && window.ffBookingCalBlocks && typeof window.ffBookingCalBlocks.paint === "function") {
+      try { window.ffBookingCalBlocks.paint(); } catch (_) {}
     }
   }
 
@@ -859,6 +973,16 @@
 
   function releaseOpensDetails(source, action) {
     return !!(source && source.kind === "card" && source.appointmentId && !action);
+  }
+
+  function releaseOpensBlock(source, action) {
+    return !!(source && source.kind === "block" && source.blockId && !action);
+  }
+
+  function openBlockEditor(source) {
+    if (!releaseOpensBlock(source, null)) return;
+    var ui = window.ffBookingCalBlockUi;
+    if (ui && typeof ui.openEdit === "function") ui.openEdit(source.blockId);
   }
 
   function openCardDetails(source) {
@@ -949,6 +1073,11 @@
     }
     var source = session.source;
     endSession(false);
+    if (releaseOpensBlock(source, action)) {
+      suppressClick = true;
+      openBlockEditor(source);
+      return;
+    }
     if (!releaseOpensDetails(source, action)) return;
     suppressClick = true;
     var stacked = source.el && source.el.classList && source.el.classList.contains("is-stack");
@@ -1021,6 +1150,7 @@
     applyDrop: applyDrop,
     consumeClick: consumeClick,
     releaseOpensDetails: releaseOpensDetails,
+    releaseOpensBlock: releaseOpensBlock,
     cancel: cancel,
     planCardMove: planCardMove,
     weekCardDraggable: weekCardDraggable,
