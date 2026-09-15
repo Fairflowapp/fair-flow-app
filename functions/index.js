@@ -47,6 +47,11 @@ const _writeups = require("./writeups");
 exports.approveAndSendWriteup = _writeups.approveAndSendWriteup;
 exports.writeupEmployeeAction = _writeups.writeupEmployeeAction;
 
+// Smart Scheduling Phase 18F — server-authoritative booking mutation callable.
+// Handler is testable without deploy. Do not deploy until Phase 18F.1.
+const _bookingMutation = require("./booking-smart-scheduling/callable");
+exports.executeBookingMutation = _bookingMutation.executeBookingMutation;
+
 // Time Clock Stage A — trusted server-side punch + manage (staffId is derived
 // server-side; kiosk PIN verified in-function; auditEvents per entry).
 // Stage B adds kiosk photo capture inside timeClockPunch + the daily 90-day

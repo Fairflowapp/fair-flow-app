@@ -3,6 +3,7 @@
   "description": "Cloud Functions for Fair Flow Admin PIN Reset",
   "scripts": {
     "lint": "eslint .",
+    "build:booking-smart-scheduling": "node booking-smart-scheduling/build-runtime.js",
     "serve": "firebase emulators:start --only functions",
     "shell": "firebase functions:shell",
     "start": "npm run shell",
