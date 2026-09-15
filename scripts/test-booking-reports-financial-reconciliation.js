@@ -43,11 +43,13 @@ load("public/booking/reports/compute.js", windowObj);
 load("public/booking/reports/sales-range.js", windowObj);
 load("public/booking/reports/service-sales-compute.js", windowObj);
 load("public/booking/reports/sales-time-compute.js", windowObj);
+load("public/booking/reports/client-spend-compute.js", windowObj);
 
 const compute = windowObj.ffBookingReportsCompute;
 const range = windowObj.ffBookingReportsSalesRange;
 const serviceApi = windowObj.ffBookingReportsServiceSalesCompute;
 const timeApi = windowObj.ffBookingReportsSalesTimeCompute;
+const spendApi = windowObj.ffBookingReportsClientSpendCompute;
 
 const SALES = [
   {
@@ -137,6 +139,14 @@ const SALES = [
 const OPTS = { fromKey: "2026-09-10", toKey: "2026-09-12", locationIds: ["nyc", "la"] };
 const summary = compute.summarize(SALES, OPTS);
 const service = serviceApi.summarizeServiceSales(SALES, OPTS);
+const spendSales = SALES.map(function (row, i) {
+  if (row.saleId === "a1") return Object.assign({}, row, { clientId: "ada", clientSnapshot: { displayName: "Ada" } });
+  if (row.saleId === "b1") return Object.assign({}, row, { clientId: "bea", clientSnapshot: { displayName: "Bea" } });
+  if (row.saleId === "a2") return Object.assign({}, row, { clientId: "ada", clientSnapshot: { displayName: "Ada" } });
+  if (row.saleId === "a3") return Object.assign({}, row, { clientId: "", clientSnapshot: { displayName: "Walk-in" } });
+  return row;
+});
+const spend = spendApi.summarizeClientSpend(spendSales, OPTS);
 const time = timeApi.summarizeSalesByPeriod(SALES, OPTS);
 const timeDailyGross = time.days.reduce(function (sum, row) { return sum + row.grossSales; }, 0);
 const timeDailyRefunds = time.days.reduce(function (sum, row) { return sum + row.refunds; }, 0);
@@ -173,6 +183,10 @@ const incompleteFetch = { kind: "incomplete", message: range.INCOMPLETE_MESSAGE,
 check("N: incomplete retrieval suppresses Summary totals", compute.ownerView(incompleteFetch, summary).summary == null);
 check("N: incomplete retrieval suppresses Service Sales totals", serviceApi.ownerView(incompleteFetch, service).summary == null);
 check("N: incomplete retrieval suppresses Time Period totals", timeApi.ownerView(incompleteFetch, time).summary == null);
+check("N: incomplete retrieval suppresses Client Spend totals", spendApi.ownerView(incompleteFetch, spend).summary == null);
+check("Client Spend identified plus unidentified equals Summary gross", spend.totals.identifiedSales + spend.totals.unidentifiedSales === summary.totals.grossTotal && spend.totals.allSales === summary.totals.grossTotal);
+check("Client Spend tickets equal Summary closed tickets", spend.totals.tickets === summary.totals.sales);
+check("Client Spend refunds equal Summary refunds", spend.totals.refunds === summary.totals.refunds);
 
 function reportBox() {
   return {
@@ -255,6 +269,7 @@ check("intentional: average service sale is service gross / service tickets", se
 const summarySrc = read("public/booking/reports/sales-summary.js");
 const serviceSrc = read("public/booking/reports/service-sales.js");
 const timeSrc = read("public/booking/reports/sales-time.js");
+const spendSrc = read("public/booking/reports/client-spend.js");
 const serviceComputeSrc = read("public/booking/reports/service-sales-compute.js");
 const timeComputeSrc = read("public/booking/reports/sales-time-compute.js");
 const computeSrc = read("public/booking/reports/compute.js");
@@ -265,7 +280,7 @@ function usesRangeOnly(src) {
   return src.indexOf("fetchForReport") !== -1 && src.indexOf("listForSalon") === -1 && src.indexOf("listForLocation") === -1 && src.indexOf("limit: 80") === -1;
 }
 
-check("source: all three reports use fetchForReport only", usesRangeOnly(summarySrc) && usesRangeOnly(serviceSrc) && usesRangeOnly(timeSrc));
+check("source: all three reports use fetchForReport only", usesRangeOnly(summarySrc) && usesRangeOnly(serviceSrc) && usesRangeOnly(timeSrc) && usesRangeOnly(spendSrc));
 check("source: computes do not read priceSnapshot or booked value", computeSrc.indexOf("priceSnapshot") === -1 && serviceComputeSrc.indexOf("priceSnapshot") === -1 && timeComputeSrc.indexOf("priceSnapshot") === -1);
 check("source: all three share rangeForPreset and locationIds", summarySrc.indexOf("rangeForPreset") !== -1 && serviceSrc.indexOf("rangeForPreset") !== -1 && timeSrc.indexOf("rangeForPreset") !== -1 && summarySrc.indexOf("locationIds: ids") !== -1 && serviceSrc.indexOf("locationIds: ids") !== -1 && timeSrc.indexOf("locationIds: ids") !== -1);
 check("source: reports ui does not preload financial fetches", uiSrc.indexOf("fetchForReport") === -1);
