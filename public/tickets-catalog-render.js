@@ -14,12 +14,13 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260824_svc_dnd";
+import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260915_combo_svc";
 import { formatServiceDurationLabel, joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260824_svc_dnd";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260824_svc_dnd";
+import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260915_combo_svc";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260915_combo_svc";
+import { catalogServiceTypeControlsHtml, comboBadgeHtml, comboDetailsViewHtml, comboSaveFields, combosUsingService, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -260,6 +261,7 @@ function renderServicesCatalogV2() {
           : '';
         html += `<div class="ffsvc-row" ${serviceDragAttrs} data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="${canDragService ? 'Drag to reorder / move' : ''}" style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 18px;border-bottom:1px solid #f3f4f6;cursor:${canDragService ? 'grab' : 'default'};${serviceOpacity}">`;
         html += `<span style="font-weight:500;color:#111;font-size:12px;flex:1;line-height:1.25;">${escapeHtml(s.name)}</span>`;
+        if (isComboService(s)) html += comboBadgeHtml();
         html += priceBadge;
         html += inactiveBadge;
         html += `<span style="color:#374151;font-size:12px;font-variant-numeric:tabular-nums;">${ffTicketMoney(s.defaultPrice || 0)}</span>`;
@@ -355,6 +357,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
         html += `<div class="staff-sidebar-item ff-services-sidebar-service${isSelected ? ' is-selected' : ''}" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 8px;border:none;border-radius:6px;background:${isSelected ? '#ede9fe' : 'transparent'};cursor:pointer;text-align:left;${serviceOpacity}">`;
         html += `<span class="ff-services-drag-handle" draggable="true" data-drag-kind="service" data-svc-id="${escapeHtml(s.id)}" data-cat-id="${escapeHtml(cat.id)}" title="Drag to reorder" style="color:#9ca3af;font-size:12px;line-height:1;cursor:grab;user-select:none;flex-shrink:0;">⋮⋮</span>`;
         html += `<span style="font-size:12px;color:#111827;line-height:1.25;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(s.name || '')}</span>`;
+        if (isComboService(s)) html += comboBadgeHtml();
         html += `</div>`;
       });
     }
@@ -654,6 +657,12 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           <span style="font-size:12px;color:#6b7280;">Service Name</span>
           <input id="servicesInlineEditName" type="text" value="${escapeHtml(selected.name || '')}" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
         </label>
+        ${catalogServiceTypeControlsHtml(selected.serviceType, {
+          compact: true,
+          groupName: "servicesInlineEditServiceType",
+          singleId: "servicesInlineEditTypeSingle",
+          comboId: "servicesInlineEditTypeCombo"
+        })}
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">Category</span>
           <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
@@ -662,10 +671,10 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           </select>
         </label>
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
-          <span style="font-size:12px;color:#6b7280;">Price</span>
+          <span style="font-size:12px;color:#6b7280;">${isComboService(selected) ? 'Combo selling price' : 'Price'}</span>
           <input id="servicesInlineEditPrice" type="number" min="0" step="0.01" value="${escapeHtml(String(basePrice))}" style="width:100%;max-width:180px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;box-sizing:border-box;">
         </label>
-        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:start;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+        <div id="servicesInlineEditDurationRow" style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:start;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;padding-top:8px;">Duration</span>
           ${serviceDurationControlsHtml(durationMinutes, {
             hoursId: "servicesInlineEditDurationHours",
@@ -681,6 +690,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
             <span style="font-size:11px;color:#9ca3af;line-height:1.35;">Apply Service Tax to this service (only when Service Tax is enabled in Settings).</span>
           </span>
         </label>
+        <div id="servicesInlineEditComboWrap"></div>
       </div>
     </div>
   ` : `
@@ -691,17 +701,22 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       </div>
       <div style="display:flex;flex-direction:column;border-top:1px solid #f3f4f6;">
         <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:12px;color:#6b7280;">Service type</div>
+          <div style="font-size:13px;color:#111827;font-weight:600;">${isComboService(selected) ? 'Combo' : 'Single'}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Service name</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(selected.name || '')}</div>
         </div>
         <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
-          <div style="font-size:12px;color:#6b7280;">Price</div>
+          <div style="font-size:12px;color:#6b7280;">${isComboService(selected) ? 'Combo selling price' : 'Price'}</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${ffTicketMoney(basePrice)}</div>
         </div>
         <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Duration</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${escapeHtml(durationText)}</div>
         </div>
+        ${comboDetailsViewHtml(selected, services, ffTicketMoney)}
         <div style="display:grid;grid-template-columns:160px 1fr;gap:12px;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <div style="font-size:12px;color:#6b7280;">Charge Tax</div>
           <div style="font-size:13px;color:#111827;font-weight:600;">${selected.taxable === true ? 'On' : 'Off'}</div>
@@ -756,6 +771,36 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
       renderServicesCatalogV2();
     });
   }
+  const comboWrap = root.querySelector('#servicesInlineEditComboWrap');
+  const durationRow = root.querySelector('#servicesInlineEditDurationRow');
+  const priceInputLive = root.querySelector('#servicesInlineEditPrice');
+  let inlineComboEditor = null;
+  const syncInlineTypeUi = (type) => {
+    const isCombo = type === SERVICE_TYPE_COMBO;
+    if (durationRow) durationRow.style.display = isCombo ? 'none' : 'grid';
+    if (comboWrap) comboWrap.style.display = isCombo ? 'block' : 'none';
+  };
+  if (comboWrap) {
+    inlineComboEditor = wireComboEditor(comboWrap, {
+      compact: true,
+      comboId: selected.id,
+      components: selected.components,
+      getComboPrice: () => parseFloat(priceInputLive?.value) || 0,
+      getCatalogServices: () => services
+    });
+    if (priceInputLive) {
+      priceInputLive.oninput = () => {
+        if (inlineComboEditor && typeof inlineComboEditor.refresh === 'function') inlineComboEditor.refresh();
+      };
+    }
+  }
+  root.querySelectorAll('input[name="servicesInlineEditServiceType"]').forEach((inp) => {
+    inp.addEventListener('change', () => {
+      syncInlineTypeUi(inp.value);
+      if (inlineComboEditor && typeof inlineComboEditor.refresh === 'function') inlineComboEditor.refresh();
+    });
+  });
+  syncInlineTypeUi(isComboService(selected) ? SERVICE_TYPE_COMBO : 'single');
   const saveBtn = root.querySelector('#servicesInlineEditSaveBtn');
   if (saveBtn) {
     saveBtn.addEventListener('click', async (e) => {
@@ -773,13 +818,39 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         showToast('Service name is required', 'error');
         return;
       }
-      const durationMinutes = joinServiceDurationMinutes(durationHours?.value, durationMinutesInput?.value);
-      if (durationMinutes == null) {
-        showServiceDurationError(durationError, durationHours, durationMinutesInput);
-        return;
+      const typeInp = root.querySelector('input[name="servicesInlineEditServiceType"]:checked');
+      const serviceType = typeInp?.value === SERVICE_TYPE_COMBO ? SERVICE_TYPE_COMBO : 'single';
+      const defaultPrice = parseFloat(priceInput?.value) || 0;
+      let durationMinutes = null;
+      let comboFields = { ok: true, serviceType: 'single', components: [] };
+      if (serviceType === SERVICE_TYPE_COMBO) {
+        if (!isComboService(selected)) {
+          const usedBy = combosUsingService(selected.id, services);
+          if (usedBy.length) {
+            showToast('This service is used as a Combo component, so it must stay a Single Service.', 'error');
+            return;
+          }
+        }
+        comboFields = comboSaveFields({
+          id: selected.id,
+          serviceType: SERVICE_TYPE_COMBO,
+          defaultPrice,
+          components: inlineComboEditor ? inlineComboEditor.getComponents() : [],
+          catalogServices: services
+        });
+        if (!comboFields.ok) {
+          showToast(comboFields.error, 'error');
+          return;
+        }
+        durationMinutes = comboFields.durationMinutes;
+      } else {
+        durationMinutes = joinServiceDurationMinutes(durationHours?.value, durationMinutesInput?.value);
+        if (durationMinutes == null) {
+          showServiceDurationError(durationError, durationHours, durationMinutesInput);
+          return;
+        }
       }
       const categoryId = categoryInput?.value || null;
-      const defaultPrice = parseFloat(priceInput?.value) || 0;
       const taxableInput = root.querySelector('#servicesInlineEditTaxable');
       const taxable = !!(taxableInput && taxableInput.checked);
       saveBtn.disabled = true;
@@ -795,6 +866,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           sortOrder: selected.sortOrder,
             taxable,
             durationMinutes,
+            serviceType: comboFields.serviceType,
+            components: comboFields.components,
           });
           await loadSharedCatalogForManager();
         } else {
@@ -806,6 +879,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           sortOrder: Number.isFinite(Number(selected.sortOrder)) ? Number(selected.sortOrder) : 0,
             taxable,
             durationMinutes,
+            serviceType: comboFields.serviceType,
+            components: comboFields.components,
           });
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
@@ -814,6 +889,8 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         selected.defaultPrice = defaultPrice;
         selected.taxable = taxable;
         selected.durationMinutes = durationMinutes;
+        selected.serviceType = comboFields.serviceType;
+        selected.components = comboFields.components;
         ticketsState._ffServicesInlineEditServiceId = null;
         if (categoryId) ticketsState._ffOpenCats.add(categoryId);
         renderServicesCatalogV2();

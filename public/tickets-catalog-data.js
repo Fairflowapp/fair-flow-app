@@ -13,6 +13,7 @@ import { collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
+import { applyComboFieldsToServicePayload, copyComboCatalogFields, isComboService, normalizeComboComponents, validateComboService } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {
@@ -145,6 +146,26 @@ function applyDurationMinutesToServicePayload(payload, service, isCreate) {
     : DEFAULT_SERVICE_DURATION_MINUTES;
 }
 
+function applyComboPayloadAndClearFlag(payload, service, isCreate) {
+  const comboPatch = applyComboFieldsToServicePayload(payload, service, isCreate);
+  if (comboPatch.clearComponents) payload.components = deleteField();
+  if (comboPatch.serviceType === "combo") {
+    const catalog = [
+      ...(ticketsState._rawSharedServices || []),
+      ...(ticketsState._rawServices || [])
+    ].map((row) => copyComboCatalogFields({ ...row }, row));
+    const validation = validateComboService({
+      id: service && service.id,
+      defaultPrice: service && service.defaultPrice,
+      components: payload.components,
+      catalogServices: catalog
+    });
+    if (!validation.ok) throw new Error(validation.error);
+    payload.components = validation.components;
+  }
+  return comboPatch;
+}
+
 function sharedServiceCatalogDocRef(accountId) {
   return doc(db, `accounts/${accountId}/shared/serviceCatalog`);
 }
@@ -219,7 +240,7 @@ function applySharedServiceCatalog() {
         ? Number(override.price)
         : defaultPrice;
       if (override) console.log('[SharedServices] override applied', { serviceId: s.id, locationId: getActiveLocationIdForTickets(), price: finalPrice });
-      return {
+      return copyComboCatalogFields({
         id: s.id,
         name: String(s.name || '').trim(),
         defaultPrice: finalPrice,
@@ -234,7 +255,7 @@ function applySharedServiceCatalog() {
         defaultDuration: s.defaultDuration,
         minutes: s.minutes,
         staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
-      };
+      }, s);
     })
     .filter((s) => s && s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
@@ -262,13 +283,13 @@ function applySharedServiceCatalog() {
     .map((s) => {
       const cat = localCategories.find((c) => c.id === s.categoryId);
       const categoryName = normalizeSharedCategoryName(cat?.name || s.category || 'Other');
-      return {
+      return copyComboCatalogFields({
         ...s,
         category: categoryName,
         categoryId: serviceCategoryDisplayId(categoryName),
         sourceCategoryId: s.categoryId,
         isSharedService: false
-      };
+      }, s);
     })
     .filter((s) => {
       if (ticketsState._rawSharedServices.length === 0) return true;
@@ -318,7 +339,7 @@ function getSharedServicesForCatalogManager() {
       const defaultPrice = Number(s.defaultPrice) || 0;
       const hasOverride = override && Number.isFinite(Number(override.price));
       const locationEnabled = !(override && override.enabled === false);
-      return {
+      return copyComboCatalogFields({
         id: s.id,
         name: String(s.name || '').trim(),
         defaultPrice: hasOverride ? Number(override.price) : defaultPrice,
@@ -336,7 +357,7 @@ function getSharedServicesForCatalogManager() {
         defaultDuration: s.defaultDuration,
         minutes: s.minutes,
         staffOverrides: s.staffOverrides && typeof s.staffOverrides === 'object' ? s.staffOverrides : {}
-      };
+      }, s);
     })
     .filter((s) => s.name)
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
@@ -350,6 +371,7 @@ function getLocationServicesForCatalogManager() {
   return {
     services: ticketsState._rawServices
       .filter(_ffServiceMatchesActiveLocation)
+      .map((s) => copyComboCatalogFields({ ...s }, s))
       .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)),
     categories: ticketsState._rawCategories
       .filter(_ffServiceMatchesActiveLocation)
@@ -398,6 +420,7 @@ async function saveSharedService(service) {
   // "Charge Tax" — only write when explicitly provided (merge-safe).
   if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   applyDurationMinutesToServicePayload(payload, service, !service.id);
+  applyComboPayloadAndClearFlag(payload, service, !service.id);
   if (service.id) {
     await ensureSharedServiceCatalogDoc(accountId);
     await setDoc(doc(sharedServiceCatalogItemsRef(accountId), service.id), payload, { merge: true });
@@ -598,6 +621,11 @@ async function seedSharedServiceCatalogFromLocationCatalogIfEmpty() {
           durationMinutes: resolveServiceDurationMinutes(svc),
           localByLocation: new Map()
         });
+        if (isComboService(svc)) {
+          const group = groups.get(key);
+          group.serviceType = "combo";
+          group.components = normalizeComboComponents(svc.components);
+        }
       }
       const group = groups.get(key);
       const locId = typeof svc.locationId === 'string' && svc.locationId.trim() ? svc.locationId.trim() : getActiveLocationIdForTickets();
@@ -710,6 +738,7 @@ function _applyCatalogFilter() {
   }
   ticketsState.salonServices = ticketsState._rawServices
     .filter(_ffServiceMatchesActiveLocation)
+    .map((s) => copyComboCatalogFields({ ...s }, s))
     .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
   ticketsState.serviceCategories = ticketsState._rawCategories
     .filter(_ffServiceMatchesActiveLocation)
@@ -854,6 +883,7 @@ async function saveService(service) {
   // (which omit it) preserve the existing value.
   if (typeof service.taxable === 'boolean') payload.taxable = service.taxable;
   applyDurationMinutesToServicePayload(payload, service, !service.id);
+  applyComboPayloadAndClearFlag(payload, service, !service.id);
   if (service.id) {
     await updateDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, service.id), payload);
     return service.id;
@@ -979,4 +1009,5 @@ export {
   loadServiceCategories,
   saveServiceCategory,
   deleteServiceCategory,
+  applyComboPayloadAndClearFlag,
 };

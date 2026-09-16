@@ -6,7 +6,8 @@ import {
   loadSharedCatalogForManager,
   resolveServiceDurationForStaff,
   resolveServiceDurationMinutes,
-} from "/tickets-catalog-data.js?v=20260818_staff_dur_ui";
+} from "/tickets-catalog-data.js?v=20260915_combo_svc";
+import { copyComboCatalogFields } from "/tickets-catalog-combo.js?v=20260915_combo_svc";
 import {
   collection,
   getDocs,
@@ -109,6 +110,7 @@ function toPickerRow(service, providerId, meta) {
   const info = meta && (meta[rawId] || meta["shared:" + categorySlug(rawName)]);
   const category = (info && info.name) || rawName;
   const categoryId = "shared:" + categorySlug(category);
+  const combo = copyComboCatalogFields({}, service);
   return {
     id: service.id,
     name: String(service.name || "").trim(),
@@ -121,6 +123,8 @@ function toPickerRow(service, providerId, meta) {
     categorySortOrder: info && info.sortOrder != null ? info.sortOrder : 999,
     sortOrder: Number.isFinite(Number(service.sortOrder)) ? Number(service.sortOrder) : 999,
     staffOverrides: service.staffOverrides || {},
+    serviceType: combo.serviceType,
+    components: combo.components,
     raw: service,
   };
 }

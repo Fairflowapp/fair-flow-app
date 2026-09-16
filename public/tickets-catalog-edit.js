@@ -9,10 +9,11 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260824_svc_dnd";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260915_combo_svc";
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
+import { catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
 
 let showToast, ticketConfirm, setupTicketsUI, renderServicesCatalogV2, _ffIsServicesScreenRoot;
 export function initCatalogEdit(deps) {
@@ -37,6 +38,39 @@ async function askCatalogConfirm(message, title) {
 
 function isSharedCatalogMode() {
   return ticketsState._ffCatalogModalMode === 'shared';
+}
+
+function currentEditorCatalogServices() {
+  const data = isSharedCatalogMode()
+    ? getSharedServicesForCatalogManager()
+    : getLocationServicesForCatalogManager();
+  return (data && data.services) || [];
+}
+
+function editorServiceType(existing) {
+  return isComboService(existing) ? SERVICE_TYPE_COMBO : 'single';
+}
+
+function syncCatalogEditorTypeUi(type) {
+  const wrapDuration = document.getElementById('servicesCatalogEditorDurationWrap');
+  const comboWrap = document.getElementById('servicesCatalogEditorComboWrap');
+  const nameInp = document.getElementById('servicesCatalogEditorName');
+  const priceInp = document.getElementById('servicesCatalogEditorPrice');
+  const card = document.querySelector('#servicesCatalogEditorModal > div');
+  const isCombo = type === SERVICE_TYPE_COMBO;
+  if (wrapDuration) wrapDuration.style.display = isCombo ? 'none' : 'block';
+  if (comboWrap) comboWrap.style.display = isCombo ? 'block' : 'none';
+  if (card) card.style.maxWidth = isCombo ? '560px' : '420px';
+  if (nameInp) {
+    nameInp.placeholder = isCombo
+      ? 'Combo name (e.g. Manicure + Pedicure Combo)'
+      : 'Service name (e.g. Gel Full Set)';
+  }
+  if (priceInp) {
+    priceInp.placeholder = isCombo
+      ? `Combo selling price (${ffTicketCurSym()})`
+      : `Default price (${ffTicketCurSym()})`;
+  }
 }
 
 async function deleteSharedCategoryWithServices(cat, catId) {
@@ -73,6 +107,13 @@ async function deleteCatalogService(svcId) {
   const id = String(svcId || '').trim();
   if (!id) {
     showToast('This service could not be found.', 'error');
+    return;
+  }
+  const catalog = currentEditorCatalogServices();
+  const usedBy = combosUsingService(id, catalog);
+  if (usedBy.length) {
+    const names = usedBy.slice(0, 3).map((s) => s.name || 'Combo').join(', ');
+    showToast(`This service is used in ${usedBy.length === 1 ? 'a Combo' : 'Combos'} (${names}). Remove it from Combo components first.`, 'error');
     return;
   }
   const ok = await askCatalogConfirm('Are you sure you want to delete this service?', 'Delete service');
@@ -549,8 +590,19 @@ function _ffCatalogEditorOpen(opts) {
   if (overridePriceInp) { overridePriceInp.style.display = 'none'; overridePriceInp.value = ''; }
   saveBtn.disabled = false;
   saveBtn.style.opacity = '1';
-
   const ctx = { ...opts };
+  const mounts = ensureCatalogEditorComboMounts(mod);
+  if (mounts && mounts.typeWrap) {
+    mounts.typeWrap.style.display = 'none';
+    mounts.typeWrap.innerHTML = '';
+  }
+  if (mounts && mounts.comboWrap) {
+    mounts.comboWrap.style.display = 'none';
+    mounts.comboWrap.innerHTML = '';
+  }
+  ctx.comboEditor = null;
+  const editorCard = mod.querySelector(':scope > div');
+  if (editorCard) editorCard.style.maxWidth = '420px';
 
   if (opts.mode === 'category-add' || opts.mode === 'shared-category-add') {
     title.textContent = 'New category';
@@ -601,9 +653,10 @@ function _ffCatalogEditorOpen(opts) {
       catSel.innerHTML = optsHtml;
     }
     if (opts.mode === 'service-edit' || opts.mode === 'shared-service-edit') {
-      const s = isSharedServiceMode
-        ? getSharedServicesForCatalogManager().services.find((x) => x.id === opts.serviceId)
-        : ticketsState.salonServices.find((x) => x.id === opts.serviceId);
+      const s = currentEditorCatalogServices().find((x) => String(x.id) === String(opts.serviceId))
+        || (isSharedServiceMode
+          ? getSharedServicesForCatalogManager().services.find((x) => x.id === opts.serviceId)
+          : ticketsState.salonServices.find((x) => x.id === opts.serviceId));
       if (!s) return;
       if (isSharedServiceMode) console.log('[SharedServicesUI] editing shared service', { serviceId: s.id });
       nameInp.value = s.name || '';
@@ -637,6 +690,40 @@ function _ffCatalogEditorOpen(opts) {
         catSel.value = opts.categoryId;
       }
     }
+    const existing = ctx.existing || null;
+    const initialType = editorServiceType(existing);
+    if (mounts && mounts.typeWrap) {
+      mounts.typeWrap.style.display = 'block';
+      mounts.typeWrap.innerHTML = catalogServiceTypeControlsHtml(initialType, {
+        groupName: 'servicesCatalogEditorServiceType',
+        singleId: 'servicesCatalogEditorTypeSingle',
+        comboId: 'servicesCatalogEditorTypeCombo'
+      });
+    }
+    if (mounts && mounts.comboWrap) {
+      ctx.comboEditor = wireComboEditor(mounts.comboWrap, {
+        compact: false,
+        comboId: existing && existing.id,
+        components: existing && existing.components,
+        getComboPrice: () => parseFloat(priceInp?.value) || 0,
+        getCatalogServices: currentEditorCatalogServices
+      });
+      if (priceInp) {
+        priceInp.oninput = () => {
+          if (ctx.comboEditor && typeof ctx.comboEditor.refresh === 'function') ctx.comboEditor.refresh();
+        };
+      }
+    }
+    const typeInputs = mounts && mounts.typeWrap
+      ? mounts.typeWrap.querySelectorAll('input[name="servicesCatalogEditorServiceType"]')
+      : [];
+    typeInputs.forEach((inp) => {
+      inp.addEventListener('change', () => {
+        syncCatalogEditorTypeUi(inp.value);
+        if (ctx.comboEditor && typeof ctx.comboEditor.refresh === 'function') ctx.comboEditor.refresh();
+      });
+    });
+    syncCatalogEditorTypeUi(initialType);
   }
 
   saveBtn.onclick = () => _ffCatalogEditorSubmit(ctx);
@@ -674,10 +761,41 @@ async function _ffCatalogEditorSubmit(ctx) {
   if (!name) { flashErr(nameInp); return; }
   const isServiceMode = ctx.mode === 'service-add' || ctx.mode === 'service-edit'
     || ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit';
-  const durationMinutes = isServiceMode ? joinServiceDurationMinutes(durationHours?.value, durationMinutesInput?.value) : null;
-  if (isServiceMode && durationMinutes == null) {
-    showServiceDurationError(durationError, durationHours, durationMinutesInput);
-    return;
+  const comboTypeInp = document.querySelector('#servicesCatalogEditorTypeWrap input[name="servicesCatalogEditorServiceType"]:checked');
+  const serviceType = isServiceMode ? (comboTypeInp?.value === SERVICE_TYPE_COMBO ? SERVICE_TYPE_COMBO : 'single') : null;
+  const comboComponents = (serviceType === SERVICE_TYPE_COMBO && ctx.comboEditor && typeof ctx.comboEditor.getComponents === 'function')
+    ? ctx.comboEditor.getComponents()
+    : [];
+  const comboPrice = parseFloat(priceInp?.value) || 0;
+  let durationMinutes = null;
+  let comboFields = { ok: true, serviceType: 'single', components: [] };
+  if (isServiceMode && serviceType === SERVICE_TYPE_COMBO) {
+    comboFields = comboSaveFields({
+      id: ctx.existing && ctx.existing.id,
+      serviceType: SERVICE_TYPE_COMBO,
+      defaultPrice: comboPrice,
+      components: comboComponents,
+      catalogServices: currentEditorCatalogServices()
+    });
+    if (!comboFields.ok) {
+      showToast(comboFields.error, 'error');
+      return;
+    }
+    durationMinutes = comboFields.durationMinutes;
+    const convertingUsedSingle = ctx.existing && !isComboService(ctx.existing);
+    if (convertingUsedSingle) {
+      const usedBy = combosUsingService(ctx.existing.id, currentEditorCatalogServices());
+      if (usedBy.length) {
+        showToast('This service is used as a Combo component, so it must stay a Single Service.', 'error');
+        return;
+      }
+    }
+  } else if (isServiceMode) {
+    durationMinutes = joinServiceDurationMinutes(durationHours?.value, durationMinutesInput?.value);
+    if (durationMinutes == null) {
+      showServiceDurationError(durationError, durationHours, durationMinutesInput);
+      return;
+    }
   }
 
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
@@ -719,7 +837,14 @@ async function _ffCatalogEditorSubmit(ctx) {
     } else if (ctx.mode === 'service-add') {
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
-      await saveService({ name, categoryId, defaultPrice, durationMinutes });
+      await saveService({
+        name,
+        categoryId,
+        defaultPrice,
+        durationMinutes,
+        serviceType: comboFields.serviceType,
+        components: comboFields.components
+      });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Service added', 'success');
@@ -727,7 +852,16 @@ async function _ffCatalogEditorSubmit(ctx) {
       const s = ctx.existing;
       const categoryId = catSel?.value || null;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
-      await saveService({ id: s.id, name, categoryId, defaultPrice, sortOrder: s.sortOrder, durationMinutes });
+      await saveService({
+        id: s.id,
+        name,
+        categoryId,
+        defaultPrice,
+        sortOrder: s.sortOrder,
+        durationMinutes,
+        serviceType: comboFields.serviceType,
+        components: comboFields.components
+      });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
       showToast('Updated', 'success');
@@ -747,7 +881,9 @@ async function _ffCatalogEditorSubmit(ctx) {
         defaultPrice,
         active: activeInp ? activeInp.checked : true,
         sortOrder: s.sortOrder,
-        durationMinutes
+        durationMinutes,
+        serviceType: comboFields.serviceType,
+        components: comboFields.components
       });
       if (ctx.mode === 'shared-service-edit') {
         if (overrideCustom?.checked) {

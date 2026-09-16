@@ -120,11 +120,46 @@ Party support exists as extra people via `guestKey` / `guestName`, not a separat
 
 Dedicated reschedule UX, any-available-provider assignment UX, processing / buffer / finishing time, recurring / series, a distinct group-appointment product.
 
+Combo Services can be created in the Services catalog. Calendar does **not** yet expand a Combo into per-component `serviceLines` or assign different providers per component. That is Phase 2.
+
 ---
 
 ## Services
 
 Booking consumes the Operations catalog. Duration and staff capability come from `durationMinutes` and `staffOverrides` (opt-out: capable unless `enabled === false`). Pricing snapshots onto lines.
+
+The catalog now supports two service types:
+
+- **Single** — one sellable, schedulable service. This is the current service. Existing documents without `serviceType` continue to work as Single. No migration is required.
+- **Combo** — one sellable catalog item with one combo name and one combo selling price (`name` + `defaultPrice`), composed of two or more existing Single Services.
+
+A Combo is sold to the client / front desk as **one item**. Internally it stores component `serviceId`s and per-component `allocatedPrice` so later Booking, checkout, commission, and reporting can attribute each component correctly. Allocated price is not required to match the standalone price of the underlying Single.
+
+### Catalog fields
+
+| Field | Meaning |
+|------|---------|
+| `serviceType` | `"single"` \| `"combo"`. Omitted on existing docs ⇒ Single. |
+| `components[]` | Combo only. `{ serviceId, allocatedPrice, sortOrder }`. |
+| `durationMinutes` | Single: editable duration. Combo: derived as the sum of component durations. |
+
+Validation (Phase 1):
+
+- minimum 2 components
+- components must be existing Single Services (no nested combos)
+- no duplicate component `serviceId`
+- combo cannot reference itself
+- allocated prices must sum (in cents) to the combo selling price
+
+`sortOrder` on components is the default sequential order for later scheduling. Parallel vs sequential timing, per-component provider assignment, and add-ons attached to a component are **not** written in Phase 1; the component identity is enough for those later fields.
+
+### Atomicity rule
+
+- A **visit** may contain multiple components / services assigned to **different providers**.
+- A Combo may split **between its component services**.
+- A **single component / service itself cannot be split** between multiple providers. The provider who starts one component must finish that component.
+
+Phase 1 implements the Services foundation only. Calendar, Smart Scheduling, Reports, and checkout still treat a Combo as one catalog row and do **not** expand it into appointment `serviceLines` yet.
 
 Processing, buffer, and finishing times are **not** in the catalog or appointment model yet. Add them only with an explicit task that owns the shared catalog / appointment schema.
 
