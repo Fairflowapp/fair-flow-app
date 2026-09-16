@@ -621,12 +621,12 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
   const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
   const isSharedInline = !!(selected.isSharedService || ticketsState._ffCatalogModalMode === 'shared');
   const editorCategories = dedupeCatalogCategories(categories);
-  const selectedCategory = findExistingCatalogCategory(selected.categoryId || selected.category, editorCategories);
+  const serviceCategory = findExistingCatalogCategory(selected.categoryId || selected.category, editorCategories);
   const categoryOptions = editorCategories
     .map((cat) => {
       const value = isSharedInline ? (cat.name || cat.id) : (cat.sourceCategoryId || cat.id);
-      const isSelected = selectedCategory
-        ? String(cat.id) === String(selectedCategory.id)
+      const isSelected = serviceCategory
+        ? String(cat.id) === String(serviceCategory.id)
         : String(cat.id) === String(selected.categoryId || '')
           || String(cat.name || '').toLowerCase() === String(selected.category || '').trim().toLowerCase();
       return `<option value="${escapeHtml(value)}" ${isSelected ? 'selected' : ''}>${escapeHtml(cat.name || '')}</option>`;
