@@ -240,9 +240,16 @@
     );
   }
 
-  async function refreshLineServices(state, line) {
+  async function refreshLineServices(state, line, expectedProviderId) {
     var api = window.ffBookingAppointmentServices;
-    line.services = api && line.providerId ? await api.listForProvider(line.providerId) : [];
+    var want = trim(expectedProviderId != null && expectedProviderId !== "" ? expectedProviderId : (line && line.providerId));
+    line.providerRefreshSeq = (Number(line.providerRefreshSeq) || 0) + 1;
+    var seq = line.providerRefreshSeq;
+    var listed = api && want ? await api.listForProvider(want) : [];
+    if (!line || seq !== line.providerRefreshSeq || trim(line.providerId) !== want) {
+      return syncHead(state);
+    }
+    line.services = listed;
     var combo = window.ffBookingAppointmentCombo;
     if (combo && typeof combo.keepComboServiceOnRefresh === "function"
       && combo.keepComboServiceOnRefresh(line, state && state.catalogServices, line.services)) {
@@ -344,7 +351,7 @@
   async function setLineProvider(state, key, providerId) {
     applyLineProvider(state, key, providerId);
     var line = findLine(state, key) || state.lines[0];
-    if (line) await refreshLineServices(state, line);
+    if (line) await refreshLineServices(state, line, trim(providerId));
     return derive(state);
   }
 

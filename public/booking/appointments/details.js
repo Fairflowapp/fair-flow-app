@@ -9,6 +9,7 @@
   var edit = null;
   var cancelling = false;
   var statusSaving = false;
+  var paintTimer = null;
   var editUi = {
     servicePickerKey: "",
     providerPickerKey: "",
@@ -548,6 +549,47 @@
     if (editing) paintEdit(ui);
   }
 
+  function editPickerOpen() {
+    return !!(editUi.servicePickerKey || editUi.providerPickerKey);
+  }
+
+  function scheduleEditPaintAfterPointer() {
+    if (paintTimer) clearTimeout(paintTimer);
+    paintTimer = setTimeout(function () {
+      paintTimer = null;
+      paint();
+    }, 0);
+  }
+
+  function paintAfterEditProviderRefresh() {
+    if (mode !== "edit" || !edit) return;
+    if (editPickerOpen()) return;
+    paint();
+  }
+
+  function commitEditLineProvider(lineKey, providerId) {
+    var api = form();
+    if (!api || !edit) return;
+    var key = String(lineKey || "").trim();
+    var id = String(providerId || "").trim();
+    if (typeof api.applyLineProvider === "function") {
+      edit = api.applyLineProvider(edit, key, id);
+    }
+    editUi.providerPickerKey = "";
+    editUi.providerQ = "";
+    scheduleEditPaintAfterPointer();
+    if (typeof api.setLineProvider !== "function") return;
+    api.setLineProvider(edit, key, id).then(function (next) {
+      if (mode !== "edit" || !edit) return;
+      var line = (edit.lines || []).find(function (row) {
+        return row && (row.key === key || row.lineId === key);
+      });
+      if (line && id && String(line.providerId || "") !== id) return;
+      edit = next;
+      paintAfterEditProviderRefresh();
+    });
+  }
+
   function ensureDom() {
     var existing = document.getElementById(ROOT_ID);
     if (existing && (!document.getElementById("ffApdEdit") || !document.getElementById("ffApdCancel") || !document.getElementById("ffApdLines") || !document.getElementById("ffApdStatusActs") || !document.getElementById("ffApdAddRow"))) {
@@ -974,7 +1016,7 @@
           editUi.providerPickerKey = pickerAct.getAttribute("data-ff-line") || "";
           editUi.servicePickerKey = "";
           editUi.providerQ = "";
-          paint();
+          scheduleEditPaintAfterPointer();
           return;
         }
         if (pickerName === "toggle-service-cat") {
@@ -1000,12 +1042,7 @@
           return;
         }
         if (pickerName === "pick-provider") {
-          api.setLineProvider(edit, pickerAct.getAttribute("data-ff-line"), pickerAct.getAttribute("data-ff-provider")).then(function (next) {
-            edit = next;
-            editUi.providerPickerKey = "";
-            editUi.providerQ = "";
-            paint();
-          });
+          commitEditLineProvider(pickerAct.getAttribute("data-ff-line"), pickerAct.getAttribute("data-ff-provider"));
           return;
         }
       }
@@ -1040,8 +1077,9 @@
         editUi.serviceQ = "";
         if (last && last.providerId && typeof api.setLineProvider === "function") {
           api.setLineProvider(edit, last.key, last.providerId).then(function (next) {
+            if (mode !== "edit" || !edit) return;
             edit = next;
-            paint();
+            paintAfterEditProviderRefresh();
           });
         }
         paint();

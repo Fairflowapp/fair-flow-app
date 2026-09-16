@@ -61,7 +61,16 @@ async function openProviderPicker(page, lineLocator) {
   const box = await chip.boundingBox();
   if (!box) throw new Error("provider chip has no box");
   await page.mouse.click(box.x + Math.min(20, box.width / 2), box.y + box.height - 4);
-  await page.locator('[data-ff-appt-act="pick-provider"]').first().waitFor({ state: "visible", timeout: 10000 });
+  const picker = page.locator('[data-ff-picker="provider"]');
+  await picker.waitFor({ state: "visible", timeout: 10000 });
+  await expect(picker.locator('[data-ff-appt-act="pick-provider"]').first()).toBeAttached();
+}
+
+async function closeProviderPicker(page) {
+  const picker = page.locator('[data-ff-picker="provider"]');
+  if (!(await picker.count())) return;
+  await page.locator("#ffApptTitle, #ffApdTitle").first().click();
+  await expect(picker).toHaveCount(0);
 }
 
 async function providerPickerIds(page, lineLocator) {
@@ -69,12 +78,9 @@ async function providerPickerIds(page, lineLocator) {
   const ids = await page.locator('[data-ff-appt-act="pick-provider"]').evaluateAll((els) => {
     return els.map((el) => String(el.getAttribute("data-ff-provider") || "")).filter(Boolean);
   });
-  const current = await lineLocator.getAttribute("data-ff-line");
-  const keep = page.locator('[data-ff-appt-act="pick-provider"][data-ff-provider="' + PROVIDER_A + '"]');
-  if (await keep.count()) await keep.click();
-  else if (current) {
-    await page.locator('[data-ff-appt-act="pick-provider"]').first().click();
-  }
+  await expect(lineLocator.locator('[data-ff-appt-act="open-provider-picker"]')).toBeAttached();
+  await closeProviderPicker(page);
+  await expect(lineLocator.locator('[data-ff-appt-act="open-provider-picker"]')).toBeVisible();
   return ids;
 }
 
@@ -198,6 +204,36 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
 
   await ui.setLineStart(page, pediLine, START_MIN + 45);
   await ui.pickProviderOnLine(page, pediLine, PROVIDER_B);
+  await expect(pediLine.locator('[data-ff-appt-act="open-provider-picker"]')).toBeVisible();
+  await expect(gelLine.locator('[data-ff-appt-act="open-provider-picker"]')).toBeVisible();
+  await expect(page.locator('#ffApptLines [data-ff-picker="provider"]')).toHaveCount(0);
+  const splitState = await page.evaluate(() => {
+    const drawer = window.ffBookingAppointmentDrawer;
+    const state = drawer && typeof drawer.getState === "function" ? drawer.getState() : null;
+    return ((state && state.lines) || []).filter((line) => line && line.comboInstanceId).map((line) => ({
+      serviceId: String(line.serviceId || ""),
+      serviceName: String((line.service && line.service.name) || line.originalServiceName || ""),
+      providerId: String(line.providerId || ""),
+      price: Number(line.price),
+      durationMinutes: Number(line.durationMinutes),
+      startMin: Number(line.startMin)
+    }));
+  });
+  expect(splitState.length).toBe(2);
+  expect(splitState[0].providerId).toBe(PROVIDER_A);
+  expect(splitState[1].providerId).toBe(PROVIDER_B);
+  expect(splitState[0].serviceId).toBe(COMBO.gelId);
+  expect(splitState[1].serviceId).toBe(COMBO.pediId);
+  expect(splitState[0].serviceName).toBe(COMBO.gelName);
+  expect(splitState[1].serviceName).toBe(COMBO.pediName);
+  expect(splitState[0].price).toBe(44);
+  expect(splitState[1].price).toBe(40);
+  expect(splitState[0].durationMinutes).toBe(45);
+  expect(splitState[1].durationMinutes).toBe(30);
+  await expect(gelLine).toContainText(COMBO.gelName);
+  await expect(pediLine).toContainText(COMBO.pediName);
+  await expect(gelLine.locator(".ff-appt-card-price")).toContainText("44");
+  await expect(pediLine.locator(".ff-appt-card-price")).toContainText("40");
   await ui.setLineStart(page, pediLine, START_MIN);
   await expect(page.locator("#ffApptCreate")).toBeEnabled();
 
@@ -286,23 +322,30 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   const editPediClock = await readLineClock(editPedi);
   expect(editGelClock.start).toMatch(/11:30/);
   expect(editPediClock.start).toMatch(/11:30|12:15/);
-  await ui.setLineStart(page, editPedi, START_MIN + 45);
-  await ui.pickProviderOnLine(page, editPedi, PROVIDER_A);
+  if (editPediClock.startMin === START_MIN) {
+    await ui.setLineStart(page, editPedi, START_MIN + 45);
+  } else {
+    await ui.setLineStart(page, editPedi, START_MIN);
+  }
   await ui.saveEdit(page);
 
   const afterEdit = await getQaAppointment(created.appointmentId);
   expect(afterEdit.serviceLines.length).toBe(2);
-  expect(afterEdit.serviceLines.every((line) => line.providerId === PROVIDER_A)).toBeTruthy();
+  expect(new Set(afterEdit.serviceLines.map((line) => line.providerId))).toEqual(new Set([PROVIDER_A, PROVIDER_B]));
+  expect(afterEdit.serviceLines.find((line) => line.serviceId === COMBO.gelId).providerId).toBe(PROVIDER_A);
+  expect(afterEdit.serviceLines.find((line) => line.serviceId === COMBO.pediId).providerId).toBe(PROVIDER_B);
   expect(Math.round(allocatedSum(afterEdit.serviceLines) * 100)).toBe(8400);
   expect(afterEdit.serviceLines.every((line) => line.comboInstanceId)).toBeTruthy();
 
   await page.locator('#ffBookingApptDetails [data-ff-apd-act="close"]').first().click().catch(() => {});
   const afterCards = page.locator('#ffBookingCalendarRoot [data-ff-cal-card="' + created.appointmentId + '"]');
-  await expect(afterCards).toHaveCount(1, { timeout: 20000 });
+  await expect(afterCards).toHaveCount(2, { timeout: 20000 });
   await afterCards.first().click();
   await page.locator("#ffBookingApptDetails").waitFor({ state: "visible", timeout: 15000 });
   const reopened = await getQaAppointment(created.appointmentId);
-  expect(reopened.serviceLines.every((line) => line.providerId === PROVIDER_A)).toBeTruthy();
+  expect(new Set(reopened.serviceLines.map((line) => line.providerId))).toEqual(new Set([PROVIDER_A, PROVIDER_B]));
+  expect(reopened.serviceLines.find((line) => line.serviceId === COMBO.gelId).providerId).toBe(PROVIDER_A);
+  expect(reopened.serviceLines.find((line) => line.serviceId === COMBO.pediId).providerId).toBe(PROVIDER_B);
   expect(reopened.serviceLines.length).toBe(2);
   const detailsAgain = await ui.readDetails(page);
   expect(detailsAgain.services).toContain(COMBO.name);

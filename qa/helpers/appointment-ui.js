@@ -145,9 +145,13 @@ async function pickProviderOnLine(page, lineLocator, providerId) {
   // QA workaround, not a product pass: the invisible start-time <select> can
   // steal a center-click on this chip. Lower-edge click is the stable hit.
   await page.mouse.click(box.x + Math.min(20, box.width / 2), box.y + box.height - 4);
-  const pick = page.locator('[data-ff-appt-act="pick-provider"][data-ff-provider="' + providerId + '"]');
+  const picker = page.locator('[data-ff-picker="provider"]');
+  const pick = picker.locator('[data-ff-appt-act="pick-provider"][data-ff-provider="' + providerId + '"]');
   await pick.waitFor({ state: "visible", timeout: 10000 });
+  await expect(pick).toBeAttached();
   await pick.click();
+  await expect(picker).toHaveCount(0);
+  await expect(chip).toBeVisible();
 }
 
 async function setLineStart(page, lineLocator, startMin) {

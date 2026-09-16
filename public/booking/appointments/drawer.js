@@ -9,6 +9,7 @@
   var searchGen = 0;
   var state = null;
   var lastScroll = null;
+  var paintTimer = null;
   var uiState = { servicePickerKey: "", providerPickerKey: "", serviceQ: "", providerQ: "", notesOpen: false, expandedCats: {} };
 
   function resetUiState() {
@@ -351,6 +352,51 @@
     }
     syncHold();
     placeLiveFab();
+  }
+
+  function linesPickerOpen() {
+    return !!(uiState.servicePickerKey || uiState.providerPickerKey);
+  }
+
+  function schedulePaintAfterPointer() {
+    if (paintTimer) clearTimeout(paintTimer);
+    paintTimer = setTimeout(function () {
+      paintTimer = null;
+      paint();
+    }, 0);
+  }
+
+  function paintAfterProviderRefresh() {
+    if (!isOpen() || !state) return;
+    if (linesPickerOpen()) {
+      paintSummary();
+      syncHold();
+      return;
+    }
+    paint();
+  }
+
+  function commitLineProvider(lineKey, providerId) {
+    var api = form();
+    if (!api || !state) return;
+    var key = String(lineKey || "").trim();
+    var id = String(providerId || "").trim();
+    if (typeof api.applyLineProvider === "function") {
+      state = api.applyLineProvider(state, key, id);
+    }
+    uiState.providerPickerKey = "";
+    uiState.providerQ = "";
+    schedulePaintAfterPointer();
+    if (typeof api.setLineProvider !== "function") return;
+    api.setLineProvider(state, key, id).then(function (next) {
+      if (!isOpen() || !state) return;
+      var line = (state.lines || []).find(function (row) {
+        return row && (row.key === key || row.lineId === key);
+      });
+      if (line && id && String(line.providerId || "") !== id) return;
+      state = next;
+      paintAfterProviderRefresh();
+    });
   }
 
   function showClientResults(rows, kind) {
@@ -707,7 +753,7 @@
         uiState.providerPickerKey = act.getAttribute("data-ff-line") || "";
         uiState.servicePickerKey = "";
         uiState.providerQ = "";
-        paint();
+        schedulePaintAfterPointer();
       } else if (name === "toggle-service-cat") {
         var cat = act.getAttribute("data-ff-cat") || "";
         if (!cat) return;
@@ -725,12 +771,7 @@
         state = api.setLineRequested(state, act.getAttribute("data-ff-line"));
         paint();
       } else if (name === "pick-provider" && api && state) {
-        api.setLineProvider(state, act.getAttribute("data-ff-line"), act.getAttribute("data-ff-provider")).then(function (next) {
-          state = next;
-          uiState.providerPickerKey = "";
-          uiState.providerQ = "";
-          paint();
-        });
+        commitLineProvider(act.getAttribute("data-ff-line"), act.getAttribute("data-ff-provider"));
       } else if (name === "add-line" && api && state) {
         var last = state.lines && state.lines[state.lines.length - 1];
         if (last && !last.serviceId) {
@@ -745,8 +786,9 @@
           uiState.serviceQ = "";
           if (last && last.providerId && typeof api.setLineProvider === "function") {
             api.setLineProvider(state, last.key, last.providerId).then(function (next) {
+              if (!isOpen() || !state) return;
               state = next;
-              paint();
+              paintAfterProviderRefresh();
             });
           }
         }
@@ -854,7 +896,7 @@
     } else if (providerChanged && typeof api.setLineProvider === "function") {
       return api.setLineProvider(next, key, id).then(function (after) {
         state = after;
-        paint();
+        paintAfterProviderRefresh();
         return true;
       });
     }
@@ -863,8 +905,12 @@
     if (providerChanged && typeof api.setLineProvider === "function") {
       api.setLineProvider(state, key, id).then(function (after) {
         if (!isOpen() || !state) return;
+        var current = (state.lines || []).find(function (row) {
+          return row && (row.key === key || row.lineId === key);
+        });
+        if (current && id && String(current.providerId || "") !== id) return;
         state = after;
-        paint();
+        paintAfterProviderRefresh();
       });
     }
     return Promise.resolve(true);

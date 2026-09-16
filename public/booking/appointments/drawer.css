@@ -516,6 +516,8 @@ body:not(.ff-booking-area) .ff-appt {
   gap: 8px;
 }
 .ff-appt-chip {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -857,6 +859,8 @@ body.ff-appt-drawer-open .ff-live-desk-fab {
 }
 
 .ff-appt-picker {
+  position: relative;
+  z-index: 2;
   margin-top: 8px;
   border: 1px solid #ececef;
   border-radius: 10px;

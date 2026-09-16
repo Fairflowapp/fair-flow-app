@@ -541,8 +541,87 @@ check("historical empty name still falls back to Service in details", details.vi
   }]
 }), "old").serviceName === "Service");
 
-if (failed) {
-  console.error("FAILED", failed);
-  process.exit(1);
+const splitPickerHtml = form.createLinesHtml(split, [
+  { id: "nicole", firstName: "Nicole" },
+  { id: "ashley", firstName: "Ashley" }
+], { providerPickerKey: split.lines[1].key });
+check("split-provider picker renders only on the chosen component", splitPickerHtml.indexOf('data-ff-picker="provider"') !== -1
+  && (splitPickerHtml.match(/data-ff-picker="provider"/g) || []).length === 1
+  && splitPickerHtml.indexOf('data-ff-provider="ashley"') !== -1
+  && splitPickerHtml.indexOf("Regular Pedicure") !== -1
+  && splitPickerHtml.indexOf("Gel Manicure") !== -1);
+
+function delayCatalog(providerId) {
+  let resolveFn = function () {};
+  const promise = new Promise(function (resolve) { resolveFn = resolve; });
+  return {
+    promise: promise,
+    resolve: function () {
+      resolveFn(catalog.filter(function (svc) {
+        if (svc.serviceType === "combo") return true;
+        return windowObj.ffBookingAppointmentServices.isCapable(svc.raw || svc, providerId);
+      }));
+    }
+  };
 }
-console.log("All Combo appointment tests passed.");
+
+async function runProviderRefreshLifecycle() {
+  const originalList = windowObj.ffBookingAppointmentServices.listForProvider;
+  const delayed = {};
+  windowObj.ffBookingAppointmentServices.listForProvider = function (providerId) {
+    if (!delayed[providerId]) delayed[providerId] = delayCatalog(providerId);
+    return delayed[providerId].promise;
+  };
+  const raced = baseState();
+  form.setLineService(raced, raced.lines[0].key, "svc-combo");
+  const firstRefresh = form.setLineProvider(raced, raced.lines[0].key, "nicole");
+  form.applyLineProvider(raced, raced.lines[1].key, "ashley");
+  const secondRefresh = form.setLineProvider(raced, raced.lines[1].key, "ashley");
+  delayed.nicole.resolve();
+  await firstRefresh;
+  check("in-flight first-component refresh does not revert the second provider", raced.lines[0].providerId === "nicole"
+    && raced.lines[1].providerId === "ashley"
+    && raced.lines[0].comboInstanceId === raced.lines[1].comboInstanceId
+    && raced.lines[0].serviceId === "svc-gel"
+    && raced.lines[1].serviceId === "svc-pedi"
+    && raced.lines[0].price === 44
+    && raced.lines[1].price === 40
+    && raced.lines[0].durationMinutes === 45
+    && raced.lines[1].durationMinutes === 30);
+  delayed.ashley.resolve();
+  await secondRefresh;
+  check("split-provider assignment survives both catalog refreshes", raced.lines[0].providerId === "nicole"
+    && raced.lines[1].providerId === "ashley"
+    && combo.isComboLine(raced.lines[0])
+    && combo.isComboLine(raced.lines[1])
+    && raced.lines[0].service.name === "Gel Manicure"
+    && raced.lines[1].service.name === "Regular Pedicure");
+
+  const staleLine = baseState();
+  form.setLineService(staleLine, staleLine.lines[0].key, "svc-combo");
+  delayed.nicole = delayCatalog("nicole");
+  delayed.ashley = delayCatalog("ashley");
+  const staleRefresh = form.setLineProvider(staleLine, staleLine.lines[1].key, "nicole");
+  form.applyLineProvider(staleLine, staleLine.lines[1].key, "ashley");
+  const liveRefresh = form.setLineProvider(staleLine, staleLine.lines[1].key, "ashley");
+  delayed.nicole.resolve();
+  await staleRefresh;
+  check("stale same-line refresh does not overwrite the later provider", staleLine.lines[1].providerId === "ashley"
+    && staleLine.lines[0].providerId === "nicole"
+    && staleLine.lines[1].serviceId === "svc-pedi"
+    && staleLine.lines[1].price === 40);
+  delayed.ashley.resolve();
+  await liveRefresh;
+  windowObj.ffBookingAppointmentServices.listForProvider = originalList;
+}
+
+runProviderRefreshLifecycle().then(function () {
+  if (failed) {
+    console.error("FAILED", failed);
+    process.exit(1);
+  }
+  console.log("All Combo appointment tests passed.");
+}).catch(function (err) {
+  console.error("FAILED provider refresh lifecycle", err && err.stack || err);
+  process.exit(1);
+});
