@@ -143,12 +143,90 @@ export function listEligibleComboComponentServices(catalogServices, comboId, sel
   });
 }
 
+export function catalogStableKey(service) {
+  const category = String(service && (service.category || "Other") || "Other").trim().toLowerCase();
+  const name = String(service && service.name || "").trim().toLowerCase();
+  return category + "::" + name;
+}
+
+/**
+ * Booking picker merge: location Singles stay visible with their existing IDs.
+ * Shared/Combo rows are added only when they do not replace those Singles.
+ */
+export function mergeCatalogServicesForPicker(sharedServices, locationServices) {
+  const shared = Array.isArray(sharedServices) ? sharedServices : [];
+  const local = Array.isArray(locationServices) ? locationServices : [];
+  const byId = new Set();
+  const byKey = new Set();
+  const merged = [];
+  local.forEach(function (service) {
+    const id = String(service && service.id || "").trim();
+    if (!id) return;
+    byId.add(id);
+    byKey.add(catalogStableKey(service));
+    merged.push(service);
+  });
+  shared.forEach(function (service) {
+    const id = String(service && service.id || "").trim();
+    if (!id || byId.has(id) || byKey.has(catalogStableKey(service))) return;
+    byId.add(id);
+    byKey.add(catalogStableKey(service));
+    merged.push(service);
+  });
+  return merged;
+}
+
+export function mergeCatalogCategoriesForPicker(sharedCategories, locationCategories) {
+  const seen = new Set();
+  const merged = [];
+  function add(list) {
+    (Array.isArray(list) ? list : []).forEach(function (cat) {
+      if (!cat) return;
+      const id = String(cat.id || "").trim();
+      const name = String(cat.name || "").trim().toLowerCase();
+      const key = id || (name ? "name:" + name : "");
+      if (!key || seen.has(key)) return;
+      if (name && seen.has("name:" + name)) return;
+      if (id) seen.add(id);
+      if (name) seen.add("name:" + name);
+      merged.push(cat);
+    });
+  }
+  add(locationCategories);
+  add(sharedCategories);
+  return merged;
+}
+
+/** Prefer rows that still carry Combo components when catalogs are merged. */
+export function catalogRowsForComboUsage(groups) {
+  const seen = new Map();
+  (Array.isArray(groups) ? groups : []).forEach(function (list) {
+    (Array.isArray(list) ? list : []).forEach(function (service) {
+      const id = String(service && service.id || "").trim();
+      if (!id) return;
+      const current = seen.get(id);
+      if (!current) {
+        seen.set(id, service);
+        return;
+      }
+      const currentIds = comboComponentServiceIds(current.components);
+      const nextIds = comboComponentServiceIds(service.components);
+      if (nextIds.length > currentIds.length || (isComboService(service) && !isComboService(current))) {
+        seen.set(id, service);
+      }
+    });
+  });
+  return Array.from(seen.values());
+}
+
 export function combosUsingService(serviceId, catalogServices) {
   const id = String(serviceId || "").trim();
   if (!id) return [];
   return (Array.isArray(catalogServices) ? catalogServices : []).filter(function (service) {
-    if (!isComboService(service)) return false;
-    return comboComponentServiceIds(service.components).indexOf(id) !== -1;
+    if (!service || String(service.id || "").trim() === id) return false;
+    const ids = comboComponentServiceIds(service.components);
+    if (ids.indexOf(id) === -1) return false;
+    return isComboService(service) || ids.length >= MIN_COMBO_COMPONENTS;
   });
 }
 
@@ -591,6 +669,10 @@ if (typeof window !== "undefined") {
     withSequentialSortOrder,
     moveComboComponent,
     listEligibleComboComponentServices,
+    catalogStableKey,
+    mergeCatalogServicesForPicker,
+    mergeCatalogCategoriesForPicker,
+    catalogRowsForComboUsage,
     combosUsingService,
     comboDurationMinutes,
     allocatedPricesReconcile,

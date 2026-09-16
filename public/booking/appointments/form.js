@@ -1060,7 +1060,8 @@
       if (!svc || !svc.name) return false;
       if (!query) return true;
       return String(svc.name).toLowerCase().indexOf(query) !== -1
-        || String(svc.category || "").toLowerCase().indexOf(query) !== -1;
+        || String(svc.category || "").toLowerCase().indexOf(query) !== -1
+        || String(svc.id || "").toLowerCase().indexOf(query) !== -1;
     }));
     var groups = [];
     var seen = {};

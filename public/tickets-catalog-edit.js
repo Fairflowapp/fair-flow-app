@@ -13,7 +13,7 @@ import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, res
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { catalogRowsForComboUsage, catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
 
 let showToast, ticketConfirm, setupTicketsUI, renderServicesCatalogV2, _ffIsServicesScreenRoot;
 export function initCatalogEdit(deps) {
@@ -45,6 +45,17 @@ function currentEditorCatalogServices() {
     ? getSharedServicesForCatalogManager()
     : getLocationServicesForCatalogManager();
   return (data && data.services) || [];
+}
+
+function catalogServicesForComboUsage() {
+  return catalogRowsForComboUsage([
+    ticketsState._rawSharedServices,
+    ticketsState._rawServices,
+    getSharedServicesForCatalogManager().services,
+    getLocationServicesForCatalogManager().services,
+    ticketsState.salonServices,
+    currentEditorCatalogServices()
+  ]);
 }
 
 function editorServiceType(existing) {
@@ -109,7 +120,7 @@ async function deleteCatalogService(svcId) {
     showToast('This service could not be found.', 'error');
     return;
   }
-  const catalog = currentEditorCatalogServices();
+  const catalog = catalogServicesForComboUsage();
   const usedBy = combosUsingService(id, catalog);
   if (usedBy.length) {
     const names = usedBy.slice(0, 3).map((s) => s.name || 'Combo').join(', ');
@@ -784,7 +795,7 @@ async function _ffCatalogEditorSubmit(ctx) {
     durationMinutes = comboFields.durationMinutes;
     const convertingUsedSingle = ctx.existing && !isComboService(ctx.existing);
     if (convertingUsedSingle) {
-      const usedBy = combosUsingService(ctx.existing.id, currentEditorCatalogServices());
+      const usedBy = combosUsingService(ctx.existing.id, catalogServicesForComboUsage());
       if (usedBy.length) {
         showToast('This service is used as a Combo component, so it must stay a Single Service.', 'error');
         return;

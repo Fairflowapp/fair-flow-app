@@ -207,6 +207,48 @@ check("eligible components exclude other combos", eligible.every(function (row) 
 const used = api.combosUsingService("svc-manicure", catalog.concat([persisted]));
 check("a Single used by a Combo can be found", used.length === 1 && used[0].id === "svc-combo");
 
+const locationOnlyCatalog = catalog;
+check(
+  "location-only catalog misses a Combo stored in shared",
+  api.combosUsingService("svc-manicure", locationOnlyCatalog).length === 0
+);
+const usageMerged = api.catalogRowsForComboUsage([locationOnlyCatalog, [persisted]]);
+check(
+  "merged catalog finds Combo usage across shared + location",
+  api.combosUsingService("svc-manicure", usageMerged).length === 1 && usageMerged.some(function (row) { return row.id === "svc-combo"; })
+);
+
+const pickerMerged = api.mergeCatalogServicesForPicker(
+  [
+    { id: "shared-combo", name: "Manicure + Pedicure Combo", category: "Combo", serviceType: "combo" },
+    { id: "shared-mani-clone", name: "QA Manicure", category: "QA Hands" }
+  ],
+  [{ id: "qaServiceManicure", name: "QA Manicure", category: "QA Hands" }]
+);
+check(
+  "picker keeps the existing location Single id when shared catalog is populated",
+  pickerMerged.some(function (row) { return row.id === "qaServiceManicure"; })
+);
+check(
+  "picker does not replace a location Single with a same-name shared clone",
+  pickerMerged.filter(function (row) { return row.name === "QA Manicure"; }).length === 1
+    && pickerMerged.every(function (row) { return row.id !== "shared-mani-clone"; })
+);
+check(
+  "picker still includes Combo Services from the shared catalog",
+  pickerMerged.some(function (row) { return row.id === "shared-combo"; })
+);
+
+const pickerWithUnrelatedCombo = api.mergeCatalogServicesForPicker(
+  [{ id: "ff-qa-combo", name: "FF-QA-COMBO leftover", category: "FF-QA-COMBO-CAT" }],
+  [{ id: "qaServiceManicure", name: "QA Manicure", category: "QA Hands" }]
+);
+check(
+  "existing Single remains searchable when an unrelated Combo exists",
+  pickerWithUnrelatedCombo.some(function (row) { return row.id === "qaServiceManicure"; })
+    && pickerWithUnrelatedCombo.some(function (row) { return row.id === "ff-qa-combo"; })
+);
+
 const reorderPayload = { name: "Manicure", category: "Nails", defaultPrice: 40, active: true, sortOrder: 1 };
 const reorderPatch = api.applyComboFieldsToServicePayload(reorderPayload, {
   id: "svc-manicure",
@@ -258,10 +300,16 @@ const data = fs.readFileSync(path.join(root, "public/tickets-catalog-data.js"), 
 check("catalog save still uses durationMinutes", data.includes("payload.durationMinutes") || data.includes("applyDurationMinutesToServicePayload"));
 check("catalog save applies combo fields", data.includes("applyComboPayloadAndClearFlag"));
 check("shared mapping copies combo fields", data.includes("copyComboCatalogFields"));
+check("delete guards in-use Combo components", data.includes("assertServiceNotUsedInCombo"));
 
 const editSrc = fs.readFileSync(path.join(root, "public/tickets-catalog-edit.js"), "utf8");
 check("New/Edit Service editor includes Service Type", editSrc.includes("catalogServiceTypeControlsHtml"));
 check("New/Edit Service editor wires Combo components", editSrc.includes("wireComboEditor"));
+check("in-use delete lookup merges shared and location catalogs", editSrc.includes("catalogServicesForComboUsage") && editSrc.includes("used in"));
+
+const pickerSrc = fs.readFileSync(path.join(root, "public/booking/appointments/services.js"), "utf8");
+check("Booking picker merges shared and location catalogs", pickerSrc.includes("mergeCatalogServicesForPicker"));
+check("Booking picker no longer treats a populated shared catalog as exclusive", pickerSrc.indexOf("if (sharedRows.length) return") === -1);
 
 const renderSrc = fs.readFileSync(path.join(root, "public/tickets-catalog-render.js"), "utf8");
 check("inline Details edit includes Service Type", renderSrc.includes("servicesInlineEditServiceType"));

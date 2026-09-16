@@ -395,6 +395,20 @@ const pickerSearch = form.createLinesHtml(emptyCreate, [], {
   serviceQ: "pedi"
 });
 check("search keeps matching category open", pickerSearch.indexOf("is-collapsed") === -1 && pickerSearch.indexOf("Pedicure") !== -1);
+emptyCreate.catalogServices = [
+  { id: "qaServiceManicure", name: "QA Manicure", category: "QA Hands", price: 25 },
+  { id: "qaServicePedicure", name: "QA Pedicure", category: "QA Hands", price: 35 }
+];
+const pickerById = form.createLinesHtml(emptyCreate, [], {
+  servicePickerKey: emptyCreate.lines[0].key,
+  serviceQ: "qaServiceManicure"
+});
+check(
+  "search by existing Single Service id keeps pick-service visible",
+  pickerById.indexOf('data-ff-appt-act="pick-service"') !== -1
+    && pickerById.indexOf('data-ff-service="qaServiceManicure"') !== -1
+    && pickerById.indexOf("QA Manicure") !== -1
+);
 
 emptyCreate.catalogServices = [
   { id: "pedi", name: "Pedicure", category: "Feet", categoryKey: "feet", categorySortOrder: 2, sortOrder: 0, price: 58 },

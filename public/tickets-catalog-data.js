@@ -13,7 +13,7 @@ import { collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
-import { applyComboFieldsToServicePayload, copyComboCatalogFields, isComboService, normalizeComboComponents, validateComboService } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { applyComboFieldsToServicePayload, catalogRowsForComboUsage, combosUsingService, copyComboCatalogFields, isComboService, normalizeComboComponents, validateComboService } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {
@@ -144,6 +144,25 @@ function applyDurationMinutesToServicePayload(payload, service, isCreate) {
   payload.durationMinutes = isValidServiceDurationMinutes(Number(service.durationMinutes))
     ? Number(service.durationMinutes)
     : DEFAULT_SERVICE_DURATION_MINUTES;
+}
+
+function comboUsageCatalog() {
+  return catalogRowsForComboUsage([
+    ticketsState._rawSharedServices,
+    ticketsState._rawServices,
+    ticketsState.salonServices
+  ]);
+}
+
+function assertServiceNotUsedInCombo(serviceId) {
+  const usedBy = combosUsingService(serviceId, comboUsageCatalog());
+  if (!usedBy.length) return;
+  const names = usedBy.slice(0, 3).map((s) => s.name || "Combo").join(", ");
+  throw new Error(
+    "This service is used in " +
+    (usedBy.length === 1 ? "a Combo" : "Combos") +
+    " (" + names + "). Remove it from Combo components first."
+  );
 }
 
 function applyComboPayloadAndClearFlag(payload, service, isCreate) {
@@ -473,6 +492,7 @@ async function deleteSharedService(serviceId) {
   const id = String(serviceId || "").trim();
   if (!accountId) throw new Error('Account is still loading. Try again in a moment.');
   if (!id) throw new Error('This service could not be found.');
+  assertServiceNotUsedInCombo(id);
   await deleteDoc(doc(sharedServiceCatalogItemsRef(accountId), id));
   ticketsState._rawSharedServices = (ticketsState._rawSharedServices || []).filter((row) => row && String(row.id) !== id);
   try {
@@ -902,6 +922,7 @@ async function saveService(service) {
 async function deleteService(serviceId) {
   if (!ffCanManageServices()) throw new Error('You do not have permission to manage services.');
   if (!ticketsState.currentUserProfile?.salonId || !serviceId) return;
+  assertServiceNotUsedInCombo(serviceId);
   await deleteDoc(doc(db, `salons/${ticketsState.currentUserProfile.salonId}/services`, serviceId));
 }
 

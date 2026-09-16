@@ -7,7 +7,11 @@ import {
   resolveServiceDurationForStaff,
   resolveServiceDurationMinutes,
 } from "/tickets-catalog-data.js?v=20260915_combo_svc";
-import { copyComboCatalogFields } from "/tickets-catalog-combo.js?v=20260915_combo_svc";
+import {
+  copyComboCatalogFields,
+  mergeCatalogCategoriesForPicker,
+  mergeCatalogServicesForPicker,
+} from "/tickets-catalog-combo.js?v=20260915_combo_svc";
 import {
   collection,
   getDocs,
@@ -76,11 +80,23 @@ async function loadLocationCatalog() {
 }
 
 async function loadCatalog() {
-  const shared = await loadSharedCatalogForManager();
+  const local = await loadLocationCatalog();
+  const localRows = Array.isArray(local && local.services) ? local.services : [];
+  const localCats = Array.isArray(local && local.categories) ? local.categories : [];
+  let shared = { services: [], categories: [] };
+  try {
+    shared = await loadSharedCatalogForManager();
+  } catch (_) {
+    shared = { services: [], categories: [] };
+  }
   const sharedRows = Array.isArray(shared && shared.services) ? shared.services : [];
   const sharedCats = Array.isArray(shared && shared.categories) ? shared.categories : [];
-  if (sharedRows.length) return { services: sharedRows, categories: sharedCats };
-  return loadLocationCatalog();
+  if (!sharedRows.length && !sharedCats.length) return { services: localRows, categories: localCats };
+  if (!localRows.length && !localCats.length) return { services: sharedRows, categories: sharedCats };
+  return {
+    services: mergeCatalogServicesForPicker(sharedRows, localRows),
+    categories: mergeCatalogCategoriesForPicker(sharedCats, localCats)
+  };
 }
 
 function categorySlug(name) {
