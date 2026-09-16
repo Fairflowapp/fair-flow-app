@@ -72,5 +72,14 @@ module.exports = defineConfig({
         storageState: STORAGE_STATE_PATH,
       },
     },
+    {
+      name: "combo",
+      dependencies: ["setup"],
+      testMatch: /combo-services\.spec\.js/,
+      timeout: 180000,
+      use: {
+        storageState: STORAGE_STATE_PATH,
+      },
+    },
   ],
 });
