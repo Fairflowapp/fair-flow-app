@@ -175,6 +175,11 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   const nameInput = page.locator("#servicesInlineEditName");
   await expect(nameInput).toHaveValue(NAMES.singleOne);
   await expect(page.locator("#servicesInlineEditTypeSingle")).toBeChecked();
+  await expect(page.locator("#servicesInlineEditCategory")).toBeVisible();
+  const reopenedSingleCat = String(await page.locator("#servicesInlineEditCategory option:checked").textContent() || "").trim();
+  expect(reopenedSingleCat).toBe(NAMES.category);
+  await expect(page.locator("#servicesInlineEditCreateCategory")).toBeVisible();
+  await expect(page.locator("#servicesInlineEditCreateCategory")).toHaveText(/\+\s*Create new category/i);
   await page.locator("#servicesInlineEditPrice").fill("42");
   await page.locator("#servicesInlineEditSaveBtn").click();
   await waitInlineSaved(page);
@@ -193,18 +198,31 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   await waitModalClosed(page);
 
   await openAddService(page, NAMES.category);
-  await page.locator("#servicesCatalogEditorName").fill(NAMES.combo);
+  await expect(page.locator("#servicesCatalogEditorCategory")).toBeVisible();
+  await expect(page.locator("#servicesCatalogEditorCategoryText")).toBeHidden();
+  const comboExistingCats = await page.locator("#servicesCatalogEditorCategory option").allTextContents();
+  expect(comboExistingCats.join("\n")).toContain(NAMES.category);
+  expect(comboExistingCats.join("\n")).toMatch(/Hands|Feet|Combo|Waxing|Massage/i);
+  await expect(page.locator("#servicesCatalogEditorCreateCategory")).toBeVisible();
+  await expect(page.locator("#servicesCatalogEditorCreateCategory")).toHaveText(/\+\s*Create new category/i);
+
+  const createdViaPicker = "FF-QA-COMBO-NEWCAT " + RUN_ID;
+  page.once("dialog", (dialog) => dialog.accept(createdViaPicker));
+  await page.locator("#servicesCatalogEditorCreateCategory").click();
+  await waitToast(page, /Category added/i);
+  await expect(page.locator("#servicesCatalogEditorCategory option:checked")).toHaveText(createdViaPicker);
+
+  page.once("dialog", (dialog) => dialog.accept(createdViaPicker.toLowerCase()));
+  await page.locator("#servicesCatalogEditorCreateCategory").click();
+  await waitToast(page, /Category selected/i);
+  const catsAfterDup = await page.locator("#servicesCatalogEditorCategory option").allTextContents();
+  expect(catsAfterDup.filter((text) => String(text || "").trim().toLowerCase() === createdViaPicker.toLowerCase()).length).toBe(1);
+
   const comboCatSel = page.locator("#servicesCatalogEditorCategory");
-  if (await comboCatSel.isVisible()) {
-    const option = comboCatSel.locator("option", { hasText: NAMES.category });
-    if (await option.count()) {
-      const value = await option.first().getAttribute("value");
-      if (value) await comboCatSel.selectOption(value);
-    }
-  } else {
-    const catText = page.locator("#servicesCatalogEditorCategoryText");
-    if (await catText.isVisible()) await catText.fill(NAMES.category);
-  }
+  const originalCatOption = comboCatSel.locator("option", { hasText: NAMES.category });
+  const originalCatValue = await originalCatOption.first().getAttribute("value");
+  if (originalCatValue) await comboCatSel.selectOption(originalCatValue);
+  await page.locator("#servicesCatalogEditorName").fill(NAMES.combo);
   await page.locator("#servicesCatalogEditorTypeCombo").check();
   await expect(page.locator("#servicesCatalogEditorComboWrap")).toBeVisible();
   await expect(page.locator("#servicesCatalogEditorDurationWrap")).toBeHidden();
@@ -297,6 +315,9 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   await expect(page.locator("#servicesInlineEditTypeCombo")).toBeChecked();
   await expect(page.locator("#servicesInlineEditDurationRow")).toBeHidden();
   await expect(page.locator("#servicesInlineEditComboWrap")).toBeVisible();
+  await expect(page.locator("#servicesInlineEditCategory")).toBeVisible();
+  const reopenedComboCat = String(await page.locator("#servicesInlineEditCategory option:checked").textContent() || "").trim();
+  expect(reopenedComboCat).toBe(NAMES.category);
   await page.locator("#servicesInlineEditComboWrap .ff-combo-move-down").first().click();
   const inlineRows = await page.locator("#servicesInlineEditComboWrap .ff-combo-component-row").evaluateAll((els) =>
     els.map((el) => String(el.querySelector("div div").textContent || "").trim())

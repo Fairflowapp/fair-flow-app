@@ -6,6 +6,7 @@
  */
 const { test, expect } = require("../../helpers/qa-test");
 const { gotoStagingApp, waitForAppReady, assertStagingFirebase } = require("../../helpers/auth");
+const { attachDiagnostics } = require("../../helpers/diagnostics");
 const {
   cleanupQaAppointments,
   getQaAppointment,
@@ -126,6 +127,7 @@ test.afterAll(async () => {
 
 test("Combo expands, splits providers, and stays one visit", async ({ page }) => {
   test.setTimeout(180000);
+  const diag = attachDiagnostics(page);
   await readyPage(page);
   const note = noteFor(RUN_ID, "combo-split");
   await ui.clickCalendarSlot(page, PROVIDER_A, START_MIN);
@@ -144,8 +146,34 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   const pediLine = comboLines(page, "#ffApptLines").nth(1);
   await expect(gelLine).toContainText(COMBO.gelName);
   await expect(pediLine).toContainText(COMBO.pediName);
+  await expect(gelLine).not.toContainText(/^Service$/);
+  await expect(pediLine).not.toContainText(/^Service$/);
   await expect(gelLine.locator(".ff-appt-card-price")).toContainText("44");
   await expect(pediLine.locator(".ff-appt-card-price")).toContainText("40");
+
+  const ssContract = await page.evaluate(() => {
+    const comboApi = window.ffBookingAppointmentCombo;
+    const drawer = window.ffBookingAppointmentDrawer;
+    const state = drawer && typeof drawer.getState === "function" ? drawer.getState() : null;
+    const providers = window.ffBookingCalState && typeof window.ffBookingCalState.getEmployees === "function"
+      ? window.ffBookingCalState.getEmployees()
+      : [];
+    if (!comboApi || !state) return [];
+    return comboApi.smartSchedulingRequestLines(state.lines, { providers: providers });
+  });
+  expect(ssContract.length).toBe(2);
+  expect(ssContract.map((row) => row.serviceId).sort()).toEqual([COMBO.gelId, COMBO.pediId].sort());
+  expect(ssContract.every((row) => row.serviceId !== COMBO.comboId)).toBeTruthy();
+  expect(ssContract.map((row) => row.serviceName).sort()).toEqual([COMBO.gelName, COMBO.pediName].sort());
+  expect(ssContract.every((row) => row.serviceName && row.serviceName !== "Service")).toBeTruthy();
+  expect(ssContract.map((row) => Number(row.durationMinutes)).sort((a, b) => a - b)).toEqual([30, 45]);
+  expect(ssContract.every((row) => Array.isArray(row.eligibleProviderIds) && row.eligibleProviderIds.length > 0)).toBeTruthy();
+  const ssGel = ssContract.find((row) => row.serviceId === COMBO.gelId);
+  const ssPedi = ssContract.find((row) => row.serviceId === COMBO.pediId);
+  expect(ssGel.eligibleProviderIds).toContain(PROVIDER_A);
+  expect(ssGel.eligibleProviderIds).not.toContain(PROVIDER_B);
+  expect(ssPedi.eligibleProviderIds).toContain(PROVIDER_A);
+  expect(ssPedi.eligibleProviderIds).toContain(PROVIDER_B);
 
   const gelClock = await readLineClock(gelLine);
   const pediClock = await readLineClock(pediLine);
@@ -185,6 +213,16 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   expect(lines.every((line) => line.comboServiceId === COMBO.comboId)).toBeTruthy();
   expect(lines.every((line) => line.serviceId !== COMBO.comboId)).toBeTruthy();
   expect(lines.map((line) => line.serviceId).sort()).toEqual([COMBO.gelId, COMBO.pediId].sort());
+  const storedGel = lines.find((line) => line.serviceId === COMBO.gelId);
+  const storedPedi = lines.find((line) => line.serviceId === COMBO.pediId);
+  expect(storedGel.serviceName || storedGel.serviceNameSnapshot).toBe(COMBO.gelName);
+  expect(storedPedi.serviceName || storedPedi.serviceNameSnapshot).toBe(COMBO.pediName);
+  expect(Number(storedGel.durationMinutes)).toBe(45);
+  expect(Number(storedPedi.durationMinutes)).toBe(30);
+  expect(storedGel.providerId).toBe(PROVIDER_A);
+  expect(storedPedi.providerId).toBe(PROVIDER_B);
+  expect(Number(storedGel.priceSnapshot)).toBe(44);
+  expect(Number(storedPedi.priceSnapshot)).toBe(40);
   expect(new Set(lines.map((line) => line.providerId))).toEqual(new Set([PROVIDER_A, PROVIDER_B]));
   expect(Math.round(allocatedSum(lines) * 100)).toBe(8400);
   expect(lines.every((line) => Number(line.comboSellingPriceSnapshot) === 84)).toBeTruthy();
@@ -233,6 +271,21 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   const editPedi = comboLines(page, "#ffApdLines").nth(1);
   await expect(editGel).toContainText(COMBO.gelName);
   await expect(editPedi).toContainText(COMBO.pediName);
+  await expect(editGel.locator(".ff-appt-card-price")).toContainText("44");
+  await expect(editPedi.locator(".ff-appt-card-price")).toContainText("40");
+  const editProviders = await page.evaluate(() => {
+    const details = window.ffBookingAppointmentDetails;
+    const state = details && typeof details.getEditState === "function" ? details.getEditState() : null;
+    return ((state && state.lines) || []).filter((line) => line && line.comboInstanceId).map((line) => ({
+      providerId: String(line.providerId || ""),
+    }));
+  });
+  expect(editProviders.length).toBe(2);
+  expect(editProviders.map((row) => row.providerId).sort()).toEqual([PROVIDER_A, PROVIDER_B].sort());
+  const editGelClock = await readLineClock(editGel);
+  const editPediClock = await readLineClock(editPedi);
+  expect(editGelClock.start).toMatch(/11:30/);
+  expect(editPediClock.start).toMatch(/11:30|12:15/);
   await ui.setLineStart(page, editPedi, START_MIN + 45);
   await ui.pickProviderOnLine(page, editPedi, PROVIDER_A);
   await ui.saveEdit(page);
@@ -256,6 +309,15 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   expect(detailsAgain.services).toContain(COMBO.gelName);
   expect(detailsAgain.services).toContain(COMBO.pediName);
   await expect(page.locator("#ffApdTotal")).toContainText("84");
+  const ignoreNoise = (msg) => {
+    const text = String(msg || "");
+    if (/favicon|Download the React DevTools|third-party cookie/i.test(text)) return false;
+    if (/\[SharedServices\]/i.test(text)) return false;
+    if (/node to be removed is no longer a child/i.test(text)) return false;
+    return true;
+  };
+  expect(diag.pageErrors.filter(ignoreNoise), "no new uncaught page errors").toEqual([]);
+  expect(diag.consoleErrors.filter(ignoreNoise), "no new console errors").toEqual([]);
 });
 
 test("Same-provider Combo, Single, and multi-service stay compatible", async ({ page }) => {

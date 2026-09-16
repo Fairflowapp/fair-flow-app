@@ -15,10 +15,13 @@ const FORBIDDEN_NAMES = new Set(["QA Manicure", "QA Pedicure", "QA Hands"]);
 function isOwnedName(name, runId) {
   const text = String(name || "").trim();
   const id = String(runId || "").trim();
-  if (!text.startsWith(NAME_PREFIX)) return false;
   if (FORBIDDEN_NAMES.has(text)) return false;
   if (id && text.indexOf(id) === -1) return false;
-  return true;
+  if (text.startsWith(NAME_PREFIX)) return true;
+  if (/^FF-QA Gel Manicure/.test(text)) return true;
+  if (/^FF-QA Regular Pedicure/.test(text)) return true;
+  if (/^FF-QA Gel Mani \+ Regular Pedi Combo/.test(text)) return true;
+  return false;
 }
 
 async function withAdmin(fn) {
@@ -93,9 +96,9 @@ async function seedQaComboAppointmentCatalog(runId, opts) {
   const gelId = "qaComboApptGel_" + id;
   const pediId = "qaComboApptPedi_" + id;
   const comboId = "qaComboAppt_" + id;
-  const gelName = "FF-QA-COMBO-APPT-GEL " + id;
-  const pediName = "FF-QA-COMBO-APPT-PEDI " + id;
-  const name = "FF-QA-COMBO-APPT " + id;
+  const gelName = "FF-QA Gel Manicure " + id;
+  const pediName = "FF-QA Regular Pedicure " + id;
+  const name = "FF-QA Gel Mani + Regular Pedi Combo " + id;
   const now = new Date().toISOString();
   const overrides = {};
   overrides[blockedProviderId] = { enabled: false };

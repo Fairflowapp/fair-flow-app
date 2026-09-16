@@ -73,6 +73,7 @@ node_modules/
 
 # Booking QA local secrets and generated reports
 qa/fixtures/staging.env
+qa/.auth
 qa/.auth/
 qa/baselines/last-*.json
 qa/test-results/
