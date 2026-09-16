@@ -38,10 +38,45 @@ async function openServices(page) {
   }, null, { timeout: 25000 });
 }
 
-async function waitToast(page, pattern) {
-  const toast = page.locator("#ff-app-toast");
-  await expect(toast).toBeVisible({ timeout: 25000 });
-  await expect(toast).toContainText(pattern);
+async function clickExpectingToast(page, target, pattern) {
+  const source = pattern instanceof RegExp ? pattern.source : String(pattern);
+  const flags = pattern instanceof RegExp ? pattern.flags : "";
+  await expect(page.locator("#ff-app-toast")).toBeHidden({ timeout: 15000 });
+  await page.evaluate(({ source, flags }) => {
+    const re = new RegExp(source, flags);
+    if (window.__ffQaToastObserver) {
+      window.__ffQaToastObserver.disconnect();
+      window.__ffQaToastObserver = null;
+    }
+    window.__ffQaExpectedToast = "";
+    const capture = (node) => {
+      if (!node || node.nodeType !== 1) return;
+      const el = node.id === "ff-app-toast" ? node : node.querySelector && node.querySelector("#ff-app-toast");
+      if (!el) return;
+      const text = String(el.textContent || "");
+      if (re.test(text)) window.__ffQaExpectedToast = text;
+    };
+    const obs = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach(capture);
+      });
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+    window.__ffQaToastObserver = obs;
+  }, { source, flags });
+  try {
+    await target.click();
+    await expect.poll(async () => page.evaluate(() => window.__ffQaExpectedToast || ""), {
+      timeout: 25000,
+    }).toMatch(pattern);
+  } finally {
+    await page.evaluate(() => {
+      if (window.__ffQaToastObserver) {
+        window.__ffQaToastObserver.disconnect();
+        window.__ffQaToastObserver = null;
+      }
+    });
+  }
 }
 
 async function waitInlineSaved(page) {
@@ -57,8 +92,7 @@ async function addCategory(page, name) {
   const modal = page.locator("#servicesCatalogEditorModal");
   await expect(modal).toBeVisible();
   await page.locator("#servicesCatalogEditorName").fill(name);
-  await page.locator("#servicesCatalogEditorSave").click();
-  await waitToast(page, /Category added/i);
+  await clickExpectingToast(page, page.locator("#servicesCatalogEditorSave"), /Category added/i);
   await waitModalClosed(page);
 }
 
@@ -96,8 +130,8 @@ async function fillSingleService(page, opts) {
   await page.locator("#servicesCatalogEditorDurationMinutes").selectOption(String(opts.minutes));
 }
 
-async function saveEditor(page) {
-  await page.locator("#servicesCatalogEditorSave").click();
+async function saveEditorExpectingToast(page, pattern) {
+  await clickExpectingToast(page, page.locator("#servicesCatalogEditorSave"), pattern);
 }
 
 async function selectService(page, name) {
@@ -165,8 +199,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
     minutes: 35,
     expectDefaultSingle: true,
   });
-  await saveEditor(page);
-  await waitToast(page, /Service added/i);
+  await saveEditorExpectingToast(page, /Service added/i);
   await waitModalClosed(page);
 
   await selectService(page, NAMES.singleOne);
@@ -193,8 +226,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
     minutes: 45,
     expectDefaultSingle: true,
   });
-  await saveEditor(page);
-  await waitToast(page, /Service added/i);
+  await saveEditorExpectingToast(page, /Service added/i);
   await waitModalClosed(page);
 
   await openAddService(page, NAMES.category);
@@ -208,13 +240,11 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
 
   const createdViaPicker = "FF-QA-COMBO-NEWCAT " + RUN_ID;
   page.once("dialog", (dialog) => dialog.accept(createdViaPicker));
-  await page.locator("#servicesCatalogEditorCreateCategory").click();
-  await waitToast(page, /Category added/i);
+  await clickExpectingToast(page, page.locator("#servicesCatalogEditorCreateCategory"), /Category added/i);
   await expect(page.locator("#servicesCatalogEditorCategory option:checked")).toHaveText(createdViaPicker);
 
   page.once("dialog", (dialog) => dialog.accept(createdViaPicker.toLowerCase()));
-  await page.locator("#servicesCatalogEditorCreateCategory").click();
-  await waitToast(page, /Category selected/i);
+  await clickExpectingToast(page, page.locator("#servicesCatalogEditorCreateCategory"), /Category selected/i);
   const catsAfterDup = await page.locator("#servicesCatalogEditorCategory option").allTextContents();
   expect(catsAfterDup.filter((text) => String(text || "").trim().toLowerCase() === createdViaPicker.toLowerCase()).length).toBe(1);
 
@@ -233,8 +263,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   await page.locator("#servicesCatalogEditorComboWrap .ff-combo-add-btn").click();
   await expect(page.locator("#servicesCatalogEditorComboWrap .ff-combo-component-row")).toHaveCount(1);
 
-  await saveEditor(page);
-  await waitToast(page, /at least 2 existing Single Services/i);
+  await saveEditorExpectingToast(page, /at least 2 existing Single Services/i);
   await expect(page.locator("#servicesCatalogEditorModal")).toBeVisible();
 
   const optionsAfterFirst = await addSelect.locator("option").allTextContents();
@@ -254,8 +283,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   const allocated = page.locator("#servicesCatalogEditorComboWrap .ff-combo-allocated");
   await allocated.nth(0).fill("30");
   await allocated.nth(1).fill("30");
-  await saveEditor(page);
-  await waitToast(page, /must add up to the Combo selling price/i);
+  await saveEditorExpectingToast(page, /must add up to the Combo selling price/i);
 
   await allocated.nth(0).fill("30");
   await allocated.nth(1).fill("35");
@@ -285,8 +313,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   await allocated.nth(0).fill("30");
   await allocated.nth(1).fill("35");
 
-  await saveEditor(page);
-  await waitToast(page, /Service added/i);
+  await saveEditorExpectingToast(page, /Service added/i);
   await waitModalClosed(page);
 
   const comboRow = page.locator("#servicesScreen .ff-services-sidebar-service").filter({ hasText: NAMES.combo });
@@ -338,8 +365,7 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
 
   await selectService(page, NAMES.singleOne);
   await page.locator("#servicesDetailActionsBtn").click();
-  await page.locator(".ffcat-popover button", { hasText: /Delete service/i }).click();
-  await waitToast(page, /used in/i);
+  await clickExpectingToast(page, page.locator(".ffcat-popover button", { hasText: /Delete service/i }), /used in/i);
   await expect(page.locator("#servicesScreen .ff-services-sidebar-service").filter({ hasText: NAMES.singleOne })).toBeVisible();
 
   const leftoverErrors = diag.pageErrors.slice(pageErrorsAtStart);
