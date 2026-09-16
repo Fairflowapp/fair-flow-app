@@ -14,6 +14,7 @@ import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDur
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { catalogRowsForComboUsage, catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { catalogServiceSavedToast, isCatalogServiceCreateMode } from "./tickets-catalog-toast.js?v=20260915_svc_toast";
 
 let showToast, ticketConfirm, setupTicketsUI, renderServicesCatalogV2, _ffIsServicesScreenRoot;
 export function initCatalogEdit(deps) {
@@ -810,6 +811,7 @@ async function _ffCatalogEditorSubmit(ctx) {
   }
 
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
+  let serviceSaveToast = null;
   try {
     if (ctx.mode === 'category-add') {
       await saveServiceCategory({ name, sortOrder: ticketsState.serviceCategories.length });
@@ -858,7 +860,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
-      showToast('Service added', 'success');
+      serviceSaveToast = catalogServiceSavedToast(ctx.mode);
     } else if (ctx.mode === 'service-edit') {
       const s = ctx.existing;
       const categoryId = catSel?.value || null;
@@ -875,7 +877,7 @@ async function _ffCatalogEditorSubmit(ctx) {
       });
       await Promise.all([loadServiceCategories(), loadServices()]);
       if (categoryId) ticketsState._ffOpenCats.add(categoryId);
-      showToast('Updated', 'success');
+      serviceSaveToast = catalogServiceSavedToast(ctx.mode);
     } else if (ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit') {
       const s = ctx.existing || {};
       const category = normalizeSharedCategoryName(catTextInp?.value || s.category || '');
@@ -905,11 +907,13 @@ async function _ffCatalogEditorSubmit(ctx) {
       }
       await loadSharedCatalogForManager();
       ticketsState._ffOpenCats.add(sharedCategoryId(category));
-      showToast(ctx.mode === 'shared-service-add' ? 'Service added' : 'Service updated', 'success');
+      serviceSaveToast = catalogServiceSavedToast(ctx.mode);
     }
     _ffCatalogEditorClose();
+    if (isCatalogServiceCreateMode(ctx.mode)) ticketsState._ffServicesInlineEditServiceId = null;
     renderServicesCatalogV2();
     setupTicketsUI();
+    if (serviceSaveToast) showToast(serviceSaveToast, 'success');
   } catch (e) {
     showToast(e?.message || 'Failed', 'error');
   } finally {
