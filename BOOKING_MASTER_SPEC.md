@@ -291,6 +291,8 @@ Respect `allowSms` / `allowEmail` and future communication policies.
 
 Staff can check out from an appointment or as a walk-in sale. Tax is currently 0; `method` / `processor` default to `"none"`. Product retail checkout is not real yet. Do not build POS/card processing unless the task owns it.
 
+**Required later — Combo checkout grouping:** a Combo is ONE sold product with ONE selling price. Component `serviceLines` exist for scheduling, provider attribution, commissions, and reporting. Checkout must not treat those components as independent full-price products. Phase 2 writes allocated `priceSnapshot` values that reconcile to the Combo selling price. Grouping those lines into **one customer-facing checkout item** at that Combo selling price is required future behavior, not optional.
+
 ---
 
 ## Reports

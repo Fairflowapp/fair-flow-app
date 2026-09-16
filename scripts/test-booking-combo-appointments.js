@@ -292,6 +292,32 @@ check("14. editing one component provider persists", patch.serviceLines[0].provi
   && patch.serviceLines[0].comboInstanceId === patch.serviceLines[1].comboInstanceId
   && patch.serviceLines[1].priceSnapshot === 40);
 
+const laterStart = new Date(Date.UTC(2026, 8, 15, 16, 15));
+const mergedLater = model.mergeServiceLinePatch(saved.serviceLines, [{
+  lineId: saved.serviceLines[1].lineId,
+  serviceId: saved.serviceLines[1].serviceId,
+  providerId: "nicole",
+  startAt: laterStart,
+  durationMinutes: 30,
+  priceSnapshot: 40,
+  comboInstanceId: saved.serviceLines[1].comboInstanceId,
+  comboServiceId: saved.serviceLines[1].comboServiceId,
+  comboNameSnapshot: saved.serviceLines[1].comboNameSnapshot,
+  comboSellingPriceSnapshot: 84,
+  comboComponentIndex: 1,
+  comboComponentCount: 2
+}])[0];
+check("14b. later component start does not keep stale endAt", mergedLater.endAt == null);
+
+form.setLineStart(restored, restored.lines[1].key, 12 * 60 + 15);
+const laterPatch = form.editPatch(restored);
+const pediPayload = laterPatch.serviceLines[1];
+check("14c. edit payload sends an end after the new start", !!(
+  pediPayload.startAt
+  && pediPayload.endAt
+  && pediPayload.endAt.getTime() > pediPayload.startAt.getTime()
+));
+
 const view = details.viewFrom(fromDoc, fromDoc.serviceLines[1].lineId);
 check("15. Appointment Details shows grouped Combo + components", view.total === 84
   && view.comboGroups.length === 1

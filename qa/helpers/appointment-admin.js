@@ -42,6 +42,8 @@ function summarizeAppointment(id, data) {
       priceSnapshot: Number(line && line.priceSnapshot) || 0,
       comboInstanceId: line && line.comboInstanceId || "",
       comboServiceId: line && line.comboServiceId || "",
+      comboNameSnapshot: line && line.comboNameSnapshot || "",
+      comboSellingPriceSnapshot: Number(line && line.comboSellingPriceSnapshot) || 0,
       requested: !!(line && line.requested),
       startAt: line && line.startAt && line.startAt.toDate ? line.startAt.toDate().toISOString() : "",
       endAt: line && line.endAt && line.endAt.toDate ? line.endAt.toDate().toISOString() : "",

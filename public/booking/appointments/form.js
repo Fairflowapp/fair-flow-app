@@ -830,12 +830,16 @@
     var sameService = line.keepStoredSnapshots && trim(line.serviceId) === trim(line.originalServiceId);
     var combo = window.ffBookingAppointmentCombo;
     var isCombo = !!(combo && combo.isComboLine && combo.isComboLine(line));
+    var startAt = startAtDateForLine(state, line);
+    var duration = Number(line.durationMinutes) || 0;
+    var endAt = startAt && duration > 0 ? new Date(startAt.getTime() + duration * 60000) : null;
     var payload = {
       lineId: line.lineId,
       serviceId: line.serviceId,
       providerId: line.providerId,
-      startAt: startAtDateForLine(state, line),
-      durationMinutes: line.durationMinutes,
+      startAt: startAt,
+      endAt: endAt,
+      durationMinutes: duration,
       priceSnapshot: line.price,
       serviceNameSnapshot: sameService ? line.originalServiceName : (line.service && line.service.name) || "",
       preservePriceSnapshot: sameService || isCombo,

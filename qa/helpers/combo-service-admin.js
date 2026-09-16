@@ -88,13 +88,41 @@ async function seedQaComboAppointmentCatalog(runId, opts) {
   const id = String(runId || "").trim();
   if (!id) abort("seedQaComboAppointmentCatalog requires a runId.");
   const options = opts || {};
-  const comboId = "qaComboAppt_" + id;
-  const name = "FF-QA-COMBO-APPT " + id;
   const locationId = String(options.locationId || "qaLoc1").trim();
-  const gelId = String(options.gelServiceId || "qaServiceManicure").trim();
-  const pediId = String(options.pediServiceId || "qaServicePedicure").trim();
+  const blockedProviderId = String(options.blockedProviderId || "qaProv2").trim();
+  const gelId = "qaComboApptGel_" + id;
+  const pediId = "qaComboApptPedi_" + id;
+  const comboId = "qaComboAppt_" + id;
+  const gelName = "FF-QA-COMBO-APPT-GEL " + id;
+  const pediName = "FF-QA-COMBO-APPT-PEDI " + id;
+  const name = "FF-QA-COMBO-APPT " + id;
+  const now = new Date().toISOString();
+  const overrides = {};
+  overrides[blockedProviderId] = { enabled: false };
   return withAdmin(async (db) => {
-    const payload = {
+    await db.doc("salons/" + SALON_ID + "/services/" + gelId).set({
+      name: gelName,
+      serviceType: "single",
+      defaultPrice: 55,
+      durationMinutes: 45,
+      active: true,
+      locationId: locationId,
+      category: "QA Hands",
+      staffOverrides: overrides,
+      updatedAt: now
+    });
+    await db.doc("salons/" + SALON_ID + "/services/" + pediId).set({
+      name: pediName,
+      serviceType: "single",
+      defaultPrice: 45,
+      durationMinutes: 30,
+      active: true,
+      locationId: locationId,
+      category: "QA Hands",
+      staffOverrides: {},
+      updatedAt: now
+    });
+    await db.doc("salons/" + SALON_ID + "/services/" + comboId).set({
       name: name,
       serviceType: "combo",
       defaultPrice: 84,
@@ -106,10 +134,18 @@ async function seedQaComboAppointmentCatalog(runId, opts) {
         { serviceId: gelId, allocatedPrice: 44, sortOrder: 0 },
         { serviceId: pediId, allocatedPrice: 40, sortOrder: 1 }
       ],
-      updatedAt: new Date().toISOString()
+      updatedAt: now
+    });
+    return {
+      comboId: comboId,
+      name: name,
+      gelId: gelId,
+      gelName: gelName,
+      pediId: pediId,
+      pediName: pediName,
+      sellingPrice: 84,
+      path: "salons/" + SALON_ID + "/services/" + comboId
     };
-    await db.doc("salons/" + SALON_ID + "/services/" + comboId).set(payload);
-    return { comboId: comboId, name: name, path: "salons/" + SALON_ID + "/services/" + comboId };
   });
 }
 

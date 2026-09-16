@@ -298,9 +298,10 @@ async function buildServiceLine(salonId, locationId, rawLine) {
   if (!startAt || durationMinutes < 1) {
     return { ok: false, code: api.CODES.INVALID_LINE, error: "Each service line needs a start time and duration." };
   }
-  const endAt = rawLine && rawLine.endAt
-    ? api.toDate(rawLine.endAt)
-    : new Date(startAt.getTime() + durationMinutes * 60000);
+  let endAt = rawLine && rawLine.endAt ? api.toDate(rawLine.endAt) : null;
+  if (!endAt || endAt.getTime() <= startAt.getTime()) {
+    endAt = new Date(startAt.getTime() + durationMinutes * 60000);
+  }
   if (!endAt || endAt.getTime() <= startAt.getTime()) {
     return { ok: false, code: api.CODES.INVALID_LINE, error: "Service line end must be after start." };
   }

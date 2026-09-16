@@ -59,6 +59,19 @@
  *   - visit window: min(start) / max(end) of the instance (already appointment)
  *
  * Do not treat comboSellingPriceSnapshot as a bookable duration or extra line.
+ *
+ * ---------------------------------------------------------------------------
+ * Checkout — REQUIRED future behavior (not optional)
+ * ---------------------------------------------------------------------------
+ * The client still buys ONE Combo at comboSellingPriceSnapshot.
+ * Component priceSnapshot values are allocated amounts for provider
+ * attribution, commissions, and reporting. They must sum to the Combo price.
+ *
+ * A later checkout phase MUST group a Combo into ONE customer-facing item
+ * at the Combo selling price. Do not charge each component as its own
+ * full-price product. Do not show two independent catalog prices.
+ * Phase 2 does not redesign checkout; it only makes that grouping possible
+ * and required.
  */
 (function () {
   var COMBO_FIELDS = [

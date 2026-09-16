@@ -430,7 +430,9 @@
       serviceId: serviceId,
       providerId: trimText(next.providerId) || trimText(current.providerId),
       startAt: next.startAt != null ? next.startAt : current.startAt,
-      endAt: next.endAt != null ? next.endAt : current.endAt,
+      endAt: next.endAt != null
+        ? next.endAt
+        : (next.startAt != null ? null : current.endAt),
       durationMinutes: Number(next.durationMinutes) > 0 ? Number(next.durationMinutes) : Number(current.durationMinutes) || 0,
       priceSnapshot: sameService ? Number(current.priceSnapshot) || 0 : Number(next.priceSnapshot) || 0,
       serviceNameSnapshot: sameService
