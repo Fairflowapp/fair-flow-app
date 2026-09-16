@@ -80,8 +80,15 @@ async function fillSingleService(page, opts) {
   if (opts.expectDefaultSingle) {
     await expect(typeSingle).toBeChecked();
   }
+  const catSel = page.locator("#servicesCatalogEditorCategory");
   const catText = page.locator("#servicesCatalogEditorCategoryText");
-  if (await catText.isVisible()) {
+  if (await catSel.isVisible()) {
+    const option = catSel.locator("option", { hasText: opts.category });
+    if (await option.count()) {
+      const value = await option.first().getAttribute("value");
+      if (value) await catSel.selectOption(value);
+    }
+  } else if (await catText.isVisible()) {
     await catText.fill(opts.category);
   }
   await page.locator("#servicesCatalogEditorPrice").fill(String(opts.price));
@@ -146,6 +153,11 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
   await expect(page.locator("#servicesCatalogEditorTypeCombo")).not.toBeChecked();
   await expect(page.locator("#servicesCatalogEditorDurationWrap")).toBeVisible();
   await expect(page.locator("#servicesCatalogEditorComboWrap")).toBeHidden();
+  await expect(page.locator("#servicesCatalogEditorCategory")).toBeVisible();
+  await expect(page.locator("#servicesCatalogEditorCategoryText")).toBeHidden();
+  const existingCats = await page.locator("#servicesCatalogEditorCategory option").allTextContents();
+  expect(existingCats.join("\n")).toMatch(/Select existing category|Hands|Feet|Combo|Waxing|Massage|FF-QA-COMBO-CAT/i);
+  await expect(page.locator("#servicesCatalogEditorCreateCategory")).toBeVisible();
   await fillSingleService(page, {
     name: NAMES.singleOne,
     category: NAMES.category,
@@ -182,8 +194,17 @@ test("Phase 1 Combo Services UI", async ({ page }) => {
 
   await openAddService(page, NAMES.category);
   await page.locator("#servicesCatalogEditorName").fill(NAMES.combo);
-  const catText = page.locator("#servicesCatalogEditorCategoryText");
-  if (await catText.isVisible()) await catText.fill(NAMES.category);
+  const comboCatSel = page.locator("#servicesCatalogEditorCategory");
+  if (await comboCatSel.isVisible()) {
+    const option = comboCatSel.locator("option", { hasText: NAMES.category });
+    if (await option.count()) {
+      const value = await option.first().getAttribute("value");
+      if (value) await comboCatSel.selectOption(value);
+    }
+  } else {
+    const catText = page.locator("#servicesCatalogEditorCategoryText");
+    if (await catText.isVisible()) await catText.fill(NAMES.category);
+  }
   await page.locator("#servicesCatalogEditorTypeCombo").check();
   await expect(page.locator("#servicesCatalogEditorComboWrap")).toBeVisible();
   await expect(page.locator("#servicesCatalogEditorDurationWrap")).toBeHidden();

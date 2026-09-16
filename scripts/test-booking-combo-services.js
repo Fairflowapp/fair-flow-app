@@ -76,6 +76,11 @@ const comboCreate = api.comboSaveFields({
 check("creating a Combo Service is valid", comboCreate.ok === true && comboCreate.serviceType === "combo");
 check("combo save keeps two components", comboCreate.components.length === 2);
 check(
+  "combo save snapshots underlying component names",
+  comboCreate.components[0].serviceNameSnapshot === "Manicure"
+    && comboCreate.components[1].serviceNameSnapshot === "Pedicure"
+);
+check(
   "combo duration is the sum of component durations",
   comboCreate.durationMinutes === 80
 );
@@ -237,6 +242,40 @@ check(
 check(
   "picker still includes Combo Services from the shared catalog",
   pickerMerged.some(function (row) { return row.id === "shared-combo"; })
+);
+
+const retainedComponents = api.retainComboComponentServices(
+  api.mergeCatalogServicesForPicker(
+    [
+      {
+        id: "shared-combo-named",
+        name: "Gel Mani + Regular Pedi",
+        serviceType: "combo",
+        components: [
+          { serviceId: "shared-gel", allocatedPrice: 44, sortOrder: 0 },
+          { serviceId: "shared-pedi", allocatedPrice: 40, sortOrder: 1 }
+        ]
+      },
+      { id: "shared-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 },
+      { id: "shared-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }
+    ],
+    [
+      { id: "loc-gel", name: "Gel Manicure", category: "Hands" },
+      { id: "loc-pedi", name: "Regular Pedicure", category: "Feet" }
+    ]
+  ),
+  [
+    [
+      { id: "shared-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 },
+      { id: "shared-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }
+    ]
+  ]
+);
+check(
+  "retainComboComponentServices keeps underlying Combo IDs after same-name merge",
+  retainedComponents.some(function (row) { return row.id === "shared-gel" && row.lookupOnly === true; })
+    && retainedComponents.some(function (row) { return row.id === "shared-pedi" && row.lookupOnly === true; })
+    && retainedComponents.some(function (row) { return row.id === "loc-gel"; })
 );
 
 const pickerWithUnrelatedCombo = api.mergeCatalogServicesForPicker(

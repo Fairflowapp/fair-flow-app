@@ -11,9 +11,9 @@
  * out to each sub-module, and injects the render layer's entry points into the
  * tabs/edit modules (breaking the dependency cycle: render -> {tabs, edit}).
  */
-import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260915_combo_svc";
+import { initCatalogRender, renderServicesCatalogV2, renderServicesScreenDetail, _ffIsServicesScreenRoot } from "./tickets-catalog-render.js?v=20260916_combo_id";
 import { initCatalogTabs } from "./tickets-catalog-tabs.js?v=20260915_combo_svc";
-import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260915_combo_svc";
+import { initCatalogEdit } from "./tickets-catalog-edit.js?v=20260916_combo_id";
 
 export function initTicketsCatalogUI(deps) {
   initCatalogRender({
@@ -52,7 +52,7 @@ export {
   _ffWireServicesScreenDragDrop,
   _ffReorderServiceWithinCategory,
   renderServicesScreenDetail,
-} from "./tickets-catalog-render.js?v=20260915_combo_svc";
+} from "./tickets-catalog-render.js?v=20260916_combo_id";
 
 export {
   renderServicesLocationsTabHtml,
@@ -93,4 +93,4 @@ export {
   _ffCatalogEditorSubmit,
   addServiceCategoryV2,
   addSharedServiceV2,
-} from "./tickets-catalog-edit.js?v=20260915_combo_svc";
+} from "./tickets-catalog-edit.js?v=20260916_combo_id";

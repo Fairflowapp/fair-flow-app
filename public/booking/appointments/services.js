@@ -11,7 +11,8 @@ import {
   copyComboCatalogFields,
   mergeCatalogCategoriesForPicker,
   mergeCatalogServicesForPicker,
-} from "/tickets-catalog-combo.js?v=20260915_combo_svc";
+  retainComboComponentServices,
+} from "/tickets-catalog-combo.js?v=20260916_combo_id";
 import {
   collection,
   getDocs,
@@ -94,7 +95,10 @@ async function loadCatalog() {
   if (!sharedRows.length && !sharedCats.length) return { services: localRows, categories: localCats };
   if (!localRows.length && !localCats.length) return { services: sharedRows, categories: sharedCats };
   return {
-    services: mergeCatalogServicesForPicker(sharedRows, localRows),
+    services: retainComboComponentServices(
+      mergeCatalogServicesForPicker(sharedRows, localRows),
+      [sharedRows, localRows]
+    ),
     categories: mergeCatalogCategoriesForPicker(sharedCats, localCats)
   };
 }
@@ -141,6 +145,7 @@ function toPickerRow(service, providerId, meta) {
     staffOverrides: service.staffOverrides || {},
     serviceType: combo.serviceType,
     components: combo.components,
+    lookupOnly: service.lookupOnly === true,
     raw: service,
   };
 }

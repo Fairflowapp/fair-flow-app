@@ -66,36 +66,46 @@ export function copyComboCatalogFields(target, source) {
   return row;
 }
 
+function componentNameSnapshot(row) {
+  return String(row && (row.serviceNameSnapshot || row.nameSnapshot || row.name) || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function comboComponentRow(row, index) {
+  const item = {
+    serviceId: String(row && row.serviceId || "").trim(),
+    allocatedPrice: row && row.allocatedPrice,
+    sortOrder: Number.isInteger(Number(index)) ? Number(index) : 0
+  };
+  const name = componentNameSnapshot(row);
+  if (name) item.serviceNameSnapshot = name;
+  return item;
+}
+
 export function normalizeComboComponents(raw) {
   const list = Array.isArray(raw) ? raw : [];
   return list.map(function (item, index) {
     const row = asObject(item) || {};
     const allocated = moneyToCents(row.allocatedPrice);
-    return {
-      serviceId: String(row.serviceId || "").trim(),
+    return comboComponentRow({
+      serviceId: row.serviceId,
       allocatedPrice: allocated == null ? 0 : centsToMoney(allocated),
-      sortOrder: Number.isInteger(Number(row.sortOrder)) ? Number(row.sortOrder) : index
-    };
+      sortOrder: Number.isInteger(Number(row.sortOrder)) ? Number(row.sortOrder) : index,
+      serviceNameSnapshot: componentNameSnapshot(row)
+    }, Number.isInteger(Number(row.sortOrder)) ? Number(row.sortOrder) : index);
   }).filter(function (row) {
     return !!row.serviceId;
   }).sort(function (a, b) {
     return a.sortOrder - b.sortOrder;
   }).map(function (row, index) {
-    return {
-      serviceId: row.serviceId,
-      allocatedPrice: row.allocatedPrice,
-      sortOrder: index
-    };
+    return comboComponentRow(row, index);
   });
 }
 
 export function withSequentialSortOrder(components) {
   return (Array.isArray(components) ? components : []).map(function (row, index) {
-    return {
-      serviceId: String(row.serviceId || "").trim(),
-      allocatedPrice: row.allocatedPrice,
-      sortOrder: index
-    };
+    return comboComponentRow(row, index);
   }).filter(function (row) {
     return !!row.serviceId;
   });
@@ -174,6 +184,39 @@ export function mergeCatalogServicesForPicker(sharedServices, locationServices) 
     merged.push(service);
   });
   return merged;
+}
+
+/**
+ * Keep Combo component Singles resolvable after picker merge drops same-name
+ * shared clones. Marked lookupOnly so the Booking picker can hide duplicates.
+ */
+export function retainComboComponentServices(merged, catalogs) {
+  const out = Array.isArray(merged) ? merged.slice() : [];
+  const byId = Object.create(null);
+  out.forEach(function (service) {
+    const id = String(service && service.id || "").trim();
+    if (id) byId[id] = service;
+  });
+  const extras = [];
+  (Array.isArray(catalogs) ? catalogs : []).forEach(function (list) {
+    (Array.isArray(list) ? list : []).forEach(function (service) {
+      extras.push(service);
+    });
+  });
+  out.slice().forEach(function (service) {
+    if (!isComboService(service)) return;
+    normalizeComboComponents(service.components).forEach(function (comp) {
+      if (!comp.serviceId || byId[comp.serviceId]) return;
+      const hit = extras.find(function (row) {
+        return row && String(row.id || "").trim() === comp.serviceId;
+      });
+      if (!hit) return;
+      const retained = Object.assign({}, hit, { lookupOnly: true });
+      byId[comp.serviceId] = retained;
+      out.push(retained);
+    });
+  });
+  return out;
 }
 
 export function mergeCatalogCategoriesForPicker(sharedCategories, locationCategories) {
@@ -307,7 +350,12 @@ export function validateComboService(input) {
     };
   }
 
-  return { ok: true, code: "OK", components: components };
+  const named = components.map(function (row) {
+    const referenced = byId[row.serviceId];
+    const name = String(referenced && referenced.name || row.serviceNameSnapshot || "").trim().replace(/\s+/g, " ");
+    return name ? Object.assign({}, row, { serviceNameSnapshot: name }) : row;
+  });
+  return { ok: true, code: "OK", components: named };
 }
 
 export function comboSaveFields(input) {
@@ -389,8 +437,9 @@ function durationLabel(minutes) {
   return n + " min";
 }
 
-function componentLookupName(service, fallbackId) {
+function componentLookupName(service, fallbackId, snapshot) {
   if (service && String(service.name || "").trim()) return String(service.name).trim();
+  if (snapshot && String(snapshot).trim()) return String(snapshot).trim();
   return fallbackId ? "Missing service" : "Select a service";
 }
 
@@ -435,7 +484,7 @@ export function comboComponentsSectionHtml(state) {
       const minutes = comboDurationMinutes([row], catalog);
       rows += '<div class="ff-combo-component-row" data-service-id="' + escapeHtml(row.serviceId) + '" style="display:grid;grid-template-columns:' + (compact ? "1fr 88px 110px auto" : "1fr 80px 110px auto") + ';gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #f3e8ff;">' +
         '<div style="min-width:0;">' +
-          '<div style="font-size:13px;font-weight:650;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(componentLookupName(service, row.serviceId)) + "</div>" +
+          '<div style="font-size:13px;font-weight:650;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(componentLookupName(service, row.serviceId, row.serviceNameSnapshot)) + "</div>" +
           (service ? "" : '<div style="font-size:11px;color:#b91c1c;">This service is missing from the catalog.</div>') +
         "</div>" +
         '<div style="font-size:12px;color:#4b5563;white-space:nowrap;">' + escapeHtml(durationLabel(minutes)) + "</div>" +
@@ -481,7 +530,7 @@ export function comboDetailsViewHtml(service, catalogServices, formatMoney) {
   const rows = components.map(function (row) {
     const referenced = byId[row.serviceId];
     return '<div style="display:grid;grid-template-columns:1fr 88px 110px;gap:8px;padding:6px 0;border-bottom:1px solid #f3f4f6;">' +
-      '<div style="font-size:13px;color:#111827;font-weight:600;">' + escapeHtml(componentLookupName(referenced, row.serviceId)) + "</div>" +
+      '<div style="font-size:13px;color:#111827;font-weight:600;">' + escapeHtml(componentLookupName(referenced, row.serviceId, row.serviceNameSnapshot)) + "</div>" +
       '<div style="font-size:12px;color:#4b5563;">' + escapeHtml(durationLabel(comboDurationMinutes([row], catalog))) + "</div>" +
       '<div style="font-size:13px;color:#111827;font-weight:600;">' + escapeHtml(money(row.allocatedPrice)) + "</div>" +
     "</div>";
@@ -671,6 +720,7 @@ if (typeof window !== "undefined") {
     listEligibleComboComponentServices,
     catalogStableKey,
     mergeCatalogServicesForPicker,
+    retainComboComponentServices,
     mergeCatalogCategoriesForPicker,
     catalogRowsForComboUsage,
     combosUsingService,

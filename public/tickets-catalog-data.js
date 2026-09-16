@@ -13,7 +13,7 @@ import { collection, doc, getDoc, getDocs, setDoc, addDoc, updateDoc, deleteDoc,
 import { db } from "/app.js?v=20260610_force_lp_ios";
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
 import { getActiveLocationIdForTickets } from "./tickets-permissions.js?v=20260630_tickets_permissions_split";
-import { applyComboFieldsToServicePayload, catalogRowsForComboUsage, combosUsingService, copyComboCatalogFields, isComboService, normalizeComboComponents, validateComboService } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { applyComboFieldsToServicePayload, catalogRowsForComboUsage, combosUsingService, copyComboCatalogFields, isComboService, normalizeComboComponents, validateComboService } from "./tickets-catalog-combo.js?v=20260916_combo_id";
 
 let renderServicesCatalogV2, setupTicketsUI;
 export function initTicketsCatalogData(deps) {
@@ -88,6 +88,44 @@ function serviceCatalogStableKey(name, category) {
 
 function serviceCategoryDisplayId(categoryName) {
   return sharedCategoryId(normalizeSharedCategoryName(categoryName));
+}
+
+function catalogCategoryIdentityKey(name) {
+  return normalizeSharedCategoryName(name).toLowerCase();
+}
+
+function dedupeCatalogCategories(list) {
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((cat) => {
+    if (!cat) return;
+    if (String(cat.id || '') === '__other__') return;
+    const name = normalizeSharedCategoryName(cat.name);
+    if (!name) return;
+    const key = catalogCategoryIdentityKey(name);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      ...cat,
+      id: cat.id || sharedCategoryId(name),
+      name
+    });
+  });
+  return out;
+}
+
+function findExistingCatalogCategory(nameOrId, list) {
+  const raw = String(nameOrId || '').trim();
+  if (!raw) return null;
+  const key = catalogCategoryIdentityKey(raw);
+  const slug = sharedCategoryId(raw);
+  return (Array.isArray(list) ? list : []).find((cat) => {
+    if (!cat) return false;
+    if (String(cat.id || '') === raw) return true;
+    if (sharedCategoryId(cat.name) === slug) return true;
+    if (catalogCategoryIdentityKey(cat.name) === key) return true;
+    return false;
+  }) || null;
 }
 
 const DEFAULT_SERVICE_DURATION_MINUTES = 30;
@@ -990,6 +1028,9 @@ export {
   getTicketsAccountId,
   normalizeSharedCategoryName,
   sharedCategoryId,
+  catalogCategoryIdentityKey,
+  dedupeCatalogCategories,
+  findExistingCatalogCategory,
   resolveServiceDurationMinutes,
   parseServiceDurationMinutesInput,
   parseStaffDurationOverrideInput,

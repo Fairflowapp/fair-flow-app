@@ -14,13 +14,13 @@
  * showToast + setupTicketsUI are injected via initCatalogRender.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories } from "./tickets-catalog-data.js?v=20260915_combo_svc";
+import { ffCanManageServices, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadLocationCatalogForManager, saveSharedService, saveService, loadServices, loadServiceCategories, dedupeCatalogCategories, findExistingCatalogCategory, saveSharedServiceCategory, saveServiceCategory, normalizeSharedCategoryName, sharedCategoryId } from "./tickets-catalog-data.js?v=20260916_combo_id";
 import { formatServiceDurationLabel, joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketMoney } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260915_combo_svc";
-import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260915_combo_svc";
-import { catalogServiceTypeControlsHtml, comboBadgeHtml, comboDetailsViewHtml, comboSaveFields, combosUsingService, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260916_combo_id";
+import { catalogServiceTypeControlsHtml, comboBadgeHtml, comboDetailsViewHtml, comboSaveFields, combosUsingService, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260916_combo_id";
 import { catalogServiceSavedToast } from "./tickets-catalog-toast.js?v=20260915_svc_toast";
 
 let showToast, setupTicketsUI;
@@ -311,7 +311,7 @@ function renderServicesCatalogV2() {
       ticketsState._ffOpenCats.add(catId);
       if (btn.getAttribute('data-add-mode') === 'shared') {
         const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
-        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryId: cat?.id || catId, categoryName: cat?.name || '' });
       } else {
         _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
       }
@@ -405,7 +405,7 @@ function renderServicesScreenCatalogList(list, grouped, isSharedCatalog) {
       ticketsState._ffOpenCats.add(catId);
       if (btn.getAttribute('data-add-mode') === 'shared') {
         const cat = getSharedServicesForCatalogManager().categories.find((c) => c.id === catId);
-        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryName: cat?.name || '' });
+        _ffCatalogEditorOpen({ mode: 'shared-service-add', categoryId: cat?.id || catId, categoryName: cat?.name || '' });
       } else {
         _ffCatalogEditorOpen({ mode: 'service-add', categoryId: catId });
       }
@@ -619,9 +619,18 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
   const isInlineEditingService = String(ticketsState._ffServicesInlineEditServiceId || '') === String(selected.id || '');
   const activeServiceTab = ticketsState._ffServicesDetailTab || 'details';
   const basePrice = Number(selected.sharedDefaultPrice ?? selected.defaultPrice) || 0;
-  const categoryOptions = categories
-    .filter((cat) => cat.id !== '__other__')
-    .map((cat) => `<option value="${escapeHtml(cat.name || cat.id)}" ${String(cat.id) === String(selected.categoryId || '') ? 'selected' : ''}>${escapeHtml(cat.name || '')}</option>`)
+  const isSharedInline = !!(selected.isSharedService || ticketsState._ffCatalogModalMode === 'shared');
+  const editorCategories = dedupeCatalogCategories(categories);
+  const selectedCategory = findExistingCatalogCategory(selected.categoryId || selected.category, editorCategories);
+  const categoryOptions = editorCategories
+    .map((cat) => {
+      const value = isSharedInline ? (cat.name || cat.id) : (cat.sourceCategoryId || cat.id);
+      const isSelected = selectedCategory
+        ? String(cat.id) === String(selectedCategory.id)
+        : String(cat.id) === String(selected.categoryId || '')
+          || String(cat.name || '').toLowerCase() === String(selected.category || '').trim().toLowerCase();
+      return `<option value="${escapeHtml(value)}" ${isSelected ? 'selected' : ''}>${escapeHtml(cat.name || '')}</option>`;
+    })
     .join('');
   nav.innerHTML = `
     <button type="button" class="staff-nav-item${activeServiceTab === 'details' ? ' is-active' : ''}" data-services-tab="details" style="width:100%;padding:8px 10px;min-height:36px;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-align:left;">Details</button>
@@ -664,12 +673,15 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           singleId: "servicesInlineEditTypeSingle",
           comboId: "servicesInlineEditTypeCombo"
         })}
-        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
-          <span style="font-size:12px;color:#6b7280;">Category</span>
-          <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
-            <option value="">No category</option>
-            ${categoryOptions}
-          </select>
+        <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:start;padding:8px 0;border-bottom:1px solid #f3f4f6;">
+          <span style="font-size:12px;color:#6b7280;padding-top:8px;">Category</span>
+          <span>
+            <select id="servicesInlineEditCategory" style="width:100%;max-width:420px;padding:7px 9px;border:1px solid #e5e7eb;border-radius:8px;font-size:12px;color:#111827;background:#fff;box-sizing:border-box;">
+              <option value="">Select existing category</option>
+              ${categoryOptions}
+            </select>
+            <button type="button" id="servicesInlineEditCreateCategory" style="display:block;margin-top:8px;padding:0;border:none;background:none;color:#7c3aed;font-size:12px;font-weight:700;cursor:pointer;">+ Create new category</button>
+          </span>
         </label>
         <label style="display:grid;grid-template-columns:160px 1fr;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #f3f4f6;">
           <span style="font-size:12px;color:#6b7280;">${isComboService(selected) ? 'Combo selling price' : 'Price'}</span>
@@ -802,6 +814,48 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
     });
   });
   syncInlineTypeUi(isComboService(selected) ? SERVICE_TYPE_COMBO : 'single');
+  const inlineCreateCat = root.querySelector('#servicesInlineEditCreateCategory');
+  if (inlineCreateCat) {
+    inlineCreateCat.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const entered = window.prompt('New category name', '');
+      if (entered == null) return;
+      const raw = String(entered || '').trim();
+      if (!raw) return;
+      const existing = findExistingCatalogCategory(raw, editorCategories);
+      const categoryInput = root.querySelector('#servicesInlineEditCategory');
+      if (existing) {
+        if (categoryInput) categoryInput.value = isSharedInline ? existing.name : (existing.sourceCategoryId || existing.id);
+        showToast('Category selected', 'success');
+        return;
+      }
+      try {
+        if (isSharedInline) {
+          const data = getSharedServicesForCatalogManager();
+          const categoryId = await saveSharedServiceCategory({ name: raw, sortOrder: (data.categories || []).length });
+          await loadSharedCatalogForManager();
+          ticketsState._ffOpenCats.add(categoryId);
+          selected.category = normalizeSharedCategoryName(raw);
+          selected.categoryId = categoryId;
+        } else {
+          await saveServiceCategory({ name: raw, sortOrder: ticketsState.serviceCategories.length });
+          await Promise.all([loadServiceCategories(), loadServices()]);
+          const created = findExistingCatalogCategory(raw, dedupeCatalogCategories(ticketsState.serviceCategories || []));
+          if (created) {
+            selected.category = created.name;
+            selected.categoryId = created.sourceCategoryId || created.id;
+          }
+        }
+        ticketsState._ffServicesInlineEditServiceId = selected.id;
+        renderServicesCatalogV2();
+        if (typeof setupTicketsUI === 'function') setupTicketsUI();
+        showToast('Category added', 'success');
+      } catch (err) {
+        showToast(err?.message || 'This category could not be created.', 'error');
+      }
+    });
+  }
   const saveBtn = root.querySelector('#servicesInlineEditSaveBtn');
   if (saveBtn) {
     saveBtn.addEventListener('click', async (e) => {
@@ -851,7 +905,14 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           return;
         }
       }
-      const categoryId = categoryInput?.value || null;
+      const pickedCategory = findExistingCatalogCategory(categoryInput?.value || '', editorCategories);
+      if (!pickedCategory) {
+        if (categoryInput) categoryInput.focus();
+        showToast('Select an existing category.', 'error');
+        return;
+      }
+      const categoryName = normalizeSharedCategoryName(pickedCategory.name);
+      const categoryId = isSharedInline ? categoryName : (pickedCategory.sourceCategoryId || pickedCategory.id);
       const taxableInput = root.querySelector('#servicesInlineEditTaxable');
       const taxable = !!(taxableInput && taxableInput.checked);
       saveBtn.disabled = true;
@@ -861,7 +922,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           await saveSharedService({
             id: selected.id,
             name,
-            category: categoryId || selected.category || '',
+            category: categoryName,
             defaultPrice,
             active: selected.active !== false,
           sortOrder: selected.sortOrder,
@@ -886,14 +947,15 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
           await Promise.all([loadServiceCategories(), loadServices()]);
         }
         selected.name = name;
-        selected.categoryId = categoryId;
+        selected.category = categoryName;
+        selected.categoryId = isSharedInline ? sharedCategoryId(categoryName) : categoryId;
         selected.defaultPrice = defaultPrice;
         selected.taxable = taxable;
         selected.durationMinutes = durationMinutes;
         selected.serviceType = comboFields.serviceType;
         selected.components = comboFields.components;
         ticketsState._ffServicesInlineEditServiceId = null;
-        if (categoryId) ticketsState._ffOpenCats.add(categoryId);
+        if (selected.categoryId) ticketsState._ffOpenCats.add(selected.categoryId);
         renderServicesCatalogV2();
         if (typeof setupTicketsUI === 'function') setupTicketsUI();
         showToast(catalogServiceSavedToast(selected.id ? 'service-edit' : 'service-add'), 'success');

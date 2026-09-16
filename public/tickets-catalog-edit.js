@@ -9,11 +9,11 @@
  * are injected too.
  */
 import { ticketsState } from "./tickets-state.js?v=20260630_tickets_state_split";
-import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260915_combo_svc";
+import { ffCanManageServices, normalizeSharedCategoryName, sharedCategoryId, dedupeCatalogCategories, findExistingCatalogCategory, resolveServiceDurationMinutes, getSharedServicesForCatalogManager, getLocationServicesForCatalogManager, loadSharedCatalogForManager, loadServices, loadServiceCategories, saveSharedService, saveSharedServiceCategory, deleteSharedServiceCategory, deleteSharedService, saveSharedServiceOverride, removeSharedServiceOverride, saveService, saveServiceCategory, deleteService, deleteServiceCategory } from "./tickets-catalog-data.js?v=20260916_combo_id";
 import { joinServiceDurationMinutes, serviceDurationControlsHtml, showServiceDurationError } from "./tickets-service-duration.js?v=20260824_svc_dur_hm";
 import { ffTicketCurSym } from "./tickets-helpers.js?v=20260721_ticket_soft_delete";
 import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
-import { catalogRowsForComboUsage, catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { catalogRowsForComboUsage, catalogServiceTypeControlsHtml, comboSaveFields, combosUsingService, ensureCatalogEditorComboMounts, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260916_combo_id";
 import { catalogServiceSavedToast, isCatalogServiceCreateMode } from "./tickets-catalog-toast.js?v=20260915_svc_toast";
 
 let showToast, ticketConfirm, setupTicketsUI, renderServicesCatalogV2, _ffIsServicesScreenRoot;
@@ -48,6 +48,60 @@ function currentEditorCatalogServices() {
   return (data && data.services) || [];
 }
 
+function currentEditorCategories() {
+  const data = isSharedCatalogMode()
+    ? getSharedServicesForCatalogManager()
+    : (ticketsState.serviceCategories && ticketsState.serviceCategories.length
+      ? { categories: ticketsState.serviceCategories }
+      : getLocationServicesForCatalogManager());
+  return dedupeCatalogCategories((data && data.categories) || ticketsState.serviceCategories || []);
+}
+
+function ensureEditorCreateCategoryBtn(wrap) {
+  if (!wrap) return null;
+  let btn = document.getElementById('servicesCatalogEditorCreateCategory');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'servicesCatalogEditorCreateCategory';
+    btn.type = 'button';
+    btn.textContent = '+ Create new category';
+    btn.style.cssText = 'margin-top:8px;padding:0;border:none;background:none;color:#7c3aed;font-size:12px;font-weight:700;cursor:pointer;text-align:left;';
+    wrap.appendChild(btn);
+  }
+  return btn;
+}
+
+function fillEditorCategorySelect(catSel, selectedIdOrName) {
+  if (!catSel) return;
+  const categories = currentEditorCategories();
+  const selected = findExistingCatalogCategory(selectedIdOrName, categories);
+  let html = '<option value="">Select existing category</option>';
+  categories.forEach((c) => {
+    html += `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`;
+  });
+  catSel.innerHTML = html;
+  if (selected) catSel.value = selected.id;
+}
+
+async function createEditorCategory(nameHint) {
+  const raw = String(nameHint || '').trim();
+  if (!raw) return null;
+  const categories = currentEditorCategories();
+  const existing = findExistingCatalogCategory(raw, categories);
+  if (existing) return existing;
+  if (isSharedCatalogMode()) {
+    const data = getSharedServicesForCatalogManager();
+    const categoryId = await saveSharedServiceCategory({ name: raw, sortOrder: (data.categories || []).length });
+    await loadSharedCatalogForManager();
+    ticketsState._ffOpenCats.add(categoryId);
+    return findExistingCatalogCategory(categoryId, currentEditorCategories())
+      || { id: categoryId, name: normalizeSharedCategoryName(raw) };
+  }
+  await saveServiceCategory({ name: raw, sortOrder: ticketsState.serviceCategories.length });
+  await Promise.all([loadServiceCategories(), loadServices()]);
+  return findExistingCatalogCategory(raw, currentEditorCategories());
+}
+
 function catalogServicesForComboUsage() {
   return catalogRowsForComboUsage([
     ticketsState._rawSharedServices,
@@ -57,6 +111,25 @@ function catalogServicesForComboUsage() {
     ticketsState.salonServices,
     currentEditorCatalogServices()
   ]);
+}
+
+function selectedEditorCategory(catSel) {
+  return findExistingCatalogCategory(catSel && catSel.value || '', currentEditorCategories());
+}
+
+function requireEditorCategory(catSel) {
+  const selected = selectedEditorCategory(catSel);
+  if (selected) return selected;
+  if (catSel) {
+    try {
+      const prev = catSel.style.borderColor;
+      catSel.style.borderColor = '#ef4444';
+      catSel.focus();
+      setTimeout(() => { catSel.style.borderColor = prev || '#e5e7eb'; }, 1400);
+    } catch (_) {}
+  }
+  showToast('Select an existing category.', 'error');
+  return null;
 }
 
 function editorServiceType(existing) {
@@ -594,6 +667,8 @@ function _ffCatalogEditorOpen(opts) {
   catSel.innerHTML = '';
   if (catSel) catSel.style.display = 'block';
   if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
+  const existingCreateCat = document.getElementById('servicesCatalogEditorCreateCategory');
+  if (existingCreateCat) existingCreateCat.style.display = 'none';
   if (activeWrap) activeWrap.style.display = 'none';
   if (activeInp) activeInp.checked = true;
   if (overrideWrap) overrideWrap.style.display = 'none';
@@ -643,13 +718,33 @@ function _ffCatalogEditorOpen(opts) {
         errorId: 'servicesCatalogEditorDurationError'
       });
     }
+    if (catSel) catSel.style.display = 'block';
+    if (catTextInp) { catTextInp.style.display = 'none'; catTextInp.value = ''; }
+    fillEditorCategorySelect(catSel, opts.categoryId || opts.categoryName || '');
+    const createCatBtn = ensureEditorCreateCategoryBtn(wrapCat);
+    if (createCatBtn) {
+      createCatBtn.style.display = 'block';
+      createCatBtn.onclick = async (e) => {
+        e.preventDefault();
+        const entered = window.prompt('New category name', '');
+        if (entered == null) return;
+        const name = String(entered || '').trim();
+        if (!name) return;
+        try {
+          const before = findExistingCatalogCategory(name, currentEditorCategories());
+          const created = await createEditorCategory(name);
+          if (!created) {
+            showToast('Enter a category name.', 'error');
+            return;
+          }
+          fillEditorCategorySelect(catSel, created.id || created.name);
+          showToast(before ? 'Category selected' : 'Category added', 'success');
+        } catch (err) {
+          showToast(err?.message || 'This category could not be created.', 'error');
+        }
+      };
+    }
     if (isSharedServiceMode) {
-      if (catSel) catSel.style.display = 'none';
-      if (catTextInp) {
-        catTextInp.style.display = 'block';
-        catTextInp.placeholder = 'Category (e.g. Manicure)';
-        catTextInp.value = opts.categoryName || '';
-      }
       if (activeWrap) activeWrap.style.display = 'flex';
       if (overrideWrap && opts.mode === 'shared-service-edit') overrideWrap.style.display = 'block';
       const syncOverrideInput = () => {
@@ -658,11 +753,6 @@ function _ffCatalogEditorOpen(opts) {
       };
       if (overrideDefault) overrideDefault.onchange = syncOverrideInput;
       if (overrideCustom) overrideCustom.onchange = syncOverrideInput;
-    } else {
-      // Populate category dropdown for the existing location fallback catalog.
-      let optsHtml = '';
-      ticketsState.serviceCategories.forEach((c) => { optsHtml += `<option value="${c.id}">${escapeHtml(c.name)}</option>`; });
-      catSel.innerHTML = optsHtml;
     }
     if (opts.mode === 'service-edit' || opts.mode === 'shared-service-edit') {
       const s = currentEditorCatalogServices().find((x) => String(x.id) === String(opts.serviceId))
@@ -683,7 +773,7 @@ function _ffCatalogEditorOpen(opts) {
         });
       }
       if (isSharedServiceMode) {
-        if (catTextInp) catTextInp.value = s.category || '';
+        fillEditorCategorySelect(catSel, s.categoryId || s.category || '');
         if (activeInp) activeInp.checked = s.active !== false;
         if (s.hasOverride) {
           if (overrideCustom) overrideCustom.checked = true;
@@ -693,8 +783,8 @@ function _ffCatalogEditorOpen(opts) {
             overridePriceInp.style.display = 'block';
           }
         }
-      } else if (s.categoryId && ticketsState.serviceCategories.some((c) => c.id === s.categoryId)) {
-        catSel.value = s.categoryId;
+      } else {
+        fillEditorCategorySelect(catSel, s.categoryId || s.category || s.sourceCategoryId || '');
       }
       ctx.existing = s;
     } else if (!isSharedServiceMode) {
@@ -810,6 +900,8 @@ async function _ffCatalogEditorSubmit(ctx) {
     }
   }
 
+  if (isServiceMode && !requireEditorCategory(catSel)) return;
+
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.6'; }
   let serviceSaveToast = null;
   try {
@@ -848,7 +940,9 @@ async function _ffCatalogEditorSubmit(ctx) {
       ticketsState._ffOpenCats.add(sharedCategoryId(newName));
       showToast('Category updated', 'success');
     } else if (ctx.mode === 'service-add') {
-      const categoryId = catSel?.value || null;
+      const selectedCategory = requireEditorCategory(catSel);
+      if (!selectedCategory) return;
+      const categoryId = selectedCategory.sourceCategoryId || selectedCategory.id;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
       await saveService({
         name,
@@ -863,7 +957,9 @@ async function _ffCatalogEditorSubmit(ctx) {
       serviceSaveToast = catalogServiceSavedToast(ctx.mode);
     } else if (ctx.mode === 'service-edit') {
       const s = ctx.existing;
-      const categoryId = catSel?.value || null;
+      const selectedCategory = requireEditorCategory(catSel);
+      if (!selectedCategory) return;
+      const categoryId = selectedCategory.sourceCategoryId || selectedCategory.id;
       const defaultPrice = parseFloat(priceInp?.value) || 0;
       await saveService({
         id: s.id,
@@ -880,7 +976,9 @@ async function _ffCatalogEditorSubmit(ctx) {
       serviceSaveToast = catalogServiceSavedToast(ctx.mode);
     } else if (ctx.mode === 'shared-service-add' || ctx.mode === 'shared-service-edit') {
       const s = ctx.existing || {};
-      const category = normalizeSharedCategoryName(catTextInp?.value || s.category || '');
+      const selectedCategory = requireEditorCategory(catSel);
+      if (!selectedCategory) return;
+      const category = normalizeSharedCategoryName(selectedCategory.name);
       const defaultPrice = parseFloat(priceInp?.value) || 0;
       const overridePrice = parseFloat(overridePriceInp?.value);
       if (ctx.mode === 'shared-service-edit' && overrideCustom?.checked && !Number.isFinite(overridePrice)) {

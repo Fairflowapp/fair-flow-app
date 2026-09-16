@@ -195,20 +195,86 @@
     }
     return (Array.isArray(list) ? list : []).map(function (row, index) {
       var item = row && typeof row === "object" ? row : {};
-      return {
+      var named = {
         serviceId: trim(item.serviceId),
         allocatedPrice: Number(item.allocatedPrice) || 0,
         sortOrder: Number.isInteger(Number(item.sortOrder)) ? Number(item.sortOrder) : index
       };
+      var snap = collapseSpaces(item.serviceNameSnapshot || item.name);
+      if (snap) named.serviceNameSnapshot = snap;
+      return named;
     }).filter(function (row) { return !!row.serviceId; }).sort(function (a, b) {
       return a.sortOrder - b.sortOrder;
     });
   }
 
+  function isGenericServiceName(value) {
+    var name = collapseSpaces(value).toLowerCase();
+    return !name || name === "service";
+  }
+
+  function serviceDisplayName(service, fallback) {
+    var row = service && typeof service === "object" ? service : {};
+    var raw = row.raw && typeof row.raw === "object" ? row.raw : {};
+    var name = collapseSpaces(row.name)
+      || collapseSpaces(row.displayName)
+      || collapseSpaces(raw.name)
+      || collapseSpaces(fallback);
+    return name;
+  }
+
   function findCatalogService(catalog, serviceId) {
     var id = trim(serviceId);
     if (!id) return null;
-    return (catalog || []).find(function (row) { return row && trim(row.id) === id; }) || null;
+    return (catalog || []).find(function (row) {
+      if (!row) return false;
+      if (trim(row.id) === id) return true;
+      if (row.raw && trim(row.raw.id) === id) return true;
+      return false;
+    }) || null;
+  }
+
+  function findCatalogServiceByName(catalog, name) {
+    var key = collapseSpaces(name).toLowerCase();
+    if (isGenericServiceName(key)) return null;
+    return (catalog || []).find(function (row) {
+      if (!row || isComboService(row)) return false;
+      return collapseSpaces(row.name || (row.raw && row.raw.name)).toLowerCase() === key;
+    }) || null;
+  }
+
+  function lookupCatalogs() {
+    var lists = [];
+    for (var i = 0; i < arguments.length; i += 1) {
+      if (Array.isArray(arguments[i])) lists.push(arguments[i]);
+    }
+    var seen = {};
+    var out = [];
+    lists.forEach(function (list) {
+      list.forEach(function (row) {
+        var id = trim(row && row.id);
+        if (!id || seen[id]) return;
+        seen[id] = true;
+        out.push(row);
+      });
+    });
+    return out;
+  }
+
+  function resolveComboComponent(catalog, comp, extras) {
+    var item = comp && typeof comp === "object" ? comp : {};
+    var serviceId = trim(item.serviceId);
+    var nameHint = collapseSpaces(item.serviceNameSnapshot || item.name || (extras && extras.nameHint));
+    var found = findCatalogService(catalog, serviceId) || findCatalogServiceByName(catalog, nameHint);
+    var name = serviceDisplayName(found, nameHint);
+    if (isGenericServiceName(name)) name = collapseSpaces(nameHint);
+    var providerId = extras && extras.providerId;
+    return {
+      serviceId: serviceId,
+      service: found,
+      name: name,
+      duration: found ? componentDuration(found, providerId) : (Number(extras && extras.duration) || 30)
+    };
   }
 
   function isProviderEligible(service, providerId) {
@@ -383,14 +449,15 @@
     return groups;
   }
 
-  function pickerRowForComponent(componentService, allocatedPrice, duration) {
+  function pickerRowForComponent(componentService, allocatedPrice, duration, nameHint) {
     var row = componentService && typeof componentService === "object" ? componentService : {};
     var raw = row.raw && typeof row.raw === "object" ? Object.assign({}, row.raw) : {};
     if (!raw.durationMinutes && duration) raw.durationMinutes = duration;
     raw.defaultPrice = allocatedPrice;
+    var name = serviceDisplayName(row, nameHint);
     return {
-      id: trim(row.id),
-      name: collapseSpaces(row.name) || "Service",
+      id: trim(row.id || row.serviceId),
+      name: name,
       durationMinutes: duration || Number(row.durationMinutes) || 30,
       price: allocatedPrice,
       category: row.category,
@@ -415,26 +482,34 @@
     var startMin = Number(opts.startMin);
     var seedProvider = trim(opts.providerId);
     var built = components.map(function (comp, index) {
-      var svc = findCatalogService(catalog, comp.serviceId) || { id: comp.serviceId, name: "Service" };
+      var resolved = resolveComboComponent(catalog, comp, { providerId: seedProvider });
+      var svc = resolved.service || {
+        id: resolved.serviceId,
+        name: resolved.name,
+        durationMinutes: resolved.duration
+      };
+      if (!trim(svc.id)) svc.id = resolved.serviceId;
+      if (isGenericServiceName(svc.name) && resolved.name) svc.name = resolved.name;
       var eligible = seedProvider ? isProviderEligible(svc, seedProvider) : false;
       var providerId = eligible ? seedProvider : "";
-      var duration = componentDuration(svc, providerId);
+      var duration = resolved.service ? componentDuration(svc, providerId) : resolved.duration;
       var allocated = Number(comp.allocatedPrice);
       if (!Number.isFinite(allocated)) allocated = 0;
+      var componentName = resolved.name;
       var line = emptyLine({
         providerId: providerId,
-        serviceId: trim(comp.serviceId),
+        serviceId: resolved.serviceId,
         startMin: startMin,
         guestKey: opts.guestKey,
         guestName: opts.guestName,
         requested: !!opts.requested,
         keepStoredSnapshots: true,
-        originalServiceId: trim(comp.serviceId),
-        originalServiceName: collapseSpaces(svc.name) || "Service",
+        originalServiceId: resolved.serviceId,
+        originalServiceName: componentName,
         storedDurationMinutes: duration,
         storedPrice: allocated
       });
-      line.service = pickerRowForComponent(svc, allocated, duration);
+      line.service = pickerRowForComponent(svc, allocated, duration, componentName);
       line.services = opts.services || [];
       line.durationMinutes = duration;
       line.price = allocated;
@@ -500,7 +575,7 @@
     if (!picked) return false;
     if (isComboService(picked)) {
       var expanded = buildExpandedLines(picked, {
-        catalog: (state && state.catalogServices) || [],
+        catalog: lookupCatalogs((state && state.catalogServices) || [], line.services),
         emptyLine: emptyLine,
         startMin: line.startMin,
         providerId: line.providerId,
@@ -567,13 +642,24 @@
 
   function keepComboServiceOnRefresh(line, catalog, listed) {
     if (!isComboLine(line) || !trim(line.serviceId)) return false;
-    var found = (listed || []).find(function (row) { return row && row.id === line.serviceId; })
-      || findCatalogService(catalog, line.serviceId)
-      || line.service;
+    var resolved = resolveComboComponent(lookupCatalogs(listed, catalog), {
+      serviceId: line.serviceId,
+      serviceNameSnapshot: line.originalServiceName || (line.service && line.service.name)
+    }, { providerId: line.providerId, duration: line.durationMinutes });
+    var found = resolved.service || line.service;
     if (found) {
       var allocated = line.storedPrice != null ? Number(line.storedPrice) : Number(line.price);
       if (!Number.isFinite(allocated)) allocated = Number(found.price) || 0;
-      line.service = pickerRowForComponent(found, allocated, Number(line.durationMinutes) || componentDuration(found, line.providerId));
+      var keepName = resolved.name || line.originalServiceName;
+      line.service = pickerRowForComponent(
+        found,
+        allocated,
+        Number(line.durationMinutes) || componentDuration(found, line.providerId),
+        keepName
+      );
+      if (keepName && isGenericServiceName(line.originalServiceName)) {
+        line.originalServiceName = keepName;
+      }
       if (!(listed || []).some(function (row) { return row && row.id === line.serviceId; })) {
         line.services = [line.service].concat(listed || []);
       } else {
@@ -612,10 +698,59 @@
   }
 
   function checkoutItemName(line) {
-    var component = collapseSpaces(line && line.serviceNameSnapshot) || "Service";
+    var component = collapseSpaces(line && (line.serviceNameSnapshot || line.originalServiceName || (line.service && line.service.name)));
+    if (isGenericServiceName(component)) component = "Service";
     var comboName = collapseSpaces(line && line.comboNameSnapshot);
     if (!comboName) return component;
     return comboName + " — " + component;
+  }
+
+  function resolvedLineIdentity(line) {
+    var row = line && typeof line === "object" ? line : {};
+    var name = serviceDisplayName(row.service, row.serviceNameSnapshot || row.originalServiceName);
+    if (isGenericServiceName(name)) name = collapseSpaces(row.serviceNameSnapshot || row.originalServiceName);
+    return {
+      serviceId: trim(row.serviceId),
+      serviceName: name,
+      durationMinutes: Number(row.durationMinutes) > 0 ? Number(row.durationMinutes) : 0
+    };
+  }
+
+  /**
+   * Focused Smart Scheduling input adapter.
+   * Each Combo component is the underlying Single — never the parent Combo
+   * and never a generic "Service" identity when the name can be resolved.
+   */
+  function smartSchedulingRequestLines(lines, options) {
+    var opts = options || {};
+    var providers = Array.isArray(opts.providers) ? opts.providers : [];
+    return (lines || []).map(function (line) {
+      var identity = resolvedLineIdentity(line);
+      var service = line && line.service;
+      var eligible = providers.map(function (emp) {
+        return trim(emp && (emp.id || emp.staffId));
+      }).filter(function (id) {
+        return id && (!service || isProviderEligible(service, id));
+      });
+      var currentId = trim(line && line.providerId);
+      return {
+        lineKey: trim(line && (line.key || line.lineId)),
+        serviceId: identity.serviceId,
+        serviceName: identity.serviceName,
+        durationMinutes: identity.durationMinutes,
+        eligibleProviderIds: eligible,
+        assignmentType: currentId ? "specific_provider" : "any_provider",
+        requestedProviderId: line && line.requested ? currentId : "",
+        comboInstanceId: comboInstanceIdOf(line),
+        comboServiceId: trim(line && line.comboServiceId),
+        comboComponentIndex: Number.isInteger(Number(line && line.comboComponentIndex))
+          ? Number(line.comboComponentIndex)
+          : 0,
+        comboComponentCount: Number(line && line.comboComponentCount) > 0
+          ? Number(line.comboComponentCount)
+          : 0
+      };
+    });
   }
 
   function detailsGroups(appointment) {
@@ -636,6 +771,12 @@
     copyNamedFields: copyNamedFields,
     comboComponentsOf: comboComponentsOf,
     findCatalogService: findCatalogService,
+    findCatalogServiceByName: findCatalogServiceByName,
+    resolveComboComponent: resolveComboComponent,
+    isGenericServiceName: isGenericServiceName,
+    serviceDisplayName: serviceDisplayName,
+    smartSchedulingRequestLines: smartSchedulingRequestLines,
+    resolvedLineIdentity: resolvedLineIdentity,
     isProviderEligible: isProviderEligible,
     componentDuration: componentDuration,
     sellingPrice: sellingPrice,

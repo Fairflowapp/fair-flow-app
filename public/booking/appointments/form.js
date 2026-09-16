@@ -367,6 +367,11 @@
   }
 
   function lineServiceName(line) {
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && typeof combo.resolvedLineIdentity === "function") {
+      var identity = combo.resolvedLineIdentity(line);
+      if (identity && trim(identity.serviceName)) return identity.serviceName;
+    }
     return trim(line && line.service && line.service.name)
       || trim(line && line.originalServiceName)
       || "Service";
@@ -826,6 +831,25 @@
     return state;
   }
 
+  function persistServiceName(line, sameService) {
+    var combo = window.ffBookingAppointmentCombo;
+    var first = sameService
+      ? [line && line.originalServiceName, line && line.service && line.service.name]
+      : [line && line.service && line.service.name, line && line.originalServiceName];
+    var i;
+    for (i = 0; i < first.length; i += 1) {
+      var name = trim(first[i]).replace(/\s+/g, " ");
+      if (name && (!combo || !combo.isGenericServiceName || !combo.isGenericServiceName(name))) return name;
+    }
+    if (combo && typeof combo.resolvedLineIdentity === "function") {
+      var identity = combo.resolvedLineIdentity(line);
+      if (identity && trim(identity.serviceName) && (!combo.isGenericServiceName || !combo.isGenericServiceName(identity.serviceName))) {
+        return identity.serviceName;
+      }
+    }
+    return trim(line && (line.originalServiceName || (line.service && line.service.name))).replace(/\s+/g, " ");
+  }
+
   function linePayload(state, line) {
     var sameService = line.keepStoredSnapshots && trim(line.serviceId) === trim(line.originalServiceId);
     var combo = window.ffBookingAppointmentCombo;
@@ -841,7 +865,7 @@
       endAt: endAt,
       durationMinutes: duration,
       priceSnapshot: line.price,
-      serviceNameSnapshot: sameService ? line.originalServiceName : (line.service && line.service.name) || "",
+      serviceNameSnapshot: persistServiceName(line, sameService),
       preservePriceSnapshot: sameService || isCombo,
       preserveNameSnapshot: sameService || isCombo,
       guestKey: trim(line.guestKey),
@@ -952,7 +976,7 @@
       if (line.serviceId) {
         line.service = {
           id: line.serviceId,
-          name: line.originalServiceName || "Service",
+          name: line.originalServiceName,
           durationMinutes: line.storedDurationMinutes,
           price: line.storedPrice || 0,
           raw: {
@@ -1074,8 +1098,10 @@
   }
 
   function pickerServices(state, line) {
-    if (line && trim(line.providerId) && (line.services || []).length) return line.services;
-    return (state && state.catalogServices) || [];
+    var rows = line && trim(line.providerId) && (line.services || []).length
+      ? line.services
+      : (state && state.catalogServices) || [];
+    return (rows || []).filter(function (svc) { return svc && svc.lookupOnly !== true; });
   }
 
   function catalogRank(value, fallback) {
@@ -1239,9 +1265,9 @@
     var startLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
     var endLabel = Number.isFinite(Number(line.endMin)) ? formatMinutes(line.endMin) : "—";
     var nameHtml = ui.hideServicePicker
-      ? '<span class="ff-appt-card-name is-static">' + escapeHtml((line.service && line.service.name) || "Service") + "</span>"
+      ? '<span class="ff-appt-card-name is-static">' + escapeHtml(lineServiceName(line)) + "</span>"
       : '<button type="button" class="ff-appt-card-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
-        escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>";
+        escapeHtml(line.key) + '">' + escapeHtml(lineServiceName(line)) + "</button>";
     return (
       '<div class="ff-appt-svc' + (err ? " is-error" : "") + (ui.comboLocked ? " is-combo-component" : "") +
         '" data-ff-line="' + escapeHtml(line.key) + '">' +
@@ -1423,6 +1449,7 @@
     closeGap: closeGap,
     gapNoticeHtml: gapNoticeHtml,
     startAtDate: startAtDate,
+    linePayload: linePayload,
     create: create,
     timeOptionsHtml: timeOptionsHtml,
     editStateFrom: editStateFrom,

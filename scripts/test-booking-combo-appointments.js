@@ -459,6 +459,88 @@ check("payload preserves allocated Combo prices", (function () {
   return rows[0].priceSnapshot + rows[1].priceSnapshot === 84 && rows[0].preservePriceSnapshot === true;
 })());
 
+check("expanded Combo components keep real underlying names", expanded.lines[0].service.name === "Gel Manicure"
+  && expanded.lines[1].service.name === "Regular Pedicure"
+  && expanded.lines[0].originalServiceName === "Gel Manicure"
+  && expanded.lines[1].originalServiceName === "Regular Pedicure"
+  && expanded.lines[0].serviceId === "svc-gel"
+  && expanded.lines[1].serviceId === "svc-pedi"
+  && expanded.lines[0].serviceId !== "svc-combo");
+
+check("create payload snapshots real component names not Service", (function () {
+  expanded.dateKey = "2026-09-15";
+  const rows = expanded.lines.map(function (line) { return form.linePayload ? form.linePayload(expanded, line) : null; });
+  if (rows[0] && rows[1]) {
+    return rows[0].serviceNameSnapshot === "Gel Manicure"
+      && rows[1].serviceNameSnapshot === "Regular Pedicure"
+      && rows[0].serviceId === "svc-gel"
+      && rows[1].serviceId === "svc-pedi";
+  }
+  return expanded.lines[0].originalServiceName === "Gel Manicure"
+    && expanded.lines[1].originalServiceName === "Regular Pedicure";
+})());
+
+const snapshotOnly = {
+  id: "svc-combo-snap",
+  name: "Gel Mani + Regular Pedi",
+  durationMinutes: 75,
+  price: 84,
+  defaultPrice: 84,
+  serviceType: "combo",
+  components: [
+    { serviceId: "shared-gel", allocatedPrice: 44, sortOrder: 0, serviceNameSnapshot: "Gel Manicure" },
+    { serviceId: "shared-pedi", allocatedPrice: 40, sortOrder: 1, serviceNameSnapshot: "Regular Pedicure" }
+  ]
+};
+const snapshotState = baseState();
+snapshotState.catalogServices = [snapshotOnly];
+snapshotState.lines[0].services = [snapshotOnly];
+form.setLineService(snapshotState, snapshotState.lines[0].key, "svc-combo-snap");
+check("name snapshots survive when underlying IDs are missing from the picker catalog", snapshotState.lines.length === 2
+  && snapshotState.lines[0].serviceId === "shared-gel"
+  && snapshotState.lines[1].serviceId === "shared-pedi"
+  && snapshotState.lines[0].service.name === "Gel Manicure"
+  && snapshotState.lines[1].service.name === "Regular Pedicure"
+  && snapshotState.lines[0].serviceId !== "svc-combo-snap"
+  && form.createLinesHtml(snapshotState, [{ id: "nicole", firstName: "Nicole" }]).indexOf(">Service<") === -1
+  && /Gel Manicure/.test(form.createLinesHtml(snapshotState, [{ id: "nicole", firstName: "Nicole" }]))
+  && /Regular Pedicure/.test(form.createLinesHtml(snapshotState, [{ id: "nicole", firstName: "Nicole" }])));
+
+const mergedPicker = windowObj.ffCatalogCombo.mergeCatalogServicesForPicker(
+  [snapshotOnly, { id: "shared-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 }, { id: "shared-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }],
+  [{ id: "loc-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 }, { id: "loc-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }]
+);
+const retained = windowObj.ffCatalogCombo.retainComboComponentServices(mergedPicker, [
+  [snapshotOnly, { id: "shared-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 }, { id: "shared-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }],
+  [{ id: "loc-gel", name: "Gel Manicure", category: "Hands", durationMinutes: 45 }, { id: "loc-pedi", name: "Regular Pedicure", category: "Feet", durationMinutes: 30 }]
+]);
+check("picker merge keeps location singles and still retains Combo component IDs", mergedPicker.some(function (row) { return row.id === "loc-gel"; })
+  && !mergedPicker.some(function (row) { return row.id === "shared-gel"; })
+  && retained.some(function (row) { return row.id === "shared-gel" && row.lookupOnly === true; })
+  && retained.some(function (row) { return row.id === "shared-pedi" && row.lookupOnly === true; }));
+
+const retainedState = baseState();
+retainedState.catalogServices = retained;
+retainedState.lines[0].services = retained.filter(function (row) { return row.lookupOnly !== true; });
+form.setLineService(retainedState, retainedState.lines[0].key, "svc-combo-snap");
+check("retained component IDs expand with real names and durations", retainedState.lines[0].serviceId === "shared-gel"
+  && retainedState.lines[1].serviceId === "shared-pedi"
+  && retainedState.lines[0].service.name === "Gel Manicure"
+  && retainedState.lines[1].service.name === "Regular Pedicure"
+  && retainedState.lines[0].durationMinutes === 45
+  && retainedState.lines[1].durationMinutes === 30);
+
+check("historical empty name still falls back to Service in details", details.viewFrom(model.fromDoc("old-generic", {
+  serviceLines: [{
+    lineId: "old",
+    serviceId: "svc-gel",
+    serviceNameSnapshot: "",
+    providerId: "nicole",
+    durationMinutes: 45,
+    priceSnapshot: 55
+  }]
+}), "old").serviceName === "Service");
+
 if (failed) {
   console.error("FAILED", failed);
   process.exit(1);
