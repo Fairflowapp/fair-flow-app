@@ -136,6 +136,12 @@ const dupes = api.validateComboService({
 });
 check("duplicate component services are rejected", dupes.ok === false && dupes.code === "DUPLICATE_COMPONENT");
 
+const moved = api.moveComboComponent(comboComponents, 0, 1);
+check("move down swaps component order", moved[0].serviceId === "svc-pedicure" && moved[1].serviceId === "svc-manicure");
+check("moved components get sequential sortOrder", moved[0].sortOrder === 0 && moved[1].sortOrder === 1);
+const movedBack = api.moveComboComponent(moved, 1, -1);
+check("move up restores original order", movedBack[0].serviceId === "svc-manicure" && movedBack[1].serviceId === "svc-pedicure");
+
 check(
   "allocated prices reconcile to Combo selling price",
   api.allocatedPricesReconcile(comboComponents, 65) === true

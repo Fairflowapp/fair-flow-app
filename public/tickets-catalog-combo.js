@@ -89,6 +89,30 @@ export function normalizeComboComponents(raw) {
   });
 }
 
+export function withSequentialSortOrder(components) {
+  return (Array.isArray(components) ? components : []).map(function (row, index) {
+    return {
+      serviceId: String(row.serviceId || "").trim(),
+      allocatedPrice: row.allocatedPrice,
+      sortOrder: index
+    };
+  }).filter(function (row) {
+    return !!row.serviceId;
+  });
+}
+
+export function moveComboComponent(components, fromIndex, delta) {
+  const current = withSequentialSortOrder(components);
+  const from = Number(fromIndex);
+  const to = from + Number(delta);
+  if (!Number.isInteger(from) || from < 0 || from >= current.length) return current;
+  if (!Number.isInteger(to) || to < 0 || to >= current.length) return current;
+  const next = current.slice();
+  const moved = next.splice(from, 1)[0];
+  next.splice(to, 0, moved);
+  return withSequentialSortOrder(next);
+}
+
 export function comboComponentServiceIds(components) {
   return normalizeComboComponents(components).map(function (row) {
     return row.serviceId;
@@ -474,7 +498,7 @@ export function wireComboEditor(root, options) {
     root.querySelectorAll(".ff-combo-remove").forEach(function (btn) {
       btn.addEventListener("click", function () {
         const idx = Number(btn.getAttribute("data-index"));
-        components = components.filter(function (_row, index) { return index !== idx; });
+        components = withSequentialSortOrder(components.filter(function (_row, index) { return index !== idx; }));
         refresh();
       });
     });
@@ -482,11 +506,7 @@ export function wireComboEditor(root, options) {
       btn.addEventListener("click", function () {
         const idx = Number(btn.getAttribute("data-index"));
         if (!idx) return;
-        const next = components.slice();
-        const tmp = next[idx - 1];
-        next[idx - 1] = next[idx];
-        next[idx] = tmp;
-        components = normalizeComboComponents(next);
+        components = moveComboComponent(components, idx, -1);
         refresh();
       });
     });
@@ -494,11 +514,7 @@ export function wireComboEditor(root, options) {
       btn.addEventListener("click", function () {
         const idx = Number(btn.getAttribute("data-index"));
         if (idx < 0 || idx >= components.length - 1) return;
-        const next = components.slice();
-        const tmp = next[idx + 1];
-        next[idx + 1] = next[idx];
-        next[idx] = tmp;
-        components = normalizeComboComponents(next);
+        components = moveComboComponent(components, idx, 1);
         refresh();
       });
     });
@@ -572,6 +588,8 @@ if (typeof window !== "undefined") {
     copyComboCatalogFields,
     normalizeComboComponents,
     comboComponentServiceIds,
+    withSequentialSortOrder,
+    moveComboComponent,
     listEligibleComboComponentServices,
     combosUsingService,
     comboDurationMinutes,
