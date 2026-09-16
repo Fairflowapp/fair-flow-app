@@ -60,13 +60,12 @@ async function setDuration(page, minutes) {
 
 async function assertNoBlockTimeCopy(page, rootSel) {
   const root = page.locator(rootSel);
-  await root.waitFor({ state: "attached", timeout: 10000 });
   const labeled = root.locator("h2, [data-ff-cal-menu='block'], [data-ff-block-act='save'], [data-ff-cal-slot='block']").first();
-  await labeled.waitFor({ state: "attached", timeout: 10000 });
-  await expect(labeled).toContainText(/Time Block/);
-  const text = await root.evaluate((el) => String(el.textContent || "").replace(/\s+/g, " "));
-  expect(text, "UI must say Time Block, not Block Time").not.toMatch(/Block Time/);
-  expect(text).toMatch(/Time Block/);
+  await expect(root).toBeVisible();
+  await expect(labeled).toBeVisible();
+  await expect(labeled).toHaveText(/Time Block/);
+  await expect(root).toContainText(/Time Block/);
+  await expect(root, "UI must say Time Block, not Block Time").not.toContainText(/Block Time/);
 }
 
 async function saveEditor(page) {
@@ -144,23 +143,38 @@ async function expectNoProviderMoveConfirm(page) {
 }
 
 async function openProviderMenu(page, providerId) {
-  await page.evaluate((id) => {
-    const btn = document.querySelector('#ffBookingCalendarRoot [data-ff-cal-provider="' + id + '"]');
-    const st = window.ffBookingCalState;
-    const menu = window.ffBookingCalMenu;
-    if (!btn || !menu || typeof menu.open !== "function") throw new Error("provider menu is not ready");
-    menu.open(btn, {
-      providerId: id,
-      dateKey: st && st.getSelectedDateKey ? st.getSelectedDateKey() : "",
-      locationId: st && st.getLocationId ? st.getLocationId() : "",
-      focusProviderId: st && st.getFocusProviderId ? st.getFocusProviderId() : "",
-    });
-  }, providerId);
-  await page.locator("#ffBookingCalProviderMenu").waitFor({ state: "visible", timeout: 10000 });
-  await page.locator('#ffBookingCalProviderMenu [data-ff-cal-menu="block"]').waitFor({
-    state: "visible",
-    timeout: 10000,
-  });
+  const menu = page.locator("#ffBookingCalProviderMenu");
+  const block = menu.locator('[data-ff-cal-menu="block"]');
+  await expect(async () => {
+    const ready = await page.evaluate((id) => {
+      const btn = document.querySelector('#ffBookingCalendarRoot [data-ff-cal-provider="' + id + '"]');
+      const st = window.ffBookingCalState;
+      const api = window.ffBookingCalMenu;
+      const root = document.getElementById("ffBookingCalProviderMenu");
+      if (!btn || !api || typeof api.open !== "function") throw new Error("provider menu is not ready");
+      const alreadyOpen = !!(
+        api.isOpen && api.isOpen()
+        && root
+        && !root.hasAttribute("hidden")
+        && root.querySelector('[data-ff-cal-menu="block"]')
+      );
+      if (!alreadyOpen) {
+        api.open(btn, {
+          providerId: id,
+          dateKey: st && st.getSelectedDateKey ? st.getSelectedDateKey() : "",
+          locationId: st && st.getLocationId ? st.getLocationId() : "",
+          focusProviderId: st && st.getFocusProviderId ? st.getFocusProviderId() : "",
+        });
+      }
+      return !!(document.getElementById("ffBookingCalProviderMenu")
+        && !document.getElementById("ffBookingCalProviderMenu").hasAttribute("hidden")
+        && document.querySelector('#ffBookingCalProviderMenu [data-ff-cal-menu="block"]'));
+    }, providerId);
+    expect(ready, "provider menu did not stay open").toBeTruthy();
+    await expect(menu).toBeVisible();
+    await expect(block).toBeVisible();
+    await expect(block).toHaveText("Time Block");
+  }).toPass({ timeout: 15000 });
 }
 
 async function dragBlockToProvider(page, blockId, toProviderId, startMin) {

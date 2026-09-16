@@ -262,9 +262,28 @@ async function cancelThroughUi(page) {
 
 async function dragCardByMinutes(page, appointmentId, deltaMin) {
   const card = page.locator('#ffBookingCalendarRoot [data-ff-cal-card="' + appointmentId + '"]').first();
-  await card.waitFor({ state: "visible" });
-  const box = await card.boundingBox();
-  if (!box) throw new Error("appointment card has no box");
+  await card.waitFor({ state: "attached", timeout: 20000 });
+  await page.evaluate((id) => {
+    const root = document.getElementById("ffBookingCalendarRoot");
+    const el = root && root.querySelector('[data-ff-cal-card="' + id + '"]');
+    const vp = root && root.querySelector("[data-ff-cal-viewport]");
+    const lay = window.ffBookingCalLayout;
+    const st = window.ffBookingCalState;
+    if (!el || !vp) return;
+    const start = Number(el.getAttribute("data-ff-cal-start"));
+    if (lay && st && typeof lay.timeToY === "function" && Number.isFinite(start)) {
+      const axis = st.getAxis();
+      vp.scrollTop = Math.max(0, lay.timeToY(start + 6, axis.startMin) - 120);
+      return;
+    }
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+  }, appointmentId);
+  let box = null;
+  await expect(async () => {
+    await expect(card).toBeVisible();
+    box = await card.boundingBox();
+    if (!box || box.width < 8 || box.height < 8) throw new Error("appointment card has no box");
+  }).toPass({ timeout: 10000 });
   const startX = box.x + Math.min(24, box.width / 2);
   const startY = box.y + Math.min(12, box.height / 2);
   const dy = (Number(deltaMin) / 60) * 72;

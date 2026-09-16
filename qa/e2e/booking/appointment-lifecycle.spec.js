@@ -197,7 +197,10 @@ test.describe("Booking appointment lifecycle", () => {
     const { created } = await createBasicQaAppointment(page, SLOT.drag, "drag");
     const before = created.startAt;
     await ui.dragCardByMinutes(page, created.appointmentId, 30);
-    await page.waitForTimeout(800);
+    await expect.poll(async () => {
+      const row = await getQaAppointment(created.appointmentId);
+      return row.startAt;
+    }, { timeout: 20000 }).not.toBe(before);
     const updated = await getQaAppointment(created.appointmentId);
     expect(updated.appointmentId).toBe(created.appointmentId);
     expect(updated.clientId).toBe(ui.FIXTURE.clientId);
