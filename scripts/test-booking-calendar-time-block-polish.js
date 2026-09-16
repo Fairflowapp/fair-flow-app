@@ -142,6 +142,12 @@ check("UI terminology uses Time Block in the slot chooser", uiSrc.indexOf(">Time
 check("UI terminology uses Time Block in the provider menu", menuSrc.indexOf('label: "Time Block"') !== -1);
 check("UI terminology no longer uses Edit Block Time", editorSrc.indexOf("Edit Block Time") === -1 && editorSrc.indexOf("Block Time") === -1);
 check("persisted collection name is unchanged", dataSrc.indexOf("calendarBlocks") !== -1 && modelSrc.indexOf("calendarBlocks") !== -1);
+check("reload does not wipe cache when location is unresolved",
+  /if \(!keys\.length \|\| !loc\) \{\s*return api && typeof api\.getAll === "function" \? api\.getAll\(\) : \[\];/.test(dataSrc));
+check("reload applies through generation-aware applyLoaded",
+  dataSrc.indexOf("applyLoaded") !== -1 && paintSrc.indexOf("function applyLoaded") !== -1);
+check("create paints the persisted Firestore id, not the empty editor blockId",
+  /Object\.assign\(\{\}, spec, body, \{\s*blockId: ref\.id/.test(dataSrc));
 
 check("existing reasons stay lunch/break/meeting/training/personal/other",
   model.REASONS.join(",") === "lunch,break,meeting,training,personal,other");
@@ -177,6 +183,33 @@ return windowObj.ffBookingBlocks.create({
 }).then(function (created) {
   check("new Time Block saves reason", created.reason === "meeting");
   check("new Time Block saves note", created.note === "Staff meeting");
+  const createSpec = {
+    blockId: "",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-16",
+    startMin: 13 * 60 + 30,
+    endMin: 14 * 60,
+    reason: "meeting",
+    note: "Staff meeting"
+  };
+  const painted = model.normalize(Object.assign({}, createSpec, { blockId: "persist_meeting_1" }));
+  const overwritten = model.normalize(Object.assign({ blockId: "persist_meeting_1" }, createSpec));
+  check("local cache keeps the persisted id after Create", painted && painted.blockId === "persist_meeting_1");
+  check("empty editor blockId must not replace the persisted id", overwritten.blockId !== "persist_meeting_1");
+
+  const staleStarted = blocks.beginLoad();
+  blocks.upsert(created);
+  const staleReload = blocks.applyLoaded([], staleStarted);
+  check("stale Calendar reload keeps a just-created Time Block",
+    !!(staleReload || []).some(function (row) { return row.blockId === created.blockId; }));
+  check("forView still finds the created block after a stale reload",
+    blocks.forView(created.dateKey, created.locationId).some(function (row) { return row.blockId === created.blockId; }));
+  check("forView still paints when location is unresolved",
+    blocks.forView(created.dateKey, "").some(function (row) { return row.blockId === created.blockId; }));
+  const confirmed = blocks.applyLoaded([created], blocks.beginLoad());
+  check("confirmed reload keeps the persisted Time Block",
+    !!(confirmed || []).some(function (row) { return row.blockId === created.blockId; }));
 
   const meetingCard = blocks.blockHtml(created, { top: 10, height: 48 });
   check("Calendar card renders reason", meetingCard.indexOf("Meeting") !== -1 && meetingCard.indexOf('data-ff-cal-block-reason="meeting"') !== -1);

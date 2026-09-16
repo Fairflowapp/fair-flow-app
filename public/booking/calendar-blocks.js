@@ -28,6 +28,9 @@
     "time off": true
   };
   var items = [];
+  var writeGen = 0;
+  var pendingIds = {};
+  var tombstones = {};
 
   function trim(value) {
     return String(value == null ? "" : value).trim();
@@ -143,6 +146,44 @@
     };
   }
 
+  function noteLocalWrite(blockId, kind) {
+    writeGen += 1;
+    var id = trim(blockId);
+    if (!id) return writeGen;
+    if (kind === "delete") {
+      delete pendingIds[id];
+      tombstones[id] = writeGen;
+    } else {
+      pendingIds[id] = writeGen;
+      delete tombstones[id];
+    }
+    return writeGen;
+  }
+
+  function beginLoad() {
+    return writeGen;
+  }
+
+  function applyLoaded(list, startedWriteGen) {
+    var started = Number(startedWriteGen);
+    if (!Number.isFinite(started)) started = writeGen;
+    var incoming = (Array.isArray(list) ? list : []).map(normalize).filter(Boolean).filter(function (row) {
+      var cut = tombstones[row.blockId];
+      return !cut || cut <= started;
+    });
+    if (started !== writeGen) return items.slice();
+    incoming.forEach(function (row) {
+      delete pendingIds[row.blockId];
+    });
+    Object.keys(pendingIds).forEach(function (id) {
+      if (incoming.some(function (row) { return row.blockId === id; })) return;
+      var row = items.find(function (item) { return item.blockId === id; });
+      if (row) incoming.push(row);
+    });
+    items = incoming;
+    return items.slice();
+  }
+
   function setAll(list) {
     items = (Array.isArray(list) ? list : []).map(normalize).filter(Boolean);
     return items.slice();
@@ -154,18 +195,23 @@
 
   function clear() {
     items = [];
+    writeGen = 0;
+    pendingIds = {};
+    tombstones = {};
     return items;
   }
 
   function upsert(raw) {
     var row = normalize(raw);
     if (!row) return null;
+    noteLocalWrite(row.blockId, "upsert");
     items = items.filter(function (item) { return item.blockId !== row.blockId; }).concat([row]);
     return row;
   }
 
   function remove(blockId) {
     var id = trim(blockId);
+    noteLocalWrite(id, "delete");
     items = items.filter(function (item) { return item.blockId !== id; });
     return items.slice();
   }
@@ -179,7 +225,9 @@
     var day = trim(dateKey);
     var loc = trim(locationId);
     return items.filter(function (row) {
-      return row.dateKey === day && row.locationId === loc;
+      if (row.dateKey !== day) return false;
+      if (!loc) return true;
+      return row.locationId === loc;
     });
   }
 
@@ -298,6 +346,9 @@
     REASONS: REASONS,
     normalize: normalize,
     setAll: setAll,
+    applyLoaded: applyLoaded,
+    beginLoad: beginLoad,
+    noteLocalWrite: noteLocalWrite,
     getAll: getAll,
     clear: clear,
     upsert: upsert,

@@ -61,8 +61,11 @@ function emitChanged(detail) {
   } catch (_) {}
 }
 
-function applyList(rows) {
+function applyList(rows, startedWriteGen) {
   const api = cache();
+  if (api && typeof api.applyLoaded === "function") {
+    return api.applyLoaded(rows, startedWriteGen);
+  }
   if (api && typeof api.setAll === "function") api.setAll(rows);
   return rows;
 }
@@ -76,9 +79,13 @@ function toBlock(docSnap) {
 
 async function loadForDates(dateKeys, locationId) {
   const salonId = requireSalon();
+  const api = cache();
+  const started = api && typeof api.beginLoad === "function" ? api.beginLoad() : 0;
   const keys = (dateKeys || []).map((key) => String(key || "").trim()).filter(Boolean);
   const loc = String(locationId || "").trim();
-  if (!keys.length || !loc) return applyList([]);
+  if (!keys.length || !loc) {
+    return api && typeof api.getAll === "function" ? api.getAll() : [];
+  }
   const start = keys.slice().sort()[0];
   const end = keys.slice().sort()[keys.length - 1];
   const snap = await getDocs(query(
@@ -93,7 +100,7 @@ async function loadForDates(dateKeys, locationId) {
     if (keys.indexOf(row.dateKey) === -1) return;
     rows.push(row);
   });
-  return applyList(rows);
+  return applyList(rows, started);
 }
 
 async function loadForView(dateKey, locationId) {
@@ -131,11 +138,12 @@ async function create(spec) {
   const ref = await addDoc(blocksRef(salonId), body);
   const api = model();
   const row = api && typeof api.normalize === "function"
-    ? api.normalize(Object.assign({ blockId: ref.id }, spec, body, {
+    ? api.normalize(Object.assign({}, spec, body, {
+      blockId: ref.id,
       createdByUid: actor.uid,
       createdByStaffId: actor.staffId,
     }))
-    : Object.assign({ blockId: ref.id }, spec);
+    : Object.assign({}, spec, { blockId: ref.id });
   if (row && cache() && typeof cache().upsert === "function") cache().upsert(row);
   emitChanged({ action: "create", block: row });
   return row;
@@ -149,8 +157,8 @@ async function update(blockId, spec) {
   await updateDoc(doc(db, `salons/${salonId}/calendarBlocks/${id}`), body);
   const api = model();
   const row = api && typeof api.normalize === "function"
-    ? api.normalize(Object.assign({ blockId: id }, spec, body))
-    : Object.assign({ blockId: id }, spec);
+    ? api.normalize(Object.assign({}, spec, body, { blockId: id }))
+    : Object.assign({}, spec, { blockId: id });
   if (row && cache() && typeof cache().upsert === "function") cache().upsert(row);
   emitChanged({ action: "update", block: row });
   return row;

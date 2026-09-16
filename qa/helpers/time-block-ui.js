@@ -59,7 +59,12 @@ async function setDuration(page, minutes) {
 }
 
 async function assertNoBlockTimeCopy(page, rootSel) {
-  const text = await page.locator(rootSel).innerText();
+  const root = page.locator(rootSel);
+  await root.waitFor({ state: "attached", timeout: 10000 });
+  const labeled = root.locator("h2, [data-ff-cal-menu='block'], [data-ff-block-act='save'], [data-ff-cal-slot='block']").first();
+  await labeled.waitFor({ state: "attached", timeout: 10000 });
+  await expect(labeled).toContainText(/Time Block/);
+  const text = await root.evaluate((el) => String(el.textContent || "").replace(/\s+/g, " "));
   expect(text, "UI must say Time Block, not Block Time").not.toMatch(/Block Time/);
   expect(text).toMatch(/Time Block/);
 }

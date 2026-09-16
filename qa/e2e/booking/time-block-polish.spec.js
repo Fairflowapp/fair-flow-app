@@ -51,11 +51,13 @@ async function createBlock(page, spec) {
   if (spec.note) await ui.setNote(page, spec.note);
   else await ui.setNote(page, "");
   await ui.saveEditor(page);
+  const providerId = spec.providerId || ui.FIXTURE.providerOneId;
+  const painted = await ui.waitForBlockCardAt(page, providerId, spec.startMin);
   let created;
   if (spec.note) {
     created = await waitForQaCalendarBlockByNote(spec.note, 20000);
+    expect(await painted.getAttribute("data-ff-cal-block")).toBe(created.blockId);
   } else {
-    const providerId = spec.providerId || ui.FIXTURE.providerOneId;
     const started = Date.now();
     while (Date.now() - started < 20000) {
       const blockId = await page.evaluate(({ providerId, startMin }) => {
@@ -162,6 +164,17 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(meetingLines.time).toBe("1:30 PM – 2:00 PM");
   expect(meetingLines.note).toContain("Staff meeting");
   expect(meetingLines.hasNoteLine).toBe(true);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await waitForAppReady(page);
+  await ui.openReadyCalendar(page);
+  await ui.goToFutureDay(page, DAYS_AHEAD);
+  await ui.waitForProviders(page);
+  const meetingAfterReload = await ui.waitForBlockCard(page, meeting.blockId);
+  const reloadLines = await ui.readCardLines(meetingAfterReload);
+  expect(reloadLines.reason).toBe("Meeting");
+  expect(reloadLines.time).toBe("1:30 PM – 2:00 PM");
+  expect(reloadLines.note).toContain("Staff meeting");
 
   const personalCard = await ui.waitForBlockCard(page, personal.blockId);
   const personalLines = await ui.readCardLines(personalCard);
