@@ -274,6 +274,26 @@ test("Combo expands, splits providers, and stays one visit", async ({ page }) =>
   expect(ours.some((card) => card.providerId === PROVIDER_A && card.text.indexOf(COMBO.gelName) !== -1)).toBeTruthy();
   expect(ours.some((card) => card.providerId === PROVIDER_B && card.text.indexOf(COMBO.pediName) !== -1)).toBeTruthy();
   expect(ours.every((card) => /Combo/i.test(card.text) && card.text.indexOf(COMBO.name) !== -1)).toBeTruthy();
+  const gelCard = ours.find((card) => card.providerId === PROVIDER_A);
+  const pediCard = ours.find((card) => card.providerId === PROVIDER_B);
+  expect(gelCard.text).toMatch(/11:30\s*AM\s*–\s*12:15\s*PM/);
+  expect(pediCard.text).toMatch(/11:30\s*AM\s*–\s*12:00\s*PM/);
+  expect(pediCard.text).not.toMatch(/12:15/);
+  const comboTimesVisible = await page.evaluate((appointmentId) => {
+    function visible(el, sel) {
+      const card = el;
+      const line = card.querySelector(sel);
+      if (!line) return false;
+      const cardBox = card.getBoundingClientRect();
+      const lineBox = line.getBoundingClientRect();
+      const style = getComputedStyle(line);
+      if (style.display === "none" || style.visibility === "hidden" || lineBox.height < 2) return false;
+      return lineBox.bottom <= cardBox.bottom + 1.5 && lineBox.top >= cardBox.top - 1.5;
+    }
+    return Array.from(document.querySelectorAll('#ffBookingCalendarRoot [data-ff-cal-card="' + appointmentId + '"]'))
+      .every((card) => visible(card, ".ff-cal-card-time"));
+  }, created.appointmentId);
+  expect(comboTimesVisible, "combo component times stay inside the painted card").toBeTruthy();
 
   await cards.nth(0).click();
   await page.locator("#ffBookingApptDetails").waitFor({ state: "visible", timeout: 15000 });
@@ -384,6 +404,11 @@ test("Same-provider Combo, Single, and multi-service stay compatible", async ({ 
   expect(Math.round(allocatedSum(sameAppt.serviceLines) * 100)).toBe(8400);
   const sameCards = page.locator('#ffBookingCalendarRoot [data-ff-cal-card="' + sameAppt.appointmentId + '"]');
   await expect(sameCards).toHaveCount(1, { timeout: 20000 });
+  const sameText = String(await sameCards.first().innerText() || "");
+  expect(sameText).toContain(COMBO.gelName);
+  expect(sameText).toContain(COMBO.pediName);
+  expect(sameText).toMatch(/1:00\s*PM\s*–\s*1:45\s*PM/);
+  expect(sameText).toMatch(/1:45\s*PM\s*–\s*2:15\s*PM/);
 
   const singleNote = noteFor(RUN_ID, "single-compat");
   await ui.clickCalendarSlot(page, PROVIDER_A, SINGLE_MIN);

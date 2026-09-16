@@ -194,6 +194,14 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(lunchLines.time).toBe("12:00 PM – 12:30 PM");
   expect(lunchLines.hasNoteLine).toBe(false);
   expect(lunchLines.note).toBe("");
+  await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-note");
+  await ui.assertCardLineVisible(personalCard, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(personalCard, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(personalCard, ".ff-cal-block-note");
 
   await expect(meetingCard).not.toHaveClass(/ff-cal-card/);
   const appointmentCards = page.locator("#ffBookingCalendarRoot [data-ff-cal-card]");

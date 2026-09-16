@@ -394,6 +394,16 @@ check("19. Reports still read priceSnapshot only (no Combo double-count rewrite)
 
 const cardHtml = render.servicesHtml(splitCards[0]);
 check("20. Calendar Combo cards keep the visit relationship", /Combo/.test(cardHtml) && /Gel Mani \+ Regular Pedi/.test(cardHtml));
+const splitHtmlByProvider = {};
+splitCards.forEach(function (card) {
+  splitHtmlByProvider[card.providerId] = render.cardInnerHtml(card, card);
+});
+check("20c. split Combo cards show each component's own start-end",
+  /Gel Manicure/.test(splitHtmlByProvider.nicole) &&
+  /11:30 AM – 12:15 PM/.test(splitHtmlByProvider.nicole) &&
+  /Regular Pedicure/.test(splitHtmlByProvider.ashley) &&
+  /11:30 AM – 12:00 PM/.test(splitHtmlByProvider.ashley) &&
+  splitHtmlByProvider.nicole.indexOf("12:00 PM") === -1);
 const nonComboCards = cal.cardsFrom([{
   appointmentId: "plain",
   status: "scheduled",

@@ -982,7 +982,7 @@
     if (!ghost || !ghost.el) return;
     var label = clockLabel(startMin, durationMinutes);
     if (!label) return;
-    var timeEl = ghost.el.querySelector(".ff-cal-card-time, .ff-cal-hold-time");
+    var timeEl = ghost.el.querySelector(".ff-cal-card-time, .ff-cal-hold-time, .ff-cal-block-time");
     if (timeEl) timeEl.textContent = label;
   }
 

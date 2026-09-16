@@ -510,25 +510,61 @@ body.ff-booking-area .ff-booking-main {
   opacity: 0.28;
   cursor: grabbing;
 }
-.ff-cal-block-reason,
-.ff-cal-block-time,
-.ff-cal-block-note,
-.ff-cal-block-label {
+.ff-cal-block > .ff-cal-block-reason,
+.ff-cal-block > .ff-cal-block-time,
+.ff-cal-block > .ff-cal-block-note,
+.ff-cal-block > .ff-cal-block-label {
   display: block;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ff-cal-block-reason {
+.ff-cal-block > .ff-cal-block-reason {
+  position: static;
+  z-index: auto;
+  display: block;
+  flex: 0 0 auto;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: auto;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   font-size: 10px;
   font-weight: 700;
+  line-height: 1.15;
+  cursor: inherit;
 }
-.ff-cal-block-time {
+.ff-cal-block > .ff-cal-block-time {
+  flex: 0 0 auto;
   font-weight: 550;
 }
-.ff-cal-block-note {
+.ff-cal-block > .ff-cal-block-note {
+  flex: 1 1 auto;
+  min-height: 0;
   font-weight: 500;
+}
+.ff-cal-block.is-compact {
+  padding: 1px 4px;
+  font-size: 8.5px;
+  line-height: 1.1;
+}
+.ff-cal-block.is-compact > .ff-cal-block-reason {
+  font-size: 9px;
+}
+.ff-cal-block.is-tight {
+  padding: 0 3px;
+  font-size: 8px;
+  line-height: 1;
+}
+.ff-cal-block.is-tight > .ff-cal-block-reason,
+.ff-cal-block.is-tight > .ff-cal-block-time {
+  font-size: 8px;
 }
 .ff-cal-now {
   position: absolute;
@@ -682,7 +718,7 @@ body.ff-booking-area .ff-booking-main {
   flex-wrap: wrap;
   gap: 6px;
 }
-.ff-cal-block-reason {
+.ff-cal-block-reasons .ff-cal-block-reason {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -703,8 +739,8 @@ body.ff-booking-area .ff-booking-main {
   cursor: pointer;
   pointer-events: auto;
 }
-.ff-cal-block-reason.is-selected,
-.ff-cal-block-reason[aria-checked="true"] {
+.ff-cal-block-reasons .ff-cal-block-reason.is-selected,
+.ff-cal-block-reasons .ff-cal-block-reason[aria-checked="true"] {
   border-color: #A89F8D;
   background: #F3F0E8;
   color: #5C5648;

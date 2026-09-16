@@ -216,6 +216,15 @@ return windowObj.ffBookingBlocks.create({
   check("Calendar card renders actual start/end time", meetingCard.indexOf("1:30 PM – 2:00 PM") !== -1 && meetingCard.indexOf('data-ff-cal-start="810"') !== -1);
   check("Calendar card renders note when present", meetingCard.indexOf("Staff meeting") !== -1 && meetingCard.indexOf("ff-cal-block-note") !== -1);
   check("Calendar card is still not an appointment card", meetingCard.indexOf("ff-cal-card") === -1);
+  check("30-minute Time Block uses compact density so reason+time stay visible",
+    meetingCard.indexOf("is-compact") !== -1 &&
+    blocks.blockDensityClass(created.startMin, created.endMin) === " is-compact");
+  const blockCss = fs.readFileSync(path.join(root, "public/booking/calendar.css"), "utf8");
+  check("Time Block CSS keeps the time line from shrinking away",
+    /\.ff-cal-block\s*>\s*\.ff-cal-block-time\s*\{[\s\S]*?flex:\s*0 0 auto/.test(blockCss) &&
+    blockCss.indexOf(".ff-cal-block.is-compact") !== -1 &&
+    blockCss.indexOf(".ff-cal-block.is-tight") !== -1 &&
+    blockCss.indexOf(".ff-cal-block-reasons .ff-cal-block-reason") !== -1);
 
   const lunch = model.normalize({
     providerId: "rebecca",

@@ -280,18 +280,27 @@
     return parts.filter(Boolean).join(" · ");
   }
 
+  function blockDensityClass(startMin, endMin) {
+    var n = Number(endMin) - Number(startMin);
+    if (n > 0 && n <= 15) return " is-tight";
+    if (n > 0 && n <= 30) return " is-compact";
+    return "";
+  }
+
   function blockHtml(block, rect) {
     if (!block || !rect) return "";
     var lines = cardLines(block);
+    var duration = Math.max(15, Number(block.endMin) - Number(block.startMin));
     var noteAttr = lines.note ? ' data-ff-cal-block-note="' + escapeHtml(lines.note) + '"' : "";
     var noteHtml = lines.note
       ? '<span class="ff-cal-block-note">' + escapeHtml(lines.note) + "</span>"
       : "";
-    return '<div class="ff-cal-block" data-ff-cal-block="' + escapeHtml(block.blockId) +
+    return '<div class="ff-cal-block' + blockDensityClass(block.startMin, block.endMin) +
+      '" data-ff-cal-block="' + escapeHtml(block.blockId) +
       '" data-ff-cal-block-reason="' + escapeHtml(block.reason) +
       '" data-ff-cal-start="' + Number(block.startMin) +
       '" data-ff-cal-end="' + Number(block.endMin) +
-      '" data-ff-cal-duration="' + Math.max(15, Number(block.endMin) - Number(block.startMin)) +
+      '" data-ff-cal-duration="' + duration +
       '" data-ff-cal-block-provider="' + escapeHtml(block.providerId) +
       '" data-ff-cal-block-date="' + escapeHtml(block.dateKey) + '"' +
       noteAttr +
@@ -364,6 +373,7 @@
     formatMinutes: formatMinutes,
     formatTimeRange: formatTimeRange,
     cardLines: cardLines,
+    blockDensityClass: blockDensityClass,
     blockHtml: blockHtml,
     paint: paint,
     clearPaint: clearPaint

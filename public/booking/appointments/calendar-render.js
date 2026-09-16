@@ -94,9 +94,50 @@
       ' <span class="ff-cal-card-combo-mark">Combo</span></span>';
   }
 
+  function isComboCard(card) {
+    return !!(card && (card.isCombo || card.comboName || card.comboInstanceId));
+  }
+
+  function isStackedCard(card) {
+    return !!((card && card.serviceNames && card.serviceNames.length > 1) || (card && card.lineIds && card.lineIds.length > 1));
+  }
+
+  function componentName(card) {
+    var segs = card && card.segments;
+    if (isComboCard(card) && segs && segs.length === 1 && segs[0].serviceName) {
+      return segs[0].serviceName;
+    }
+    return card && card.serviceName || "Service";
+  }
+
+  function cardRangeLabel(card, item) {
+    var segs = card && card.segments;
+    if (isComboCard(card) && segs && segs.length === 1) {
+      return rangeLabel(segs[0].startMin, segs[0].endMin);
+    }
+    var start = item && item.startMin != null ? item.startMin : card && card.startMin;
+    var end = item && item.endMin != null ? item.endMin : card && card.endMin;
+    return rangeLabel(start, end);
+  }
+
   function servicesHtml(card) {
     return comboHtml(card) +
-      '<span class="ff-cal-card-svc">' + escapeHtml(card && card.serviceName || "Service") + "</span>";
+      '<span class="ff-cal-card-svc">' + escapeHtml(componentName(card)) + "</span>";
+  }
+
+  function cardInnerHtml(card, item) {
+    var party = Number(card && card.partySize) > 1
+      ? '<span class="ff-cal-card-party">' + escapeHtml(String(card.partySize) + " people") + "</span>"
+      : "";
+    var newbie = card && card.firstVisit
+      ? '<span class="ff-cal-card-new">New Client</span>'
+      : "";
+    if (isStackedCard(card)) return stackHtml(card) + party + newbie;
+    return '<span class="ff-cal-card-name">' + escapeHtml(card && card.clientName || "Client") + "</span>" +
+      servicesHtml(card) +
+      '<span class="ff-cal-card-time">' + escapeHtml(cardRangeLabel(card, item || card)) + "</span>" +
+      party +
+      newbie;
   }
 
   function board() { return window.ffBookingScheduleBoard || null; }
@@ -174,8 +215,8 @@
         ? window.ffBookingAppointmentStatus.cardClass(statusKey)
         : "is-status-" + statusKey;
       var duration = card.durationMinutes || (item.endMin - item.startMin);
-      var stacked = (card.serviceNames && card.serviceNames.length > 1) || (card.lineIds && card.lineIds.length > 1);
-      el.className = ("ff-cal-card " + densityClass(duration) + " " + statusClass + (card.firstVisit ? " is-new-client" : "") + (card.requested ? " is-requested" : "") + (stacked ? " is-stack" : "")).trim();
+      var stacked = isStackedCard(card);
+      el.className = ("ff-cal-card " + densityClass(duration) + " " + statusClass + (card.firstVisit ? " is-new-client" : "") + (card.requested ? " is-requested" : "") + (stacked ? " is-stack" : "") + (isComboCard(card) ? " is-combo" : "")).trim();
       el.setAttribute("data-ff-cal-card", card.appointmentId || item.appointmentId);
       if (card.clientKey || card.clientId) {
         el.setAttribute("data-ff-cal-client", card.clientKey || card.clientId);
@@ -194,23 +235,15 @@
         el.setAttribute("aria-label", "Requested for this provider");
       }
       el.setAttribute("data-ff-cal-start", String(item.startMin));
+      el.setAttribute("data-ff-cal-end", String(item.endMin));
       el.setAttribute("data-ff-cal-duration", String(duration));
+      if (isComboCard(card) && !el.getAttribute("title")) {
+        el.setAttribute("title", [card.clientName, card.comboName, componentName(card), cardRangeLabel(card, item)].filter(Boolean).join(" · "));
+      }
       el.style.top = rect.top + "px";
       el.style.height = Math.max(rect.height, 18) + "px";
       applyBoardBox(el, item);
-      var party = Number(card.partySize) > 1
-        ? '<span class="ff-cal-card-party">' + escapeHtml(String(card.partySize) + " people") + "</span>"
-        : "";
-      var newbie = card.firstVisit
-        ? '<span class="ff-cal-card-new">New Client</span>'
-        : "";
-      el.innerHTML = stacked
-        ? stackHtml(card) + party + newbie
-        : '<span class="ff-cal-card-name">' + escapeHtml(card.clientName) + "</span>" +
-          servicesHtml(card) +
-          '<span class="ff-cal-card-time">' + escapeHtml(rangeLabel(item.startMin, item.endMin)) + "</span>" +
-          party +
-          newbie;
+      el.innerHTML = cardInnerHtml(card, item);
       col.appendChild(el);
     });
   }
@@ -322,6 +355,9 @@
     segmentShare: segmentShare,
     stackHtml: stackHtml,
     servicesHtml: servicesHtml,
+    cardInnerHtml: cardInnerHtml,
+    cardRangeLabel: cardRangeLabel,
+    isComboCard: isComboCard,
     clock: clock,
     rangeLabel: rangeLabel,
     highlightClient: highlightClient

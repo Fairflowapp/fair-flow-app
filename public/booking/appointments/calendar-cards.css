@@ -300,3 +300,54 @@
   font-weight: 700;
   vertical-align: 1px;
 }
+.ff-cal-card.is-combo:not(.is-stack) {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 0;
+}
+.ff-cal-card.is-combo:not(.is-stack) .ff-cal-card-name,
+.ff-cal-card.is-combo:not(.is-stack) .ff-cal-card-combo,
+.ff-cal-card.is-combo:not(.is-stack) .ff-cal-card-svc {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.ff-cal-card.is-combo:not(.is-stack) .ff-cal-card-time {
+  flex: 0 0 auto;
+  display: block;
+}
+.ff-cal-card.is-combo.is-compact:not(.is-stack) {
+  padding: 1px 5px;
+  font-size: 8px;
+  line-height: 1.05;
+}
+.ff-cal-card.is-combo.is-compact:not(.is-stack) .ff-cal-card-time {
+  font-size: 8px;
+}
+.ff-cal-card.is-combo.is-tiny:not(.is-stack) {
+  padding: 0 4px;
+  font-size: 8px;
+  line-height: 1;
+}
+.ff-cal-card.is-combo.is-tiny .ff-cal-card-svc,
+.ff-cal-card.is-combo.is-tiny .ff-cal-card-combo {
+  display: block;
+}
+.ff-cal-card.is-combo.is-tiny .ff-cal-card-combo-mark {
+  display: none;
+}
+.ff-cal-card.is-combo.is-stack .ff-cal-card-seg .ff-cal-card-name,
+.ff-cal-card.is-combo.is-stack .ff-cal-card-seg .ff-cal-card-combo,
+.ff-cal-card.is-combo.is-stack .ff-cal-card-seg .ff-cal-card-svc {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.ff-cal-card.is-combo.is-stack .ff-cal-card-seg .ff-cal-card-time {
+  flex: 0 0 auto;
+}
+.ff-cal-card.is-combo.is-stack .ff-cal-card-seg.is-first.is-tight {
+  font-size: 8px;
+  line-height: 1.05;
+  padding-top: 1px;
+  padding-bottom: 0;
+}

@@ -95,6 +95,24 @@ async function readCardLines(card) {
   return { reason, time, note, hasNoteLine: noteCount > 0 };
 }
 
+async function assertCardLineVisible(card, selector) {
+  const result = await card.evaluate((el, sel) => {
+    const line = el.querySelector(sel);
+    if (!line) return { ok: false, reason: "missing" };
+    const cardBox = el.getBoundingClientRect();
+    const lineBox = line.getBoundingClientRect();
+    const style = getComputedStyle(line);
+    if (style.display === "none" || style.visibility === "hidden") return { ok: false, reason: "hidden" };
+    if (lineBox.height < 2) return { ok: false, reason: "collapsed" };
+    if (lineBox.bottom > cardBox.bottom + 1.5 || lineBox.top < cardBox.top - 1.5) {
+      return { ok: false, reason: "clipped", cardH: cardBox.height, lineBottom: lineBox.bottom, cardBottom: cardBox.bottom };
+    }
+    return { ok: true, text: String(line.textContent || "").trim(), cardH: cardBox.height };
+  }, selector);
+  expect(result.ok, selector + " must stay visible on the Time Block card " + JSON.stringify(result)).toBeTruthy();
+  return result;
+}
+
 async function openBlockEditor(page, blockId) {
   const card = await waitForBlockCard(page, blockId);
   await card.click();
@@ -229,6 +247,7 @@ module.exports = {
   waitForBlockCard,
   waitForBlockCardAt,
   readCardLines,
+  assertCardLineVisible,
   openBlockEditor,
   readEditorFacts,
   dragBlockByMinutes,
