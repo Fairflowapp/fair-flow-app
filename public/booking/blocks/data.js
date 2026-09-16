@@ -103,7 +103,7 @@ async function loadForView(dateKey, locationId) {
 function payloadFrom(spec, actor, isCreate) {
   const api = model();
   const row = api && typeof api.normalize === "function" ? api.normalize(spec) : spec;
-  if (!row) throw new Error("That block time is not valid.");
+  if (!row) throw new Error("That Time Block is not valid.");
   const body = {
     locationId: row.locationId,
     providerId: row.providerId,

@@ -6,12 +6,26 @@
 (function () {
   var REASONS = ["lunch", "break", "meeting", "training", "personal", "other"];
   var LABELS = {
-    lunch: "Lunch",
+    lunch: "Lunch Break",
     break: "Break",
     meeting: "Meeting",
     training: "Training",
     personal: "Personal",
     other: "Other"
+  };
+  var REASON_LABELS = {
+    lunch: true,
+    "lunch break": true,
+    break: true,
+    meeting: true,
+    training: true,
+    personal: true,
+    other: true,
+    "block time": true,
+    "time block": true,
+    blocked: true,
+    unavailable: true,
+    "time off": true
   };
   var items = [];
 
@@ -24,7 +38,66 @@
   }
 
   function labelForReason(reason) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.labelForReason === "function") {
+      return window.ffBookingBlockModel.labelForReason(reason);
+    }
     return LABELS[reason] || LABELS.other;
+  }
+
+  function isReasonLabel(value) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.isReasonLabel === "function") {
+      return window.ffBookingBlockModel.isReasonLabel(value);
+    }
+    var key = collapse(value).toLowerCase();
+    return !!(key && REASON_LABELS[key]);
+  }
+
+  function displayNote(raw) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.displayNote === "function") {
+      return window.ffBookingBlockModel.displayNote(raw);
+    }
+    if (!raw || typeof raw !== "object") return collapse(raw);
+    var note = collapse(raw.note);
+    if (note) return note;
+    var legacy = collapse(raw.label);
+    if (legacy && !isReasonLabel(legacy)) return legacy;
+    return "";
+  }
+
+  function formatMinutes(total) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.formatMinutes === "function") {
+      return window.ffBookingBlockModel.formatMinutes(total);
+    }
+    var m = ((Number(total) % 1440) + 1440) % 1440;
+    if (!Number.isFinite(Number(total))) return "";
+    var hour = Math.floor(m / 60);
+    var min = m % 60;
+    var suffix = hour >= 12 ? "PM" : "AM";
+    var hour12 = hour % 12;
+    if (hour12 === 0) hour12 = 12;
+    return hour12 + ":" + String(min).padStart(2, "0") + " " + suffix;
+  }
+
+  function formatTimeRange(startMin, endMin) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.formatTimeRange === "function") {
+      return window.ffBookingBlockModel.formatTimeRange(startMin, endMin);
+    }
+    var start = formatMinutes(startMin);
+    var end = formatMinutes(endMin);
+    if (!start || !end) return "";
+    return start + " – " + end;
+  }
+
+  function cardLines(block) {
+    if (window.ffBookingBlockModel && typeof window.ffBookingBlockModel.cardLines === "function") {
+      return window.ffBookingBlockModel.cardLines(block);
+    }
+    if (!block) return { reason: "", time: "", note: "" };
+    return {
+      reason: labelForReason(block.reason),
+      time: formatTimeRange(block.startMin, block.endMin),
+      note: displayNote(block)
+    };
   }
 
   function normalizeReason(value) {
@@ -32,6 +105,7 @@
       return window.ffBookingBlockModel.normalizeReason(value);
     }
     var key = trim(value).toLowerCase().replace(/\s+/g, "_");
+    if (key === "lunch_break" || key === "lunchbreak") key = "lunch";
     if (key === "time_off" || key === "block" || key === "blocked" || key === "unavailable") key = "other";
     return REASONS.indexOf(key) !== -1 ? key : "other";
   }
@@ -54,7 +128,7 @@
     if (!providerId || !locationId || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return null;
     if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || !(endMin > startMin)) return null;
     var reason = normalizeReason(raw.reason || raw.kind || raw.type);
-    var note = collapse(raw.note);
+    var note = displayNote(raw);
     var label = note || labelForReason(reason);
     return {
       blockId: trim(raw.blockId || raw.id) || ("blk_" + providerId + "_" + dateKey + "_" + startMin + "_" + endMin),
@@ -64,7 +138,8 @@
       startMin: startMin,
       endMin: endMin,
       reason: reason,
-      label: label
+      label: label,
+      note: note
     };
   }
 
@@ -150,17 +225,34 @@
       .replace(/"/g, "&quot;");
   }
 
+  function cardTitle(block) {
+    var lines = cardLines(block);
+    var parts = [lines.reason, lines.time];
+    if (lines.note) parts.push(lines.note);
+    return parts.filter(Boolean).join(" · ");
+  }
+
   function blockHtml(block, rect) {
     if (!block || !rect) return "";
+    var lines = cardLines(block);
+    var noteAttr = lines.note ? ' data-ff-cal-block-note="' + escapeHtml(lines.note) + '"' : "";
+    var noteHtml = lines.note
+      ? '<span class="ff-cal-block-note">' + escapeHtml(lines.note) + "</span>"
+      : "";
     return '<div class="ff-cal-block" data-ff-cal-block="' + escapeHtml(block.blockId) +
       '" data-ff-cal-block-reason="' + escapeHtml(block.reason) +
       '" data-ff-cal-start="' + Number(block.startMin) +
+      '" data-ff-cal-end="' + Number(block.endMin) +
       '" data-ff-cal-duration="' + Math.max(15, Number(block.endMin) - Number(block.startMin)) +
       '" data-ff-cal-block-provider="' + escapeHtml(block.providerId) +
-      '" data-ff-cal-block-date="' + escapeHtml(block.dateKey) +
-      '" title="' + escapeHtml(block.label) +
+      '" data-ff-cal-block-date="' + escapeHtml(block.dateKey) + '"' +
+      noteAttr +
+      ' title="' + escapeHtml(cardTitle(block)) +
       '" style="top:' + rect.top + "px;height:" + Math.max(rect.height, 16) + 'px">' +
-      '<span class="ff-cal-block-label">' + escapeHtml(block.label) + "</span></div>";
+      '<span class="ff-cal-block-reason">' + escapeHtml(lines.reason) + "</span>" +
+      '<span class="ff-cal-block-time">' + escapeHtml(lines.time) + "</span>" +
+      noteHtml +
+      "</div>";
   }
 
   function clearPaint(root) {
@@ -217,6 +309,10 @@
     overlaps: overlaps,
     rangeOverlaps: rangeOverlaps,
     labelForReason: labelForReason,
+    displayNote: displayNote,
+    formatMinutes: formatMinutes,
+    formatTimeRange: formatTimeRange,
+    cardLines: cardLines,
     blockHtml: blockHtml,
     paint: paint,
     clearPaint: clearPaint

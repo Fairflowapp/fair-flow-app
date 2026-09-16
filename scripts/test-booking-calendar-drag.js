@@ -79,6 +79,73 @@ check("a hold click does not open details", drag.releaseOpensDetails({
   kind: "hold",
   lineKey: "k1"
 }, null) === false);
+const blockToNicole = drag.dropAction({
+  kind: "block",
+  blockId: "blk_1",
+  fromProviderId: "rebecca",
+  fromStartMin: 14 * 60,
+  durationMinutes: 45,
+  reason: "personal",
+  note: "Doctor appointment"
+}, { providerId: "nicole", startMin: 14 * 60 });
+check("Time Block can drop onto another provider", !!(blockToNicole && blockToNicole.providerId === "nicole"));
+check("cross-provider Time Block drag asks for confirmation", drag.isBlockProviderChange(blockToNicole) === true);
+check("same-provider Time Block time change does not ask", drag.isBlockProviderChange({
+  source: { kind: "block", blockId: "blk_1", fromProviderId: "rebecca" },
+  providerId: "rebecca",
+  startMin: 15 * 60
+}) === false);
+check("appointment confirm still ignores Time Block provider changes", drag.isProviderChange(blockToNicole) === false);
+check(
+  "Time Block move prompt names both providers",
+  drag.blockMovePrompt("Rebecca", "Nicole") === "Move this Time Block from Rebecca to Nicole?"
+);
+const keptBlock = drag.blockMoveSpec({
+  source: {
+    kind: "block",
+    blockId: "blk_1",
+    fromProviderId: "rebecca",
+    fromLocationId: "loc1",
+    fromDateKey: "2026-09-16",
+    durationMinutes: 45,
+    reason: "personal",
+    note: "Doctor appointment",
+    label: "Doctor appointment"
+  },
+  providerId: "nicole",
+  startMin: 14 * 60,
+  dateKey: "2026-09-16"
+});
+check("confirming a provider move keeps reason, note, and duration", !!(
+  keptBlock &&
+  keptBlock.providerId === "nicole" &&
+  keptBlock.reason === "personal" &&
+  keptBlock.note === "Doctor appointment" &&
+  keptBlock.startMin === 14 * 60 &&
+  keptBlock.endMin === 14 * 60 + 45
+));
+const sameProviderMove = drag.blockMoveSpec({
+  source: {
+    kind: "block",
+    blockId: "blk_1",
+    fromProviderId: "rebecca",
+    fromLocationId: "loc1",
+    fromDateKey: "2026-09-16",
+    durationMinutes: 45,
+    reason: "meeting",
+    note: "Staff meeting"
+  },
+  providerId: "rebecca",
+  startMin: 15 * 60,
+  dateKey: "2026-09-16"
+});
+check("same-provider Time Block drag preserves metadata", !!(
+  sameProviderMove &&
+  sameProviderMove.providerId === "rebecca" &&
+  sameProviderMove.reason === "meeting" &&
+  sameProviderMove.note === "Staff meeting" &&
+  sameProviderMove.endMin - sameProviderMove.startMin === 45
+));
 check("tapping a block opens the editor", drag.releaseOpensBlock({
   kind: "block",
   blockId: "blk_1"
@@ -166,6 +233,10 @@ check("without focus the whole visit moves", drag.dragLines({
 const dragSrc = fs.readFileSync(path.join(root, "public/booking/calendar-drag.js"), "utf8");
 const calCss = fs.readFileSync(path.join(root, "public/booking/calendar.css"), "utf8");
 check("move uses an in-app dialog", dragSrc.indexOf("ff-cal-move") !== -1 && dragSrc.indexOf("window.confirm") === -1);
+check(
+  "cross-provider Time Block drop confirms before persist",
+  /source\.kind === "block"[\s\S]*confirmBlockProviderMove[\s\S]*assignBlock/.test(dragSrc)
+);
 check("requested move writes the heart choice", dragSrc.indexOf("keepRequest === true") !== -1 && dragSrc.indexOf("keepRequest === false") !== -1);
 check("staff names are extra bold", /ff-cal-emp-label[\s\S]*font-weight:\s*800/.test(calCss));
 check("closed and off no longer share one background rule", !/\.ff-cal-off,\s*\.ff-cal-closed\s*\{[^}]*background:/.test(calCss.replace(/\s+/g, " ")));

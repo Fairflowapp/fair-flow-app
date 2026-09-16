@@ -489,6 +489,10 @@ body.ff-booking-area .ff-booking-main {
   right: 4px;
   z-index: 2;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 1px;
   padding: 4px 6px;
   overflow: hidden;
   border-radius: 6px;
@@ -497,7 +501,7 @@ body.ff-booking-area .ff-booking-main {
   color: #5C5648;
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.25;
+  line-height: 1.2;
   pointer-events: auto;
   cursor: grab;
   touch-action: none;
@@ -506,11 +510,24 @@ body.ff-booking-area .ff-booking-main {
   opacity: 0.28;
   cursor: grabbing;
 }
+.ff-cal-block-reason,
+.ff-cal-block-time,
+.ff-cal-block-note,
 .ff-cal-block-label {
   display: block;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.ff-cal-block-reason {
+  font-weight: 700;
+}
+.ff-cal-block-time {
+  font-weight: 550;
+}
+.ff-cal-block-note {
+  font-weight: 500;
 }
 .ff-cal-now {
   position: absolute;
@@ -623,10 +640,15 @@ body.ff-booking-area .ff-booking-main {
   line-height: 1;
   cursor: pointer;
 }
-.ff-cal-block-editor-meta {
+.ff-cal-block-editor-meta,
+.ff-cal-block-editor-facts {
   margin: 4px 0 12px;
   color: #6b6575;
   font-size: 12px;
+  line-height: 1.45;
+}
+.ff-cal-block-editor-facts p {
+  margin: 0 0 2px;
 }
 .ff-cal-block-editor-field {
   display: flex;

@@ -441,6 +441,16 @@
     );
   }
 
+  function isBlockProviderChange(action) {
+    return !!(
+      action &&
+      action.source &&
+      action.source.kind === "block" &&
+      String(action.providerId || "") &&
+      String(action.providerId || "") !== String(action.source.fromProviderId || "")
+    );
+  }
+
   function moveSubject(serviceName) {
     var name = String(serviceName || "").trim();
     return name || "this appointment";
@@ -456,6 +466,12 @@
     }
     return "Are you sure you want to move " + subject + " from " +
       String(fromName || "this provider") + " to " + String(toName || "this provider") + "?";
+  }
+
+  function blockMovePrompt(fromName, toName) {
+    return "Move this Time Block from " +
+      String(fromName || "this provider") + " to " +
+      String(toName || "another provider") + "?";
   }
 
   function requestedMoveActions(toName) {
@@ -579,6 +595,43 @@
       providerName(action.providerId),
       !!action.source.requested,
       action.source.solo ? action.source.serviceName : ""
+    );
+  }
+
+  function askBlockMoveConfirm(fromName, toName) {
+    var box = ensureMoveAsk();
+    box.classList.remove("is-request");
+    var title = document.getElementById("ffCalMoveTitle");
+    if (title) title.textContent = "Move Time Block?";
+    var copy = document.getElementById("ffCalMoveCopy");
+    if (copy) {
+      copy.innerHTML = "Move this Time Block from <strong>" +
+        escapeHtml(fromName || "this provider") +
+        "</strong> to <strong>" +
+        escapeHtml(toName || "another provider") +
+        "</strong>?";
+    }
+    var acts = box.querySelector(".ff-cal-move-acts");
+    if (acts) {
+      acts.innerHTML =
+        '<button type="button" class="ff-cal-move-cancel" data-ff-cal-move="no">Cancel</button>' +
+        '<button type="button" class="ff-cal-move-go" data-ff-cal-move="yes">Move Time Block</button>';
+    }
+    box.hidden = false;
+    box.classList.add("is-open");
+    var go = box.querySelector('[data-ff-cal-move="yes"]');
+    if (go) go.focus();
+    return new Promise(function (resolve) {
+      if (moveAsk) moveAsk({ ok: false });
+      moveAsk = resolve;
+    });
+  }
+
+  function confirmBlockProviderMove(action) {
+    if (!isBlockProviderChange(action)) return Promise.resolve({ ok: true });
+    return askBlockMoveConfirm(
+      providerName(action.source.fromProviderId),
+      providerName(action.providerId)
     );
   }
 
@@ -754,23 +807,19 @@
       return {
         ok: false,
         reason: "block_conflict",
-        message: "This provider already has overlapping block time."
+        message: "This provider already has an overlapping Time Block."
       };
     }
     return null;
   }
 
-  function assignBlock(action) {
+  function blockMoveSpec(action) {
     var source = action && action.source;
-    var api = window.ffBookingBlocks;
-    var cache = window.ffBookingCalBlocks;
-    if (!source || !source.blockId || !api || typeof api.update !== "function") {
-      toastError("This block time could not be moved.");
-      return Promise.resolve(false);
-    }
+    if (!source || !source.blockId) return null;
     var startMin = Number(action.startMin);
     var duration = Number(source.durationMinutes) || 30;
-    var spec = {
+    if (!Number.isFinite(startMin) || !(duration > 0)) return null;
+    return {
       blockId: source.blockId,
       providerId: action.providerId,
       locationId: source.fromLocationId,
@@ -781,6 +830,17 @@
       note: source.note || "",
       label: source.label
     };
+  }
+
+  function assignBlock(action) {
+    var source = action && action.source;
+    var api = window.ffBookingBlocks;
+    var cache = window.ffBookingCalBlocks;
+    var spec = blockMoveSpec(action);
+    if (!source || !source.blockId || !spec || !api || typeof api.update !== "function") {
+      toastError("This Time Block could not be moved.");
+      return Promise.resolve(false);
+    }
     if (cache && typeof cache.upsert === "function") cache.upsert(spec);
     if (cache && typeof cache.paint === "function") {
       try { cache.paint(); } catch (_) {}
@@ -788,7 +848,7 @@
     return api.update(source.blockId, spec).then(function () {
       return true;
     }).catch(function (err) {
-      toastError((err && err.message) || "This block time could not be moved.");
+      toastError((err && err.message) || "This Time Block could not be moved.");
       return false;
     });
   }
@@ -813,7 +873,13 @@
         toastError(blockBlocked.message || "That time is not available.");
         return Promise.resolve(false);
       }
-      return assignBlock(action);
+      return confirmBlockProviderMove(action).then(function (choice) {
+        if (!choice || !choice.ok) {
+          restoreSource();
+          return false;
+        }
+        return assignBlock(action);
+      });
     }
     var blocked = unavailableDrop(action);
     if (!blocked && isWeek()) blocked = overlapDrop(action);
@@ -1143,7 +1209,11 @@
     clearSegmentFocus: clearSegmentFocus,
     previewFromDelta: previewFromDelta,
     isProviderChange: isProviderChange,
+    isBlockProviderChange: isBlockProviderChange,
     providerMovePrompt: providerMovePrompt,
+    blockMovePrompt: blockMovePrompt,
+    confirmBlockProviderMove: confirmBlockProviderMove,
+    blockMoveSpec: blockMoveSpec,
     requestedMoveActions: requestedMoveActions,
     moveAskResult: moveAskResult,
     unavailableDrop: unavailableDrop,

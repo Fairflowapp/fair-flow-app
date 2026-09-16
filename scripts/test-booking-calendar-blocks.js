@@ -86,7 +86,7 @@ const lunch = blocks.normalize({
   reason: "lunch",
   label: "Lunch"
 });
-check("normalize keeps a lunch block during working hours", !!(lunch && lunch.reason === "lunch" && lunch.label === "Lunch"));
+check("normalize keeps a lunch block during working hours", !!(lunch && lunch.reason === "lunch" && lunch.label === "Lunch Break"));
 check("normalize rejects a missing location", blocks.normalize({
   providerId: "ashley",
   dateKey: "2026-12-17",
@@ -207,7 +207,7 @@ check("weekly closed 8:30 is still salon_closed", inspectAt(8 * 60 + 30).reason 
 
 const markup = blocks.blockHtml(lunch, layout.windowToRect(12 * 60, 13 * 60, 8 * 60, 19 * 60));
 check("block markup is not an appointment card", markup.indexOf("ff-cal-card") === -1 && markup.indexOf("ff-cal-block") !== -1);
-check("block markup shows the reason label", markup.indexOf("Lunch") !== -1 && markup.indexOf("data-ff-cal-block-reason=\"lunch\"") !== -1);
+check("block markup shows the reason label", markup.indexOf("Lunch Break") !== -1 && markup.indexOf("data-ff-cal-block-reason=\"lunch\"") !== -1);
 
 const css = fs.readFileSync(path.join(root, "public/booking/calendar.css"), "utf8");
 check("block style is dashed, not an appointment fill", /\.ff-cal-block\s*\{[^}]*dashed/.test(css));

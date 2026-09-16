@@ -6,6 +6,8 @@ const { clientNoteBelongsToRun, isQaLifecycleNote, FIXTURE_CLIENT_ID } = require
 const {
   isQaCalendarBlockMark,
   isQaOwnedCalendarBlock,
+  isRunOwnedCalendarBlock,
+  noteBelongsToRun: blockNoteBelongsToRun,
   isStaleUpdate,
   FIXTURE_NOTE,
 } = require("../helpers/calendar-block-admin");
@@ -58,6 +60,7 @@ check("calendar block marks include leftover FF-QA-LIVE-BLOCK", () => {
 check("calendar block marks reject fixture and real block labels", () => {
   assert.strictEqual(isQaCalendarBlockMark(FIXTURE_NOTE), false);
   assert.strictEqual(isQaCalendarBlockMark("Lunch"), false);
+  assert.strictEqual(isQaCalendarBlockMark("Lunch Break"), false);
   assert.strictEqual(isQaCalendarBlockMark("Break"), false);
   assert.strictEqual(isQaCalendarBlockMark("meeting with FF"), false);
   assert.strictEqual(isQaCalendarBlockMark(""), false);
@@ -88,6 +91,27 @@ check("calendar block cleanup keeps non-QA and off-location blocks", () => {
     note: "FF-QA-LIVE-BLOCK",
     label: "FF-QA-LIVE-BLOCK",
   }), false);
+});
+
+check("calendar block run cleanup matches exact run prefix only", () => {
+  const runA = "FF-QA-aaa111";
+  const runB = "FF-QA-bbb222";
+  const owned = {
+    locationId: "qaLoc1",
+    providerId: "qaProv1",
+    note: runA + " personal",
+    label: runA + " personal",
+  };
+  assert.strictEqual(blockNoteBelongsToRun(runA + " personal", runA), true);
+  assert.strictEqual(blockNoteBelongsToRun(runB + " personal", runA), false);
+  assert.strictEqual(isRunOwnedCalendarBlock(owned, runA), true);
+  assert.strictEqual(isRunOwnedCalendarBlock(owned, runB), false);
+  assert.strictEqual(isRunOwnedCalendarBlock({
+    locationId: "qaLoc1",
+    providerId: "qaProv1",
+    note: "",
+    label: "Lunch Break",
+  }, runA), false);
 });
 
 check("stale calendar block age cutoff is exclusive of fresh updates", () => {

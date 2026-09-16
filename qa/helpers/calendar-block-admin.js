@@ -47,6 +47,103 @@ async function withAdmin(fn) {
   return fn(db, admin);
 }
 
+function summarizeBlock(id, data) {
+  const row = data && typeof data === "object" ? data : {};
+  return {
+    blockId: id,
+    salonId: SALON_ID,
+    projectId: REQUIRED_PROJECT,
+    locationId: row.locationId || "",
+    providerId: row.providerId || "",
+    dateKey: row.dateKey || "",
+    startMin: Number(row.startMin) || 0,
+    endMin: Number(row.endMin) || 0,
+    reason: row.reason || "",
+    note: row.note || "",
+    label: row.label || "",
+  };
+}
+
+function noteBelongsToRun(text, runId) {
+  const value = String(text || "");
+  const id = String(runId || "");
+  if (!id) return false;
+  return value === id || value.indexOf(id + " ") === 0;
+}
+
+function isRunOwnedCalendarBlock(data, runId) {
+  const row = data && typeof data === "object" ? data : {};
+  if (!isQaOwnedCalendarBlock(row)) return false;
+  return noteBelongsToRun(row.note, runId) || noteBelongsToRun(row.label, runId);
+}
+
+async function listQaCalendarBlocks(runId) {
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlocks").limit(400).get();
+    const rows = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (runId && !isRunOwnedCalendarBlock(data, runId)) return;
+      if (!runId && !isQaOwnedCalendarBlock(data)) return;
+      rows.push(summarizeBlock(docSnap.id, data));
+    });
+    return rows;
+  });
+}
+
+async function waitForQaCalendarBlockByNote(note, timeoutMs) {
+  const started = Date.now();
+  const limit = Number(timeoutMs) || 20000;
+  const want = String(note || "").trim();
+  if (!want) abort("waitForQaCalendarBlockByNote requires a note.");
+  while (Date.now() - started < limit) {
+    const rows = await withAdmin(async (db) => {
+      const snap = await db.collection("salons/" + SALON_ID + "/calendarBlocks").limit(400).get();
+      const found = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        if (!isQaOwnedCalendarBlock(data)) return;
+        if (String(data.note || "").trim() !== want && String(data.label || "").trim() !== want) return;
+        found.push(summarizeBlock(docSnap.id, data));
+      });
+      return found;
+    });
+    if (rows.length) return rows[0];
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  abort("Timed out waiting for QA Time Block note: " + want);
+}
+
+async function getQaCalendarBlock(blockId) {
+  const id = String(blockId || "").trim();
+  if (!id) abort("getQaCalendarBlock requires a blockId.");
+  return withAdmin(async (db) => {
+    const docPath = BLOCKS_PREFIX + id;
+    assertQaSalonPath(docPath);
+    const snap = await db.doc(docPath).get();
+    if (!snap.exists) return null;
+    return summarizeBlock(snap.id, snap.data() || {});
+  });
+}
+
+async function cleanupQaCalendarBlocks(runId) {
+  const id = String(runId || "").trim();
+  if (!id) abort("cleanupQaCalendarBlocks requires a runId so concurrent QA runs are not deleted.");
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlocks").limit(400).get();
+    const deleted = [];
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() || {};
+      if (!isRunOwnedCalendarBlock(data, id)) continue;
+      const docPath = BLOCKS_PREFIX + docSnap.id;
+      assertQaSalonPath(docPath);
+      await db.doc(docPath).delete();
+      deleted.push(docSnap.id);
+    }
+    return deleted;
+  });
+}
+
 async function cleanupStaleQaCalendarBlocks(maxAgeMs) {
   const age = Number(maxAgeMs) || 6 * 60 * 60 * 1000;
   const cutoff = Date.now() - age;
@@ -75,6 +172,13 @@ module.exports = {
   QA_BLOCK_MARK_RE,
   isQaCalendarBlockMark,
   isQaOwnedCalendarBlock,
+  isRunOwnedCalendarBlock,
+  noteBelongsToRun,
   isStaleUpdate,
+  summarizeBlock,
+  listQaCalendarBlocks,
+  waitForQaCalendarBlockByNote,
+  getQaCalendarBlock,
+  cleanupQaCalendarBlocks,
   cleanupStaleQaCalendarBlocks,
 };

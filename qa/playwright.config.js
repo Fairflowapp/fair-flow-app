@@ -81,5 +81,14 @@ module.exports = defineConfig({
         storageState: STORAGE_STATE_PATH,
       },
     },
+    {
+      name: "time-block",
+      dependencies: ["setup"],
+      testMatch: /time-block-polish\.spec\.js/,
+      timeout: 180000,
+      use: {
+        storageState: STORAGE_STATE_PATH,
+      },
+    },
   ],
 });

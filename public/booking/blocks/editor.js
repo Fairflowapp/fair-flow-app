@@ -1,6 +1,7 @@
 /**
- * Lightweight Block Time create/edit panel.
+ * Lightweight Time Block create/edit panel.
  * Provider, location, and date stay fixed in this first version.
+ * Changing only reason or note must keep the stored start/end/duration.
  */
 (function () {
   var EDITOR_ID = "ffBookingBlockEditor";
@@ -28,6 +29,8 @@
   }
 
   function formatMinutes(total) {
+    var api = model();
+    if (api && typeof api.formatMinutes === "function") return api.formatMinutes(total);
     var m = ((Number(total) % 1440) + 1440) % 1440;
     var hour = Math.floor(m / 60);
     var min = m % 60;
@@ -35,6 +38,12 @@
     var hour12 = hour % 12;
     if (hour12 === 0) hour12 = 12;
     return hour12 + ":" + String(min).padStart(2, "0") + " " + suffix;
+  }
+
+  function formatTimeRange(startMin, endMin) {
+    var api = model();
+    if (api && typeof api.formatTimeRange === "function") return api.formatTimeRange(startMin, endMin);
+    return formatMinutes(startMin) + " – " + formatMinutes(endMin);
   }
 
   function formatDate(dateKey) {
@@ -134,6 +143,16 @@
     return 30;
   }
 
+  function notePlaceholder(reason) {
+    return reason === "other" ? "What is this Time Block for?" : "Optional";
+  }
+
+  function syncNotePlaceholder(el, reason) {
+    var noteEl = el && el.querySelector("[name='ff-block-note']");
+    if (!noteEl) return;
+    noteEl.placeholder = notePlaceholder(reason || selectedReason(el));
+  }
+
   function specFromState(state) {
     var api = model();
     var startMin = Number(state && state.startMin);
@@ -153,7 +172,7 @@
   }
 
   function inspectSave(spec, excludeBlockId) {
-    if (!spec) return { ok: false, reason: "invalid", message: "That block time is not valid." };
+    if (!spec) return { ok: false, reason: "invalid", message: "That Time Block is not valid." };
     var dropApi = drop();
     if (dropApi && typeof dropApi.inspectOverlap === "function") {
       var conflict = dropApi.inspectOverlap({
@@ -170,7 +189,7 @@
       return {
         ok: false,
         reason: "block_conflict",
-        message: "This provider already has overlapping block time."
+        message: "This provider already has an overlapping Time Block."
       };
     }
     return { ok: true, spec: spec };
@@ -197,6 +216,7 @@
         chip.classList.toggle("is-selected", on);
         chip.setAttribute("aria-checked", on ? "true" : "false");
       });
+      syncNotePlaceholder(el, key);
     }
     return current.reason;
   }
@@ -220,8 +240,11 @@
     };
     if (custom) {
       spec.endMin = endEl ? Number(endEl.value) : current.endMin;
+    } else if (durEl && Number(durEl.value) > 0) {
+      spec.durationMinutes = Number(durEl.value);
     } else {
-      spec.durationMinutes = durEl ? Number(durEl.value) : (current.endMin - current.startMin);
+      spec.endMin = current.endMin;
+      spec.startMin = Number.isFinite(startMin) ? startMin : current.startMin;
     }
     return specFromState(spec);
   }
@@ -253,18 +276,19 @@
   function render() {
     if (!current) return;
     var el = ensure();
-    var duration = Math.max(15, Number(current.endMin) - Number(current.startMin));
+    var duration = Math.max(15, durationFromState(current));
     var isEdit = !!current.blockId;
     el.innerHTML =
       '<div class="ff-cal-block-editor-card">' +
         '<div class="ff-cal-block-editor-head">' +
-          "<h2>" + (isEdit ? "Edit Block Time" : "Block Time") + "</h2>" +
+          "<h2>Time Block</h2>" +
           '<button type="button" class="ff-cal-block-editor-x" data-ff-block-act="close" aria-label="Close">×</button>' +
         "</div>" +
-        '<p class="ff-cal-block-editor-meta">' +
-          escapeHtml(providerName(current.providerId)) + " · " +
-          escapeHtml(formatDate(current.dateKey)) +
-        "</p>" +
+        '<div class="ff-cal-block-editor-facts">' +
+          "<p>Provider: " + escapeHtml(providerName(current.providerId)) + "</p>" +
+          "<p>Date: " + escapeHtml(formatDate(current.dateKey)) + "</p>" +
+          '<p data-ff-block-end>Time: ' + escapeHtml(formatTimeRange(current.startMin, current.endMin)) + "</p>" +
+        "</div>" +
         '<div class="ff-cal-block-editor-field">' +
           "<span>Reason</span>" +
           '<div class="ff-cal-block-reasons" role="radiogroup" aria-label="Reason">' +
@@ -290,17 +314,15 @@
           (isPresetDuration(duration) ? " hidden" : "") + ">End" +
           '<select name="ff-block-end">' + endOptions(current.startMin, current.endMin) + "</select>" +
         "</label>" +
-        '<p class="ff-cal-block-editor-end" data-ff-block-end>' +
-          escapeHtml(formatMinutes(current.startMin)) + "–" + escapeHtml(formatMinutes(current.endMin)) +
-        "</p>" +
         '<label class="ff-cal-block-editor-field">Note' +
-          '<input type="text" name="ff-block-note" maxlength="80" placeholder="Optional" value="' +
+          '<input type="text" name="ff-block-note" maxlength="80" placeholder="' +
+            escapeHtml(notePlaceholder(current.reason)) + '" value="' +
             escapeHtml(current.note || "") + '">' +
         "</label>" +
         '<div class="ff-cal-block-editor-foot">' +
-          (isEdit ? '<button type="button" class="ff-cal-block-editor-delete" data-ff-block-act="delete">Delete Block</button>' : "<span></span>") +
+          (isEdit ? '<button type="button" class="ff-cal-block-editor-delete" data-ff-block-act="delete">Delete Time Block</button>' : "<span></span>") +
           '<button type="button" class="ff-cal-block-editor-save" data-ff-block-act="save">' +
-            (isEdit ? "Save" : "Block Time") +
+            (isEdit ? "Save" : "Time Block") +
           "</button>" +
         "</div>" +
       "</div>";
@@ -313,7 +335,7 @@
     var spec = readForm(el);
     var label = el && el.querySelector("[data-ff-block-end]");
     if (!spec || !label) return;
-    label.textContent = formatMinutes(spec.startMin) + "–" + formatMinutes(spec.endMin);
+    label.textContent = "Time: " + formatTimeRange(spec.startMin, spec.endMin);
   }
 
   function syncTimeUi(el) {
@@ -386,7 +408,7 @@
     }
     var api = repo();
     if (!api) {
-      toast("Block Time is not ready.");
+      toast("Time Block is not ready.");
       return;
     }
     saving = true;
@@ -398,7 +420,7 @@
       }
       close();
     } catch (err) {
-      toast((err && err.message) || "Could not save block time.");
+      toast((err && err.message) || "Could not save this Time Block.");
     } finally {
       saving = false;
     }
@@ -406,7 +428,7 @@
 
   async function remove() {
     if (!current || !current.blockId || saving) return;
-    if (!window.confirm("Delete this block time? That time will become available for booking.")) return;
+    if (!window.confirm("Delete this Time Block? That time will become available for booking.")) return;
     var api = repo();
     if (!api || typeof api.remove !== "function") return;
     saving = true;
@@ -414,7 +436,7 @@
       await api.remove(current.blockId);
       close();
     } catch (err) {
-      toast((err && err.message) || "Could not delete block time.");
+      toast((err && err.message) || "Could not delete this Time Block.");
     } finally {
       saving = false;
     }

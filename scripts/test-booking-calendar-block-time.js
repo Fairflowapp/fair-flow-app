@@ -188,7 +188,7 @@ return windowObj.ffBookingBlocks.create(Object.assign({}, daySpec, {
 })).then(function (created) {
   check("create Day Block Time persists lunch", !!(created && created.blockId && created.reason === "lunch"));
   check("created start/end are 1:00–1:30", created.startMin === 13 * 60 && created.endMin === 13 * 60 + 30);
-  check("selected reason persists", created.reason === "lunch" && created.label === "Lunch");
+  check("selected reason persists", created.reason === "lunch" && created.label === "Lunch Break");
 
   st.setView("week");
   st.setWeekProviderId("ashley");

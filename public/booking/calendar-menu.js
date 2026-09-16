@@ -51,7 +51,7 @@
       },
       {
         id: "block",
-        label: "Block time",
+        label: "Time Block",
         enabled: true
       },
       {

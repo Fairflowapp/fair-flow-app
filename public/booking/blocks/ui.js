@@ -112,7 +112,7 @@
     pendingHit = hit;
     el.innerHTML =
       '<button type="button" class="ff-cal-menu-item" role="menuitem" data-ff-cal-slot="appointment">New Appointment</button>' +
-      '<button type="button" class="ff-cal-menu-item" role="menuitem" data-ff-cal-slot="block">Block Time</button>';
+      '<button type="button" class="ff-cal-menu-item" role="menuitem" data-ff-cal-slot="block">Time Block</button>';
     el.removeAttribute("hidden");
     openedAt = Date.now();
     place(el, ev && ev.clientX, ev && ev.clientY);
