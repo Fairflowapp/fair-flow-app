@@ -403,3 +403,28 @@ body:not(.ff-booking-area) .ff-apd { display: none !important; }
   opacity: 0.45;
   cursor: default;
 }
+.ff-apd-combo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px 8px;
+  border: 1px solid #e9d5ff;
+  border-radius: 10px 10px 0 0;
+  background: #faf5ff;
+}
+.ff-apd-combo strong {
+  font-size: 13px;
+  font-weight: 750;
+  color: #5b21b6;
+}
+.ff-apd-combo + .ff-apd-svc.is-combo-component {
+  margin-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-color: #edd9ff;
+}
+.ff-apd-svc.is-combo-component + .ff-apd-svc.is-combo-component {
+  margin-top: 0;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+}

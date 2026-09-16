@@ -52,7 +52,7 @@ Booking is client-side JavaScript talking to Firestore. There are **no Booking C
 | `salons/{salonId}/counters/sales` | sales numbering |
 | `salons/{salonId}/settings/main.booking` | overlap policy |
 
-**Appointment `serviceLines[]` fields in use:** `lineId`, `serviceId`, `serviceNameSnapshot`, `providerId`, `providerNameSnapshot`, `startAt`, `endAt`, `durationMinutes`, `priceSnapshot`, `guestKey`, `guestName`, `requested`.
+**Appointment `serviceLines[]` fields in use:** `lineId`, `serviceId`, `serviceNameSnapshot`, `providerId`, `providerNameSnapshot`, `startAt`, `endAt`, `durationMinutes`, `priceSnapshot`, `guestKey`, `guestName`, `requested`. Combo component lines also snapshot `comboInstanceId`, `comboServiceId`, `comboNameSnapshot`, `comboSellingPriceSnapshot`, `comboComponentIndex`, `comboComponentCount`. Add-on foundation: `lineKind`, `addonTargetLineId`, `addonOfComboInstanceId`.
 
 Prefer new isolated modules under `public/booking/<area>/`. Do not put substantial Booking business logic in `index.html`.
 
@@ -120,7 +120,7 @@ Party support exists as extra people via `guestKey` / `guestName`, not a separat
 
 Dedicated reschedule UX, any-available-provider assignment UX, processing / buffer / finishing time, recurring / series, a distinct group-appointment product.
 
-Combo Services can be created in the Services catalog. Calendar does **not** yet expand a Combo into per-component `serviceLines` or assign different providers per component. That is Phase 2.
+Combo Services can be created in the Services catalog. Phase 2 expands a selected Combo into per-component `serviceLines` inside one appointment, with per-component providers and times. Historical appointments without Combo metadata still load as before.
 
 ---
 
@@ -159,7 +159,7 @@ Validation (Phase 1):
 - A Combo may split **between its component services**.
 - A **single component / service itself cannot be split** between multiple providers. The provider who starts one component must finish that component.
 
-Phase 1 implements the Services foundation only. Calendar, Smart Scheduling, Reports, and checkout still treat a Combo as one catalog row and do **not** expand it into appointment `serviceLines` yet.
+Phase 2 expands a Combo into component `serviceLines` on create/edit. Reports and checkout still use each line's `priceSnapshot` (the allocated Combo price). Smart Scheduling is not rewritten; component lines are structured so a later phase can score sequential vs parallel placement.
 
 Processing, buffer, and finishing times are **not** in the catalog or appointment model yet. Add them only with an explicit task that owns the shared catalog / appointment schema.
 

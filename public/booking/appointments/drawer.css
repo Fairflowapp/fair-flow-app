@@ -970,6 +970,60 @@ button.ff-appt-picker-cat:hover {
   color: var(--sub, #6b7280);
 }
 
+.ff-appt-combo {
+  margin: 4px 0 2px 28px;
+  padding: 8px 10px 6px;
+  border: 1px solid #e9d5ff;
+  border-radius: 10px 10px 0 0;
+  background: #faf5ff;
+}
+.ff-appt-combo-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ff-appt-combo-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 750;
+  color: #5b21b6;
+  cursor: pointer;
+}
+.ff-appt-combo-mark,
+.ff-appt-combo-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #5b21b6;
+  font-size: 10px;
+  font-weight: 700;
+  font-style: normal;
+  white-space: nowrap;
+}
+.ff-appt-combo-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+.ff-appt-svc.is-combo-component .ff-appt-card {
+  border-color: #edd9ff;
+  background: #fffcff;
+}
+.ff-appt-card-name.is-static {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text, #111827);
+}
+
 @media (max-width: 720px) {
   .ff-booking-workspace .ff-appt,
   .ff-appt {

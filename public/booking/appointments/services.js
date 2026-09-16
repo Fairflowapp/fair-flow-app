@@ -157,7 +157,13 @@ function pickerRowsFromCatalog(catalog, providerId) {
   const meta = categoryMeta(catalog && catalog.categories);
   return sortPickerRows(
     ((catalog && catalog.services) || [])
-      .filter((service) => isActive(service) && (!providerId || isCapable(service, providerId)))
+      .filter((service) => {
+        if (!isActive(service)) return false;
+        if (!providerId) return true;
+        const type = String(service && service.serviceType || "").trim().toLowerCase();
+        if (type === "combo") return true;
+        return isCapable(service, providerId);
+      })
       .map((service) => toPickerRow(service, providerId, meta))
   );
 }

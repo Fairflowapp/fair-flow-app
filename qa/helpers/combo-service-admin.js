@@ -84,8 +84,38 @@ async function cleanupQaComboServices(runId) {
   });
 }
 
+async function seedQaComboAppointmentCatalog(runId, opts) {
+  const id = String(runId || "").trim();
+  if (!id) abort("seedQaComboAppointmentCatalog requires a runId.");
+  const options = opts || {};
+  const comboId = "qaComboAppt_" + id;
+  const name = "FF-QA-COMBO-APPT " + id;
+  const locationId = String(options.locationId || "qaLoc1").trim();
+  const gelId = String(options.gelServiceId || "qaServiceManicure").trim();
+  const pediId = String(options.pediServiceId || "qaServicePedicure").trim();
+  return withAdmin(async (db) => {
+    const payload = {
+      name: name,
+      serviceType: "combo",
+      defaultPrice: 84,
+      durationMinutes: 75,
+      active: true,
+      locationId: locationId,
+      category: "QA Hands",
+      components: [
+        { serviceId: gelId, allocatedPrice: 44, sortOrder: 0 },
+        { serviceId: pediId, allocatedPrice: 40, sortOrder: 1 }
+      ],
+      updatedAt: new Date().toISOString()
+    };
+    await db.doc("salons/" + SALON_ID + "/services/" + comboId).set(payload);
+    return { comboId: comboId, name: name, path: "salons/" + SALON_ID + "/services/" + comboId };
+  });
+}
+
 module.exports = {
   NAME_PREFIX,
   listQaComboServices,
   cleanupQaComboServices,
+  seedQaComboAppointmentCatalog,
 };

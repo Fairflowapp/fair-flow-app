@@ -190,7 +190,12 @@
       providerPhoto: photo,
       guestName: trim(line && line.guestName),
       guestKey: trim(line && line.guestKey),
-      requested: !!(line && line.requested)
+      requested: !!(line && line.requested),
+      comboInstanceId: trim(line && line.comboInstanceId),
+      comboServiceId: trim(line && line.comboServiceId),
+      comboName: trim(line && line.comboNameSnapshot),
+      comboSellingPrice: Number(line && line.comboSellingPriceSnapshot) || 0,
+      comboComponentIndex: Number(line && line.comboComponentIndex) || 0
     };
   }
 
@@ -204,7 +209,10 @@
     });
     var line = pickLine(appointment, lineId);
     var selected = lineView(appointment, line);
-    var total = services.reduce(function (sum, row) { return sum + (Number(row.price) || 0); }, 0);
+    var comboApi = window.ffBookingAppointmentCombo;
+    var total = comboApi && typeof comboApi.appointmentServiceTotal === "function"
+      ? comboApi.appointmentServiceTotal(appointment && appointment.serviceLines)
+      : services.reduce(function (sum, row) { return sum + (Number(row.price) || 0); }, 0);
     var dateKey = trim(appointment && appointment.dateKey);
     if (!dateKey && window.ffBookingTime && appointment && appointment.startAt) {
       var startDate = toDate(appointment.startAt);
@@ -235,6 +243,9 @@
       providerName: selected.providerName,
       providerPhoto: selected.providerPhoto,
       services: services,
+      comboGroups: comboApi && typeof comboApi.detailsGroups === "function"
+        ? comboApi.detailsGroups(appointment)
+        : [],
       total: total,
       totalLabel: money(total),
       dateKey: dateKey,
@@ -306,12 +317,12 @@
         after[gap.prevKey] = api.gapNoticeHtml(gap, { gapReadOnly: true });
       });
     }
-    return party + rows.map(function (row, index) {
+    function rowHtml(row, index, allocatedLabel) {
       var key = row.lineId || ("view_" + index);
       var forName = trim(row.guestName) || trim(view && view.clientName) || "Client";
       var showFor = Number(view && view.partySize) > 1 || !!trim(row.guestName);
       return (
-        '<article class="ff-apd-svc">' +
+        '<article class="ff-apd-svc' + (row.comboInstanceId ? " is-combo-component" : "") + '">' +
           "<strong>" + escapeHtml(row.serviceName) + "</strong>" +
           (showFor ? "<span>For " + escapeHtml(forName) + "</span>" : "") +
           "<span>" + escapeHtml(row.providerName) +
@@ -320,11 +331,34 @@
               : "") +
           "</span>" +
           "<span>" + escapeHtml(row.startLabel + " – " + row.endLabel) + "</span>" +
-          "<span>" + escapeHtml(row.durationLabel + " · " + row.priceLabel) + "</span>" +
+          "<span>" + escapeHtml(row.durationLabel + " · " +
+            (allocatedLabel ? "Allocated: " + row.priceLabel : row.priceLabel)) + "</span>" +
         "</article>" +
         (after[key] || "")
       );
-    }).join("");
+    }
+    var byId = {};
+    rows.forEach(function (row, index) { byId[row.lineId || ("view_" + index)] = { row: row, index: index }; });
+    var groups = view && view.comboGroups;
+    if (groups && groups.length) {
+      return party + groups.map(function (group) {
+        if (group.kind !== "combo") {
+          var single = group.lines && group.lines[0];
+          var hit = single && byId[single.lineId];
+          return hit ? rowHtml(hit.row, hit.index, false) : "";
+        }
+        var selling = money(group.sellingPrice);
+        var head = '<article class="ff-apd-combo">' +
+          "<strong>" + escapeHtml(group.comboName) + " — COMBO — " + escapeHtml(selling) + "</strong>" +
+        "</article>";
+        var body = (group.lines || []).map(function (line) {
+          var hit = byId[line.lineId];
+          return hit ? rowHtml(hit.row, hit.index, true) : "";
+        }).join("");
+        return head + body;
+      }).join("");
+    }
+    return party + rows.map(function (row, index) { return rowHtml(row, index, false); }).join("");
   }
 
   function clientHtml(view) {
@@ -709,7 +743,16 @@
         startMin: minutesOf(line.startAt, loc),
         guestKey: line.guestKey,
         guestName: line.guestName,
-        requested: !!line.requested
+        requested: !!line.requested,
+        comboInstanceId: line.comboInstanceId,
+        comboServiceId: line.comboServiceId,
+        comboNameSnapshot: line.comboNameSnapshot,
+        comboSellingPriceSnapshot: line.comboSellingPriceSnapshot,
+        comboComponentIndex: line.comboComponentIndex,
+        comboComponentCount: line.comboComponentCount,
+        lineKind: line.lineKind,
+        addonTargetLineId: line.addonTargetLineId,
+        addonOfComboInstanceId: line.addonOfComboInstanceId
       };
     });
     edit = api.editStateFrom({

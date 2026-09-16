@@ -311,27 +311,50 @@ async function buildServiceLine(salonId, locationId, rawLine) {
   }
   const preservePrice = !!(rawLine && rawLine.preservePriceSnapshot);
   const preserveName = !!(rawLine && rawLine.preserveNameSnapshot);
-  return {
-    ok: true,
-    line: {
-      lineId: String(rawLine && rawLine.lineId || "").trim() || api.makeLineId(),
-      serviceId,
-      serviceNameSnapshot: preserveName && String(rawLine.serviceNameSnapshot || "").trim()
-        ? String(rawLine.serviceNameSnapshot).trim()
-        : String(service.name || "").trim(),
-      providerId,
-      providerNameSnapshot: api.providerNameFrom(staff),
-      startAt,
-      endAt,
-      durationMinutes,
-      priceSnapshot: preservePrice && Number.isFinite(Number(rawLine.priceSnapshot))
-        ? Number(rawLine.priceSnapshot)
-        : api.resolvePriceSnapshot(service, providerId),
-      guestKey: String(rawLine && rawLine.guestKey || "").trim(),
-      guestName: String(rawLine && rawLine.guestName || "").trim(),
-      requested: rawLine && rawLine.requested === true,
-    },
+  const comboApi = window.ffBookingAppointmentCombo;
+  const comboFields = comboApi && typeof comboApi.readComboFields === "function"
+    ? comboApi.readComboFields(rawLine)
+    : (rawLine && String(rawLine.comboInstanceId || "").trim()
+      ? {
+        comboInstanceId: String(rawLine.comboInstanceId).trim(),
+        comboServiceId: String(rawLine.comboServiceId || "").trim(),
+        comboNameSnapshot: String(rawLine.comboNameSnapshot || "").trim(),
+        comboSellingPriceSnapshot: Number(rawLine.comboSellingPriceSnapshot) || 0,
+        comboComponentIndex: Number(rawLine.comboComponentIndex) || 0,
+        comboComponentCount: Number(rawLine.comboComponentCount) || 0,
+      }
+      : null);
+  const useAllocated = !!(comboFields && Number.isFinite(Number(rawLine && rawLine.priceSnapshot)));
+  const line = {
+    lineId: String(rawLine && rawLine.lineId || "").trim() || api.makeLineId(),
+    serviceId,
+    serviceNameSnapshot: preserveName && String(rawLine.serviceNameSnapshot || "").trim()
+      ? String(rawLine.serviceNameSnapshot).trim()
+      : String(service.name || "").trim(),
+    providerId,
+    providerNameSnapshot: api.providerNameFrom(staff),
+    startAt,
+    endAt,
+    durationMinutes,
+    priceSnapshot: (preservePrice || useAllocated) && Number.isFinite(Number(rawLine.priceSnapshot))
+      ? Number(rawLine.priceSnapshot)
+      : api.resolvePriceSnapshot(service, providerId),
+    guestKey: String(rawLine && rawLine.guestKey || "").trim(),
+    guestName: String(rawLine && rawLine.guestName || "").trim(),
+    requested: rawLine && rawLine.requested === true,
   };
+  if (comboFields) {
+    Object.keys(comboFields).forEach((key) => { line[key] = comboFields[key]; });
+  }
+  if (comboApi && typeof comboApi.readAddonFields === "function") {
+    const addon = comboApi.readAddonFields(rawLine);
+    if (addon) Object.keys(addon).forEach((key) => { line[key] = addon[key]; });
+  } else if (rawLine && String(rawLine.addonTargetLineId || "").trim()) {
+    line.lineKind = String(rawLine.lineKind || "addon").trim();
+    line.addonTargetLineId = String(rawLine.addonTargetLineId).trim();
+    line.addonOfComboInstanceId = String(rawLine.addonOfComboInstanceId || "").trim();
+  }
+  return { ok: true, line };
 }
 
 async function validateAppointment(data, options) {
@@ -387,6 +410,15 @@ async function validateAppointment(data, options) {
       }
     }
   }
+  const comboApi = window.ffBookingAppointmentCombo;
+  if (comboApi && typeof comboApi.validateComboAtomicity === "function") {
+    const atomic = comboApi.validateComboAtomicity(lines);
+    if (!atomic.ok) return atomic;
+  }
+  if (comboApi && typeof comboApi.validateComboPrices === "function") {
+    const priced = comboApi.validateComboPrices(lines);
+    if (!priced.ok) return priced;
+  }
   if (api.clientIdleGaps && api.clientIdleGaps(lines).length && !data.gapsAcknowledged) {
     return {
       ok: false,
@@ -418,20 +450,39 @@ async function validateAppointment(data, options) {
 }
 
 function persistableLines(lines) {
-  return (lines || []).map((line) => ({
-    lineId: line.lineId,
-    serviceId: line.serviceId,
-    serviceNameSnapshot: line.serviceNameSnapshot,
-    providerId: line.providerId,
-    providerNameSnapshot: line.providerNameSnapshot,
-    startAt: asTimestamp(line.startAt),
-    endAt: asTimestamp(line.endAt),
-    durationMinutes: line.durationMinutes,
-    priceSnapshot: line.priceSnapshot,
-    guestKey: line.guestKey || "",
-    guestName: line.guestName || "",
-    requested: line.requested === true,
-  }));
+  return (lines || []).map((line) => {
+    const row = {
+      lineId: line.lineId,
+      serviceId: line.serviceId,
+      serviceNameSnapshot: line.serviceNameSnapshot,
+      providerId: line.providerId,
+      providerNameSnapshot: line.providerNameSnapshot,
+      startAt: asTimestamp(line.startAt),
+      endAt: asTimestamp(line.endAt),
+      durationMinutes: line.durationMinutes,
+      priceSnapshot: line.priceSnapshot,
+      guestKey: line.guestKey || "",
+      guestName: line.guestName || "",
+      requested: line.requested === true,
+    };
+    const comboApi = window.ffBookingAppointmentCombo;
+    if (comboApi && typeof comboApi.applyComboFields === "function") {
+      comboApi.applyComboFields(row, line);
+    } else if (line && String(line.comboInstanceId || "").trim()) {
+      row.comboInstanceId = String(line.comboInstanceId).trim();
+      row.comboServiceId = String(line.comboServiceId || "").trim();
+      row.comboNameSnapshot = String(line.comboNameSnapshot || "").trim();
+      row.comboSellingPriceSnapshot = Number(line.comboSellingPriceSnapshot) || 0;
+      row.comboComponentIndex = Number(line.comboComponentIndex) || 0;
+      row.comboComponentCount = Number(line.comboComponentCount) || 0;
+    }
+    if (line && String(line.addonTargetLineId || "").trim()) {
+      row.lineKind = String(line.lineKind || "addon").trim();
+      row.addonTargetLineId = String(line.addonTargetLineId).trim();
+      if (line.addonOfComboInstanceId) row.addonOfComboInstanceId = String(line.addonOfComboInstanceId).trim();
+    }
+    return row;
+  });
 }
 
 async function createAppointment(data) {

@@ -64,6 +64,9 @@
             || (appt.clientSnapshot && appt.clientSnapshot.displayName)
             || "Client",
           serviceName: line.serviceNameSnapshot || "Service",
+          comboName: String(line.comboNameSnapshot || "").trim(),
+          comboInstanceId: String(line.comboInstanceId || "").trim(),
+          comboServiceId: String(line.comboServiceId || "").trim(),
           status: appt.status,
           partySize: partySize,
           firstVisit: !!(appt.firstVisit),
@@ -102,6 +105,8 @@
             return {
               lineId: row.lineId,
               serviceName: row.serviceName,
+              comboName: row.comboName || "",
+              comboInstanceId: row.comboInstanceId || "",
               startMin: row.startMin,
               endMin: row.endMin,
               durationMinutes: row.durationMinutes,
@@ -110,8 +115,15 @@
           }),
           lineId: first.lineId,
           lineIds: lineIds,
-          requested: requested
+          requested: requested,
+          comboName: first.comboName || "",
+          comboInstanceId: first.comboInstanceId || "",
+          isCombo: !!first.comboInstanceId
         }));
+        var comboApi = window.ffBookingAppointmentCombo;
+        if (comboApi && typeof comboApi.decorateCalendarCard === "function") {
+          comboApi.decorateCalendarCard(out[out.length - 1], out[out.length - 1].segments);
+        }
       });
     });
     return out;

@@ -40,7 +40,9 @@
     INVALID_ASSIGNMENT: "INVALID_ASSIGNMENT",
     MISSING_LOCATION: "MISSING_LOCATION",
     INVALID_LINE: "INVALID_LINE",
-    UNRESOLVED_GAP: "UNRESOLVED_GAP"
+    UNRESOLVED_GAP: "UNRESOLVED_GAP",
+    COMBO_PRICE_MISMATCH: "COMBO_PRICE_MISMATCH",
+    COMBO_COMPONENT_SPLIT: "COMBO_COMPONENT_SPLIT"
   };
 
   function trimText(value) {
@@ -423,7 +425,7 @@
     var next = row && typeof row === "object" ? row : {};
     var serviceId = trimText(next.serviceId) || trimText(current.serviceId);
     var sameService = !!serviceId && trimText(current.serviceId) === serviceId;
-    return {
+    var merged = {
       lineId: trimText(next.lineId) || trimText(current.lineId),
       serviceId: serviceId,
       providerId: trimText(next.providerId) || trimText(current.providerId),
@@ -440,6 +442,29 @@
       guestName: collapseSpaces(next.guestName != null ? next.guestName : current.guestName),
       requested: next.requested != null ? next.requested === true : current.requested === true
     };
+    var comboApi = window.ffBookingAppointmentCombo;
+    if (comboApi && typeof comboApi.mergeComboFields === "function") {
+      var combo = comboApi.mergeComboFields(current, next);
+      if (combo) Object.keys(combo).forEach(function (key) { merged[key] = combo[key]; });
+      var addon = comboApi.readAddonFields
+        ? (comboApi.readAddonFields(next) || comboApi.readAddonFields(current))
+        : null;
+      if (addon) Object.keys(addon).forEach(function (key) { merged[key] = addon[key]; });
+    } else if (trimText(next.comboInstanceId) || trimText(current.comboInstanceId)) {
+      merged.comboInstanceId = trimText(next.comboInstanceId) || trimText(current.comboInstanceId);
+      merged.comboServiceId = trimText(next.comboServiceId) || trimText(current.comboServiceId);
+      merged.comboNameSnapshot = collapseSpaces(next.comboNameSnapshot || current.comboNameSnapshot);
+      merged.comboSellingPriceSnapshot = Number(next.comboSellingPriceSnapshot != null
+        ? next.comboSellingPriceSnapshot
+        : current.comboSellingPriceSnapshot) || 0;
+      merged.comboComponentIndex = Number.isInteger(Number(next.comboComponentIndex))
+        ? Number(next.comboComponentIndex)
+        : Number(current.comboComponentIndex) || 0;
+      merged.comboComponentCount = Number(next.comboComponentCount) > 0
+        ? Number(next.comboComponentCount)
+        : Number(current.comboComponentCount) || 0;
+    }
+    return merged;
   }
 
   function mergeServiceLinePatch(existingLines, incomingLines) {
@@ -463,7 +488,7 @@
     var snapshot = raw.clientSnapshot && typeof raw.clientSnapshot === "object" ? raw.clientSnapshot : {};
     var lines = Array.isArray(raw.serviceLines) ? raw.serviceLines.map(function (line) {
       var row = line && typeof line === "object" ? line : {};
-      return {
+      var out = {
         lineId: trimText(row.lineId),
         serviceId: trimText(row.serviceId),
         serviceNameSnapshot: collapseSpaces(row.serviceNameSnapshot),
@@ -477,6 +502,23 @@
         guestName: collapseSpaces(row.guestName),
         requested: row.requested === true
       };
+      var comboApi = window.ffBookingAppointmentCombo;
+      if (comboApi && typeof comboApi.applyComboFields === "function") {
+        comboApi.applyComboFields(out, row);
+      } else if (trimText(row.comboInstanceId)) {
+        out.comboInstanceId = trimText(row.comboInstanceId);
+        out.comboServiceId = trimText(row.comboServiceId);
+        out.comboNameSnapshot = collapseSpaces(row.comboNameSnapshot);
+        out.comboSellingPriceSnapshot = Number(row.comboSellingPriceSnapshot) || 0;
+        out.comboComponentIndex = Number(row.comboComponentIndex) || 0;
+        out.comboComponentCount = Number(row.comboComponentCount) || 0;
+      }
+      if (trimText(row.addonTargetLineId)) {
+        out.lineKind = trimText(row.lineKind) || "addon";
+        out.addonTargetLineId = trimText(row.addonTargetLineId);
+        out.addonOfComboInstanceId = trimText(row.addonOfComboInstanceId);
+      }
+      return out;
     }) : [];
     return {
       appointmentId: String(id || raw.appointmentId || ""),

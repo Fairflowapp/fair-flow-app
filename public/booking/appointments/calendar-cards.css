@@ -281,3 +281,22 @@
   border-left-color: #be123c;
   box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.28);
 }
+.ff-cal-card-combo {
+  display: block;
+  color: #5b21b6;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ff-cal-card-combo-mark {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(91, 33, 182, 0.12);
+  color: #5b21b6;
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: 1px;
+}

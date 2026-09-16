@@ -91,7 +91,7 @@
 
   function emptyLine(seed) {
     var storedPrice = seed && seed.storedPrice != null ? seed.storedPrice : seed && seed.price;
-    return {
+    var line = {
       key: trim(seed && seed.key) || makeLineKey(),
       lineId: trim(seed && seed.lineId),
       providerId: trim(seed && seed.providerId),
@@ -112,6 +112,9 @@
       guestName: seed && seed.guestName != null ? String(seed.guestName) : "",
       requested: !!(seed && seed.requested)
     };
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && typeof combo.applyComboFields === "function") combo.applyComboFields(line, seed);
+    return line;
   }
 
   function syncHead(state) {
@@ -211,6 +214,7 @@
       && trim(line.serviceId)
       && Number.isFinite(Number(line.startMin))
       && Number(line.durationMinutes) > 0
+      && !trim(line.capabilityMessage)
     );
   }
 
@@ -239,6 +243,12 @@
   async function refreshLineServices(state, line) {
     var api = window.ffBookingAppointmentServices;
     line.services = api && line.providerId ? await api.listForProvider(line.providerId) : [];
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && typeof combo.keepComboServiceOnRefresh === "function"
+      && combo.keepComboServiceOnRefresh(line, state && state.catalogServices, line.services)) {
+      deriveLine(line);
+      return syncHead(state);
+    }
     if (line.serviceId) {
       var next = line.services.find(function (row) { return row.id === line.serviceId; }) || null;
       if (!next) {
@@ -287,6 +297,18 @@
     var line = findLine(state, key) || state.lines[0];
     if (!line) return derive(state);
     var id = trim(serviceId);
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && typeof combo.applySelectedService === "function") {
+      var handled = combo.applySelectedService(state, line, id, {
+        findServiceRow: findServiceRow,
+        emptyLine: emptyLine
+      });
+      if (handled) {
+        state.error = "";
+        state.errorLineKey = "";
+        return derive(state);
+      }
+    }
     line.serviceId = id;
     line.service = findServiceRow(state, line, id);
     line.capabilityMessage = "";
@@ -756,6 +778,13 @@
 
   function removeLine(state, key) {
     ensureLines(state);
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && typeof combo.removeComboOrLine === "function"
+      && combo.removeComboOrLine(state, key, emptyLine)) {
+      state.error = "";
+      state.errorLineKey = "";
+      return derive(state);
+    }
     if (state.lines.length <= 1) return state;
     var id = trim(key);
     var next = state.lines.filter(function (line) {
@@ -799,7 +828,9 @@
 
   function linePayload(state, line) {
     var sameService = line.keepStoredSnapshots && trim(line.serviceId) === trim(line.originalServiceId);
-    return {
+    var combo = window.ffBookingAppointmentCombo;
+    var isCombo = !!(combo && combo.isComboLine && combo.isComboLine(line));
+    var payload = {
       lineId: line.lineId,
       serviceId: line.serviceId,
       providerId: line.providerId,
@@ -807,12 +838,14 @@
       durationMinutes: line.durationMinutes,
       priceSnapshot: line.price,
       serviceNameSnapshot: sameService ? line.originalServiceName : (line.service && line.service.name) || "",
-      preservePriceSnapshot: sameService,
-      preserveNameSnapshot: sameService,
+      preservePriceSnapshot: sameService || isCombo,
+      preserveNameSnapshot: sameService || isCombo,
       guestKey: trim(line.guestKey),
       guestName: trim(line.guestName),
       requested: !!line.requested
     };
+    if (combo && typeof combo.applyComboFields === "function") combo.applyComboFields(payload, line);
+    return payload;
   }
 
   async function create(state) {
@@ -901,7 +934,16 @@
         keepStoredSnapshots: true,
         guestKey: row && row.guestKey,
         guestName: row && row.guestName,
-        requested: !!(row && row.requested)
+        requested: !!(row && row.requested),
+        comboInstanceId: row && row.comboInstanceId,
+        comboServiceId: row && row.comboServiceId,
+        comboNameSnapshot: row && row.comboNameSnapshot,
+        comboSellingPriceSnapshot: row && row.comboSellingPriceSnapshot,
+        comboComponentIndex: row && row.comboComponentIndex,
+        comboComponentCount: row && row.comboComponentCount,
+        lineKind: row && row.lineKind,
+        addonTargetLineId: row && row.addonTargetLineId,
+        addonOfComboInstanceId: row && row.addonOfComboInstanceId
       });
       if (line.serviceId) {
         line.service = {
@@ -1086,9 +1128,13 @@
         "</button>" +
         '<div class="ff-appt-picker-cat-list">' +
           group.services.map(function (svc) {
+            var comboApi = window.ffBookingAppointmentCombo;
+            var isCombo = !!(comboApi && comboApi.isComboService && comboApi.isComboService(svc));
             return '<button type="button" class="ff-appt-svc-row" data-ff-appt-act="pick-service" data-ff-line="' +
               escapeHtml(line.key) + '" data-ff-service="' + escapeHtml(svc.id) + '">' +
-              "<span>" + escapeHtml(svc.name) + "</span>" +
+              "<span>" + escapeHtml(svc.name) +
+                (isCombo ? ' <em class="ff-appt-combo-badge">Combo</em>' : "") +
+              "</span>" +
               "<strong>" + escapeHtml(money(svc.price)) + "</strong>" +
               "</button>";
           }).join("") +
@@ -1143,89 +1189,143 @@
     }, 0);
   }
 
-  function createLinesHtml(state, providers, options) {
-    var rows = (state && state.lines) || [];
-    var list = Array.isArray(providers) ? providers : [];
+  function createLineProviders(line, providers) {
+    var lineProviders = Array.isArray(providers) ? providers.slice() : [];
+    if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
+      lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
+    }
+    var combo = window.ffBookingAppointmentCombo;
+    if (combo && combo.isComboLine && combo.isComboLine(line) && typeof combo.filterProvidersForLine === "function") {
+      lineProviders = combo.filterProvidersForLine(line, lineProviders);
+    }
+    return lineProviders;
+  }
+
+  function createLineCardHtml(state, line, index, options) {
     var ui = options || {};
-    var canRemove = rows.length > 1;
+    var rows = (state && state.lines) || [];
+    var canRemove = rows.length > 1 && !ui.comboLocked;
     var showError = ui.showError !== false;
-    return partyNoticeHtml(state) + rows.map(function (line, index) {
-      var lineProviders = list.slice();
-      if (line.providerId && !lineProviders.some(function (emp) { return emp && emp.id === line.providerId; })) {
-        lineProviders = lineProviders.concat([{ id: line.providerId, firstName: providerName(line.providerId) }]);
-      }
-      var clash = providerOverlapKeys(state)[line.key];
-      var err = !!(clash || (showError && state.errorLineKey === line.key && state.error));
-      var pickingService = ui.servicePickerKey === line.key;
-      var pickingProvider = ui.providerPickerKey === line.key;
-      var rail = '<div class="ff-appt-rail"><span class="ff-appt-rail-node">' + (index + 1) + "</span></div>";
-      if (!trim(line.serviceId)) {
-        return (
-          '<div class="ff-appt-svc is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
-            rail +
-            '<div class="ff-appt-card">' +
-              guestRowHtml(state, line) +
-              '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
-                escapeHtml(line.key) + '">Search or select service</button>' +
-              (pickingService ? servicePickerHtml(state, line, ui) : "") +
-              (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
-            "</div>" +
-          "</div>"
-        );
-      }
-      var withName = line.providerId ? providerName(line.providerId) : "Provider";
-      var emp = lineProviders.find(function (row) { return row && row.id === line.providerId; }) || null;
-      var photo = emp ? trim(emp.photoURL || emp.photoUrl || emp.avatarUrl) : "";
-      var avatar = photo
-        ? '<img class="ff-appt-chip-av" src="' + escapeHtml(photo) + '" alt="">'
-        : '<span class="ff-appt-chip-av">' + escapeHtml(withName.charAt(0).toUpperCase()) + "</span>";
-      var startLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
-      var endLabel = Number.isFinite(Number(line.endMin)) ? formatMinutes(line.endMin) : "—";
+    var lineProviders = createLineProviders(line, ui.providers);
+    var clash = providerOverlapKeys(state)[line.key];
+    var err = !!(clash || (showError && state.errorLineKey === line.key && state.error));
+    var pickingService = !ui.hideServicePicker && ui.servicePickerKey === line.key;
+    var pickingProvider = ui.providerPickerKey === line.key;
+    var rail = '<div class="ff-appt-rail"><span class="ff-appt-rail-node">' + (index + 1) + "</span></div>";
+    if (!trim(line.serviceId)) {
       return (
-        '<div class="ff-appt-svc' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
+        '<div class="ff-appt-svc is-empty' + (err ? " is-error" : "") + '" data-ff-line="' + escapeHtml(line.key) + '">' +
           rail +
           '<div class="ff-appt-card">' +
             guestRowHtml(state, line) +
-            '<div class="ff-appt-card-top">' +
-              '<button type="button" class="ff-appt-card-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
-                escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>" +
-              '<span class="ff-appt-card-price">' + escapeHtml(money(line.price)) + "</span>" +
-              (canRemove
-                ? '<button type="button" class="ff-appt-card-x" data-ff-line-act="remove" data-ff-line="' +
-                  escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
-                : "") +
-            "</div>" +
-            '<div class="ff-appt-strip">' +
-              '<label class="ff-appt-strip-start">' +
-                '<select data-ff-line-field="start" aria-label="Start time">' + timeOptionsHtml(line.startMin) + "</select>" +
-                '<span class="ff-appt-strip-value">' + escapeHtml(startLabel) + "</span>" +
-              "</label>" +
-              '<span class="ff-appt-strip-line" aria-hidden="true"></span>' +
-              '<span class="ff-appt-strip-end">' + escapeHtml(endLabel) + "</span>" +
-            "</div>" +
-            '<div class="ff-appt-card-row">' +
-              '<button type="button" class="ff-appt-chip" data-ff-appt-act="open-provider-picker" data-ff-line="' +
-                escapeHtml(line.key) + '">' + avatar +
-                "<span>" + escapeHtml(withName) + "</span>" +
-                '<span class="ff-appt-caret" aria-hidden="true">▾</span></button>' +
-              '<button type="button" class="ff-appt-request' + (line.requested ? " is-on" : "") +
-                '" data-ff-appt-act="toggle-request" data-ff-line="' + escapeHtml(line.key) +
-                '" aria-pressed="' + (line.requested ? "true" : "false") + '" title="Requested for this provider">' +
-                '<span class="ff-appt-request-mark" aria-hidden="true"></span>Request</button>' +
-              '<span class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
-            "</div>" +
-            (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
+            '<button type="button" class="ff-appt-search-row" data-ff-appt-act="open-service-picker" data-ff-line="' +
+              escapeHtml(line.key) + '">Search or select service</button>' +
             (pickingService ? servicePickerHtml(state, line, ui) : "") +
-            '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
-            (clash
-              ? '<div class="ff-appt-error">' + escapeHtml(providerOverlapMessage(state)) + "</div>"
-              : (showError && state.errorLineKey === line.key && state.error
-                ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>"
-                : "")) +
+            (err ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>" : "") +
           "</div>" +
-        "</div>" +
-        gapAfterHtml(state, line.key, ui)
+        "</div>"
       );
+    }
+    var withName = line.providerId ? providerName(line.providerId) : "Provider";
+    var emp = lineProviders.find(function (row) { return row && row.id === line.providerId; }) || null;
+    var photo = emp ? trim(emp.photoURL || emp.photoUrl || emp.avatarUrl) : "";
+    var avatar = photo
+      ? '<img class="ff-appt-chip-av" src="' + escapeHtml(photo) + '" alt="">'
+      : '<span class="ff-appt-chip-av">' + escapeHtml(withName.charAt(0).toUpperCase()) + "</span>";
+    var startLabel = Number.isFinite(Number(line.startMin)) ? formatMinutes(line.startMin) : "—";
+    var endLabel = Number.isFinite(Number(line.endMin)) ? formatMinutes(line.endMin) : "—";
+    var nameHtml = ui.hideServicePicker
+      ? '<span class="ff-appt-card-name is-static">' + escapeHtml((line.service && line.service.name) || "Service") + "</span>"
+      : '<button type="button" class="ff-appt-card-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
+        escapeHtml(line.key) + '">' + escapeHtml((line.service && line.service.name) || "Service") + "</button>";
+    return (
+      '<div class="ff-appt-svc' + (err ? " is-error" : "") + (ui.comboLocked ? " is-combo-component" : "") +
+        '" data-ff-line="' + escapeHtml(line.key) + '">' +
+        rail +
+        '<div class="ff-appt-card">' +
+          guestRowHtml(state, line) +
+          '<div class="ff-appt-card-top">' +
+            nameHtml +
+            '<span class="ff-appt-card-price">' + escapeHtml(money(line.price)) + "</span>" +
+            (canRemove
+              ? '<button type="button" class="ff-appt-card-x" data-ff-line-act="remove" data-ff-line="' +
+                escapeHtml(line.key) + '" aria-label="Remove service">×</button>'
+              : "") +
+          "</div>" +
+          '<div class="ff-appt-strip">' +
+            '<label class="ff-appt-strip-start">' +
+              '<select data-ff-line-field="start" aria-label="Start time">' + timeOptionsHtml(line.startMin) + "</select>" +
+              '<span class="ff-appt-strip-value">' + escapeHtml(startLabel) + "</span>" +
+            "</label>" +
+            '<span class="ff-appt-strip-line" aria-hidden="true"></span>' +
+            '<span class="ff-appt-strip-end">' + escapeHtml(endLabel) + "</span>" +
+          "</div>" +
+          '<div class="ff-appt-card-row">' +
+            '<button type="button" class="ff-appt-chip" data-ff-appt-act="open-provider-picker" data-ff-line="' +
+              escapeHtml(line.key) + '">' + avatar +
+              "<span>" + escapeHtml(withName) + "</span>" +
+              '<span class="ff-appt-caret" aria-hidden="true">▾</span></button>' +
+            '<button type="button" class="ff-appt-request' + (line.requested ? " is-on" : "") +
+              '" data-ff-appt-act="toggle-request" data-ff-line="' + escapeHtml(line.key) +
+              '" aria-pressed="' + (line.requested ? "true" : "false") + '" title="Requested for this provider">' +
+              '<span class="ff-appt-request-mark" aria-hidden="true"></span>Request</button>' +
+            '<span class="ff-appt-card-dur">' + escapeHtml(formatDurationLabel(line.durationMinutes) || "—") + "</span>" +
+          "</div>" +
+          (pickingProvider ? providerPickerHtml(line, lineProviders, ui) : "") +
+          (pickingService ? servicePickerHtml(state, line, ui) : "") +
+          '<div class="ff-appt-cap"' + (line.capabilityMessage ? "" : " hidden") + ">" + escapeHtml(line.capabilityMessage) + "</div>" +
+          (clash
+            ? '<div class="ff-appt-error">' + escapeHtml(providerOverlapMessage(state)) + "</div>"
+            : (showError && state.errorLineKey === line.key && state.error
+              ? '<div class="ff-appt-error">' + escapeHtml(state.error) + "</div>"
+              : "")) +
+        "</div>" +
+      "</div>" +
+      gapAfterHtml(state, line.key, ui)
+    );
+  }
+
+  function createLinesHtml(state, providers, options) {
+    var rows = (state && state.lines) || [];
+    var ui = Object.assign({}, options || {}, { providers: Array.isArray(providers) ? providers : [] });
+    var combo = window.ffBookingAppointmentCombo;
+    var groups = combo && typeof combo.groupFormLines === "function" ? combo.groupFormLines(rows) : null;
+    if (!groups) {
+      return partyNoticeHtml(state) + rows.map(function (line, index) {
+        return createLineCardHtml(state, line, index, ui);
+      }).join("");
+    }
+    var displayIndex = 0;
+    return partyNoticeHtml(state) + groups.map(function (group) {
+      if (group.kind !== "combo") {
+        var single = createLineCardHtml(state, group.lines[0], displayIndex, ui);
+        displayIndex += 1;
+        return single;
+      }
+      var first = group.lines[0];
+      var pickingCombo = ui.servicePickerKey === first.key;
+      var header = (
+        '<div class="ff-appt-combo" data-ff-combo="' + escapeHtml(group.instanceId) + '">' +
+          '<div class="ff-appt-combo-head">' +
+            '<button type="button" class="ff-appt-combo-name" data-ff-appt-act="open-service-picker" data-ff-line="' +
+              escapeHtml(first.key) + '">' + escapeHtml(group.comboName) + "</button>" +
+            '<span class="ff-appt-combo-mark">Combo</span>' +
+            '<span class="ff-appt-combo-price">' + escapeHtml(money(group.sellingPrice)) + "</span>" +
+            '<button type="button" class="ff-appt-card-x" data-ff-line-act="remove" data-ff-line="' +
+              escapeHtml(first.key) + '" aria-label="Remove combo">×</button>' +
+          "</div>" +
+          (pickingCombo ? servicePickerHtml(state, first, ui) : "") +
+        "</div>"
+      );
+      var body = group.lines.map(function (line) {
+        var html = createLineCardHtml(state, line, displayIndex, Object.assign({}, ui, {
+          hideServicePicker: true,
+          comboLocked: true
+        }));
+        displayIndex += 1;
+        return html;
+      }).join("");
+      return header + body;
     }).join("");
   }
 

@@ -56,14 +56,20 @@
   function itemsFromAppointment(appointment) {
     return (appointment && appointment.serviceLines || []).map(function (line) {
       var row = line && typeof line === "object" ? line : {};
+      var combo = window.ffBookingAppointmentCombo;
+      var name = combo && typeof combo.checkoutItemName === "function"
+        ? combo.checkoutItemName(row)
+        : (collapseSpaces(row.serviceNameSnapshot) || "Service");
       return {
         lineId: trimText(row.lineId),
         kind: "service",
-        name: collapseSpaces(row.serviceNameSnapshot) || "Service",
+        name: name,
         serviceId: trimText(row.serviceId),
         providerId: trimText(row.providerId),
         providerName: collapseSpaces(row.providerNameSnapshot),
-        amount: Number(row.priceSnapshot) || 0
+        amount: Number(row.priceSnapshot) || 0,
+        comboServiceId: trimText(row.comboServiceId),
+        comboInstanceId: trimText(row.comboInstanceId)
       };
     }).filter(function (item) { return item.name; });
   }

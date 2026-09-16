@@ -66,7 +66,8 @@
     var count = segs.length || ((card && card.serviceNames) || []).length || 1;
     var head =
       '<span class="ff-cal-card-name" title="Drag to move the whole appointment">' + escapeHtml(card.clientName) +
-        ' <span class="ff-cal-card-count">· ' + escapeHtml(moreLabel(count)) + "</span></span>";
+        ' <span class="ff-cal-card-count">· ' + escapeHtml(moreLabel(count)) + "</span></span>" +
+      comboHtml(card);
     var body = segs.map(function (seg, index) {
       var share = segmentShare(seg, card.startMin, card.endMin);
       var mins = Number(seg.durationMinutes);
@@ -86,8 +87,16 @@
     return '<span class="ff-cal-card-segs">' + body + "</span>";
   }
 
+  function comboHtml(card) {
+    var name = card && card.comboName ? String(card.comboName) : "";
+    if (!name) return "";
+    return '<span class="ff-cal-card-combo">' + escapeHtml(name) +
+      ' <span class="ff-cal-card-combo-mark">Combo</span></span>';
+  }
+
   function servicesHtml(card) {
-    return '<span class="ff-cal-card-svc">' + escapeHtml(card && card.serviceName || "Service") + "</span>";
+    return comboHtml(card) +
+      '<span class="ff-cal-card-svc">' + escapeHtml(card && card.serviceName || "Service") + "</span>";
   }
 
   function board() { return window.ffBookingScheduleBoard || null; }
@@ -175,6 +184,9 @@
       el.setAttribute("data-ff-cal-line", card.lineId || item.lineId);
       if (card.lineIds && card.lineIds.length) {
         el.setAttribute("data-ff-cal-lines", card.lineIds.join(","));
+      }
+      if (card.comboInstanceId) {
+        el.setAttribute("data-ff-cal-combo", card.comboInstanceId);
       }
       if (card.requested) {
         el.setAttribute("data-ff-cal-requested", "1");
