@@ -21,6 +21,7 @@ import { escapeHtml } from "./tickets-list.js?v=20260721_ticket_soft_delete";
 import { renderServicesLocationsTabHtml, wireServicesLocationsTab, renderServicesStaffTabHtml, wireServicesStaffTab } from "./tickets-catalog-tabs.js?v=20260915_combo_svc";
 import { _ffShowServicesCategoryDetailMenu, _ffShowCategoryMenu, _ffShowServiceMenu, _ffCatalogEditorOpen, _ffCatalogEditorClose, _ffWireCatalogDragDrop, _ffClearDragHover, _ffReorderCategoriesBefore, _ffReorderServiceBefore, _ffMoveServiceToCategoryEnd } from "./tickets-catalog-edit.js?v=20260915_combo_svc";
 import { catalogServiceTypeControlsHtml, comboBadgeHtml, comboDetailsViewHtml, comboSaveFields, combosUsingService, isComboService, SERVICE_TYPE_COMBO, wireComboEditor } from "./tickets-catalog-combo.js?v=20260915_combo_svc";
+import { catalogServiceSavedToast } from "./tickets-catalog-toast.js?v=20260915_svc_toast";
 
 let showToast, setupTicketsUI;
 export function initCatalogRender(deps) {
@@ -895,7 +896,7 @@ function renderServicesScreenDetail(catalogServices, catalogCategories) {
         if (categoryId) ticketsState._ffOpenCats.add(categoryId);
         renderServicesCatalogV2();
         if (typeof setupTicketsUI === 'function') setupTicketsUI();
-        showToast('Updated', 'success');
+        showToast(catalogServiceSavedToast(selected.id ? 'service-edit' : 'service-add'), 'success');
       } catch (err) {
         showToast(err?.message || 'Failed', 'error');
       } finally {
