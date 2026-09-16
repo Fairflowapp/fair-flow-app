@@ -50,6 +50,20 @@ async function setNote(page, note) {
   await input.fill(note);
 }
 
+async function setStartMin(page, startMin) {
+  await page.locator('#ffBookingBlockEditor [name="ff-block-start"]').selectOption(String(startMin));
+}
+
+async function setDuration(page, minutes) {
+  await page.locator('#ffBookingBlockEditor [name="ff-block-duration"]').selectOption(String(minutes));
+}
+
+async function assertNoBlockTimeCopy(page, rootSel) {
+  const text = await page.locator(rootSel).innerText();
+  expect(text, "UI must say Time Block, not Block Time").not.toMatch(/Block Time/);
+  expect(text).toMatch(/Time Block/);
+}
+
 async function saveEditor(page) {
   await page.locator('#ffBookingBlockEditor [data-ff-block-act="save"]').click();
   await page.locator("#ffBookingBlockEditor").waitFor({ state: "hidden", timeout: 20000 });
@@ -59,6 +73,22 @@ async function waitForBlockCard(page, blockId) {
   const card = page.locator('#ffBookingCalendarRoot [data-ff-cal-block="' + blockId + '"]');
   await card.waitFor({ state: "visible", timeout: 20000 });
   return card;
+}
+
+async function waitForBlockCardAt(page, providerId, startMin) {
+  const card = page.locator(
+    '#ffBookingCalendarRoot [data-ff-cal-emp="' + providerId + '"] [data-ff-cal-block][data-ff-cal-start="' + startMin + '"]'
+  ).first();
+  await card.waitFor({ state: "visible", timeout: 20000 });
+  return card;
+}
+
+async function readCardLines(card) {
+  const reason = (await card.locator(".ff-cal-block-reason").innerText()).trim();
+  const time = (await card.locator(".ff-cal-block-time").innerText()).trim();
+  const noteCount = await card.locator(".ff-cal-block-note").count();
+  const note = noteCount ? (await card.locator(".ff-cal-block-note").innerText()).trim() : "";
+  return { reason, time, note, hasNoteLine: noteCount > 0 };
 }
 
 async function openBlockEditor(page, blockId) {
@@ -85,6 +115,46 @@ async function readEditorFacts(page) {
       startMin: start ? Number(start.value) : NaN,
       duration: duration && duration.value !== "custom" ? Number(duration.value) : NaN,
     };
+  });
+}
+
+async function dragBlockByMinutes(page, blockId, deltaMin) {
+  const card = await waitForBlockCard(page, blockId);
+  const box = await card.boundingBox();
+  if (!box) throw new Error("Time Block card has no box");
+  const startX = box.x + Math.min(20, box.width / 2);
+  const startY = box.y + Math.min(10, box.height / 2);
+  const dy = (Number(deltaMin) / 60) * 72;
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX, startY + dy, { steps: 16 });
+  await page.mouse.up();
+}
+
+async function expectNoProviderMoveConfirm(page) {
+  const dialog = page.locator("#ffCalMoveConfirm");
+  if (await dialog.count()) {
+    await expect(dialog).toBeHidden();
+  }
+}
+
+async function openProviderMenu(page, providerId) {
+  await page.evaluate((id) => {
+    const btn = document.querySelector('#ffBookingCalendarRoot [data-ff-cal-provider="' + id + '"]');
+    const st = window.ffBookingCalState;
+    const menu = window.ffBookingCalMenu;
+    if (!btn || !menu || typeof menu.open !== "function") throw new Error("provider menu is not ready");
+    menu.open(btn, {
+      providerId: id,
+      dateKey: st && st.getSelectedDateKey ? st.getSelectedDateKey() : "",
+      locationId: st && st.getLocationId ? st.getLocationId() : "",
+      focusProviderId: st && st.getFocusProviderId ? st.getFocusProviderId() : "",
+    });
+  }, providerId);
+  await page.locator("#ffBookingCalProviderMenu").waitFor({ state: "visible", timeout: 10000 });
+  await page.locator('#ffBookingCalProviderMenu [data-ff-cal-menu="block"]').waitFor({
+    state: "visible",
+    timeout: 10000,
   });
 }
 
@@ -133,10 +203,18 @@ module.exports = {
   clickSlotForTimeBlock,
   selectReason,
   setNote,
+  setStartMin,
+  setDuration,
+  assertNoBlockTimeCopy,
   saveEditor,
   waitForBlockCard,
+  waitForBlockCardAt,
+  readCardLines,
   openBlockEditor,
   readEditorFacts,
+  dragBlockByMinutes,
+  expectNoProviderMoveConfirm,
+  openProviderMenu,
   dragBlockToProvider,
   confirmMove,
 };

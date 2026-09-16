@@ -126,6 +126,46 @@ async function getQaCalendarBlock(blockId) {
   });
 }
 
+async function cleanupQaCalendarBlocksForDay(dateKey) {
+  const day = String(dateKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) abort("cleanupQaCalendarBlocksForDay requires a dateKey.");
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlocks").limit(400).get();
+    const deleted = [];
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() || {};
+      if (data.locationId !== QA_LOCATION_ID) continue;
+      if (QA_PROVIDER_IDS.indexOf(String(data.providerId || "")) === -1) continue;
+      if (String(data.dateKey || "") !== day) continue;
+      const docPath = BLOCKS_PREFIX + docSnap.id;
+      assertQaSalonPath(docPath);
+      await db.doc(docPath).delete();
+      deleted.push(docSnap.id);
+    }
+    return deleted;
+  });
+}
+
+async function deleteCalendarBlocksByIds(ids) {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!list.length) return [];
+  return withAdmin(async (db) => {
+    const deleted = [];
+    for (const id of list) {
+      const docPath = BLOCKS_PREFIX + id;
+      assertQaSalonPath(docPath);
+      const snap = await db.doc(docPath).get();
+      if (!snap.exists) continue;
+      const data = snap.data() || {};
+      if (data.locationId && data.locationId !== QA_LOCATION_ID) continue;
+      if (data.providerId && QA_PROVIDER_IDS.indexOf(data.providerId) === -1) continue;
+      await db.doc(docPath).delete();
+      deleted.push(id);
+    }
+    return deleted;
+  });
+}
+
 async function cleanupQaCalendarBlocks(runId) {
   const id = String(runId || "").trim();
   if (!id) abort("cleanupQaCalendarBlocks requires a runId so concurrent QA runs are not deleted.");
@@ -179,6 +219,8 @@ module.exports = {
   listQaCalendarBlocks,
   waitForQaCalendarBlockByNote,
   getQaCalendarBlock,
+  cleanupQaCalendarBlocksForDay,
+  deleteCalendarBlocksByIds,
   cleanupQaCalendarBlocks,
   cleanupStaleQaCalendarBlocks,
 };
