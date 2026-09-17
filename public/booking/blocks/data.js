@@ -483,7 +483,13 @@ async function remove(blockId) {
 }
 
 async function applyRelocations(relocations) {
-  const moves = Array.isArray(relocations) ? relocations.filter((row) => row && row.moved) : [];
+  const moves = (Array.isArray(relocations) ? relocations : []).filter((row) => {
+    if (!row || !row.moved) return false;
+    if (row.kind === "skip") return false;
+    const duration = Number(row.toEndMin) - Number(row.toStartMin);
+    const required = Number(row.durationMinutes);
+    return Number.isFinite(duration) && duration > 0 && (!required || duration === required);
+  });
   const applied = [];
   try {
     for (const move of moves) {

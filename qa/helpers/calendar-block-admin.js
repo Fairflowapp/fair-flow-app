@@ -226,7 +226,86 @@ function summarizeSeries(id, data) {
     startDateKey: row.startDateKey || "",
     note: row.note || "",
     label: row.label || "",
+    repeatFrequency: row.repeatFrequency || "",
+    flexibilityMode: row.flexibilityMode || "",
+    preferredStartMin: Number(row.preferredStartMin) || 0,
+    durationMinutes: Number(row.durationMinutes) || 0,
+    earliestStartMin: Number(row.earliestStartMin) || 0,
+    latestEndMin: Number(row.latestEndMin) || 0,
+    requiredDurationMinutes: Number(row.requiredDurationMinutes) || 0,
+    reason: row.reason || "",
   };
+}
+
+function summarizeException(id, data) {
+  const row = data && typeof data === "object" ? data : {};
+  return {
+    exceptionId: id,
+    salonId: SALON_ID,
+    projectId: REQUIRED_PROJECT,
+    seriesId: row.seriesId || "",
+    occurrenceDateKey: row.occurrenceDateKey || row.dateKey || "",
+    kind: row.kind || "",
+    startMin: Number.isFinite(Number(row.startMin)) ? Number(row.startMin) : null,
+    endMin: Number.isFinite(Number(row.endMin)) ? Number(row.endMin) : null,
+    providerId: row.providerId || "",
+    note: row.note || "",
+  };
+}
+
+async function listQaCalendarSeries(runId) {
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlockSeries").limit(400).get();
+    const rows = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      if (runId && !isRunOwnedSeries(data, runId)) return;
+      if (!runId && !isQaOwnedSeries(data)) return;
+      rows.push(summarizeSeries(docSnap.id, data));
+    });
+    return rows;
+  });
+}
+
+async function getQaCalendarSeries(seriesId) {
+  const id = String(seriesId || "").trim();
+  if (!id) abort("getQaCalendarSeries requires a seriesId.");
+  return withAdmin(async (db) => {
+    const docPath = SERIES_PREFIX + id;
+    assertQaSalonPath(docPath);
+    const snap = await db.doc(docPath).get();
+    if (!snap.exists) return null;
+    return summarizeSeries(snap.id, snap.data() || {});
+  });
+}
+
+async function listQaExceptionsForSeries(seriesId) {
+  const id = String(seriesId || "").trim();
+  if (!id) abort("listQaExceptionsForSeries requires a seriesId.");
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlockExceptions")
+      .where("seriesId", "==", id)
+      .limit(400)
+      .get();
+    return snap.docs.map((docSnap) => summarizeException(docSnap.id, docSnap.data() || {}));
+  });
+}
+
+async function waitForQaException(seriesId, dateKey, timeoutMs) {
+  const id = String(seriesId || "").trim();
+  const day = String(dateKey || "").trim();
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    abort("waitForQaException requires seriesId and dateKey.");
+  }
+  const started = Date.now();
+  const limit = Number(timeoutMs) || 20000;
+  while (Date.now() - started < limit) {
+    const rows = await listQaExceptionsForSeries(id);
+    const hit = rows.find((row) => row.occurrenceDateKey === day);
+    if (hit) return hit;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  abort("Timed out waiting for QA Time Block exception " + id + " " + day);
 }
 
 async function waitForQaCalendarSeriesByNote(note, timeoutMs) {
@@ -358,6 +437,12 @@ module.exports = {
   cleanupStaleQaCalendarBlocks,
   isQaOwnedSeries,
   isRunOwnedSeries,
+  summarizeSeries,
+  summarizeException,
+  listQaCalendarSeries,
+  getQaCalendarSeries,
+  listQaExceptionsForSeries,
+  waitForQaException,
   waitForQaCalendarSeriesByNote,
   cleanupQaCalendarSeries,
   cleanupStaleQaCalendarSeries,

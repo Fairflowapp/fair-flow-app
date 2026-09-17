@@ -167,6 +167,27 @@ async function clientHasOtherActiveAppointment(salonId, clientId, excludeId) {
   });
 }
 
+async function loadBlocksForLines(rawLines, locationId, api) {
+  const repo = window.ffBookingBlocks;
+  if (!repo) return;
+  const keys = [];
+  (Array.isArray(rawLines) ? rawLines : []).forEach((line) => {
+    const start = api && typeof api.toDate === "function" ? api.toDate(line && line.startAt) : null;
+    const key = start && api && typeof api.dateKeyOf === "function"
+      ? api.dateKeyOf(start, locationId)
+      : "";
+    if (key && keys.indexOf(key) === -1) keys.push(key);
+  });
+  if (!keys.length) return;
+  if (typeof repo.loadForDates === "function") {
+    await repo.loadForDates(keys, locationId);
+    return;
+  }
+  if (typeof repo.loadForView === "function") {
+    await repo.loadForView(keys[0], locationId);
+  }
+}
+
 function availabilityCode(api, providerId, startAt, durationMinutes, locationId) {
   const engine = window.ffBookingAvailability;
   if (!engine || typeof engine.canProviderFitDuration !== "function") {
@@ -177,6 +198,21 @@ function availabilityCode(api, providerId, startAt, durationMinutes, locationId)
     : { ok: engine.canProviderFitDuration(providerId, startAt, durationMinutes, locationId) };
   if (details && details.ok) {
     return { ok: true, relocations: details.relocations || [] };
+  }
+  const blocked = details && (
+    details.reason === "blocked"
+    || details.reason === "no_slot"
+    || details.reason === "fixed"
+    || details.reason === "window"
+  );
+  if (blocked) {
+    return {
+      ok: false,
+      code: api.CODES.PROVIDER_BLOCKED || "PROVIDER_BLOCKED",
+      error: details.reason === "fixed"
+        ? "This time is blocked for this provider."
+        : "The required Time Block cannot be moved.",
+    };
   }
   const hours = typeof engine.getEffectiveBusinessHours === "function"
     ? engine.getEffectiveBusinessHours(startAt, locationId)
@@ -371,6 +407,7 @@ async function validateAppointment(data, options) {
   if (!client) {
     return { ok: false, code: api.CODES.INVALID_CLIENT, error: "Client was not found." };
   }
+  await loadBlocksForLines(checked.fields.serviceLines, checked.fields.locationId, api);
   const lines = [];
   const relocations = [];
   for (let i = 0; i < checked.fields.serviceLines.length; i += 1) {

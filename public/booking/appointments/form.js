@@ -6,6 +6,7 @@
   var CODES = {
     APPOINTMENT_CONFLICT: "This provider already has an appointment during this time.",
     PROVIDER_NOT_WORKING: "This provider is not scheduled to work at this time.",
+    PROVIDER_BLOCKED: "The required Time Block cannot be moved.",
     OUTSIDE_BUSINESS_HOURS: "This appointment falls outside business hours.",
     PROVIDER_INCAPABLE: "This provider is not available for this service.",
     INVALID_CLIENT: "Please select a valid client.",
@@ -62,6 +63,7 @@
     var first = providerName(providerId);
     if (code === "APPOINTMENT_CONFLICT") return first + " already has an appointment during this time.";
     if (code === "PROVIDER_NOT_WORKING") return first + " is not scheduled to work at this time.";
+    if (code === "PROVIDER_BLOCKED") return CODES.PROVIDER_BLOCKED;
     if (code === "PROVIDER_INCAPABLE") return first + " is not available for this service.";
     if (code === "UNRESOLVED_GAP") return CODES.UNRESOLVED_GAP;
     if (code === "PROVIDER_DOUBLE_BOOKED") return first + " cannot serve two guests at the same time.";

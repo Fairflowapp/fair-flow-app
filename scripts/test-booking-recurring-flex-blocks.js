@@ -299,6 +299,109 @@ const packed = flex.tryFitAppointment({
 });
 check("22. no valid alternative => appointment is rejected", packed.ok === false);
 
+const holeFillers = [
+  flexible,
+  model.normalize({
+    blockId: "blk_before",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-21",
+    startMin: 13 * 60,
+    endMin: 14 * 60,
+    reason: "meeting",
+    flexibilityMode: "fixed"
+  }),
+  model.normalize({
+    blockId: "blk_after",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-21",
+    startMin: 14 * 60 + 30,
+    endMin: 15 * 60 + 30,
+    reason: "meeting",
+    flexibilityMode: "fixed"
+  })
+];
+const noHole = flex.tryFitAppointment({
+  startMin: 14 * 60,
+  endMin: 14 * 60 + 30
+}, {
+  appointments: [],
+  blocks: holeFillers,
+  workingIntervals: [{ startMin: 9 * 60, endMin: 18 * 60 }]
+});
+check("required flexible block cannot be displaced when no relocation exists",
+  noHole.ok === false && (noHole.reason === "no_slot" || noHole.reason === "blocked"));
+
+blocks.setAll(holeFillers);
+const noHoleFit = engine.fitProviderDuration(
+  "rebecca",
+  { dateKey: "2026-09-21", minutes: 14 * 60 },
+  30,
+  "loc1"
+);
+check("availability rejects no-hole preferred-slot booking",
+  !!(noHoleFit && noHoleFit.ok === false));
+check("no-hole booking does not propose a skip or override",
+  !noHoleFit.relocations || noHoleFit.relocations.length === 0);
+
+const openLater = [
+  flexible,
+  model.normalize({
+    blockId: "blk_morning",
+    providerId: "rebecca",
+    locationId: "loc1",
+    dateKey: "2026-09-21",
+    startMin: 13 * 60,
+    endMin: 14 * 60,
+    reason: "meeting",
+    flexibilityMode: "fixed"
+  })
+];
+const successMove = flex.tryFitAppointment({
+  startMin: 14 * 60,
+  endMin: 15 * 60
+}, {
+  appointments: [],
+  blocks: openLater,
+  workingIntervals: [{ startMin: 9 * 60, endMin: 18 * 60 }]
+});
+check("valid relocation booking moves lunch to 3:00-3:30",
+  !!(successMove.ok && successMove.relocations[0]
+    && successMove.relocations[0].toStartMin === 15 * 60
+    && successMove.relocations[0].toEndMin === 15 * 60 + 30
+    && successMove.relocations[0].durationMinutes === 30
+    && successMove.relocations[0].kind !== "skip"));
+
+blocks.setAll(openLater);
+const successFit = engine.fitProviderDuration(
+  "rebecca",
+  { dateKey: "2026-09-21", minutes: 14 * 60 },
+  60,
+  "loc1"
+);
+check("availability allows booking only after a valid 30-minute replacement",
+  !!(successFit && successFit.ok && successFit.relocations
+    && successFit.relocations[0]
+    && successFit.relocations[0].toStartMin === 15 * 60
+    && successFit.relocations[0].toEndMin === 15 * 60 + 30));
+
+blocks.setAll([flexible]);
+const loadGen = blocks.beginLoad();
+blocks.upsert({
+  blockId: "blk_local",
+  providerId: "rebecca",
+  locationId: "loc1",
+  dateKey: "2026-09-21",
+  startMin: 10 * 60,
+  endMin: 10 * 60 + 30,
+  reason: "meeting",
+  flexibilityMode: "fixed"
+});
+blocks.applyLoaded([flexible], loadGen);
+check("local writes do not discard generated required occurrences",
+  !!(blocks.getById(flexible.blockId) && blocks.getById("blk_local")));
+
 const offHours = flex.findRelocation(flexible, { startMin: 14 * 60, endMin: 15 * 60 }, {
   appointments: [],
   blocks: [flexible],

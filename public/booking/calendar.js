@@ -723,7 +723,10 @@
       if (isCalendarVisible()) render({ keepScroll: true });
     });
     document.addEventListener("ff-booking-appointment-created", function () {
-      if (isCalendarVisible()) syncAppointmentCards();
+      if (isCalendarVisible()) {
+        syncAppointmentCards();
+        syncBlocks();
+      }
     });
     document.addEventListener("ff-booking-appointment-updated", function () {
       if (isCalendarVisible()) syncAppointmentCards();

@@ -171,7 +171,6 @@
       var cut = tombstones[row.blockId];
       return !cut || cut <= started;
     });
-    if (started !== writeGen) return items.slice();
     incoming.forEach(function (row) {
       delete pendingIds[row.blockId];
     });

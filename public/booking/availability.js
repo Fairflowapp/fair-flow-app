@@ -619,9 +619,6 @@
       return when.minutes >= win.startMin && endMin <= win.endMin;
     });
     if (!fits) return { ok: false, reason: "off_hours" };
-    if (!calendarBlockOverlaps(providerId, when.dateKey, locId, when.minutes, endMin)) {
-      return { ok: true, relocations: [] };
-    }
     var flex = window.ffBookingFlexRelocate;
     if (flex && typeof flex.tryFitFromCalendar === "function") {
       var plan = flex.tryFitFromCalendar({
@@ -633,8 +630,12 @@
         durationMinutes: duration
       });
       if (plan && plan.ok) return { ok: true, relocations: plan.relocations || [] };
+      return { ok: false, reason: (plan && plan.reason) || "blocked" };
     }
-    return { ok: false, reason: "blocked" };
+    if (calendarBlockOverlaps(providerId, when.dateKey, locId, when.minutes, endMin)) {
+      return { ok: false, reason: "blocked" };
+    }
+    return { ok: true, relocations: [] };
   }
 
   function isProviderAvailableAt(providerId, dateTime, locationId) {
