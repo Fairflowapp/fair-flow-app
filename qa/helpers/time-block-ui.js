@@ -58,14 +58,25 @@ async function setDuration(page, minutes) {
   await page.locator('#ffBookingBlockEditor [name="ff-block-duration"]').selectOption(String(minutes));
 }
 
-async function assertNoBlockTimeCopy(page, rootSel) {
+async function waitForNextPaint(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+}
+
+async function assertNoBlockTimeCopy(page, rootSel, opts) {
   const root = page.locator(rootSel);
   const labeled = root.locator("h2, [data-ff-cal-menu='block'], [data-ff-block-act='save'], [data-ff-cal-slot='block']").first();
-  await expect(root).toBeVisible();
-  await expect(labeled).toBeVisible();
-  await expect(labeled).toHaveText(/Time Block/);
-  await expect(root).toContainText(/Time Block/);
-  await expect(root, "UI must say Time Block, not Block Time").not.toContainText(/Block Time/);
+  await expect(async () => {
+    if (opts && opts.reopenProviderId) {
+      await openProviderMenu(page, opts.reopenProviderId);
+    }
+    await expect(root).toBeVisible();
+    await expect(labeled).toBeVisible();
+    await expect(labeled).toHaveText(/Time Block/);
+    await expect(root).toContainText(/Time Block/);
+    await expect(root, "UI must say Time Block, not Block Time").not.toContainText(/Block Time/);
+  }).toPass({ timeout: 15000 });
 }
 
 async function saveEditor(page) {
@@ -73,9 +84,22 @@ async function saveEditor(page) {
   await page.locator("#ffBookingBlockEditor").waitFor({ state: "hidden", timeout: 20000 });
 }
 
+async function waitForCardBox(card) {
+  await expect.poll(async () => {
+    const attached = await card.evaluate((el) => {
+      if (!el || !el.isConnected) return null;
+      const box = el.getBoundingClientRect();
+      return { w: box.width, h: box.height };
+    }).catch(() => null);
+    return attached && attached.h >= 2 && attached.w >= 2 ? attached.h : 0;
+  }, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
+}
+
 async function waitForBlockCard(page, blockId) {
   const card = page.locator('#ffBookingCalendarRoot [data-ff-cal-block="' + blockId + '"]');
   await card.waitFor({ state: "visible", timeout: 20000 });
+  await waitForNextPaint(page);
+  await waitForCardBox(card);
   return card;
 }
 
@@ -84,6 +108,8 @@ async function waitForBlockCardAt(page, providerId, startMin) {
     '#ffBookingCalendarRoot [data-ff-cal-emp="' + providerId + '"] [data-ff-cal-block][data-ff-cal-start="' + startMin + '"]'
   ).first();
   await card.waitFor({ state: "visible", timeout: 20000 });
+  await waitForNextPaint(page);
+  await waitForCardBox(card);
   return card;
 }
 
@@ -95,22 +121,45 @@ async function readCardLines(card) {
   return { reason, time, note, hasNoteLine: noteCount > 0 };
 }
 
-async function assertCardLineVisible(card, selector) {
-  const result = await card.evaluate((el, sel) => {
+async function measureCardLine(card, selector) {
+  return card.evaluate((el, sel) => {
+    if (!el || !el.isConnected) return { ok: false, reason: "detached" };
     const line = el.querySelector(sel);
-    if (!line) return { ok: false, reason: "missing" };
+    if (!line) {
+      const box = el.getBoundingClientRect();
+      return { ok: false, reason: "missing", card: { w: box.width, h: box.height } };
+    }
     const cardBox = el.getBoundingClientRect();
     const lineBox = line.getBoundingClientRect();
     const style = getComputedStyle(line);
-    if (style.display === "none" || style.visibility === "hidden") return { ok: false, reason: "hidden" };
-    if (lineBox.height < 2) return { ok: false, reason: "collapsed" };
+    const snap = {
+      card: { x: cardBox.x, y: cardBox.y, w: cardBox.width, h: cardBox.height },
+      line: { x: lineBox.x, y: lineBox.y, w: lineBox.width, h: lineBox.height, text: String(line.textContent || "").trim() },
+      display: style.display,
+      visibility: style.visibility,
+    };
+    if (style.display === "none" || style.visibility === "hidden") return { ok: false, reason: "hidden", ...snap };
+    if (lineBox.height < 2) return { ok: false, reason: "collapsed", ...snap };
     if (lineBox.bottom > cardBox.bottom + 1.5 || lineBox.top < cardBox.top - 1.5) {
-      return { ok: false, reason: "clipped", cardH: cardBox.height, lineBottom: lineBox.bottom, cardBottom: cardBox.bottom };
+      return { ok: false, reason: "clipped", ...snap };
     }
-    return { ok: true, text: String(line.textContent || "").trim(), cardH: cardBox.height };
+    return { ok: true, text: snap.line.text, ...snap };
   }, selector);
-  expect(result.ok, selector + " must stay visible on the Time Block card " + JSON.stringify(result)).toBeTruthy();
-  return result;
+}
+
+async function assertCardLineVisible(card, selector) {
+  let previous = null;
+  await expect(async () => {
+    const result = await measureCardLine(card, selector);
+    const prior = previous;
+    previous = result;
+    expect(result.ok, selector + " must stay visible on the Time Block card " + JSON.stringify(result)).toBeTruthy();
+    const sameHeight = !!(prior && prior.ok && result.card && prior.card
+      && Math.abs(prior.card.h - result.card.h) <= 0.5
+      && Math.abs(prior.line.h - result.line.h) <= 0.5);
+    expect(sameHeight, "Time Block card layout is still settling " + JSON.stringify({ prior, result })).toBeTruthy();
+  }).toPass({ timeout: 15000 });
+  return previous;
 }
 
 async function openBlockEditor(page, blockId) {
@@ -163,13 +212,18 @@ async function expectNoProviderMoveConfirm(page) {
 async function openProviderMenu(page, providerId) {
   const menu = page.locator("#ffBookingCalProviderMenu");
   const block = menu.locator('[data-ff-cal-menu="block"]');
+  const trigger = page.locator('#ffBookingCalendarRoot [data-ff-cal-provider="' + providerId + '"]');
+  await trigger.waitFor({ state: "visible", timeout: 20000 });
+  await waitForNextPaint(page);
   await expect(async () => {
     const ready = await page.evaluate((id) => {
       const btn = document.querySelector('#ffBookingCalendarRoot [data-ff-cal-provider="' + id + '"]');
       const st = window.ffBookingCalState;
       const api = window.ffBookingCalMenu;
       const root = document.getElementById("ffBookingCalProviderMenu");
-      if (!btn || !api || typeof api.open !== "function") throw new Error("provider menu is not ready");
+      if (!btn || !api || typeof api.open !== "function") {
+        return { ok: false, why: "provider menu is not ready" };
+      }
       const alreadyOpen = !!(
         api.isOpen && api.isOpen()
         && root
@@ -177,6 +231,7 @@ async function openProviderMenu(page, providerId) {
         && root.querySelector('[data-ff-cal-menu="block"]')
       );
       if (!alreadyOpen) {
+        if (api.isOpen && api.isOpen() && typeof api.close === "function") api.close();
         api.open(btn, {
           providerId: id,
           dateKey: st && st.getSelectedDateKey ? st.getSelectedDateKey() : "",
@@ -184,11 +239,16 @@ async function openProviderMenu(page, providerId) {
           focusProviderId: st && st.getFocusProviderId ? st.getFocusProviderId() : "",
         });
       }
-      return !!(document.getElementById("ffBookingCalProviderMenu")
-        && !document.getElementById("ffBookingCalProviderMenu").hasAttribute("hidden")
-        && document.querySelector('#ffBookingCalProviderMenu [data-ff-cal-menu="block"]'));
+      const el = document.getElementById("ffBookingCalProviderMenu");
+      const item = el && el.querySelector('[data-ff-cal-menu="block"]');
+      return {
+        ok: !!(el && !el.hasAttribute("hidden") && item),
+        hidden: !!(el && el.hasAttribute("hidden")),
+        hasItem: !!item,
+        text: item ? String(item.textContent || "").trim() : "",
+      };
     }, providerId);
-    expect(ready, "provider menu did not stay open").toBeTruthy();
+    expect(ready.ok, "provider menu did not stay open " + JSON.stringify(ready)).toBeTruthy();
     await expect(menu).toBeVisible();
     await expect(block).toBeVisible();
     await expect(block).toHaveText("Time Block");

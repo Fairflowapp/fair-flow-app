@@ -121,9 +121,9 @@ test("Time Block polish real UI", async ({ page }) => {
   const personalNote = noteFor(RUN_ID, "Doctor appointment");
   const otherNote = noteFor(RUN_ID, "Inventory delivery");
 
-  await ui.openProviderMenu(page, ui.FIXTURE.providerOneId);
-  await expect(page.locator('#ffBookingCalProviderMenu [data-ff-cal-menu="block"]')).toHaveText("Time Block");
-  await ui.assertNoBlockTimeCopy(page, "#ffBookingCalProviderMenu");
+  await ui.assertNoBlockTimeCopy(page, "#ffBookingCalProviderMenu", {
+    reopenProviderId: ui.FIXTURE.providerOneId,
+  });
   await page.keyboard.press("Escape");
 
   const other = await createBlock(page, {
@@ -196,14 +196,14 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(lunchLines.note).toBe("");
   await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-reason");
   await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-time");
-  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-reason");
-  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-time");
-  await ui.assertCardLineVisible(meetingCard, ".ff-cal-block-note");
+  await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-note");
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-reason");
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-time");
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-note");
 
-  await expect(meetingCard).not.toHaveClass(/ff-cal-card/);
+  await expect(meetingAfterReload).not.toHaveClass(/ff-cal-card/);
   const appointmentCards = page.locator("#ffBookingCalendarRoot [data-ff-cal-card]");
   const appointmentCount = await appointmentCards.count();
   for (let i = 0; i < appointmentCount; i += 1) {
