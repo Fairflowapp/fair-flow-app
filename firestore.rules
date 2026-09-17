@@ -1315,6 +1315,39 @@ service cloud.firestore {
       allow delete: if belongsToSalon(salonId);
     }
 
+    match /salons/{salonId}/calendarBlockSeries/{seriesId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.locationId is string
+        && request.resource.data.providerId is string
+        && request.resource.data.preferredStartMin is number
+        && request.resource.data.durationMinutes is number
+        && request.resource.data.durationMinutes > 0
+        && request.resource.data.startDateKey is string
+        && request.resource.data.repeatFrequency is string
+        && request.resource.data.flexibilityMode is string;
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == resource.data.createdByUid
+        && request.resource.data.createdByStaffId == resource.data.createdByStaffId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.locationId == resource.data.locationId;
+      allow delete: if belongsToSalon(salonId);
+    }
+
+    match /salons/{salonId}/calendarBlockExceptions/{exceptionId} {
+      allow read: if belongsToSalon(salonId) || isPlatformAdmin();
+      allow create: if belongsToSalon(salonId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.seriesId is string
+        && request.resource.data.occurrenceDateKey is string
+        && request.resource.data.kind is string;
+      allow update: if belongsToSalon(salonId)
+        && request.resource.data.seriesId == resource.data.seriesId
+        && request.resource.data.occurrenceDateKey == resource.data.occurrenceDateKey;
+      allow delete: if belongsToSalon(salonId);
+    }
+
     // ===== BOOKING SALES =====
     // Checkout tickets. Not public. Salon members can read and create.
     match /salons/{salonId}/sales/{saleId} {

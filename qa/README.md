@@ -71,6 +71,12 @@ npm run test:booking:lifecycle
 # Client lifecycle (writes only FF-QA-CLIENT-* inside salons/ffBookingQa)
 npm run test:booking:clients
 
+# Time Block polish
+npm run test:booking:time-block
+
+# Recurring + Flexible Time Blocks
+npm run test:booking:recurring-flex
+
 # Smoke then appointment + client write suites. Smoke itself stays read-only.
 npm run test:booking:staging-write
 
@@ -194,7 +200,7 @@ Ordinary appointment/client cleanup deletes only records whose notes contain tha
 npm run test:booking:cleanup-stale
 ```
 
-That command only deletes QA-marked `ffBookingQa` appointments, clients, and `calendarBlocks` older than 6 hours (override with `FF_QA_STALE_MS`). Never `qaAppointmentClient` / `FF-QA-FIXTURE`. Blocks must have an `FF-QA-*` note or label on `qaLoc1` / `qaProv1`/`qaProv2`.
+That command only deletes QA-marked `ffBookingQa` appointments, clients, `calendarBlocks`, and `calendarBlockSeries` older than 6 hours (override with `FF_QA_STALE_MS`). Never `qaAppointmentClient` / `FF-QA-FIXTURE`. Blocks and series must have an `FF-QA-*` note or label on `qaLoc1` / `qaProv1`/`qaProv2`.
 
 Machine-readable output: `qa/regression-results/` (gitignored).
 

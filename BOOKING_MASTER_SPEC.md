@@ -51,6 +51,9 @@ Booking is client-side JavaScript talking to Firestore. There are **no Booking C
 | `salons/{salonId}/sales/{id}` | `public/booking/sales/` |
 | `salons/{salonId}/counters/sales` | sales numbering |
 | `salons/{salonId}/settings/main.booking` | overlap policy |
+| `salons/{salonId}/calendarBlocks/{id}` | one-off Time Blocks |
+| `salons/{salonId}/calendarBlockSeries/{id}` | recurring Time Block definition |
+| `salons/{salonId}/calendarBlockExceptions/{id}` | per-date skip/override |
 
 **Appointment `serviceLines[]` fields in use:** `lineId`, `serviceId`, `serviceNameSnapshot`, `providerId`, `providerNameSnapshot`, `startAt`, `endAt`, `durationMinutes`, `priceSnapshot`, `guestKey`, `guestName`, `requested`. Combo component lines also snapshot `comboInstanceId`, `comboServiceId`, `comboNameSnapshot`, `comboSellingPriceSnapshot`, `comboComponentIndex`, `comboComponentCount`. Add-on foundation: `lineKind`, `addonTargetLineId`, `addonOfComboInstanceId`.
 
@@ -83,9 +86,11 @@ Prefer new isolated modules under `public/booking/<area>/`. Do not put substanti
 
 Day view, 15-minute snap, provider columns with **first name** + photo, global active-location (no calendar-local picker), open/closed overlays, provider-off bands, now-line, drag/drop (including stacked multi-service: name = whole visit, segment = one line), requested-provider heart, stacked multi-service cards.
 
+**Time Blocks.** One-off `calendarBlocks` stay backward compatible. Recurring definitions persist as `calendarBlockSeries` plus per-date `calendarBlockExceptions` (skip or override). Visible Calendar days generate occurrences in memory; Fair Flow does not write one document per future day. Flexibility `fixed` is hard unavailable time. Flexibility `flexible` may relocate an occurrence inside its allowed window, keeping the required duration, so an appointment can use the preferred slot when another valid placement exists. Moving or deleting **this occurrence** does not rewrite the series.
+
 ### Not implemented
 
-Week view, filters, blocked time, print day, calendar-local location selector, resources (rooms/chairs). Week/filters/block/print exist only as disabled “coming later” controls.
+Calendar-local location selector and resources (rooms/chairs).
 
 ---
 

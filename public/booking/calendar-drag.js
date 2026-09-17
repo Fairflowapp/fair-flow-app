@@ -819,17 +819,23 @@
     var startMin = Number(action.startMin);
     var duration = Number(source.durationMinutes) || 30;
     if (!Number.isFinite(startMin) || !(duration > 0)) return null;
-    return {
+    var current = window.ffBookingCalBlocks && typeof window.ffBookingCalBlocks.getById === "function"
+      ? window.ffBookingCalBlocks.getById(source.blockId)
+      : null;
+    return Object.assign({}, current || {}, {
       blockId: source.blockId,
       providerId: action.providerId,
-      locationId: source.fromLocationId,
+      locationId: source.fromLocationId || (current && current.locationId),
       dateKey: action.dateKey || source.fromDateKey,
       startMin: startMin,
       endMin: startMin + duration,
-      reason: source.reason,
-      note: source.note || "",
-      label: source.label
-    };
+      reason: source.reason || (current && current.reason),
+      note: source.note || (current && current.note) || "",
+      label: source.label || (current && current.label),
+      preferredStartMin: current && current.preferredStartMin != null
+        ? current.preferredStartMin
+        : (source.preferredStartMin != null ? source.preferredStartMin : startMin)
+    });
   }
 
   function assignBlock(action) {

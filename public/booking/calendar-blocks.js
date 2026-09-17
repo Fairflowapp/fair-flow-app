@@ -295,7 +295,21 @@
     var noteHtml = lines.note
       ? '<span class="ff-cal-block-note">' + escapeHtml(lines.note) + "</span>"
       : "";
+    var moved = !!(block.movedFromPreferred && Number.isFinite(Number(block.preferredStartMin))
+      && Number(block.startMin) !== Number(block.preferredStartMin));
+    var movedHtml = moved
+      ? '<span class="ff-cal-block-moved">Moved from ' + escapeHtml(formatMinutes(block.preferredStartMin)) + "</span>"
+      : "";
+    var seriesAttr = block.seriesId
+      ? ' data-ff-cal-block-series="' + escapeHtml(block.seriesId) + '"'
+      : "";
+    var flexAttr = block.flexibilityMode
+      ? ' data-ff-cal-block-flex="' + escapeHtml(block.flexibilityMode) + '"'
+      : "";
+    var title = cardTitle(block);
+    if (moved) title = title + " · Moved from " + formatMinutes(block.preferredStartMin);
     return '<div class="ff-cal-block' + blockDensityClass(block.startMin, block.endMin) +
+      (moved ? " is-moved" : "") +
       '" data-ff-cal-block="' + escapeHtml(block.blockId) +
       '" data-ff-cal-block-reason="' + escapeHtml(block.reason) +
       '" data-ff-cal-start="' + Number(block.startMin) +
@@ -303,12 +317,14 @@
       '" data-ff-cal-duration="' + duration +
       '" data-ff-cal-block-provider="' + escapeHtml(block.providerId) +
       '" data-ff-cal-block-date="' + escapeHtml(block.dateKey) + '"' +
+      seriesAttr + flexAttr +
       noteAttr +
-      ' title="' + escapeHtml(cardTitle(block)) +
+      ' title="' + escapeHtml(title) +
       '" style="top:' + rect.top + "px;height:" + Math.max(rect.height, 16) + 'px">' +
       '<span class="ff-cal-block-reason">' + escapeHtml(lines.reason) + "</span>" +
       '<span class="ff-cal-block-time">' + escapeHtml(lines.time) + "</span>" +
       noteHtml +
+      movedHtml +
       "</div>";
   }
 

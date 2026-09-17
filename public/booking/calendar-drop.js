@@ -90,6 +90,32 @@
       return !(skipBlock && win && String(win.blockId || "") === skipBlock);
     });
     if (rangeOverlaps(blockedWins, startMin, endMin)) {
+      var flex = window.ffBookingFlexRelocate;
+      var dateKey = String(action.dateKey || (action.axis && action.axis.dateKey) || "").trim();
+      var locationId = String(action.locationId || (action.axis && action.axis.locationId) || "").trim();
+      if (!dateKey) {
+        var st = state();
+        if (st && typeof st.getSelectedDateKey === "function") dateKey = String(st.getSelectedDateKey() || "").trim();
+      }
+      if (!locationId) {
+        var stLoc = state();
+        if (stLoc && typeof stLoc.getLocationId === "function") locationId = String(stLoc.getLocationId() || "").trim();
+      }
+      if (flex && typeof flex.tryFitFromCalendar === "function") {
+        var fit = flex.tryFitFromCalendar({
+          providerId: action.providerId,
+          dateKey: dateKey,
+          locationId: locationId,
+          startMin: startMin,
+          endMin: endMin,
+          durationMinutes: durationOf(action),
+          excludeBlockId: skipBlock,
+          appointmentId: action.excludeAppointmentId || (action.source && action.source.appointmentId)
+        });
+        if (fit && fit.ok) {
+          return { ok: true, relocations: fit.relocations || [] };
+        }
+      }
       return { ok: false, reason: "provider_blocked", message: MESSAGES.provider_blocked };
     }
     return { ok: true };

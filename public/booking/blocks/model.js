@@ -1,6 +1,6 @@
 /**
- * One-off Calendar Time Block. Not an appointment and not recurring schedule.
- * Persisted path remains salons/{salonId}/calendarBlocks.
+ * Calendar Time Block. One-off documents stay at salons/{salonId}/calendarBlocks.
+ * Recurring definitions live in calendarBlockSeries; visible days are generated.
  */
 (function () {
   var REASONS = ["lunch", "break", "meeting", "training", "personal", "other"];
@@ -104,6 +104,21 @@
     var reason = normalizeReason(raw.reason || raw.kind || raw.type);
     var note = displayNote(raw);
     var label = note || labelForReason(reason);
+    var seriesApi = window.ffBookingBlockSeriesModel;
+    var parsed = seriesApi && typeof seriesApi.parseOccurrenceId === "function"
+      ? seriesApi.parseOccurrenceId(raw.blockId || raw.id)
+      : null;
+    var seriesId = trim(raw.seriesId) || (parsed && parsed.seriesId) || "";
+    var occurrenceDateKey = trim(raw.occurrenceDateKey) || (parsed && parsed.dateKey) || "";
+    var flexibilityMode = trim(raw.flexibilityMode).toLowerCase() === "flexible" ? "flexible" : "fixed";
+    var preferredStartMin = Number(raw.preferredStartMin);
+    if (!Number.isFinite(preferredStartMin)) preferredStartMin = startMin;
+    var requiredDurationMinutes = Number(raw.requiredDurationMinutes);
+    if (!(requiredDurationMinutes > 0)) requiredDurationMinutes = endMin - startMin;
+    var earliestStartMin = Number(raw.earliestStartMin);
+    var latestEndMin = Number(raw.latestEndMin);
+    if (!Number.isFinite(earliestStartMin)) earliestStartMin = preferredStartMin;
+    if (!Number.isFinite(latestEndMin)) latestEndMin = preferredStartMin + requiredDurationMinutes;
     return {
       blockId: trim(raw.blockId || raw.id),
       providerId: providerId,
@@ -114,6 +129,20 @@
       reason: reason,
       label: label,
       note: note,
+      flexibilityMode: flexibilityMode,
+      preferredStartMin: preferredStartMin,
+      earliestStartMin: earliestStartMin,
+      latestEndMin: latestEndMin,
+      requiredDurationMinutes: requiredDurationMinutes,
+      seriesId: seriesId,
+      occurrenceDateKey: occurrenceDateKey,
+      isOccurrence: !!(raw.isOccurrence || seriesId),
+      isOverride: !!raw.isOverride,
+      movedFromPreferred: startMin !== preferredStartMin,
+      repeatFrequency: trim(raw.repeatFrequency) || "none",
+      daysOfWeek: Array.isArray(raw.daysOfWeek) ? raw.daysOfWeek.slice() : [],
+      startDateKey: trim(raw.startDateKey),
+      endDateKey: trim(raw.endDateKey),
       createdByUid: trim(raw.createdByUid),
       createdByStaffId: trim(raw.createdByStaffId),
       createdAt: raw.createdAt || null,

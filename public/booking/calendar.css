@@ -647,7 +647,7 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-block-editor-card {
   position: relative;
   z-index: 1;
-  width: min(360px, 100%);
+  width: min(420px, 100%);
   background: #fff;
   border: 1px solid #e6e4ea;
   border-radius: 14px;
@@ -778,6 +778,58 @@ body.ff-booking-area .ff-booking-main {
 .ff-cal-block-editor-delete {
   background: transparent;
   color: #9b3b3b;
+}
+.ff-cal-block-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ff-cal-block-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 550;
+  color: #2a2140;
+}
+.ff-cal-block-flex,
+.ff-cal-block-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ff-cal-block-scopes label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 550;
+  color: #2a2140;
+}
+.ff-cal-block-flex-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid #e6e4ea;
+  border-radius: 999px;
+  background: #f8f7f5;
+  color: #2a2140;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+.ff-cal-block-flex-opt.is-selected,
+.ff-cal-block-flex-opt[aria-checked="true"] {
+  border-color: #A89F8D;
+  background: #F3F0E8;
+  color: #5C5648;
+}
+.ff-cal-block-moved {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: #8a8494;
+  line-height: 1.2;
 }
 
 .ff-cal-filter-menu {

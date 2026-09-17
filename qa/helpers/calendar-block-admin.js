@@ -204,6 +204,139 @@ async function cleanupStaleQaCalendarBlocks(maxAgeMs) {
   });
 }
 
+const SERIES_PREFIX = "salons/" + SALON_ID + "/calendarBlockSeries/";
+const EXCEPTION_PREFIX = "salons/" + SALON_ID + "/calendarBlockExceptions/";
+
+function isQaOwnedSeries(data) {
+  return isQaOwnedCalendarBlock(data);
+}
+
+function isRunOwnedSeries(data, runId) {
+  return isRunOwnedCalendarBlock(data, runId);
+}
+
+function summarizeSeries(id, data) {
+  const row = data && typeof data === "object" ? data : {};
+  return {
+    seriesId: id,
+    salonId: SALON_ID,
+    projectId: REQUIRED_PROJECT,
+    locationId: row.locationId || "",
+    providerId: row.providerId || "",
+    startDateKey: row.startDateKey || "",
+    note: row.note || "",
+    label: row.label || "",
+  };
+}
+
+async function waitForQaCalendarSeriesByNote(note, timeoutMs) {
+  const started = Date.now();
+  const limit = Number(timeoutMs) || 20000;
+  const want = String(note || "").trim();
+  if (!want) abort("waitForQaCalendarSeriesByNote requires a note.");
+  while (Date.now() - started < limit) {
+    const rows = await withAdmin(async (db) => {
+      const snap = await db.collection("salons/" + SALON_ID + "/calendarBlockSeries").limit(400).get();
+      const found = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() || {};
+        if (!isQaOwnedSeries(data)) return;
+        if (String(data.note || "").trim() !== want && String(data.label || "").trim() !== want) return;
+        found.push(summarizeSeries(docSnap.id, data));
+      });
+      return found;
+    });
+    if (rows.length) return rows[0];
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  abort("Timed out waiting for QA Time Block series note: " + want);
+}
+
+async function cleanupQaCalendarSeries(runId) {
+  const id = String(runId || "").trim();
+  if (!id) abort("cleanupQaCalendarSeries requires a runId so concurrent QA runs are not deleted.");
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlockSeries").limit(400).get();
+    const deleted = [];
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() || {};
+      if (!isRunOwnedSeries(data, id)) continue;
+      const seriesPath = SERIES_PREFIX + docSnap.id;
+      assertQaSalonPath(seriesPath);
+      const exSnap = await db.collection("salons/" + SALON_ID + "/calendarBlockExceptions")
+        .where("seriesId", "==", docSnap.id)
+        .limit(400)
+        .get();
+      for (const ex of exSnap.docs) {
+        const exPath = EXCEPTION_PREFIX + ex.id;
+        assertQaSalonPath(exPath);
+        await db.doc(exPath).delete();
+      }
+      await db.doc(seriesPath).delete();
+      deleted.push(docSnap.id);
+    }
+    return deleted;
+  });
+}
+
+async function cleanupStaleQaCalendarSeries(maxAgeMs) {
+  const age = Number(maxAgeMs) || 6 * 60 * 60 * 1000;
+  const cutoff = Date.now() - age;
+  return withAdmin(async (db) => {
+    const snap = await db.collection("salons/" + SALON_ID + "/calendarBlockSeries").limit(400).get();
+    const deleted = [];
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() || {};
+      if (!isQaOwnedSeries(data)) continue;
+      const updated = docSnap.updateTime && docSnap.updateTime.toMillis ? docSnap.updateTime.toMillis() : 0;
+      if (!isStaleUpdate(updated, cutoff)) continue;
+      const seriesPath = SERIES_PREFIX + docSnap.id;
+      assertQaSalonPath(seriesPath);
+      const exSnap = await db.collection("salons/" + SALON_ID + "/calendarBlockExceptions")
+        .where("seriesId", "==", docSnap.id)
+        .limit(400)
+        .get();
+      for (const ex of exSnap.docs) {
+        const exPath = EXCEPTION_PREFIX + ex.id;
+        assertQaSalonPath(exPath);
+        await db.doc(exPath).delete();
+      }
+      await db.doc(seriesPath).delete();
+      deleted.push(docSnap.id);
+    }
+    return deleted;
+  });
+}
+
+async function deleteCalendarSeriesByIds(ids) {
+  const list = (Array.isArray(ids) ? ids : []).map((id) => String(id || "").trim()).filter(Boolean);
+  if (!list.length) return [];
+  return withAdmin(async (db) => {
+    const deleted = [];
+    for (const id of list) {
+      const seriesPath = SERIES_PREFIX + id;
+      assertQaSalonPath(seriesPath);
+      const snap = await db.doc(seriesPath).get();
+      if (!snap.exists) continue;
+      const data = snap.data() || {};
+      if (data.locationId && data.locationId !== QA_LOCATION_ID) continue;
+      if (data.providerId && QA_PROVIDER_IDS.indexOf(data.providerId) === -1) continue;
+      const exSnap = await db.collection("salons/" + SALON_ID + "/calendarBlockExceptions")
+        .where("seriesId", "==", id)
+        .limit(400)
+        .get();
+      for (const ex of exSnap.docs) {
+        const exPath = EXCEPTION_PREFIX + ex.id;
+        assertQaSalonPath(exPath);
+        await db.doc(exPath).delete();
+      }
+      await db.doc(seriesPath).delete();
+      deleted.push(id);
+    }
+    return deleted;
+  });
+}
+
 module.exports = {
   SALON_ID,
   FIXTURE_NOTE,
@@ -223,4 +356,10 @@ module.exports = {
   deleteCalendarBlocksByIds,
   cleanupQaCalendarBlocks,
   cleanupStaleQaCalendarBlocks,
+  isQaOwnedSeries,
+  isRunOwnedSeries,
+  waitForQaCalendarSeriesByNote,
+  cleanupQaCalendarSeries,
+  cleanupStaleQaCalendarSeries,
+  deleteCalendarSeriesByIds,
 };

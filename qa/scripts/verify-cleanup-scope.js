@@ -7,6 +7,8 @@ const {
   isQaCalendarBlockMark,
   isQaOwnedCalendarBlock,
   isRunOwnedCalendarBlock,
+  isQaOwnedSeries,
+  isRunOwnedSeries,
   noteBelongsToRun: blockNoteBelongsToRun,
   isStaleUpdate,
   FIXTURE_NOTE,
@@ -120,6 +122,28 @@ check("stale calendar block age cutoff is exclusive of fresh updates", () => {
   assert.strictEqual(isStaleUpdate(cutoff - 1, cutoff), true);
   assert.strictEqual(isStaleUpdate(cutoff + 1, cutoff), false);
   assert.strictEqual(isStaleUpdate(0, cutoff), false);
+});
+
+check("calendar series cleanup uses the same QA ownership as Time Blocks", () => {
+  const runA = "FF-QA-aaa111";
+  assert.strictEqual(isQaOwnedSeries({
+    locationId: "qaLoc1",
+    providerId: "qaProv1",
+    note: runA + " lunch",
+    label: runA + " lunch",
+  }), true);
+  assert.strictEqual(isRunOwnedSeries({
+    locationId: "qaLoc1",
+    providerId: "qaProv1",
+    note: runA + " lunch",
+    label: runA + " lunch",
+  }, runA), true);
+  assert.strictEqual(isQaOwnedSeries({
+    locationId: "qaLoc1",
+    providerId: "qaProv1",
+    note: "",
+    label: "Lunch Break",
+  }), false);
 });
 
 if (failed) {

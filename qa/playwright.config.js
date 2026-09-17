@@ -90,5 +90,14 @@ module.exports = defineConfig({
         storageState: STORAGE_STATE_PATH,
       },
     },
+    {
+      name: "recurring-flex",
+      dependencies: ["setup"],
+      testMatch: /recurring-flex-blocks\.spec\.js/,
+      timeout: 180000,
+      use: {
+        storageState: STORAGE_STATE_PATH,
+      },
+    },
   ],
 });

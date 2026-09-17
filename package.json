@@ -17,6 +17,7 @@
     "test:booking:lifecycle": "FF_QA_SUITE=lifecycle playwright test --config qa/playwright.config.js --project=lifecycle",
     "test:booking:clients": "FF_QA_SUITE=clients playwright test --config qa/playwright.config.js --project=clients",
     "test:booking:time-block": "FF_QA_SUITE=time-block playwright test --config qa/playwright.config.js --project=time-block",
+    "test:booking:recurring-flex": "FF_QA_SUITE=recurring-flex playwright test --config qa/playwright.config.js --project=recurring-flex",
     "test:booking:staging-write": "npm run test:booking:e2e && npm run test:booking:lifecycle && npm run test:booking:clients",
     "test:booking:regression": "node qa/scripts/run-booking-regression.js",
     "test:booking:regression:compare": "node qa/scripts/verify-baseline-compare.js",

@@ -172,8 +172,11 @@ function availabilityCode(api, providerId, startAt, durationMinutes, locationId)
   if (!engine || typeof engine.canProviderFitDuration !== "function") {
     return { ok: false, code: api.CODES.PROVIDER_NOT_WORKING, error: "Availability engine is not loaded." };
   }
-  if (engine.canProviderFitDuration(providerId, startAt, durationMinutes, locationId)) {
-    return { ok: true };
+  const details = typeof engine.fitProviderDuration === "function"
+    ? engine.fitProviderDuration(providerId, startAt, durationMinutes, locationId)
+    : { ok: engine.canProviderFitDuration(providerId, startAt, durationMinutes, locationId) };
+  if (details && details.ok) {
+    return { ok: true, relocations: details.relocations || [] };
   }
   const hours = typeof engine.getEffectiveBusinessHours === "function"
     ? engine.getEffectiveBusinessHours(startAt, locationId)
@@ -355,7 +358,7 @@ async function buildServiceLine(salonId, locationId, rawLine) {
     line.addonTargetLineId = String(rawLine.addonTargetLineId).trim();
     line.addonOfComboInstanceId = String(rawLine.addonOfComboInstanceId || "").trim();
   }
-  return { ok: true, line };
+  return { ok: true, line, relocations: fit.relocations || [] };
 }
 
 async function validateAppointment(data, options) {
@@ -369,6 +372,7 @@ async function validateAppointment(data, options) {
     return { ok: false, code: api.CODES.INVALID_CLIENT, error: "Client was not found." };
   }
   const lines = [];
+  const relocations = [];
   for (let i = 0; i < checked.fields.serviceLines.length; i += 1) {
     const built = await buildServiceLine(salonId, checked.fields.locationId, checked.fields.serviceLines[i]);
     if (!built.ok) {
@@ -376,6 +380,9 @@ async function validateAppointment(data, options) {
       return built;
     }
     lines.push(built.line);
+    (built.relocations || []).forEach((move) => {
+      if (move) relocations.push(move);
+    });
   }
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
@@ -432,6 +439,7 @@ async function validateAppointment(data, options) {
   const endKey = api.dateKeyOf(windowTimes.endAt, checked.fields.locationId);
   return {
     ok: true,
+    relocations,
     appointment: {
       clientId: checked.fields.clientId,
       clientSnapshot: api.clientSnapshotFrom(client),
@@ -495,6 +503,20 @@ async function createAppointment(data) {
   const checked = await validateAppointment(data, { salonId });
   if (!checked.ok) return { ...checked, created: false };
   const row = checked.appointment;
+  const blocks = window.ffBookingBlocks;
+  let moved = [];
+  if (checked.relocations && checked.relocations.length
+      && blocks && typeof blocks.applyRelocations === "function") {
+    try {
+      moved = await blocks.applyRelocations(checked.relocations);
+    } catch (err) {
+      return {
+        ok: false,
+        created: false,
+        error: (err && err.message) || "Could not move the required Time Block.",
+      };
+    }
+  }
   const payload = {
     clientId: row.clientId,
     clientSnapshot: row.clientSnapshot,
@@ -518,10 +540,30 @@ async function createAppointment(data) {
     cancelledByUid: "",
     cancellationReason: "",
   };
-  const ref = await addDoc(appointmentsRef(salonId), payload);
+  let ref;
+  try {
+    ref = await addDoc(appointmentsRef(salonId), payload);
+  } catch (err) {
+    if (moved.length && blocks && typeof blocks.applyRelocations === "function") {
+      try {
+        await blocks.applyRelocations(moved.map((move) => Object.assign({}, move, {
+          toStartMin: move.fromStartMin,
+          toEndMin: move.fromEndMin,
+          fromStartMin: move.toStartMin,
+          fromEndMin: move.toEndMin,
+          moved: true,
+        })));
+      } catch (_) {}
+    }
+    return {
+      ok: false,
+      created: false,
+      error: (err && err.message) || "Could not save this appointment.",
+    };
+  }
   const appointment = await getAppointmentById(ref.id, salonId);
   emitAppointmentCreated(appointment);
-  return { ok: true, created: true, appointment };
+  return { ok: true, created: true, appointment, relocations: moved };
 }
 
 async function getAppointmentsForDate(date, locationId) {

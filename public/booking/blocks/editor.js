@@ -11,6 +11,8 @@
   var saving = false;
 
   function model() { return window.ffBookingBlockModel || null; }
+  function seriesModel() { return window.ffBookingBlockSeriesModel || null; }
+  function recurrenceUi() { return window.ffBookingBlockEditorRecurrence || null; }
   function cache() { return window.ffBookingCalBlocks || null; }
   function repo() { return window.ffBookingBlocks || null; }
   function drop() { return window.ffBookingCalDrop || null; }
@@ -166,7 +168,20 @@
       endMin: startMin + duration,
       reason: state && state.reason,
       note: state && state.note,
-      label: state && state.label
+      label: state && state.label,
+      flexibilityMode: state && state.flexibilityMode,
+      preferredStartMin: state && state.preferredStartMin != null ? state.preferredStartMin : startMin,
+      earliestStartMin: state && state.earliestStartMin,
+      latestEndMin: state && state.latestEndMin,
+      requiredDurationMinutes: duration,
+      seriesId: state && state.seriesId,
+      occurrenceDateKey: state && state.occurrenceDateKey,
+      isOccurrence: state && state.isOccurrence,
+      isOverride: state && state.isOverride,
+      repeatFrequency: state && state.repeatFrequency,
+      daysOfWeek: state && state.daysOfWeek,
+      startDateKey: state && state.startDateKey,
+      endDateKey: state && state.endDateKey
     };
     return api && typeof api.normalize === "function" ? api.normalize(raw) : (cache() && cache().normalize(raw));
   }
@@ -227,17 +242,23 @@
     var durEl = el.querySelector("[name='ff-block-duration']");
     var endEl = el.querySelector("[name='ff-block-end']");
     var noteEl = el.querySelector("[name='ff-block-note']");
+    var rec = recurrenceUi() && typeof recurrenceUi().read === "function"
+      ? recurrenceUi().read(el, current)
+      : {};
     var startMin = startEl ? Number(startEl.value) : current.startMin;
     var custom = !!(durEl && durEl.value === "custom");
-    var spec = {
+    var spec = Object.assign({
       blockId: current.blockId,
       providerId: current.providerId,
       locationId: current.locationId,
       dateKey: current.dateKey,
       startMin: startMin,
       reason: selectedReason(el),
-      note: noteEl ? noteEl.value : current.note
-    };
+      note: noteEl ? noteEl.value : current.note,
+      seriesId: current.seriesId,
+      occurrenceDateKey: current.occurrenceDateKey || current.dateKey,
+      isOccurrence: current.isOccurrence
+    }, rec);
     if (custom) {
       spec.endMin = endEl ? Number(endEl.value) : current.endMin;
     } else if (durEl && Number(durEl.value) > 0) {
@@ -245,6 +266,12 @@
     } else {
       spec.endMin = current.endMin;
       spec.startMin = Number.isFinite(startMin) ? startMin : current.startMin;
+    }
+    spec.preferredStartMin = spec.startMin;
+    spec.requiredDurationMinutes = (spec.endMin || (spec.startMin + spec.durationMinutes)) - spec.startMin;
+    if (spec.flexibilityMode !== "flexible") {
+      spec.earliestStartMin = spec.startMin;
+      spec.latestEndMin = spec.startMin + spec.requiredDurationMinutes;
     }
     return specFromState(spec);
   }
@@ -278,6 +305,11 @@
     var el = ensure();
     var duration = Math.max(15, durationFromState(current));
     var isEdit = !!current.blockId;
+    var recHtml = recurrenceUi() && typeof recurrenceUi().fieldsHtml === "function"
+      ? recurrenceUi().fieldsHtml(current, function (selected, fromMin, toMin) {
+        return timeOptions(selected, fromMin, toMin);
+      })
+      : "";
     el.innerHTML =
       '<div class="ff-cal-block-editor-card">' +
         '<div class="ff-cal-block-editor-head">' +
@@ -314,6 +346,7 @@
           (isPresetDuration(duration) ? " hidden" : "") + ">End" +
           '<select name="ff-block-end">' + endOptions(current.startMin, current.endMin) + "</select>" +
         "</label>" +
+        recHtml +
         '<label class="ff-cal-block-editor-field">Note' +
           '<input type="text" name="ff-block-note" maxlength="80" placeholder="' +
             escapeHtml(notePlaceholder(current.reason)) + '" value="' +
@@ -329,6 +362,7 @@
     el.removeAttribute("hidden");
     document.body.classList.add("ff-cal-block-editor-open");
     openedAt = Date.now();
+    if (recurrenceUi() && typeof recurrenceUi().syncUi === "function") recurrenceUi().syncUi(el);
   }
 
   function refreshEndLabel(el) {
@@ -356,6 +390,10 @@
       endEl.innerHTML = endOptions(startMin, endMin);
     }
     refreshEndLabel(el);
+    if (recurrenceUi() && typeof recurrenceUi().syncUi === "function") recurrenceUi().syncUi(el);
+    if (recurrenceUi() && typeof recurrenceUi().refreshFlexLabels === "function") {
+      recurrenceUi().refreshFlexLabels(el, readForm(el) || current);
+    }
   }
 
   function openCreate(spec) {
@@ -373,7 +411,17 @@
       endMin: row.endMin,
       reason: row.reason,
       note: row.note || "",
-      label: row.label
+      label: row.label,
+      flexibilityMode: "fixed",
+      preferredStartMin: row.startMin,
+      earliestStartMin: Math.max(6 * 60, row.startMin - 60),
+      latestEndMin: Math.min(23 * 60, row.endMin + 60),
+      requiredDurationMinutes: row.endMin - row.startMin,
+      repeatFrequency: "none",
+      daysOfWeek: [],
+      startDateKey: row.dateKey,
+      endDateKey: "",
+      editScope: "occurrence"
     };
     render();
     return current;
@@ -382,6 +430,8 @@
   function openEdit(block) {
     var row = specFromState(block);
     if (!row || !row.blockId) return null;
+    var sm = seriesModel();
+    var parsed = sm && typeof sm.parseOccurrenceId === "function" ? sm.parseOccurrenceId(row.blockId) : null;
     current = {
       blockId: row.blockId,
       providerId: row.providerId,
@@ -391,7 +441,21 @@
       endMin: row.endMin,
       reason: row.reason,
       note: row.note || "",
-      label: row.label
+      label: row.label,
+      flexibilityMode: row.flexibilityMode || "fixed",
+      preferredStartMin: row.preferredStartMin != null ? row.preferredStartMin : row.startMin,
+      earliestStartMin: row.earliestStartMin,
+      latestEndMin: row.latestEndMin,
+      requiredDurationMinutes: row.requiredDurationMinutes || (row.endMin - row.startMin),
+      seriesId: row.seriesId || (parsed && parsed.seriesId) || "",
+      occurrenceDateKey: row.occurrenceDateKey || (parsed && parsed.dateKey) || row.dateKey,
+      isOccurrence: !!(row.isOccurrence || parsed),
+      isOverride: !!row.isOverride,
+      repeatFrequency: row.repeatFrequency || (parsed ? "daily" : "none"),
+      daysOfWeek: Array.isArray(row.daysOfWeek) ? row.daysOfWeek.slice() : [],
+      startDateKey: row.startDateKey || row.dateKey,
+      endDateKey: row.endDateKey || "",
+      editScope: "occurrence"
     };
     render();
     return current;
@@ -401,6 +465,14 @@
     if (saving) return;
     var el = document.getElementById(EDITOR_ID);
     var spec = readForm(el);
+    var rec = recurrenceUi() && typeof recurrenceUi().read === "function"
+      ? recurrenceUi().read(el, current)
+      : {};
+    var payload = Object.assign({}, spec, rec, {
+      preferredStartMin: spec && spec.startMin,
+      durationMinutes: spec ? spec.endMin - spec.startMin : 30,
+      requiredDurationMinutes: spec ? spec.endMin - spec.startMin : 30
+    });
     var checked = inspectSave(spec, current && current.blockId);
     if (!checked.ok) {
       toast(checked.message || "That time is not available.");
@@ -413,10 +485,18 @@
     }
     saving = true;
     try {
-      if (current && current.blockId) {
-        await api.update(current.blockId, spec);
+      if (current && current.isOccurrence && current.seriesId) {
+        if (rec.editScope === "series" && typeof api.updateSeries === "function") {
+          await api.updateSeries(current.seriesId, payload);
+        } else if (rec.editScope === "future" && typeof api.splitSeriesFrom === "function") {
+          await api.splitSeriesFrom(current.seriesId, current.dateKey, payload);
+        } else {
+          await api.update(current.blockId, payload);
+        }
+      } else if (current && current.blockId) {
+        await api.update(current.blockId, payload);
       } else {
-        await api.create(spec);
+        await api.create(payload);
       }
       close();
     } catch (err) {
@@ -428,12 +508,39 @@
 
   async function remove() {
     if (!current || !current.blockId || saving) return;
-    if (!window.confirm("Delete this Time Block? That time will become available for booking.")) return;
+    var el = document.getElementById(EDITOR_ID);
+    var rec = recurrenceUi() && typeof recurrenceUi().read === "function"
+      ? recurrenceUi().read(el, current)
+      : {};
     var api = repo();
     if (!api || typeof api.remove !== "function") return;
+    var isSeries = !!(current.isOccurrence && current.seriesId);
+    var message = "Delete this Time Block? That time will become available for booking.";
+    if (isSeries && rec.editScope === "series") {
+      message = "Delete the entire repeating Time Block? Every day in this series will be removed.";
+    } else if (isSeries && rec.editScope === "future") {
+      message = "Delete this and future occurrences? Earlier days will stay.";
+    } else if (isSeries) {
+      message = "Delete this Time Block for this date only? Later days will still have it.";
+    }
+    if (!window.confirm(message)) return;
     saving = true;
     try {
-      await api.remove(current.blockId);
+      if (isSeries && rec.editScope === "series" && typeof api.deleteSeries === "function") {
+        await api.deleteSeries(current.seriesId);
+      } else if (isSeries && rec.editScope === "future" && typeof api.updateSeries === "function") {
+        var sm = seriesModel();
+        var prev = sm && typeof sm.previousDateKey === "function"
+          ? sm.previousDateKey(current.dateKey)
+          : current.dateKey;
+        if (current.startDateKey === current.dateKey && typeof api.deleteSeries === "function") {
+          await api.deleteSeries(current.seriesId);
+        } else {
+          await api.updateSeries(current.seriesId, Object.assign({}, current, { endDateKey: prev }));
+        }
+      } else {
+        await api.remove(current.blockId);
+      }
       close();
     } catch (err) {
       toast((err && err.message) || "Could not delete this Time Block.");
@@ -450,6 +557,15 @@
       if (!t || typeof t.closest !== "function") return;
       var el = document.getElementById(EDITOR_ID);
       if (!el || el.hasAttribute("hidden")) return;
+      var flexBtn = t.closest("[data-ff-block-flex]");
+      if (flexBtn && el.contains(flexBtn)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (recurrenceUi() && typeof recurrenceUi().selectFlex === "function") {
+          recurrenceUi().selectFlex(el, flexBtn.getAttribute("data-ff-block-flex"));
+        }
+        return;
+      }
       var reasonBtn = t.closest("[data-ff-block-reason]");
       if (reasonBtn && el.contains(reasonBtn)) {
         ev.preventDefault();

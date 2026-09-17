@@ -6,7 +6,10 @@
  */
 const { cleanupStaleQaAppointments } = require("../helpers/appointment-admin");
 const { cleanupStaleQaClients } = require("../helpers/client-admin");
-const { cleanupStaleQaCalendarBlocks } = require("../helpers/calendar-block-admin");
+const {
+  cleanupStaleQaCalendarBlocks,
+  cleanupStaleQaCalendarSeries,
+} = require("../helpers/calendar-block-admin");
 
 const MAX_AGE_MS = Number(process.env.FF_QA_STALE_MS || 6 * 60 * 60 * 1000);
 
@@ -16,9 +19,11 @@ async function main() {
   const appointments = await cleanupStaleQaAppointments(MAX_AGE_MS);
   const clients = await cleanupStaleQaClients(MAX_AGE_MS);
   const calendarBlocks = await cleanupStaleQaCalendarBlocks(MAX_AGE_MS);
+  const calendarSeries = await cleanupStaleQaCalendarSeries(MAX_AGE_MS);
   console.log("Deleted stale appointments:", appointments.length);
   console.log("Deleted stale clients:", clients.length);
   console.log("Deleted stale calendarBlocks:", calendarBlocks.length);
+  console.log("Deleted stale calendarBlockSeries:", calendarSeries.length);
 }
 
 main().catch((err) => {
