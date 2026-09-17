@@ -153,7 +153,10 @@ check("8. 30-minute block still shows reason + time",
 check("9. 30-minute block with note shows note if layout allows",
   thirtyHtml.indexOf("Staff meeting") !== -1 &&
   /ff-cal-block\.is-compact/.test(blockCss) &&
-  /\.ff-cal-block\s*>\s*\.ff-cal-block-time\s*\{[\s\S]*?flex:\s*0 0 auto/.test(blockCss));
+  /\.ff-cal-block\s*>\s*\.ff-cal-block-time\s*\{[\s\S]*?flex:\s*0 0 auto/.test(blockCss) &&
+  /\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?flex:\s*0 0 auto/.test(blockCss) &&
+  /\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?min-height:\s*1em/.test(blockCss) &&
+  !/\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[^}]*min-height:\s*0/.test(blockCss));
 
 const longNote = makeBlock({
   reason: "personal",
@@ -167,6 +170,11 @@ check("10. long note truncates safely",
   longHtml.indexOf('title="') !== -1 &&
   /text-overflow:\s*ellipsis/.test(blockCss) &&
   longHtml.indexOf("is-tight") !== -1);
+check("10b. 15-minute block hides the note so time stays visible",
+  longHtml.indexOf("is-tight") !== -1 &&
+  longHtml.indexOf("9:00 AM – 9:15 AM") !== -1 &&
+  blocks.blockDensityClass(longNote.startMin, longNote.endMin) === " is-tight" &&
+  /\.ff-cal-block\.is-tight\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?display:\s*none/.test(blockCss));
 
 check("11. persisted times match displayed times",
   meetingHtml.indexOf('data-ff-cal-start="' + meeting.startMin + '"') !== -1 &&

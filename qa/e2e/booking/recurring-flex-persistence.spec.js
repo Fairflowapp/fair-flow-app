@@ -400,6 +400,10 @@ test("Recurring + Flexible Time Blocks real Firestore persistence", async ({ pag
   expect(lines.reason).toBe("Lunch Break");
   expect(lines.time).toMatch(/2:00 PM/);
   expect(lines.note).toBe(lunchNote);
+  await ui.assertCardLineVisible(card, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(card, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(card, ".ff-cal-block-note");
+  await ui.assertBlockCardGeometry(card, 30);
 
   await openWeekView(page, ui.FIXTURE.providerOneId);
   await expect.poll(async () => {
@@ -431,6 +435,10 @@ test("Recurring + Flexible Time Blocks real Firestore persistence", async ({ pag
   expect(lines.time).toMatch(/1:30 PM/);
   expect(lines.note).toBe(lunchNote);
   expect(lines.time).not.toMatch(/2:00 PM–2:30 PM/);
+  await ui.assertCardLineVisible(movedCard, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(movedCard, ".ff-cal-block-time");
+  await ui.assertCardLineVisible(movedCard, ".ff-cal-block-note");
+  await ui.assertBlockCardGeometry(movedCard, 30);
 
   await goToDateKey(page, dateB);
   const nextCard = await ui.waitForBlockCard(page, "series:" + series.seriesId + ":" + dateB);

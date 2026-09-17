@@ -119,6 +119,10 @@ test("Recurring and Flexible Time Block editor + Calendar", async ({ page }) => 
     expect(lines.reason).toBe("Lunch Break");
     expect(lines.time).toMatch(/2:00 PM/);
     expect(lines.note).toBe(note);
+    await ui.assertCardLineVisible(card, ".ff-cal-block-reason");
+    await ui.assertCardLineVisible(card, ".ff-cal-block-time");
+    await ui.assertCardLineVisible(card, ".ff-cal-block-note");
+    await ui.assertBlockCardGeometry(card, 30);
     await expect(card).toHaveAttribute("data-ff-cal-block-flex", "flexible");
   } else {
     await page.locator('#ffBookingBlockEditor [data-ff-block-act="close"]').click();

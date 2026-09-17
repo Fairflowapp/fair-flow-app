@@ -225,6 +225,11 @@ return windowObj.ffBookingBlocks.create({
     blockCss.indexOf(".ff-cal-block.is-compact") !== -1 &&
     blockCss.indexOf(".ff-cal-block.is-tight") !== -1 &&
     blockCss.indexOf(".ff-cal-block-reasons .ff-cal-block-reason") !== -1);
+  check("Time Block CSS keeps a 30-minute note from collapsing to zero height",
+    /\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?flex:\s*0 0 auto/.test(blockCss) &&
+    /\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?min-height:\s*1em/.test(blockCss) &&
+    !/\.ff-cal-block\s*>\s*\.ff-cal-block-note\s*\{[^}]*min-height:\s*0/.test(blockCss) &&
+    /\.ff-cal-block\.is-tight\s*>\s*\.ff-cal-block-note\s*\{[\s\S]*?display:\s*none/.test(blockCss));
 
   const lunch = model.normalize({
     providerId: "rebecca",

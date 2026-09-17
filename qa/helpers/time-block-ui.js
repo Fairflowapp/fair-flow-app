@@ -137,14 +137,20 @@ async function measureCardLine(card, selector) {
     const cardBox = el.getBoundingClientRect();
     const lineBox = line.getBoundingClientRect();
     const style = getComputedStyle(line);
+    const minVisible = sel === ".ff-cal-block-note" ? 8 : 2;
     const snap = {
       card: { x: cardBox.x, y: cardBox.y, w: cardBox.width, h: cardBox.height },
       line: { x: lineBox.x, y: lineBox.y, w: lineBox.width, h: lineBox.height, text: String(line.textContent || "").trim() },
       display: style.display,
       visibility: style.visibility,
+      flex: style.flex,
+      flexShrink: style.flexShrink,
+      minHeight: style.minHeight,
+      lineHeight: style.lineHeight,
+      overflow: style.overflow,
     };
     if (style.display === "none" || style.visibility === "hidden") return { ok: false, reason: "hidden", ...snap };
-    if (lineBox.height < 2) return { ok: false, reason: "collapsed", ...snap };
+    if (lineBox.height < minVisible) return { ok: false, reason: "collapsed", ...snap };
     if (lineBox.bottom > cardBox.bottom + 1.5 || lineBox.top < cardBox.top - 1.5) {
       return { ok: false, reason: "clipped", ...snap };
     }
@@ -165,6 +171,21 @@ async function assertCardLineVisible(card, selector) {
     expect(sameHeight, "Time Block card layout is still settling " + JSON.stringify({ prior, result })).toBeTruthy();
   }).toPass({ timeout: 15000 });
   return previous;
+}
+
+async function assertBlockCardGeometry(card, durationMin) {
+  const expected = Number(durationMin) * (72 / 60);
+  await expect.poll(async () => {
+    const box = await card.boundingBox();
+    return box ? box.height : 0;
+  }, { timeout: 15000 }).toBeGreaterThanOrEqual(2);
+  const box = await card.boundingBox();
+  expect(box, "Time Block card must have a bounding box").toBeTruthy();
+  expect(
+    Math.abs(box.height - expected),
+    "Time Block card height must keep duration geometry " + JSON.stringify({ height: box.height, expected, durationMin })
+  ).toBeLessThanOrEqual(2);
+  return box;
 }
 
 async function openBlockEditor(page, blockId) {
@@ -312,7 +333,9 @@ module.exports = {
   waitForBlockCard,
   waitForBlockCardAt,
   readCardLines,
+  measureCardLine,
   assertCardLineVisible,
+  assertBlockCardGeometry,
   openBlockEditor,
   readEditorFacts,
   dragBlockByMinutes,

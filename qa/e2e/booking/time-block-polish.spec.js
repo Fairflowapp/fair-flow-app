@@ -24,6 +24,7 @@ let DATE_KEY = "";
 const CREATED_IDS = [];
 const DAYS_AHEAD = 3;
 const SLOT = {
+  brief: 10 * 60,
   other: 11 * 60,
   lunch: 12 * 60,
   meeting: 13 * 60 + 30,
@@ -120,12 +121,19 @@ test("Time Block polish real UI", async ({ page }) => {
   const meetingNote = noteFor(RUN_ID, "Staff meeting");
   const personalNote = noteFor(RUN_ID, "Doctor appointment");
   const otherNote = noteFor(RUN_ID, "Inventory delivery");
+  const briefNote = noteFor(RUN_ID, "Quick huddle");
 
   await ui.assertNoBlockTimeCopy(page, "#ffBookingCalProviderMenu", {
     reopenProviderId: ui.FIXTURE.providerOneId,
   });
   await page.keyboard.press("Escape");
 
+  const brief = await createBlock(page, {
+    startMin: SLOT.brief,
+    durationMinutes: 15,
+    reason: "meeting",
+    note: briefNote,
+  });
   const other = await createBlock(page, {
     startMin: SLOT.other,
     durationMinutes: 30,
@@ -150,10 +158,13 @@ test("Time Block polish real UI", async ({ page }) => {
     note: personalNote,
   });
 
+  expect(brief.reason).toBe("meeting");
   expect(other.reason).toBe("other");
   expect(lunch.reason).toBe("lunch");
   expect(meeting.reason).toBe("meeting");
   expect(personal.reason).toBe("personal");
+  expect(brief.startMin).toBe(SLOT.brief);
+  expect(brief.endMin).toBe(SLOT.brief + 15);
   expect(meeting.startMin).toBe(SLOT.meeting);
   expect(meeting.endMin).toBe(SLOT.meeting + 30);
   expect(personal.endMin).toBe(SLOT.personal + 60);
@@ -196,12 +207,29 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(lunchLines.note).toBe("");
   await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-reason");
   await ui.assertCardLineVisible(lunchCard, ".ff-cal-block-time");
+  await ui.assertBlockCardGeometry(lunchCard, 30);
   await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-reason");
   await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-time");
   await ui.assertCardLineVisible(meetingAfterReload, ".ff-cal-block-note");
+  await ui.assertBlockCardGeometry(meetingAfterReload, 30);
+  await ui.assertCardLineVisible(otherCard, ".ff-cal-block-note");
+  await ui.assertBlockCardGeometry(otherCard, 30);
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-reason");
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-time");
   await ui.assertCardLineVisible(personalCard, ".ff-cal-block-note");
+  await ui.assertBlockCardGeometry(personalCard, 60);
+  const briefCard = await ui.waitForBlockCard(page, brief.blockId);
+  const briefLines = await ui.readCardLines(briefCard);
+  expect(briefLines.reason).toBe("Meeting");
+  expect(briefLines.time).toBe("10:00 AM – 10:15 AM");
+  await ui.assertCardLineVisible(briefCard, ".ff-cal-block-reason");
+  await ui.assertCardLineVisible(briefCard, ".ff-cal-block-time");
+  await ui.assertBlockCardGeometry(briefCard, 15);
+  const briefNoteBox = await ui.measureCardLine(briefCard, ".ff-cal-block-note");
+  expect(
+    briefNoteBox.reason === "hidden" || briefNoteBox.reason === "collapsed" || briefNoteBox.reason === "clipped" || briefNoteBox.ok,
+    "15-minute note may hide, but must not push time out " + JSON.stringify(briefNoteBox)
+  ).toBeTruthy();
 
   await expect(meetingAfterReload).not.toHaveClass(/ff-cal-card/);
   const appointmentCards = page.locator("#ffBookingCalendarRoot [data-ff-cal-card]");
