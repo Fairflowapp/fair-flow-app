@@ -44,12 +44,14 @@ load("public/booking/reports/sales-range.js", windowObj);
 load("public/booking/reports/service-sales-compute.js", windowObj);
 load("public/booking/reports/sales-time-compute.js", windowObj);
 load("public/booking/reports/client-spend-compute.js", windowObj);
+load("public/booking/reports/sales-compare-compute.js", windowObj);
 
 const compute = windowObj.ffBookingReportsCompute;
 const range = windowObj.ffBookingReportsSalesRange;
 const serviceApi = windowObj.ffBookingReportsServiceSalesCompute;
 const timeApi = windowObj.ffBookingReportsSalesTimeCompute;
 const spendApi = windowObj.ffBookingReportsClientSpendCompute;
+const compareApi = windowObj.ffBookingReportsSalesCompareCompute;
 
 const SALES = [
   {
@@ -148,6 +150,7 @@ const spendSales = SALES.map(function (row, i) {
 });
 const spend = spendApi.summarizeClientSpend(spendSales, OPTS);
 const time = timeApi.summarizeSalesByPeriod(SALES, OPTS);
+const compare = compareApi.comparePeriods(SALES, SALES, OPTS);
 const timeDailyGross = time.days.reduce(function (sum, row) { return sum + row.grossSales; }, 0);
 const timeDailyRefunds = time.days.reduce(function (sum, row) { return sum + row.refunds; }, 0);
 const timeDailyAdjusted = time.days.reduce(function (sum, row) { return sum + row.adjustedSales; }, 0);
@@ -187,6 +190,13 @@ check("N: incomplete retrieval suppresses Client Spend totals", spendApi.ownerVi
 check("Client Spend identified plus unidentified equals Summary gross", spend.totals.identifiedSales + spend.totals.unidentifiedSales === summary.totals.grossTotal && spend.totals.allSales === summary.totals.grossTotal);
 check("Client Spend tickets equal Summary closed tickets", spend.totals.tickets === summary.totals.sales);
 check("Client Spend refunds equal Summary refunds", spend.totals.refunds === summary.totals.refunds);
+check("Sales Comparison current gross equals Sales Summary", compare.metrics.grossTotal.current === summary.totals.grossTotal);
+check("Sales Comparison current adjusted equals Sales Summary", compare.metrics.adjustedTotal.current === summary.totals.adjustedTotal);
+check("Sales Comparison current tickets equal Sales Summary", compare.metrics.tickets.current === summary.totals.sales);
+check("Sales Comparison current tips equal Sales Summary", compare.metrics.tip.current === summary.totals.tip);
+check("Sales Comparison current average ticket equals Summary gross / tickets", compare.metrics.averageTicket.current === compareApi.averageTicket(summary.totals));
+check("N: incomplete current range suppresses Comparison totals", compareApi.ownerView(incompleteFetch, { kind: "ok", sales: SALES }, compare).summary == null);
+check("N: incomplete previous range suppresses Comparison totals", compareApi.ownerView({ kind: "ok", sales: SALES }, incompleteFetch, compare).summary == null && compareApi.ownerView({ kind: "ok", sales: SALES }, incompleteFetch, compare).message === compareApi.INCOMPLETE_PREVIOUS_MESSAGE);
 
 function reportBox() {
   return {
@@ -258,9 +268,10 @@ const zonedOpts = { fromKey: "2026-09-10", toKey: "2026-09-11", locationIds: ["n
 const zonedSummary = compute.summarize(zonedSales, zonedOpts);
 const zonedService = serviceApi.summarizeServiceSales(zonedSales, zonedOpts);
 const zonedTime = timeApi.summarizeSalesByPeriod(zonedSales, zonedOpts);
+const zonedCompare = compareApi.comparePeriods(zonedSales, zonedSales, zonedOpts);
 check("L: timezone civil dates stay aligned across reports", zonedSummary.days.length === 2 && zonedTime.days.length === 2 && zonedService.days.length === 2);
 check("L: NY close lands on Sep 11 and LA on Sep 10 in every report", zonedSummary.days[0].dateKey === "2026-09-10" && zonedSummary.days[0].grossTotal === 20 && zonedSummary.days[1].dateKey === "2026-09-11" && zonedSummary.days[1].grossTotal === 10 && zonedTime.days[0].grossSales === 20 && zonedTime.days[1].grossSales === 10 && zonedService.days[0].sales === 20 && zonedService.days[1].sales === 10);
-check("L: combined timezone totals still reconcile", zonedSummary.totals.grossTotal === 30 && zonedTime.totals.grossSales === 30 && zonedService.totals.grossSales === 30);
+check("L: combined timezone totals still reconcile", zonedSummary.totals.grossTotal === 30 && zonedTime.totals.grossSales === 30 && zonedService.totals.grossSales === 30 && zonedCompare.metrics.grossTotal.current === 30);
 
 check("intentional: service gross is not checkout gross", service.totals.grossSales !== summary.totals.grossTotal);
 check("intentional: average closed ticket is checkout gross / tickets", time.totals.averageTicket === 57.25);
@@ -270,8 +281,10 @@ const summarySrc = read("public/booking/reports/sales-summary.js");
 const serviceSrc = read("public/booking/reports/service-sales.js");
 const timeSrc = read("public/booking/reports/sales-time.js");
 const spendSrc = read("public/booking/reports/client-spend.js");
+const compareSrc = read("public/booking/reports/sales-compare.js");
 const serviceComputeSrc = read("public/booking/reports/service-sales-compute.js");
 const timeComputeSrc = read("public/booking/reports/sales-time-compute.js");
+const compareComputeSrc = read("public/booking/reports/sales-compare-compute.js");
 const computeSrc = read("public/booking/reports/compute.js");
 const uiSrc = read("public/booking/reports/ui.js");
 const navSrc = read("public/booking/reports/nav.js");
@@ -280,16 +293,17 @@ function usesRangeOnly(src) {
   return src.indexOf("fetchForReport") !== -1 && src.indexOf("listForSalon") === -1 && src.indexOf("listForLocation") === -1 && src.indexOf("limit: 80") === -1;
 }
 
-check("source: all three reports use fetchForReport only", usesRangeOnly(summarySrc) && usesRangeOnly(serviceSrc) && usesRangeOnly(timeSrc) && usesRangeOnly(spendSrc));
-check("source: computes do not read priceSnapshot or booked value", computeSrc.indexOf("priceSnapshot") === -1 && serviceComputeSrc.indexOf("priceSnapshot") === -1 && timeComputeSrc.indexOf("priceSnapshot") === -1);
-check("source: all three share rangeForPreset and locationIds", summarySrc.indexOf("rangeForPreset") !== -1 && serviceSrc.indexOf("rangeForPreset") !== -1 && timeSrc.indexOf("rangeForPreset") !== -1 && summarySrc.indexOf("locationIds: ids") !== -1 && serviceSrc.indexOf("locationIds: ids") !== -1 && timeSrc.indexOf("locationIds: ids") !== -1);
+check("source: all three reports use fetchForReport only", usesRangeOnly(summarySrc) && usesRangeOnly(serviceSrc) && usesRangeOnly(timeSrc) && usesRangeOnly(spendSrc) && usesRangeOnly(compareSrc));
+check("source: computes do not read priceSnapshot or booked value", computeSrc.indexOf("priceSnapshot") === -1 && serviceComputeSrc.indexOf("priceSnapshot") === -1 && timeComputeSrc.indexOf("priceSnapshot") === -1 && compareComputeSrc.indexOf("priceSnapshot") === -1);
+check("source: all three share rangeForPreset and locationIds", summarySrc.indexOf("rangeForPreset") !== -1 && serviceSrc.indexOf("rangeForPreset") !== -1 && timeSrc.indexOf("rangeForPreset") !== -1 && compareSrc.indexOf("rangeForPreset") !== -1 && summarySrc.indexOf("locationIds: ids") !== -1 && serviceSrc.indexOf("locationIds: ids") !== -1 && timeSrc.indexOf("locationIds: ids") !== -1 && compareSrc.indexOf("locationIds: ids") !== -1);
 check("source: reports ui does not preload financial fetches", uiSrc.indexOf("fetchForReport") === -1);
 check("copy: Sales Summary is overall checkout sales", navSrc.indexOf("Overall closed checkout sales.") !== -1 && summarySrc.indexOf("Overall closed checkout sales.") !== -1);
 check("copy: Service Sales explains service-item scope", serviceSrc.indexOf("Tips and ticket-level refunds are not allocated to services.") !== -1);
 check("copy: Time Period is grouped by sale date", timeSrc.indexOf("Closed checkout sales grouped by sale date.") !== -1);
 check("copy: Product Sales is not a visible nav item", navSrc.indexOf('id: "product-sales"') === -1);
-check("copy: financial reports do not say revenue or profit", summarySrc.indexOf("Revenue") === -1 && serviceSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("profit") === -1);
-check("copy: incomplete and error strings match", summarySrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && serviceSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && timeSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && summarySrc.indexOf("This report could not load.") !== -1 && serviceSrc.indexOf("This report could not load.") !== -1 && timeSrc.indexOf("This report could not load.") !== -1);
+check("copy: Sales Comparison is a visible nav item", navSrc.indexOf('id: "sales-comparison"') !== -1 && navSrc.indexOf("Sales Comparison") !== -1);
+check("copy: financial reports do not say revenue or profit", summarySrc.indexOf("Revenue") === -1 && serviceSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("Revenue") === -1 && timeSrc.indexOf("profit") === -1 && compareSrc.indexOf("Revenue") === -1);
+check("copy: incomplete and error strings match", summarySrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && serviceSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && timeSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && compareSrc.indexOf("Sales data for this range is incomplete. Narrow the date range and try again.") !== -1 && summarySrc.indexOf("This report could not load.") !== -1 && serviceSrc.indexOf("This report could not load.") !== -1 && timeSrc.indexOf("This report could not load.") !== -1 && compareSrc.indexOf("This report could not load.") !== -1);
 check("shared item-kind semantic is kind !== product", compute.isServiceItem({ kind: "service" }) === true && compute.isServiceItem({ kind: "product" }) === false && serviceApi.isServiceItem({ kind: "addon" }) === true);
 
 if (failed) process.exit(1);

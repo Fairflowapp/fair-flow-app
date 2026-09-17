@@ -1,6 +1,6 @@
 /**
- * Shared checkout Sales facts for Sales Summary, Service Sales,
- * Sales by Time Period, and Client Spend. No Firestore.
+ * Shared checkout Sales facts for Sales Summary, Sales Comparison,
+ * Service Sales, Sales by Time Period, and Client Spend. No Firestore.
  *
  * Gross checkout sales = item amounts + fees + tax + tip (breakdown.grossTotal).
  * Gross service sales = service-item amounts only (kind !== "product").

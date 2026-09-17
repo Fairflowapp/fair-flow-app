@@ -307,7 +307,7 @@ Reports should be **actionable**, not only descriptive. Number → explanation �
 Visible navigation today:
 
 - Intelligence → Booking Intelligence · Forward Outlook
-- Sales → Sales Summary · Service Sales · Sales by Time Period
+- Sales → Sales Summary · Sales Comparison · Service Sales · Sales by Time Period
 - Clients → Cancellations · Client Retention · Client Spend
 
 ### Built
@@ -330,6 +330,7 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 **Financial reports** use closed checkout sales only (`salons/{salonId}/sales`), not appointment booked value:
 
 - Sales Summary
+- Sales Comparison (current civil range vs the immediately preceding equal-length civil range)
 - Service Sales (service-item amounts; tips and ticket-level refunds are not allocated to services)
 - Sales by Time Period
 - Client Spend (closed tickets grouped by identified `clientId`; in-period spend, not lifetime value)
@@ -339,6 +340,8 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 **Client Retention.** Cohort-based return after qualifying visits, with 30 / 60 / 90 / 180-day closed observation windows. The selected range is the cohort period, not the return period. A qualifying visit is `status === "completed"` (checked out after Check In → Start Service → Check Out). Booked, confirmed, checked-in, in-service, cancelled, and no-show appointments are not visits. One identified `clientId` per cohort; the anchor is that client's first completed visit in the cohort. A return is another completed visit for the same `clientId` on a later salon-local civil date, already occurred as of now, inside the selected locations. Same-day multi-service appointments, future scheduled bookings, and cancelled / no-show rows are not returns. A client enters an N-day rate denominator only when `anchor date + N days` has elapsed as of now; open windows are still in observation, never counted as unretained. Rate is returned eligible clients ÷ eligible cohort clients; no closed window shows — rather than 0%. Client Behavior (in-period repeat) is not retention. New vs existing, provider ranking, and service-specific retention are not in v1.
 
 **Client Spend.** Closed checkout sales grouped by identified `clientId` in the selected location and civil date range. Spend is shared `breakdown.grossTotal` (item amounts + fees + tax + tip), so identified-client sales plus unidentified tickets equal Sales Summary / Sales by Time Period gross for the same complete dataset. Tickets without `clientId` are excluded from the ranked table and reported separately. Display names come from the latest ticket `clientSnapshot` in range; no name/phone identity matching and no client document reads. Open and void tickets are excluded. This is in-period spend, not estimated LTV.
+
+**Sales Comparison.** Closed checkout sales for the selected location-local civil range compared with the immediately preceding range of the same number of inclusive days (Sep 1–7 vs Aug 25–31; Sep 1–30 vs Aug 2–31). Totals reuse Sales Summary math: gross = items + fees + tax + tip; adjusted = gross − ticket-level refunds. KPIs are gross, adjusted, closed tickets, average closed ticket, and tips, each with current, previous, absolute change, and percent. Previous = 0 never becomes Infinity: both zero is 0%, current > 0 is shown as New. If either fetch is incomplete or errors, the comparison is not shown as trustworthy. Multi-location current totals must equal Sales Summary for the same current period. No per-location table in v1. This is not booked appointment value.
 
 **Financial infrastructure:**
 

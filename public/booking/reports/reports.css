@@ -432,6 +432,15 @@
   font-weight: 650;
   color: #3b3354;
 }
+.ff-rpt-cmp-up {
+  color: #047857;
+}
+.ff-rpt-cmp-down {
+  color: #b91c1c;
+}
+.ff-rpt-cmp-flat {
+  color: #6b7280;
+}
 .ff-rpt-split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

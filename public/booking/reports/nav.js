@@ -33,6 +33,11 @@
           blurb: "Overall closed checkout sales."
         },
         {
+          id: "sales-comparison",
+          label: "Sales Comparison",
+          blurb: "Closed checkout sales compared with the immediately preceding period of the same number of days."
+        },
+        {
           id: "service-sales",
           label: "Service Sales",
           blurb: "Service-item sales from closed checkout tickets. Tips and ticket-level refunds are not allocated to services."

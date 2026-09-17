@@ -63,6 +63,10 @@
     "/booking/reports/sales-time-compute.js?v=20260914_salestime",
     "/booking/reports/sales-time.js?v=20260914_salestime"
   ];
+  var SALES_COMPARE_SCRIPTS = [
+    "/booking/reports/sales-compare-compute.js?v=20260917_salescmp",
+    "/booking/reports/sales-compare.js?v=20260917_salescmp"
+  ];
   var CANCELLATIONS_SCRIPTS = [
     "/booking/reports/appointment-range.js?v=20260914_apptrange",
     "/booking/reports/cancellations-compute.js?v=20260914_apptrange",
@@ -105,6 +109,10 @@
 
   function salesTimeReady() {
     return !!(window.ffBookingReportsSalesTimeCompute && window.ffBookingReportsSalesTime);
+  }
+
+  function salesCompareReady() {
+    return !!(window.ffBookingReportsSalesCompareCompute && window.ffBookingReportsSalesCompare);
   }
 
   function cancellationsReady() {
@@ -177,6 +185,14 @@
     loadScripts(SALES_TIME_SCRIPTS, done);
   }
 
+  function ensureSalesCompareScripts(done) {
+    if (salesCompareReady()) {
+      done();
+      return;
+    }
+    loadScripts(SALES_COMPARE_SCRIPTS, done);
+  }
+
   function ensureCancellationsScripts(done) {
     if (cancellationsReady()) {
       done();
@@ -231,6 +247,21 @@
     }
     if (id === "sales-summary" && window.ffBookingReportsSalesSummary) {
       window.ffBookingReportsSalesSummary.paint();
+      return;
+    }
+    if (id === "sales-comparison") {
+      if (window.ffBookingReportsSalesCompare) {
+        window.ffBookingReportsSalesCompare.paint();
+        return;
+      }
+      main.innerHTML = '<p class="ff-rpt-empty">Loading Sales Comparison…</p>';
+      ensureSalesCompareScripts(function () {
+        if (window.ffBookingReportsSalesCompare) window.ffBookingReportsSalesCompare.paint();
+        else {
+          var host = document.getElementById("ffRptMain");
+          if (host) host.innerHTML = laterHtml(report);
+        }
+      });
       return;
     }
     if (id === "service-sales") {

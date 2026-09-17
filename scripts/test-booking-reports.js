@@ -51,6 +51,7 @@ check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/rep
 check("reports ui loads time block range for intelligence and outlook", ui.indexOf("/booking/reports/time-block-range.js") !== -1);
 check("reports ui loads service sales modules", ui.indexOf("/booking/reports/service-sales-compute.js") !== -1 && ui.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui loads sales by time period modules", ui.indexOf("/booking/reports/sales-time-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-time.js") !== -1);
+check("reports ui loads sales comparison modules", ui.indexOf("/booking/reports/sales-compare-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-compare.js") !== -1);
 check("reports ui loads cancellations modules", ui.indexOf("/booking/reports/cancellations-compute.js") !== -1 && ui.indexOf("/booking/reports/cancellations.js") !== -1);
 check("reports ui loads appointment range helper", ui.indexOf("/booking/reports/appointment-range.js") !== -1);
 check("reports ui loads forward outlook modules", ui.indexOf("/booking/reports/forward-outlook-compute.js") !== -1 && ui.indexOf("/booking/reports/forward-outlook.js") !== -1);
@@ -80,12 +81,13 @@ check("nav can still open sales summary", nav.setSelectedId("sales-summary") ===
 check("nav can select booking intelligence", nav.setSelectedId("booking-intelligence") === "booking-intelligence" && nav.getSelected().label === "Booking Intelligence");
 check("nav can select service sales", nav.setSelectedId("service-sales") === "service-sales" && nav.getSelected().label === "Service Sales");
 check("nav can select sales by time period", nav.setSelectedId("sales-by-period") === "sales-by-period" && nav.getSelected().blurb.indexOf("sale date") !== -1);
+check("nav can select sales comparison", nav.setSelectedId("sales-comparison") === "sales-comparison" && nav.getSelected().label === "Sales Comparison");
 check("service sales is no longer a placeholder blurb only", nav.find("service-sales").blurb.indexOf("closed checkout") !== -1);
 check("sales summary blurb is overall checkout sales", nav.find("sales-summary").blurb.indexOf("Overall closed checkout sales") !== -1);
 check("product sales is not a visible report", nav.find("product-sales") == null);
 check("stale product-sales selection falls back to intelligence", nav.setSelectedId("product-sales") === "booking-intelligence");
 const salesIds = nav.GROUPS.find(function (group) { return group.id === "sales"; }).items.map(function (row) { return row.id; });
-check("visible sales nav is summary, service, time", salesIds.join(",") === "sales-summary,service-sales,sales-by-period");
+check("visible sales nav is summary, comparison, service, time", salesIds.join(",") === "sales-summary,sales-comparison,service-sales,sales-by-period");
 check("nav can select cancellations", nav.setSelectedId("cancellations") === "cancellations" && nav.getSelected().label === "Cancellations");
 check("nav can select client retention", nav.setSelectedId("client-retention") === "client-retention" && nav.getSelected().label === "Client Retention");
 check("nav can select client spend", nav.setSelectedId("client-spend") === "client-spend" && nav.getSelected().label === "Client Spend");
@@ -94,7 +96,7 @@ const intelIds = nav.GROUPS.find(function (group) { return group.id === "intelli
 check("intelligence nav is historical plus outlook", intelIds.join(",") === "booking-intelligence,forward-outlook");
 const clientIds = nav.GROUPS.find(function (group) { return group.id === "clients"; }).items.map(function (row) { return row.id; });
 check("clients nav is cancellations, retention, and spend", clientIds.join(",") === "cancellations,client-retention,client-spend");
-check("visible reports are built surfaces only", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,forward-outlook,sales-summary,service-sales,sales-by-period,cancellations,client-retention,client-spend");
+check("visible reports are built surfaces only", nav.items().map(function (row) { return row.id; }).join(",") === "booking-intelligence,forward-outlook,sales-summary,sales-comparison,service-sales,sales-by-period,cancellations,client-retention,client-spend");
 const summary = compute.summarize([
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }, { kind: "service" }], subtotal: 50, tip: 5, total: 55 },
   { status: "closed", locationId: "a", dateKey: "2026-09-10", items: [{ kind: "service" }], subtotal: 20, tip: 0, total: 20 },
