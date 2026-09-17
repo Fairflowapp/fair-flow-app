@@ -166,6 +166,59 @@ async function loadSeriesAndExceptions(salonId, loc, start, end) {
   return { seriesRows, exceptions };
 }
 
+function dateKeysBetween(fromKey, toKey) {
+  const sm = seriesModel();
+  let start = String(fromKey || "").trim();
+  let end = String(toKey || "").trim() || start;
+  if (!start) return [];
+  if (end < start) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  const addDays = sm && typeof sm.addDays === "function"
+    ? sm.addDays
+    : function (key) { return key; };
+  const out = [];
+  let cur = start;
+  let guard = 0;
+  while (cur && cur <= end && guard < 400) {
+    out.push(cur);
+    if (cur === end) break;
+    const next = addDays(cur, 1);
+    if (!next || next === cur) break;
+    cur = next;
+    guard += 1;
+  }
+  return out;
+}
+
+async function listVisibleBlocks(salonId, keys, loc) {
+  const list = (keys || []).map((key) => String(key || "").trim()).filter(Boolean);
+  const locationId = String(loc || "").trim();
+  if (!salonId || !list.length || !locationId) return [];
+  const start = list.slice().sort()[0];
+  const end = list.slice().sort()[list.length - 1];
+  const snap = await getDocs(query(
+    blocksRef(salonId),
+    where("dateKey", ">=", start),
+    where("dateKey", "<=", end)
+  ));
+  const rows = [];
+  snap.forEach((docSnap) => {
+    const row = toBlock(docSnap);
+    if (!row || row.locationId !== locationId) return;
+    if (list.indexOf(row.dateKey) === -1) return;
+    rows.push(row);
+  });
+  const extra = await loadSeriesAndExceptions(salonId, locationId, start, end);
+  const sm = seriesModel();
+  const generated = sm && typeof sm.generateOccurrences === "function"
+    ? sm.generateOccurrences(extra.seriesRows, list, extra.exceptions)
+    : [];
+  return uniqueById(rows.concat(generated));
+}
+
 async function loadForDates(dateKeys, locationId) {
   const salonId = requireSalon();
   const api = cache();
@@ -175,26 +228,24 @@ async function loadForDates(dateKeys, locationId) {
   if (!keys.length || !loc) {
     return api && typeof api.getAll === "function" ? api.getAll() : [];
   }
-  const start = keys.slice().sort()[0];
-  const end = keys.slice().sort()[keys.length - 1];
-  const snap = await getDocs(query(
-    blocksRef(salonId),
-    where("dateKey", ">=", start),
-    where("dateKey", "<=", end)
-  ));
-  const rows = [];
-  snap.forEach((docSnap) => {
-    const row = toBlock(docSnap);
-    if (!row || row.locationId !== loc) return;
-    if (keys.indexOf(row.dateKey) === -1) return;
-    rows.push(row);
+  const rows = await listVisibleBlocks(salonId, keys, loc);
+  return applyList(rows, started);
+}
+
+async function listForLocationsRange(locationIds, fromKey, toKey) {
+  const salonId = requireSalon();
+  const ids = [];
+  const seen = {};
+  (Array.isArray(locationIds) ? locationIds : []).forEach((id) => {
+    const key = String(id || "").trim();
+    if (!key || seen[key]) return;
+    seen[key] = true;
+    ids.push(key);
   });
-  const extra = await loadSeriesAndExceptions(salonId, loc, start, end);
-  const sm = seriesModel();
-  const generated = sm && typeof sm.generateOccurrences === "function"
-    ? sm.generateOccurrences(extra.seriesRows, keys, extra.exceptions)
-    : [];
-  return applyList(uniqueById(rows.concat(generated)), started);
+  const keys = dateKeysBetween(fromKey, toKey);
+  if (!ids.length || !keys.length) return [];
+  const parts = await Promise.all(ids.map((loc) => listVisibleBlocks(salonId, keys, loc)));
+  return uniqueById(parts.reduce((all, rows) => all.concat(rows || []), []));
 }
 
 async function loadForView(dateKey, locationId) {
@@ -540,6 +591,7 @@ async function applyRelocations(relocations) {
 window.ffBookingBlocks = {
   loadForView,
   loadForDates,
+  listForLocationsRange,
   create,
   update,
   remove,
@@ -555,6 +607,7 @@ window.ffBookingBlocks = {
 export {
   loadForView,
   loadForDates,
+  listForLocationsRange,
   create,
   update,
   remove,

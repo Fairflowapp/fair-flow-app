@@ -48,6 +48,7 @@ check("booking intelligence is the default report", navSrc.indexOf('DEFAULT_ID =
 check("reports ui paints the inner sales nav", ui.indexOf("ff-rpt-nav") !== -1 && ui.indexOf("data-ff-rpt") !== -1);
 check("reports ui can paint booking intelligence", ui.indexOf("booking-intelligence") !== -1 && ui.indexOf("ffBookingReportsIntelligence") !== -1);
 check("reports ui loads isolated intelligence modules", ui.indexOf("/booking/reports/intelligence-compute.js") !== -1 && ui.indexOf("/booking/reports/capacity-patterns.js") !== -1 && ui.indexOf("/booking/reports/service-demand.js") !== -1 && ui.indexOf("/booking/reports/client-behavior.js") !== -1 && ui.indexOf("/booking/reports/insight-priority.js") !== -1 && ui.indexOf("/booking/reports/intelligence.js") !== -1);
+check("reports ui loads time block range for intelligence and outlook", ui.indexOf("/booking/reports/time-block-range.js") !== -1);
 check("reports ui loads service sales modules", ui.indexOf("/booking/reports/service-sales-compute.js") !== -1 && ui.indexOf("/booking/reports/service-sales.js") !== -1);
 check("reports ui loads sales by time period modules", ui.indexOf("/booking/reports/sales-time-compute.js") !== -1 && ui.indexOf("/booking/reports/sales-time.js") !== -1);
 check("reports ui loads cancellations modules", ui.indexOf("/booking/reports/cancellations-compute.js") !== -1 && ui.indexOf("/booking/reports/cancellations.js") !== -1);

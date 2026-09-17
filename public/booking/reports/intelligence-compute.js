@@ -3,10 +3,11 @@
  * No Firestore. Callers pass appointments and provider schedules.
  *
  * Time buckets stay separate:
- *   working  = provider scheduled minutes inside effective working windows
- *   booked   = union of active appointment time clipped to those windows
+ *   working  = scheduled windows minus Time Blocks (client-bookable capacity)
+ *   booked   = union of active appointment time clipped to those bookable windows
  *   idle     = working − booked (includes open time before first / after last)
- *   gap      = unused working time BETWEEN booked blocks only
+ *   gap      = unused bookable time BETWEEN booked appointments only
+ * Time Blocks are not booked appointment minutes. Overlapping blocks union once.
  * Calendar gap time is a subset of idle time. Utilization stays booked / working.
  */
 (function () {
@@ -218,6 +219,78 @@
       }
     });
     return out;
+  }
+
+  function subtractFromWindows(windows, cuts) {
+    var mergedWindows = mergeIntervals(windows);
+    var mergedCuts = mergeIntervals(cuts);
+    if (!mergedCuts.length) return mergedWindows;
+    var out = [];
+    mergedWindows.forEach(function (win) {
+      var pieces = [{ startMin: win.startMin, endMin: win.endMin }];
+      mergedCuts.forEach(function (cut) {
+        var next = [];
+        pieces.forEach(function (piece) {
+          var overlapStart = Math.max(piece.startMin, cut.startMin);
+          var overlapEnd = Math.min(piece.endMin, cut.endMin);
+          if (!(overlapEnd > overlapStart)) {
+            next.push(piece);
+            return;
+          }
+          if (piece.startMin < overlapStart) {
+            next.push({ startMin: piece.startMin, endMin: overlapStart });
+          }
+          if (overlapEnd < piece.endMin) {
+            next.push({ startMin: overlapEnd, endMin: piece.endMin });
+          }
+        });
+        pieces = next;
+      });
+      pieces.forEach(function (piece) {
+        if (piece.endMin > piece.startMin) out.push(piece);
+      });
+    });
+    return mergeIntervals(out);
+  }
+
+  function actualBlockInterval(block) {
+    if (!block) return null;
+    var start = Number(block.actualStartMin != null ? block.actualStartMin : block.startMin);
+    var end = Number(block.actualEndMin != null ? block.actualEndMin : block.endMin);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || !(end > start)) return null;
+    var providerId = trim(block.providerId || block.staffId);
+    var dateKey = trim(block.dateKey);
+    var locationId = trim(block.locationId);
+    if (!providerId || !dateKey) return null;
+    return {
+      providerId: providerId,
+      dateKey: dateKey,
+      locationId: locationId,
+      startMin: start,
+      endMin: end
+    };
+  }
+
+  function timeBlockKey(block) {
+    var row = actualBlockInterval(block) || block;
+    if (!row) return "";
+    return trim(row.providerId || row.staffId) + "|" + trim(row.dateKey) + "|" + trim(row.locationId);
+  }
+
+  function indexTimeBlocks(blocks) {
+    var map = {};
+    (blocks || []).forEach(function (raw) {
+      var row = actualBlockInterval(raw);
+      if (!row) return;
+      var key = timeBlockKey(row);
+      if (!map[key]) map[key] = [];
+      map[key].push({ startMin: row.startMin, endMin: row.endMin });
+    });
+    return map;
+  }
+
+  function bookableWindows(windows, blockIntervals) {
+    return subtractFromWindows(windows, blockIntervals);
   }
 
   function clipInterval(interval, win) {
@@ -816,6 +889,7 @@
       });
     });
 
+    var blockByKey = indexTimeBlocks(opts.timeBlocks);
     var gapItems = [];
     var dayFacts = [];
     var utilRows = providers.map(function (provider) {
@@ -825,7 +899,8 @@
             opts.locationIds.indexOf(entry.locationId) === -1) return;
         if (!inRange(entry.dateKey, opts.fromKey, opts.toKey)) return;
         var key = provider.id + "|" + entry.dateKey + "|" + trim(entry.locationId);
-        var cap = capacityFromWindows(entry.windows, bookedByKey[key] || []);
+        var windows = bookableWindows(entry.windows, blockByKey[key] || []);
+        var cap = capacityFromWindows(windows, bookedByKey[key] || []);
         row.workingMinutes += cap.workingMinutes;
         row.bookedMinutes += cap.bookedMinutes;
         row.gapCount += cap.gaps.length;
@@ -969,6 +1044,10 @@
     isBookedStatus: isBookedStatus,
     appointmentInScope: appointmentInScope,
     mergeIntervals: mergeIntervals,
+    subtractFromWindows: subtractFromWindows,
+    actualBlockInterval: actualBlockInterval,
+    indexTimeBlocks: indexTimeBlocks,
+    bookableWindows: bookableWindows,
     clipInterval: clipInterval,
     lineWindow: lineWindow,
     capacityFromWindows: capacityFromWindows,

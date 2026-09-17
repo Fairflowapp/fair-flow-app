@@ -317,7 +317,7 @@ Visible navigation today:
 - owner overview
 - provider capacity
 - working / booked / idle / calendar gap / open-edge idle time
-- utilization
+- utilization (working minutes are client-bookable: scheduled windows minus Time Blocks)
 - capacity patterns (day / weekday / hour)
 - service demand and booked service value (`priceSnapshot`, not checkout sales)
 - client behavior (in-period first-visit vs returning, repeat-in-period, requested provider)
@@ -325,7 +325,7 @@ Visible navigation today:
 
 Appointment `source` is still computed internally, but Booking Source is **not** shown to owners while create writes `front_desk`. No-show is counted when marked, but is not a headline KPI because that workflow is incomplete.
 
-**Forward Outlook.** Future booked capacity from now through a selected future range (Next 7 / 14 / 30 days, or custom). Uses the range-complete appointment loader. Cancelled appointments do not occupy future capacity. Current-day working and booked intervals clip at location-local now. Booked-ahead utilization is booked ahead minutes ÷ future working minutes. Upcoming gaps are unused working time between future booked blocks; leading/trailing open time is not a gap. Booked service value ahead is `priceSnapshot`, not collected sales or a forecast.
+**Forward Outlook.** Future booked capacity from now through a selected future range (Next 7 / 14 / 30 days, or custom). Uses the range-complete appointment loader. Cancelled appointments do not occupy future capacity. Current-day working and booked intervals clip at location-local now. Time Blocks (one-off, recurring, moved, skipped) are removed from remaining working capacity and are not booked appointment time. Booked-ahead utilization is booked ahead minutes ÷ future bookable working minutes. Upcoming gaps are unused bookable time between future booked appointments; leading/trailing open time is not a gap. Booked service value ahead is `priceSnapshot`, not collected sales or a forecast.
 
 **Financial reports** use closed checkout sales only (`salons/{salonId}/sales`), not appointment booked value:
 
@@ -350,6 +350,7 @@ Appointment `source` is still computed internally, but Booking Source is **not**
 
 **Appointment infrastructure:**
 
+- Time Block capacity subtraction for Intelligence and Forward Outlook (`ffBookingReportsTimeBlockRange.fetchForReport` + `listForLocationsRange`). One-off, recurring, moved, and skipped occurrences use actual block times. Overlapping blocks union once. Blocks are removed from working capacity and are not booked appointment minutes.
 - date-range-complete appointment retrieval (`ffBookingReportsAppointmentRange.fetchForReport`)
 - repository methods `listAppointmentsForLocationRange` / `listAppointmentsForLocationsRange` (additive; Calendar still uses `getAppointmentsForDate` and the 500-row overlap `getAppointmentsForRange`)
 - pagination with document-snapshot cursors on `locationId + startAt`

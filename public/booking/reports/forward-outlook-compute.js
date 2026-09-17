@@ -2,10 +2,11 @@
  * Forward Outlook. Future booked capacity from now through a selected range.
  * Reuses Intelligence interval primitives. No Firestore.
  *
- * Future working minutes = remaining effective provider windows.
+ * Future working minutes = remaining provider windows minus Time Blocks.
  * Booked ahead minutes = union of non-cancelled future line intervals
- * clipped to those windows and to now. Utilization = booked / working.
- * Upcoming gaps are unused working time BETWEEN future booked blocks.
+ * clipped to those bookable windows and to now. Utilization = booked / working.
+ * Time Blocks are removed from capacity and are not booked appointment time.
+ * Upcoming gaps are unused bookable time BETWEEN future booked appointments.
  */
 (function () {
   var WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
@@ -96,6 +97,18 @@
       gapMinutes: 0,
       openEdgeMinutes: 0
     };
+  }
+
+  function subtractFromWindows(windows, cuts) {
+    var api = intel();
+    if (api && typeof api.subtractFromWindows === "function") return api.subtractFromWindows(windows, cuts);
+    return mergeIntervals(windows);
+  }
+
+  function indexTimeBlocks(blocks) {
+    var api = intel();
+    if (api && typeof api.indexTimeBlocks === "function") return api.indexTimeBlocks(blocks);
+    return {};
   }
 
   function lineWindow(line, appointment, locationId) {
@@ -345,6 +358,7 @@
     });
 
     var bookedByKey = {};
+    var blockByKey = indexTimeBlocks(opts.timeBlocks);
     var futureAppointments = [];
     var clientIds = {};
     var firstVisit = 0;
@@ -440,8 +454,11 @@
         if (locationIds.length && entry.locationId && locationIds.indexOf(entry.locationId) === -1) return;
         if (!inRange(entry.dateKey, fromKey, toKey)) return;
         var locNow = locationNow(entry.locationId, opts);
-        var windows = clipWindowsAtNow(entry.windows, entry.dateKey, locNow);
         var key = provider.id + "|" + entry.dateKey + "|" + trim(entry.locationId);
+        var windows = subtractFromWindows(
+          clipWindowsAtNow(entry.windows, entry.dateKey, locNow),
+          blockByKey[key] || []
+        );
         var cap = capacityFromWindows(windows, bookedByKey[key] || []);
         row.workingMinutes += cap.workingMinutes;
         row.bookedMinutes += cap.bookedMinutes;

@@ -70,6 +70,7 @@
   ];
   var INTEL_SCRIPTS = [
     "/booking/reports/appointment-range.js?v=20260914_apptrange",
+    "/booking/reports/time-block-range.js?v=20260917_timeblocks",
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/capacity-patterns.js?v=20260913_ui1",
     "/booking/reports/service-demand.js?v=20260913_ui1",
@@ -79,6 +80,7 @@
   ];
   var FORWARD_OUTLOOK_SCRIPTS = [
     "/booking/reports/appointment-range.js?v=20260914_apptrange",
+    "/booking/reports/time-block-range.js?v=20260917_timeblocks",
     "/booking/reports/intelligence-compute.js?v=20260913_ui1",
     "/booking/reports/forward-outlook-compute.js?v=20260914_outlook",
     "/booking/reports/forward-outlook.js?v=20260914_outlook"
@@ -94,7 +96,7 @@
   ];
 
   function intelReady() {
-    return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence);
+    return !!(window.ffBookingReportsIntelligenceCompute && window.ffBookingReportsIntelligence && window.ffBookingReportsTimeBlockRange);
   }
 
   function serviceSalesReady() {
@@ -110,7 +112,7 @@
   }
 
   function forwardOutlookReady() {
-    return !!(window.ffBookingReportsForwardOutlookCompute && window.ffBookingReportsForwardOutlook);
+    return !!(window.ffBookingReportsForwardOutlookCompute && window.ffBookingReportsForwardOutlook && window.ffBookingReportsTimeBlockRange);
   }
 
   function clientRetentionReady() {

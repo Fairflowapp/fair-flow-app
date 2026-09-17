@@ -27,6 +27,8 @@
     return window.ffBookingReportsAppointmentRange || window.ffBookingReportsSalesRange || null;
   }
   function apptRange() { return window.ffBookingReportsAppointmentRange || null; }
+  function blockRange() { return window.ffBookingReportsTimeBlockRange || null; }
+  function blocksRepo() { return window.ffBookingBlocks || null; }
   function nav() { return window.ffBookingReportsNav || null; }
 
   function isActive() {
@@ -315,14 +317,14 @@
         '<div class="ff-rpt-meta">' +
           "<p><strong>Location(s):</strong> " + escapeHtml(locationHeader()) + "</p>" +
           "<p><strong>Period:</strong> " + escapeHtml(periodText()) + "</p>" +
-          '<p class="ff-rpt-fine">Remaining time from now. Past minutes on the current day are excluded. Booked service value ahead is appointment value, not collected sales.</p>' +
+          '<p class="ff-rpt-fine">Remaining client-bookable time from now. Time Blocks are removed from future working capacity and are not booked appointment time. Past minutes on the current day are excluded. Booked service value ahead is appointment value, not collected sales.</p>' +
         "</div>" +
         emptyNote +
         '<div class="ff-rpt-kpis ff-rpt-kpis-4">' +
           kpi("Future appointments", String(totals.futureAppointments || 0)) +
           kpi("Future working hours", hoursText(totals.hoursWorking || 0)) +
           kpi("Booked ahead hours", hoursText(totals.hoursBooked || 0)) +
-          kpi("Booked-ahead utilization", utilLabel, totals.workingMinutes ? "booked ahead ÷ future working" : "no future working hours") +
+          kpi("Booked-ahead utilization", utilLabel, totals.workingMinutes ? "booked ahead ÷ future bookable working" : "no future working hours") +
           kpi("Open future hours", hoursText(totals.hoursOpen || 0)) +
           kpi("Upcoming gap hours", hoursText(totals.hoursGap || 0)) +
           kpi("Booked service value ahead", totals.bookedServiceValue ? moneyText(totals.bookedServiceValue) : "—", valueNote) +
@@ -464,15 +466,29 @@
       return;
     }
     var fetched = null;
+    var blockFetched = null;
     try {
       if (!rangeHelp || typeof rangeHelp.fetchForReport !== "function") {
         throw new Error("Appointment range lookup is not available.");
       }
-      fetched = await rangeHelp.fetchForReport(repo(), {
-        locationIds: ids,
-        fromKey: range.fromKey,
-        toKey: range.toKey
-      });
+      var blockHelp = blockRange();
+      if (!blockHelp || typeof blockHelp.fetchForReport !== "function") {
+        throw new Error("Time Block lookup is not available.");
+      }
+      var pair = await Promise.all([
+        rangeHelp.fetchForReport(repo(), {
+          locationIds: ids,
+          fromKey: range.fromKey,
+          toKey: range.toKey
+        }),
+        blockHelp.fetchForReport(blocksRepo(), {
+          locationIds: ids,
+          fromKey: range.fromKey,
+          toKey: range.toKey
+        })
+      ]);
+      fetched = pair[0];
+      blockFetched = pair[1];
     } catch (err) {
       finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
         ? rangeHelp.userSafeError(err && err.message)
@@ -491,6 +507,14 @@
         "Appointment data for this range is incomplete. Narrow the date range and try again.", null);
       return;
     }
+    var blockHelp = blockRange();
+    var blockView = blockHelp && typeof blockHelp.viewState === "function"
+      ? blockHelp.viewState(blockFetched)
+      : { kind: "error", message: "Time Blocks for this range could not load.", blocks: [] };
+    if (blockView.kind === "error") {
+      finish(requestId, "error", blockView.message || "Time Blocks for this range could not load.", null);
+      return;
+    }
     var schedules = loadSchedules(ids, range.fromKey, range.toKey);
     if (!schedules.ok) {
       finish(requestId, "error", (outlook && outlook.SCHEDULE_ERROR_MESSAGE) ||
@@ -502,6 +526,7 @@
       ? outlook.buildOutlook({
         appointments: fetchView.appointments || [],
         providers: schedules.providers,
+        timeBlocks: blockView.blocks || [],
         fromKey: range.fromKey,
         toKey: range.toKey,
         locationIds: ids,

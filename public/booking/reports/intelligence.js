@@ -28,6 +28,8 @@
     return window.ffBookingReportsAppointmentRange || window.ffBookingReportsSalesRange || null;
   }
   function apptRange() { return window.ffBookingReportsAppointmentRange || null; }
+  function blockRange() { return window.ffBookingReportsTimeBlockRange || null; }
+  function blocksRepo() { return window.ffBookingBlocks || null; }
 
   function isActive() {
     var api = nav();
@@ -281,7 +283,7 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Overview</h2>" +
-        '<p class="ff-rpt-fine">What happened and how scheduled provider time was used. Booked service value is the appointment price snapshot, not collected sales.</p>' +
+        '<p class="ff-rpt-fine">What happened and how client-bookable provider time was used. Time Blocks are removed from working capacity and are not booked appointment time. Booked service value is the appointment price snapshot, not collected sales.</p>' +
         '<div class="ff-rpt-kpis">' +
           kpi("Appointments", a.total || 0) +
           kpi("Unique clients", unique, behavior.unidentifiedClientAppointmentCount ? "identified only" : "") +
@@ -597,7 +599,7 @@
     return (
       '<section class="ff-rpt-panel">' +
         "<h2>Provider capacity</h2>" +
-        '<p class="ff-rpt-fine">Shows how scheduled provider working time was used during this period. Ranked by the most calendar gap time, then idle. Calendar gaps are holes between visits; open-edge idle is unused time at the start or end of a working window.</p>' +
+        '<p class="ff-rpt-fine">Working hours are scheduled time minus Time Blocks. Ranked by the most calendar gap time, then idle. Calendar gaps are holes between visits inside bookable windows; open-edge idle is unused time at the start or end of a bookable window.</p>' +
         body +
       "</section>"
     );
@@ -764,15 +766,29 @@
       return;
     }
     var fetched = null;
+    var blockFetched = null;
     try {
       if (!rangeHelp || typeof rangeHelp.fetchForReport !== "function") {
         throw new Error("Appointment range lookup is not available.");
       }
-      fetched = await rangeHelp.fetchForReport(repo(), {
-        locationIds: ids,
-        fromKey: range.fromKey,
-        toKey: range.toKey
-      });
+      var blockHelp = blockRange();
+      if (!blockHelp || typeof blockHelp.fetchForReport !== "function") {
+        throw new Error("Time Block lookup is not available.");
+      }
+      var pair = await Promise.all([
+        rangeHelp.fetchForReport(repo(), {
+          locationIds: ids,
+          fromKey: range.fromKey,
+          toKey: range.toKey
+        }),
+        blockHelp.fetchForReport(blocksRepo(), {
+          locationIds: ids,
+          fromKey: range.fromKey,
+          toKey: range.toKey
+        })
+      ]);
+      fetched = pair[0];
+      blockFetched = pair[1];
     } catch (err) {
       finish(requestId, "error", (rangeHelp && typeof rangeHelp.userSafeError === "function")
         ? rangeHelp.userSafeError(err && err.message)
@@ -791,6 +807,14 @@
         "Appointment data for this range is incomplete. Narrow the date range and try again.", null);
       return;
     }
+    var blockHelp = blockRange();
+    var blockView = blockHelp && typeof blockHelp.viewState === "function"
+      ? blockHelp.viewState(blockFetched)
+      : { kind: "error", message: "Time Blocks for this range could not load.", blocks: [] };
+    if (blockView.kind === "error") {
+      finish(requestId, "error", blockView.message || "Time Blocks for this range could not load.", null);
+      return;
+    }
     var providers = [];
     try {
       providers = loadProviders(ids, range.fromKey, range.toKey);
@@ -802,6 +826,7 @@
       ? math.buildReport({
         appointments: fetchView.appointments || [],
         providers: providers,
+        timeBlocks: blockView.blocks || [],
         fromKey: range.fromKey,
         toKey: range.toKey,
         locationIds: ids,
