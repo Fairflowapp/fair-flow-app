@@ -171,15 +171,21 @@
       var cut = tombstones[row.blockId];
       return !cut || cut <= started;
     });
-    incoming.forEach(function (row) {
+    var merged = incoming.map(function (row) {
+      var pendingAt = pendingIds[row.blockId];
+      if (pendingAt && pendingAt > started) {
+        var local = items.find(function (item) { return item.blockId === row.blockId; });
+        return local || row;
+      }
       delete pendingIds[row.blockId];
+      return row;
     });
     Object.keys(pendingIds).forEach(function (id) {
-      if (incoming.some(function (row) { return row.blockId === id; })) return;
+      if (merged.some(function (row) { return row.blockId === id; })) return;
       var row = items.find(function (item) { return item.blockId === id; });
-      if (row) incoming.push(row);
+      if (row) merged.push(row);
     });
-    items = incoming;
+    items = merged;
     return items.slice();
   }
 

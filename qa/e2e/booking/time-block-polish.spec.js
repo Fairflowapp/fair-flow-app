@@ -238,8 +238,33 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(reasonOnly.startMin).toBe(meeting.startMin);
   expect(reasonOnly.endMin).toBe(meeting.endMin);
   expect(reasonOnly.note).toBe(meetingNote);
+  const cacheAfterReason = await page.evaluate((id) => {
+    const row = window.ffBookingCalBlocks && window.ffBookingCalBlocks.getById
+      ? window.ffBookingCalBlocks.getById(id)
+      : null;
+    return row ? { reason: row.reason, startMin: row.startMin, endMin: row.endMin, note: row.note } : null;
+  }, meeting.blockId);
+  expect(cacheAfterReason && cacheAfterReason.reason).toBe("training");
+  expect(cacheAfterReason.startMin).toBe(meeting.startMin);
+  expect(cacheAfterReason.endMin).toBe(meeting.endMin);
   const trainingCard = await ui.waitForBlockCard(page, meeting.blockId);
   expect((await ui.readCardLines(trainingCard)).reason).toBe("Training");
+  await page.waitForTimeout(400);
+  expect((await ui.readCardLines(await ui.waitForBlockCard(page, meeting.blockId))).reason).toBe("Training");
+  expect(await page.evaluate((id) => {
+    const row = window.ffBookingCalBlocks.getById(id);
+    return row ? row.reason : "";
+  }, meeting.blockId)).toBe("training");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await waitForAppReady(page);
+  await ui.openReadyCalendar(page);
+  await ui.goToFutureDay(page, DAYS_AHEAD);
+  await ui.waitForProviders(page);
+  expect((await ui.readCardLines(await ui.waitForBlockCard(page, meeting.blockId))).reason).toBe("Training");
+  expect(await page.evaluate((id) => {
+    const row = window.ffBookingCalBlocks.getById(id);
+    return row ? row.reason : "";
+  }, meeting.blockId)).toBe("training");
 
   await ui.openBlockEditor(page, meeting.blockId);
   await ui.selectReason(page, "meeting");
@@ -251,6 +276,11 @@ test("Time Block polish real UI", async ({ page }) => {
   expect(noteOnly.reason).toBe("meeting");
   expect(noteOnly.startMin).toBe(meeting.startMin);
   expect(noteOnly.endMin).toBe(meeting.endMin);
+  expect(await page.evaluate((id) => {
+    const row = window.ffBookingCalBlocks.getById(id);
+    return row ? String(row.note || "") : "";
+  }, meeting.blockId)).toBe(noteOnlyValue);
+  expect((await ui.readCardLines(await ui.waitForBlockCard(page, meeting.blockId))).note).toBe(noteOnlyValue);
 
   await ui.dragBlockByMinutes(page, meeting.blockId, 30);
   await ui.expectNoProviderMoveConfirm(page);

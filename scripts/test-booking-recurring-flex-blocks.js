@@ -402,6 +402,25 @@ blocks.applyLoaded([flexible], loadGen);
 check("local writes do not discard generated required occurrences",
   !!(blocks.getById(flexible.blockId) && blocks.getById("blk_local")));
 
+const occMeeting = {
+  blockId: "series:serLunch:2026-09-21",
+  seriesId: "serLunch",
+  providerId: "rebecca",
+  locationId: "loc1",
+  dateKey: "2026-09-21",
+  startMin: 13 * 60 + 30,
+  endMin: 14 * 60,
+  reason: "meeting",
+  note: "Staff meeting",
+  flexibilityMode: "fixed"
+};
+blocks.setAll([occMeeting]);
+const occLoad = blocks.beginLoad();
+blocks.upsert(Object.assign({}, occMeeting, { reason: "training" }));
+blocks.applyLoaded([occMeeting], occLoad);
+check("stale occurrence generation does not overwrite an edited reason",
+  blocks.getById(occMeeting.blockId).reason === "training");
+
 const offHours = flex.findRelocation(flexible, { startMin: 14 * 60, endMin: 15 * 60 }, {
   appointments: [],
   blocks: [flexible],

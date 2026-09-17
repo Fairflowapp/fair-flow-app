@@ -67,16 +67,21 @@ async function waitForNextPaint(page) {
 async function assertNoBlockTimeCopy(page, rootSel, opts) {
   const root = page.locator(rootSel);
   const labeled = root.locator("h2, [data-ff-cal-menu='block'], [data-ff-block-act='save'], [data-ff-cal-slot='block']").first();
+  if (opts && opts.reopenProviderId) {
+    await waitForNextPaint(page);
+    await openProviderMenu(page, opts.reopenProviderId);
+  }
   await expect(async () => {
     if (opts && opts.reopenProviderId) {
-      await openProviderMenu(page, opts.reopenProviderId);
+      const hidden = await root.evaluate((el) => !el || el.hasAttribute("hidden") || !el.offsetParent).catch(() => true);
+      if (hidden) await openProviderMenu(page, opts.reopenProviderId);
     }
     await expect(root).toBeVisible();
     await expect(labeled).toBeVisible();
     await expect(labeled).toHaveText(/Time Block/);
     await expect(root).toContainText(/Time Block/);
     await expect(root, "UI must say Time Block, not Block Time").not.toContainText(/Block Time/);
-  }).toPass({ timeout: 15000 });
+  }).toPass({ timeout: 20000 });
 }
 
 async function saveEditor(page) {
@@ -252,7 +257,7 @@ async function openProviderMenu(page, providerId) {
     await expect(menu).toBeVisible();
     await expect(block).toBeVisible();
     await expect(block).toHaveText("Time Block");
-  }).toPass({ timeout: 15000 });
+  }).toPass({ timeout: 8000 });
 }
 
 async function dragBlockToProvider(page, blockId, toProviderId, startMin) {

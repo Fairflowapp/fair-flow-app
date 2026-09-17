@@ -205,6 +205,55 @@ check(
 check("provider-off at 9:00 is still provider_off", inspectAt(9 * 60).reason === "provider_off");
 check("weekly closed 8:30 is still salon_closed", inspectAt(8 * 60 + 30).reason === "salon_closed");
 
+blocks.setAll([{
+  blockId: "blkReason",
+  providerId: "ashley",
+  locationId: "loc1",
+  dateKey: "2026-12-17",
+  startMin: 13 * 60 + 30,
+  endMin: 14 * 60,
+  reason: "meeting",
+  note: "Staff meeting"
+}]);
+const staleGen = blocks.beginLoad();
+blocks.upsert({
+  blockId: "blkReason",
+  providerId: "ashley",
+  locationId: "loc1",
+  dateKey: "2026-12-17",
+  startMin: 13 * 60 + 30,
+  endMin: 14 * 60,
+  reason: "training",
+  note: "Staff meeting"
+});
+blocks.applyLoaded([{
+  blockId: "blkReason",
+  providerId: "ashley",
+  locationId: "loc1",
+  dateKey: "2026-12-17",
+  startMin: 13 * 60 + 30,
+  endMin: 14 * 60,
+  reason: "meeting",
+  note: "Staff meeting"
+}], staleGen);
+const afterStale = blocks.getById("blkReason");
+check(
+  "stale load does not replace a newer local reason",
+  !!(afterStale && afterStale.reason === "training" && afterStale.startMin === 13 * 60 + 30 && afterStale.endMin === 14 * 60)
+);
+const freshGen = blocks.beginLoad();
+blocks.applyLoaded([{
+  blockId: "blkReason",
+  providerId: "ashley",
+  locationId: "loc1",
+  dateKey: "2026-12-17",
+  startMin: 13 * 60 + 30,
+  endMin: 14 * 60,
+  reason: "training",
+  note: "Staff meeting"
+}], freshGen);
+check("fresh load still accepts the persisted training reason", blocks.getById("blkReason").reason === "training");
+
 const markup = blocks.blockHtml(lunch, layout.windowToRect(12 * 60, 13 * 60, 8 * 60, 19 * 60));
 check("block markup is not an appointment card", markup.indexOf("ff-cal-card") === -1 && markup.indexOf("ff-cal-block") !== -1);
 check("block markup shows the reason label", markup.indexOf("Lunch Break") !== -1 && markup.indexOf("data-ff-cal-block-reason=\"lunch\"") !== -1);
